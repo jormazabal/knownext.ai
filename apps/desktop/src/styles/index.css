@@ -43,6 +43,10 @@ textarea {
     @apply grid h-8 w-8 place-items-center rounded-md hover:bg-brand-hover;
   }
 
+  .window-control-close {
+    @apply hover:bg-red-50 hover:text-red-600;
+  }
+
   .toolbar-button {
     @apply grid h-8 min-w-8 place-items-center rounded-md border border-transparent px-2 text-ink-primary hover:border-line hover:bg-brand-hover;
   }

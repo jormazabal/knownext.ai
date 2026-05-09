@@ -2,6 +2,13 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.4.4 - 2026-05-09
+
+- Wired the custom Windows title bar controls to Tauri window actions.
+- Added draggable title bar behavior for frameless Windows builds, including double-click maximize/restore.
+- Added invisible resize handles on all window edges and corners.
+- Added explicit Tauri window permissions for close, minimize, maximize, move, and resize actions.
+
 ## 0.4.3 - 2026-05-09
 
 - Fixed the Windows desktop build opening an extra terminal window in release installs.
