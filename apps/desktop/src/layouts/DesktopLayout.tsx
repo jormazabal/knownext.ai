@@ -15,6 +15,7 @@ import { ProjectActions } from "../features/projects/ProjectActions";
 import { ProjectSelector } from "../features/projects/ProjectSelector";
 import { VersionHistoryPanel } from "../features/versions/VersionHistoryPanel";
 import { TitleBar } from "../components/window/TitleBar";
+import { startWindowResize, type WindowResizeDirection } from "../lib/runtime/windowControls";
 import type { DocumentConflictStatus, DocumentRecord, DocumentTreeNode, LayoutConfig, OpenDocumentTab, Project } from "../types/domain";
 
 const sidebarWidthConfig = {
@@ -132,6 +133,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
 
   return (
     <div className="h-screen overflow-hidden bg-white text-ink-primary">
+      <WindowResizeHandles />
       <TitleBar />
       <div className="flex h-[calc(100vh-54px)]">
         <aside className="flex shrink-0 flex-col border-r border-line bg-panel" style={{ width: sidebar.width }}>
@@ -275,6 +277,39 @@ export function DesktopLayout(props: DesktopLayoutProps) {
         </main>
       </div>
     </div>
+  );
+}
+
+const windowResizeHandles: Array<{
+  direction: WindowResizeDirection;
+  className: string;
+}> = [
+  { direction: "North", className: "inset-x-2 top-0 h-1 cursor-n-resize" },
+  { direction: "South", className: "inset-x-2 bottom-0 h-1 cursor-s-resize" },
+  { direction: "West", className: "inset-y-2 left-0 w-1 cursor-w-resize" },
+  { direction: "East", className: "inset-y-2 right-0 w-1 cursor-e-resize" },
+  { direction: "NorthWest", className: "left-0 top-0 h-3 w-3 cursor-nw-resize" },
+  { direction: "NorthEast", className: "right-0 top-0 h-3 w-3 cursor-ne-resize" },
+  { direction: "SouthWest", className: "bottom-0 left-0 h-3 w-3 cursor-sw-resize" },
+  { direction: "SouthEast", className: "bottom-0 right-0 h-3 w-3 cursor-se-resize" },
+];
+
+function WindowResizeHandles() {
+  return (
+    <>
+      {windowResizeHandles.map((handle) => (
+        <div
+          key={handle.direction}
+          aria-hidden="true"
+          className={["fixed z-50 select-none", handle.className].join(" ")}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            void startWindowResize(handle.direction);
+          }}
+        />
+      ))}
+    </>
   );
 }
 

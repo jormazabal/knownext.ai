@@ -60,6 +60,9 @@
 - [ ] Edit a document without saving, start the update, and confirm pending drafts are saved before installation continues.
 - [ ] Complete the update and confirm the app relaunches with the new visible version.
 - [ ] Confirm the updated Windows app opens without a separate terminal window.
+- [ ] Confirm the custom Windows title bar buttons minimize, maximize or restore, and close the app.
+- [ ] Confirm dragging the top title area moves the frameless app window.
+- [ ] Confirm dragging each app window edge and corner resizes the frameless app window.
 - [ ] Confirm the NSIS update replaces the installed `knownext-ai-desktop.exe` while the previous app version is running.
 - [ ] Confirm documents, projects, drafts, tabs, panel widths, and local configuration remain intact after the update.
 - [ ] Disable network access or publish a build with an invalid updater signature in a disposable test release and confirm the app does not get blocked.
