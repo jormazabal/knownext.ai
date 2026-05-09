@@ -76,6 +76,13 @@ gh release view v0.3.1 --repo jormazabal/knownext.ai --json isDraft,assets
 
 The release must contain the Windows installer, the matching `.sig` file, and `latest.json`.
 
+After publishing, verify that the README download link resolves and that the updater manifest points at the published NSIS installer:
+
+```bash
+curl -I https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_<version>_x64-setup.exe
+curl https://github.com/jormazabal/knownext.ai/releases/latest/download/latest.json
+```
+
 Do not tag or publish a release if `pnpm release:check` fails or if the working tree contains unrelated changes that should not ship in the release.
 
 ## Next Releases

@@ -14,6 +14,19 @@ This first version establishes the product foundation:
 - Local folder scanning and real Markdown file read/write for project documentation.
 - Mock version history and AI prompt response pending the post-foundation implementation phases.
 
+## Download
+
+The latest Windows installer is published on GitHub Releases:
+
+- [Download KnowNext.ai for Windows](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_0.4.1_x64-setup.exe)
+- [View all releases](https://github.com/jormazabal/knownext.ai/releases)
+
+The desktop app also checks the signed updater manifest at:
+
+```text
+https://github.com/jormazabal/knownext.ai/releases/latest/download/latest.json
+```
+
 ## Run Locally
 
 Install frontend dependencies:
