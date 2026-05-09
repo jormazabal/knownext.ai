@@ -1,10 +1,8 @@
-import { mockDelay, requestJson } from "./client";
+import { isBackendEnabled, mockDelay, requestJson } from "./client";
 import type { AiPromptRequest, AiPromptResponse } from "../../types/domain";
 
-const USE_BACKEND = import.meta.env.VITE_USE_BACKEND === "true";
-
 export async function promptAssistant(request: AiPromptRequest): Promise<AiPromptResponse> {
-  if (USE_BACKEND && request.documentId) {
+  if (isBackendEnabled() && request.documentId) {
     try {
       return await requestJson<AiPromptResponse>(`/api/documents/${request.documentId}/ai/prompt`, {
         method: "POST",
@@ -15,7 +13,7 @@ export async function promptAssistant(request: AiPromptRequest): Promise<AiPromp
     }
   }
 
-  if (USE_BACKEND && request.projectId) {
+  if (isBackendEnabled() && request.projectId) {
     try {
       return await requestJson<AiPromptResponse>(`/api/projects/${request.projectId}/ai/prompt`, {
         method: "POST",

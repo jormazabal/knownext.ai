@@ -4,7 +4,7 @@ import { CreateDocumentDialog } from "../features/documents/CreateDocumentDialog
 import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
 import { DesktopLayout } from "../layouts/DesktopLayout";
 import { defaultLayoutConfig, defaultProjectTabsConfig, getAppConfig, updateAppConfig } from "../lib/api/config";
-import { API_BASE_URL, ApiError, getApiErrorMessage } from "../lib/api/client";
+import { API_BASE_URL, ApiError, getApiErrorMessage, isBackendEnabled } from "../lib/api/client";
 import { discardDocumentDraft, getDocument, saveDocument, saveDocumentDraft } from "../lib/api/documents";
 import { APP_VERSION } from "../lib/appVersion";
 import {
@@ -135,6 +135,8 @@ export function App() {
 
   useEffect(() => {
     function handlePageHide() {
+      if (!isBackendEnabled()) return;
+
       for (const [documentId, session] of Object.entries(documentSessions)) {
         if (!shouldPersistDraft(session)) continue;
         void fetch(`${API_BASE_URL}/api/documents/${encodeURIComponent(documentId)}/draft`, {

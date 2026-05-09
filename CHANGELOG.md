@@ -2,6 +2,12 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.4.2 - 2026-05-09
+
+- Prepared Windows Authenticode signing for Tauri release builds through a CI-imported PFX certificate.
+- Made the packaged desktop app default to local mock services until the FastAPI backend is bundled as a managed sidecar.
+- Kept backend-backed development behavior enabled by default while allowing `VITE_USE_BACKEND=true` to force backend usage.
+
 ## 0.4.1 - 2026-05-09
 
 - Added the public Windows installer URL to the README.

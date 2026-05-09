@@ -46,6 +46,32 @@ jobs:
       - name: Run release gate
         run: pnpm release:check
 
+      - name: Import Windows code signing certificate
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE)) {
+            throw "WINDOWS_CERTIFICATE secret is required to publish signed Windows releases."
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
+            throw "WINDOWS_CERTIFICATE_PASSWORD secret is required to publish signed Windows releases."
+          }
+
+          $certificatePath = Join-Path $env:RUNNER_TEMP "knownext-windows-signing.pfx"
+          [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE) | Set-Content -LiteralPath $certificatePath -AsByteStream
+          $securePassword = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          $certificate = Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $securePassword
+          if (-not $certificate.Thumbprint) {
+            throw "Imported Windows signing certificate did not expose a thumbprint."
+          }
+
+          "WINDOWS_CERTIFICATE_THUMBPRINT=$($certificate.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "WINDOWS_SIGNING_REQUIRED=true" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "WINDOWS_TIMESTAMP_URL=http://timestamp.digicert.com" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Build Tauri Windows release
         uses: tauri-apps/tauri-action@v0.6.2
         env:

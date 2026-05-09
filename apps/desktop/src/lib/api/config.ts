@@ -1,7 +1,5 @@
 import type { AppConfig, AppConfigUpdate, LayoutConfig, ProjectTabsConfig } from "../../types/domain";
-import { requestJson } from "./client";
-
-const USE_BACKEND = import.meta.env.VITE_USE_BACKEND !== "false";
+import { isBackendEnabled, requestJson } from "./client";
 
 export const defaultLayoutConfig: LayoutConfig = {
   sidebarWidth: 338,
@@ -27,12 +25,12 @@ export const defaultAppConfig: AppConfig = {
 };
 
 export async function getAppConfig(): Promise<AppConfig> {
-  if (!USE_BACKEND) return defaultAppConfig;
+  if (!isBackendEnabled()) return defaultAppConfig;
   return requestJson<AppConfig>("/api/config");
 }
 
 export async function updateAppConfig(payload: AppConfigUpdate): Promise<AppConfig> {
-  if (!USE_BACKEND) {
+  if (!isBackendEnabled()) {
     return {
       ...defaultAppConfig,
       ...payload,

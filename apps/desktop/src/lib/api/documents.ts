@@ -1,18 +1,16 @@
 import { documents } from "../mockData";
-import { mockDelay, requestJson } from "./client";
+import { isBackendEnabled, mockDelay, requestJson } from "./client";
 import type { DocumentRecord, DraftResponse, SaveDocumentPayload, SaveDraftPayload } from "../../types/domain";
 
-const USE_BACKEND = import.meta.env.VITE_USE_BACKEND !== "false";
-
 export async function getDocument(documentId: string): Promise<DocumentRecord> {
-  if (USE_BACKEND) {
+  if (isBackendEnabled()) {
     return requestJson<DocumentRecord>(`/api/documents/${encodeURIComponent(documentId)}`);
   }
   return mockDelay(documents[documentId] ?? documents["meeting-minutes"]);
 }
 
 export async function saveDocument(documentId: string, payload: SaveDocumentPayload): Promise<DocumentRecord> {
-  if (USE_BACKEND) {
+  if (isBackendEnabled()) {
     return requestJson<DocumentRecord>(`/api/documents/${encodeURIComponent(documentId)}`, {
       method: "PUT",
       body: JSON.stringify(payload),
@@ -29,7 +27,7 @@ export async function saveDocument(documentId: string, payload: SaveDocumentPayl
 }
 
 export async function saveDocumentDraft(documentId: string, payload: SaveDraftPayload): Promise<DraftResponse> {
-  if (USE_BACKEND) {
+  if (isBackendEnabled()) {
     return requestJson<DraftResponse>(`/api/documents/${encodeURIComponent(documentId)}/draft`, {
       method: "PUT",
       body: JSON.stringify(payload),
@@ -44,7 +42,7 @@ export async function saveDocumentDraft(documentId: string, payload: SaveDraftPa
 }
 
 export async function discardDocumentDraft(documentId: string): Promise<void> {
-  if (USE_BACKEND) {
+  if (isBackendEnabled()) {
     await requestJson<void>(`/api/documents/${encodeURIComponent(documentId)}/draft`, {
       method: "DELETE",
     });
