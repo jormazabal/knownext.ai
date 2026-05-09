@@ -2,6 +2,11 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.4.6 - 2026-05-10
+
+- Restored native top-edge height resizing for the custom Windows title bar.
+- Kept title-bar dragging, double-click maximize, and window control buttons working with the frameless Tauri window.
+
 ## 0.4.5 - 2026-05-09
 
 - Changed the Windows updater manifest to prefer the MSI artifact instead of NSIS for in-app updates from already installed versions.
