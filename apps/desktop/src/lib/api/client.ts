@@ -1,4 +1,11 @@
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8765";
+const VITE_USE_BACKEND = import.meta.env.VITE_USE_BACKEND;
+
+export function isBackendEnabled() {
+  if (VITE_USE_BACKEND === "true") return true;
+  if (VITE_USE_BACKEND === "false") return false;
+  return import.meta.env.DEV;
+}
 
 export class ApiError extends Error {
   status: number;

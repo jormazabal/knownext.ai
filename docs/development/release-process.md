@@ -50,7 +50,20 @@ The password file is encrypted with Windows DPAPI for the current user. Do not c
 
 The public updater key is configured in `apps/desktop/src-tauri/tauri.conf.json`. If the production key is regenerated, update `plugins.updater.pubkey`, update the GitHub secrets, and rebuild a release from a clean commit.
 
-The Windows updater currently prefers the NSIS installer when generating `latest.json`. Authenticode code signing for the installer is a later hardening step and is not required for the Tauri updater signature verification.
+The Windows updater currently prefers the NSIS installer when generating `latest.json`.
+
+## Windows Authenticode Signing
+
+Windows release artifacts can be signed with Authenticode to reduce SmartScreen and corporate endpoint protection blocks when users download the installer manually.
+
+Optional GitHub Actions secrets:
+
+- `WINDOWS_CERTIFICATE`: base64-encoded `.pfx` code signing certificate.
+- `WINDOWS_CERTIFICATE_PASSWORD`: export password for the `.pfx` certificate.
+
+When configured, the release workflow imports the certificate into the current user certificate store, exposes its thumbprint through `WINDOWS_CERTIFICATE_THUMBPRINT`, and Tauri calls `scripts/sign-windows.ps1` through `bundle.windows.signCommand`.
+
+A self-signed certificate is not enough for public distribution because it does not establish publisher trust or SmartScreen reputation. If no public code signing certificate is available, publish the release unsigned, keep the Tauri updater signature enabled, and document the expected Windows warning plus SHA256 verification path.
 
 ## GitHub Release Flow
 

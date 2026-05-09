@@ -7,7 +7,9 @@ KnowNext.ai uses Tauri as the desktop shell.
 - Tauri loads the Vite React app.
 - Tauri registers the updater and process plugins for runtime self-update checks.
 - FastAPI is run manually during development.
-- The frontend can use local mocks or call FastAPI with `VITE_USE_BACKEND=true`.
+- The frontend calls FastAPI by default in development.
+- Packaged desktop builds use local mock services by default until FastAPI is bundled as a managed sidecar.
+- `VITE_USE_BACKEND=true` forces FastAPI usage and `VITE_USE_BACKEND=false` forces local mocks.
 
 ## Auto Updates
 

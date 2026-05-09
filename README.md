@@ -18,7 +18,7 @@ This first version establishes the product foundation:
 
 The latest Windows installer is published on GitHub Releases:
 
-- [Download KnowNext.ai for Windows](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_0.4.1_x64-setup.exe)
+- [Download KnowNext.ai for Windows](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_0.4.2_x64-setup.exe)
 - [View all releases](https://github.com/jormazabal/knownext.ai/releases)
 
 The desktop app also checks the signed updater manifest at:
@@ -26,6 +26,8 @@ The desktop app also checks the signed updater manifest at:
 ```text
 https://github.com/jormazabal/knownext.ai/releases/latest/download/latest.json
 ```
+
+Windows may show a SmartScreen or endpoint protection warning for unsigned open source builds. The Tauri updater manifest and update artifacts are signed, but the manually downloaded Windows installer may not have Authenticode signing. You can verify the installer hash against the SHA256 digest shown on the GitHub release asset.
 
 ## Run Locally
 
