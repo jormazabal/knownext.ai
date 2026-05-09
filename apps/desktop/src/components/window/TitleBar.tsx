@@ -1,8 +1,15 @@
 import type { PointerEvent } from "react";
 import { Maximize2, Minus, X } from "lucide-react";
-import { closeWindow, minimizeWindow, startWindowDrag, toggleMaximizeWindow } from "../../lib/runtime/windowControls";
+import { closeWindow, minimizeWindow, startWindowDrag, startWindowResize, toggleMaximizeWindow } from "../../lib/runtime/windowControls";
 
 export function TitleBar() {
+  const handleTopResizePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void startWindowResize("North");
+  };
+
   const handleTitlePointerDown = (event: PointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
     if (event.detail > 1) {
@@ -14,7 +21,8 @@ export function TitleBar() {
   };
 
   return (
-    <header className="flex h-[54px] select-none items-center justify-between border-b border-line bg-white">
+    <header className="relative flex h-[54px] select-none items-center justify-between border-b border-line bg-white">
+      <div aria-hidden="true" className="absolute inset-x-0 top-0 z-30 h-1.5 cursor-n-resize" onPointerDown={handleTopResizePointerDown} />
       <div className="flex h-full min-w-0 flex-1 items-center gap-3 px-5" onPointerDown={handleTitlePointerDown}>
         <img className="h-7 w-7 object-contain" src="/brand/knownext-logo.png" alt="" aria-hidden="true" />
         <span className="text-[15px] font-semibold">KnowNext.ai</span>
