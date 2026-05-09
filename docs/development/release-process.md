@@ -89,6 +89,8 @@ gh release view v0.3.1 --repo jormazabal/knownext.ai --json isDraft,assets
 
 The release must contain the Windows installer, the matching `.sig` file, and `latest.json`.
 
+For Windows updater changes, install the previous release and update through the in-app updater. Confirm the app process is closed, the installer replaces `knownext-ai-desktop.exe`, and the updated app relaunches with the new visible version.
+
 After publishing, verify that the README download link resolves and that the updater manifest points at the published NSIS installer:
 
 ```bash
