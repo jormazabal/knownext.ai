@@ -1,0 +1,60 @@
+# Manual Test Checklist
+
+- [ ] Open the application.
+- [ ] Confirm the window top bar shows KnowNext.ai and simulated window controls.
+- [ ] Open and close the project selector.
+- [ ] Select Proyecto Beta or Proyecto Gamma.
+- [ ] Restart the app and confirm the selected project is restored from `projects.json`.
+- [ ] Confirm Nuevo proyecto is inside the selector dropdown.
+- [ ] Create a project and confirm it is present after restarting the app.
+- [ ] Inspect the folder/document tree levels and confirm they match the active project's local folder.
+- [ ] Confirm only Markdown documents and folders are shown in the navigation tree.
+- [ ] Drag the divider next to the folder/document tree and confirm the panel width changes with a visible vertical resize line.
+- [ ] Restart the app and confirm the folder/document tree width is restored from `config.json`.
+- [ ] Expand and collapse individual folder nodes.
+- [ ] Use Expandir árbol and Contraer árbol from the compact icon actions.
+- [ ] Click Configurar proyecto and confirm the edit project dialog opens with the active project name, folder, icon, and color already filled.
+- [ ] Click Seleccionar in Carpeta local and confirm it opens the native folder selector, not a browser upload picker.
+- [ ] In the Tauri app or local dev browser with the FastAPI backend running, select a project folder and confirm the full local path is shown and saved, for example `C:\Dev\knownext.ai`.
+- [ ] Save a project edit and confirm the project selector shows the updated project data.
+- [ ] Restart the app and confirm the project edit is restored from `projects.json`.
+- [ ] Open `acta-reunion.md`.
+- [ ] Change active tab to `requisitos-funcionales.md`.
+- [ ] Change active tab to `decision-tecnologica.md`.
+- [ ] Close and open document tabs, then restart the app and confirm the same tabs, active document, and tab order are restored from `config.json`.
+- [ ] Close every document tab and confirm the tab bar, editor toolbar, document canvas, and status bar disappear.
+- [ ] Confirm the empty workspace area is very light gray and shows the gray KnowNext.ai watermark logo.
+- [ ] Confirm the AI prompt remains visible with project documentation wording when no document tab is open.
+- [ ] Switch projects and confirm each project restores its own open tabs and active document.
+- [ ] Confirm folder context menu shows Nueva carpeta, Nuevo documento, Renombrar, Eliminar.
+- [ ] Confirm file context menu shows Renombrar, Duplicar, Mover, Eliminar.
+- [ ] Use the folder context menu to create a folder and document, then confirm they exist on disk.
+- [ ] Rename a folder or document from the tree and confirm the disk item is renamed.
+- [ ] Duplicate, move, and delete a document from the file context menu and confirm the disk changes.
+- [ ] Edit content in Milkdown visual mode.
+- [ ] Confirm the status changes to Cambios sin guardar.
+- [ ] Use Deshacer and Rehacer in the active document and confirm they affect only that document.
+- [ ] Edit two open documents, switch between tabs, and confirm each tab keeps its own unsaved content and undo/redo history.
+- [ ] Save the document.
+- [ ] Confirm temporary Guardado feedback appears.
+- [ ] Edit a document, do not save, close the tab, and confirm the app offers Guardar, Descartar, and Cancelar.
+- [ ] Edit a document, do not save, close the browser/app, reopen it, and confirm the document appears with Borrador recuperado and remains pending save to disk.
+- [ ] Confirm draft files are created only under the KnowNext.ai app data directory and not inside the project documentation folder.
+- [ ] Edit a document, let the draft autosave, change the same file on disk externally, return to KnowNext.ai, and confirm the conflict warning offers Cargar disco and Mantener mi versión.
+- [ ] Resolve a conflict with Cargar disco and confirm the draft is discarded.
+- [ ] Resolve a conflict with Mantener mi versión and confirm the draft is written to the real Markdown file.
+- [ ] Stop the FastAPI backend while using the browser build and confirm API failures are visible in the UI instead of silently showing mock data.
+- [ ] Open the version history panel.
+- [ ] Drag the divider next to the version history panel and confirm the panel width changes with a visible vertical resize line.
+- [ ] Restart the app, open history, and confirm the history panel width is restored from `config.json`.
+- [ ] Confirm latest version appears first and has Actual.
+- [ ] Close the version history panel.
+- [ ] Write text in the AI prompt input.
+- [ ] Submit the prompt.
+- [ ] Submit the AI prompt with no document open and confirm it is accepted as a project documentation prompt.
+- [ ] Hover over Ana Domínguez and confirm the account menu appears with icon and text options.
+- [ ] Confirm the account menu shows the current application version.
+- [ ] Confirm no Git branch name is shown anywhere.
+- [ ] Confirm no blue primary action is present.
+- [ ] Corrupt `config.json` in a disposable test profile, restart the backend, and confirm a `config.json.corrupt-*` backup is created.
+- [ ] Run the checklist against the packaged Tauri app before marking a build as 1.0.

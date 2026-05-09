@@ -1,0 +1,1114 @@
+import { useEffect, useMemo, useState } from "react";
+import type { DocumentTreeAction } from "../features/documents/DocumentTree";
+import { CreateDocumentDialog } from "../features/documents/CreateDocumentDialog";
+import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
+import { DesktopLayout } from "../layouts/DesktopLayout";
+import { defaultLayoutConfig, defaultProjectTabsConfig, getAppConfig, updateAppConfig } from "../lib/api/config";
+import { API_BASE_URL, ApiError, getApiErrorMessage } from "../lib/api/client";
+import { discardDocumentDraft, getDocument, saveDocument, saveDocumentDraft } from "../lib/api/documents";
+import { APP_VERSION } from "../lib/appVersion";
+import {
+  createFolder,
+  createProjectDocument,
+  createProject,
+  deleteProject,
+  deleteTreeNode,
+  duplicateProjectDocument,
+  getProjectTree,
+  listProjects,
+  moveTreeNode,
+  renameTreeNode,
+  setActiveProject as persistActiveProject,
+  updateProject,
+} from "../lib/api/projects";
+import type {
+  DocumentRecord,
+  DocumentConflictStatus,
+  DocumentFingerprint,
+  DocumentTreeNode,
+  FileOperationResult,
+  LayoutConfig,
+  OpenDocumentTab,
+  Project,
+  ProjectPayload,
+  ProjectTabsConfig,
+} from "../types/domain";
+
+type AppNotice = {
+  title: string;
+  message: string;
+  tone: "error" | "info";
+};
+
+type DocumentSession = {
+  document: DocumentRecord | null;
+  markdown: string;
+  savedMarkdown: string;
+  isDirty: boolean;
+  isLoading: boolean;
+  saveState: "idle" | "saving" | "saved";
+  loadVersion: number;
+  lastDraftMarkdown: string;
+  baseFingerprint?: DocumentFingerprint | null;
+  conflictStatus: DocumentConflictStatus;
+  diskChanged: boolean;
+  hasRecoveredDraft: boolean;
+  draftUpdatedAt?: string | null;
+};
+
+export function App() {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [activeProject, setActiveProject] = useState<Project | null>(null);
+  const [tree, setTree] = useState<DocumentTreeNode[]>([]);
+  const [tabs, setTabs] = useState<OpenDocumentTab[]>(defaultProjectTabsConfig.openTabs);
+  const [activeDocumentId, setActiveDocumentId] = useState(defaultProjectTabsConfig.activeDocumentId);
+  const [documentSessions, setDocumentSessions] = useState<Record<string, DocumentSession>>({});
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [createDocumentOpen, setCreateDocumentOpen] = useState(false);
+  const [createDocumentParentId, setCreateDocumentParentId] = useState<string | null>(null);
+  const [moveNode, setMoveNode] = useState<DocumentTreeNode | null>(null);
+  const [createProjectOpen, setCreateProjectOpen] = useState(false);
+  const [editProjectOpen, setEditProjectOpen] = useState(false);
+  const [layoutConfig, setLayoutConfig] = useState<LayoutConfig>(defaultLayoutConfig);
+  const [tabsByProject, setTabsByProject] = useState<Record<string, ProjectTabsConfig>>({});
+  const [configLoaded, setConfigLoaded] = useState(false);
+  const [notice, setNotice] = useState<AppNotice | null>(null);
+  const [closeDocumentId, setCloseDocumentId] = useState<string | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const [projectList, appConfig] = await Promise.all([listProjects(), getAppConfig()]);
+        const active = projectList.find((project) => project.active) ?? projectList[0];
+        const projectTree = active ? await getProjectTree(active.id) : [];
+        const activeProjectTabs = active
+          ? resolveProjectTabs(appConfig.tabsByProject, active.id, projectTree)
+          : { openTabs: [], activeDocumentId: "" };
+        setProjects(projectList);
+        setActiveProject(active ?? null);
+        setTree(projectTree);
+        setLayoutConfig(appConfig.layout);
+        setTabsByProject(appConfig.tabsByProject);
+        setTabs(activeProjectTabs.openTabs);
+        setActiveDocumentId(activeProjectTabs.activeDocumentId);
+      } catch (error) {
+        setNotice({
+          title: "No se pudo iniciar KnowNext.ai",
+          message: getApiErrorMessage(error, "La aplicación no pudo cargar la configuración inicial."),
+          tone: "error",
+        });
+        setProjects([]);
+        setActiveProject(null);
+        setTree([]);
+        setTabs([]);
+        setActiveDocumentId("");
+      } finally {
+        setConfigLoaded(true);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!configLoaded) return;
+
+    const timeout = window.setTimeout(() => {
+      void updateAppConfig({ layout: layoutConfig, tabsByProject }).catch((error) => {
+        showError(error, "No se pudo guardar la configuración de la aplicación.");
+      });
+    }, 350);
+
+    return () => window.clearTimeout(timeout);
+  }, [configLoaded, layoutConfig, tabsByProject]);
+
+  useEffect(() => {
+    function handlePageHide() {
+      for (const [documentId, session] of Object.entries(documentSessions)) {
+        if (!shouldPersistDraft(session)) continue;
+        void fetch(`${API_BASE_URL}/api/documents/${encodeURIComponent(documentId)}/draft`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ markdown: session.markdown, baseFingerprint: session.baseFingerprint }),
+          keepalive: true,
+        });
+      }
+    }
+
+    window.addEventListener("pagehide", handlePageHide);
+    return () => window.removeEventListener("pagehide", handlePageHide);
+  }, [documentSessions]);
+
+  useEffect(() => {
+    if (!configLoaded || !activeProject) return;
+
+    const activeProjectTabs = normalizeProjectTabs({
+      openTabs: tabs,
+      activeDocumentId,
+    });
+
+    setTabsByProject((currentTabsByProject) => {
+      const currentProjectTabs = currentTabsByProject[activeProject.id];
+      if (areProjectTabsEqual(currentProjectTabs, activeProjectTabs)) return currentTabsByProject;
+      return {
+        ...currentTabsByProject,
+        [activeProject.id]: activeProjectTabs,
+      };
+    });
+  }, [activeDocumentId, activeProject, configLoaded, tabs]);
+
+  useEffect(() => {
+    if (!activeDocumentId || documentSessions[activeDocumentId]) return;
+    void loadDocumentSession(activeDocumentId);
+  }, [activeDocumentId, documentSessions]);
+
+  useEffect(() => {
+    const pendingDrafts = Object.entries(documentSessions).filter(([, session]) => shouldPersistDraft(session));
+    if (pendingDrafts.length === 0) return;
+
+    const timeout = window.setTimeout(() => {
+      for (const [documentId, session] of pendingDrafts) {
+        void persistDraft(documentId, session);
+      }
+    }, 1000);
+
+    return () => window.clearTimeout(timeout);
+  }, [documentSessions]);
+
+  const activeTab = useMemo(
+    () => tabs.find((tab) => tab.id === activeDocumentId) ?? tabs[0],
+    [activeDocumentId, tabs],
+  );
+  const activeSession = activeDocumentId ? documentSessions[activeDocumentId] : undefined;
+  const dirtyDocumentIds = useMemo(
+    () => Object.entries(documentSessions).filter(([, session]) => session.isDirty).map(([documentId]) => documentId),
+    [documentSessions],
+  );
+  const editorSessions = useMemo(
+    () => tabs.map((tab) => ({
+      documentId: tab.id,
+      document: documentSessions[tab.id]?.document ?? null,
+      markdown: documentSessions[tab.id]?.markdown ?? "",
+      editorKey: `${tab.id}-${documentSessions[tab.id]?.loadVersion ?? 0}`,
+      isLoading: documentSessions[tab.id]?.isLoading ?? !documentSessions[tab.id],
+    })),
+    [documentSessions, tabs],
+  );
+
+  function handleOpenDocument(documentId: string, name: string) {
+    setTabs((currentTabs) => (
+      currentTabs.some((tab) => tab.id === documentId)
+        ? currentTabs
+        : [...currentTabs, { id: documentId, name }]
+    ));
+    setActiveDocumentId(documentId);
+  }
+
+  function handleCloseTab(documentId: string) {
+    if (documentSessions[documentId]?.isDirty) {
+      setCloseDocumentId(documentId);
+      return;
+    }
+    closeTabNow(documentId);
+  }
+
+  function closeTabNow(documentId: string) {
+    const nextTabs = tabs.filter((tab) => tab.id !== documentId);
+    setTabs(nextTabs);
+    setDocumentSessions((currentSessions) => {
+      const { [documentId]: _closedSession, ...nextSessions } = currentSessions;
+      return nextSessions;
+    });
+    if (documentId === activeDocumentId) {
+      setActiveDocumentId(nextTabs[0]?.id ?? "");
+    }
+  }
+
+  function handleSelectTab(documentId: string) {
+    if (activeDocumentId && documentSessions[activeDocumentId]) {
+      void persistDraft(activeDocumentId, documentSessions[activeDocumentId]);
+    }
+    setActiveDocumentId(documentId);
+  }
+
+  function handleMarkdownChange(documentId: string, nextMarkdown: string) {
+    setDocumentSessions((currentSessions) => {
+      const session = currentSessions[documentId];
+      if (!session) return currentSessions;
+      return {
+        ...currentSessions,
+        [documentId]: {
+          ...session,
+          markdown: nextMarkdown,
+          isDirty: session.hasRecoveredDraft || nextMarkdown !== session.savedMarkdown,
+          saveState: "idle",
+          document: session.document ? { ...session.document, wordCount: countWords(nextMarkdown) } : session.document,
+        },
+      };
+    });
+  }
+
+  async function handleSave(documentId = activeDocumentId, force = false) {
+    const session = documentSessions[documentId];
+    if (!documentId || !session?.document) return false;
+    setDocumentSessions((currentSessions) => updateSession(currentSessions, documentId, { saveState: "saving" }));
+    try {
+      const saved = await saveDocument(documentId, {
+        markdown: session.markdown,
+        baseFingerprint: session.baseFingerprint,
+        force,
+      });
+      setDocumentSessions((currentSessions) => updateSession(currentSessions, documentId, {
+        document: saved,
+        markdown: saved.markdown,
+        savedMarkdown: saved.markdown,
+        isDirty: false,
+        saveState: "saved",
+        lastDraftMarkdown: "",
+        baseFingerprint: saved.baseFingerprint,
+        conflictStatus: "none",
+        diskChanged: false,
+        hasRecoveredDraft: false,
+        draftUpdatedAt: null,
+      }));
+      window.setTimeout(() => {
+        setDocumentSessions((currentSessions) => {
+          const currentSession = currentSessions[documentId];
+          if (!currentSession || currentSession.saveState !== "saved") return currentSessions;
+          return updateSession(currentSessions, documentId, { saveState: "idle" });
+        });
+      }, 1400);
+      return true;
+    } catch (error) {
+      setDocumentSessions((currentSessions) => updateSession(currentSessions, documentId, { saveState: "idle" }));
+      if (error instanceof ApiError && error.status === 409) {
+        setDocumentSessions((currentSessions) => updateSession(currentSessions, documentId, {
+          diskChanged: true,
+          conflictStatus: "disk-changed",
+        }));
+        setNotice({
+          title: "El archivo cambió en disco",
+          message: "El documento se modificó fuera de KnowNext.ai. Revisa el aviso del editor para elegir qué versión mantener.",
+          tone: "info",
+        });
+        return false;
+      }
+      showError(error, "No se pudo guardar el documento.");
+      return false;
+    }
+  }
+
+  async function handleSelectProject(project: Project) {
+    if (project.id === activeProject?.id) return;
+    await flushPendingDrafts();
+    if (activeProject) {
+      setTabsByProject((currentTabsByProject) => ({
+        ...currentTabsByProject,
+        [activeProject.id]: normalizeProjectTabs({ openTabs: tabs, activeDocumentId }),
+      }));
+    }
+
+    try {
+      const active = await persistActiveProject(project.id);
+      const nextTree = await getProjectTree(active.id);
+      const nextProjectTabs = resolveProjectTabs(tabsByProject, active.id, nextTree);
+      setProjects((currentProjects) => currentProjects.map((currentProject) => ({
+        ...currentProject,
+        active: currentProject.id === active.id,
+      })));
+      setActiveProject(active);
+      setTree(nextTree);
+      setTabs(nextProjectTabs.openTabs);
+      setActiveDocumentId(nextProjectTabs.activeDocumentId);
+      if (!active.isGitRepository) setHistoryOpen(false);
+    } catch (error) {
+      showError(error, "No se pudo cambiar de proyecto.");
+    }
+  }
+
+  async function handleCreateFolder(parentId: string | null = null) {
+    if (!activeProject) return;
+    try {
+      const result = await createFolder(activeProject.id, parentId, getUniqueFolderName(tree));
+      setTree(markNodeEditing(result.tree, result.node?.id ?? null));
+    } catch (error) {
+      showError(error, "No se pudo crear la carpeta.");
+    }
+  }
+
+  async function handleRenameNode(nodeId: string, name: string) {
+    if (!activeProject) return;
+    const nextName = name.trim() || "Nueva carpeta";
+    const previousNode = findNodeById(tree, nodeId);
+    if (previousNode?.name === nextName) {
+      setTree((currentTree) => renameNode(currentTree, nodeId, nextName));
+      return;
+    }
+
+    try {
+      const result = await renameTreeNode(activeProject.id, nodeId, nextName);
+      applyFileOperationResult(result);
+    } catch (error) {
+      showError(error, "No se pudo renombrar el elemento.");
+      setTree(markNodeEditing(tree, null));
+    }
+  }
+
+  function handleToggleNode(nodeId: string) {
+    setTree((currentTree) => toggleNodeOpen(currentTree, nodeId));
+  }
+
+  function handleExpandTree() {
+    setTree((currentTree) => setAllFoldersOpen(currentTree, true));
+  }
+
+  function handleCollapseTree() {
+    setTree((currentTree) => setAllFoldersOpen(currentTree, false));
+  }
+
+  async function handleCreateDocument(name: string, template: string) {
+    if (!activeProject) return;
+    const documentName = name.trim().endsWith(".md") ? name.trim() : `${name.trim()}.md`;
+    const markdownValue = getTemplateMarkdown(template, documentName);
+    try {
+      const result = await createProjectDocument(activeProject.id, createDocumentParentId, documentName, markdownValue);
+      applyFileOperationResult(result);
+      if (result.node?.type === "document") {
+        openOrReplaceTab(result.node.id, result.node.name);
+      }
+      setCreateDocumentOpen(false);
+      setCreateDocumentParentId(null);
+    } catch (error) {
+      showError(error, "No se pudo crear el documento.");
+    }
+  }
+
+  async function handleCreateProject(project: ProjectPayload) {
+    try {
+      await flushPendingDrafts();
+      const nextProject = await createProject(project);
+
+      setProjects((currentProjects) => [
+        ...currentProjects.map((currentProject) => ({ ...currentProject, active: false })),
+        nextProject,
+      ]);
+      const nextTree = await getProjectTree(nextProject.id);
+      const nextProjectTabs = resolveProjectTabs({}, nextProject.id, nextTree);
+      setActiveProject(nextProject);
+      setTree(nextTree);
+      setTabs(nextProjectTabs.openTabs);
+      setActiveDocumentId(nextProjectTabs.activeDocumentId);
+      setTabsByProject((currentTabsByProject) => ({
+        ...currentTabsByProject,
+        [nextProject.id]: nextProjectTabs,
+      }));
+      setHistoryOpen(false);
+      setCreateProjectOpen(false);
+    } catch (error) {
+      showError(error, "No se pudo crear el proyecto.");
+    }
+  }
+
+  async function handleUpdateProject(projectId: string, project: ProjectPayload) {
+    try {
+      const updatedProject = await updateProject(projectId, project);
+      setProjects((currentProjects) => currentProjects.map((currentProject) => (
+        currentProject.id === projectId ? updatedProject : currentProject
+      )));
+      setActiveProject((currentProject) => (
+        currentProject?.id === projectId ? updatedProject : currentProject
+      ));
+      if (activeProject?.id === projectId) {
+        const nextTree = await getProjectTree(projectId);
+        setTree(nextTree);
+        const nextProjectTabs = resolveProjectTabs(tabsByProject, projectId, nextTree);
+        setTabs(nextProjectTabs.openTabs);
+        setActiveDocumentId(nextProjectTabs.activeDocumentId);
+      }
+      setEditProjectOpen(false);
+    } catch (error) {
+      showError(error, "No se pudo guardar el proyecto.");
+    }
+  }
+
+  async function handleDeleteProject(projectId: string) {
+    try {
+      await flushPendingDrafts();
+      const nextProjects = await deleteProject(projectId);
+      const nextActiveProject = nextProjects.find((project) => project.active) ?? nextProjects[0];
+
+      setProjects(nextProjects);
+      setTabsByProject((currentTabsByProject) => {
+        const { [projectId]: _removedProjectTabs, ...nextTabsByProject } = currentTabsByProject;
+        return nextTabsByProject;
+      });
+      setEditProjectOpen(false);
+
+      if (!nextActiveProject) {
+        setActiveProject(null);
+        setTree([]);
+        setTabs([]);
+        setActiveDocumentId("");
+        setHistoryOpen(false);
+        return;
+      }
+
+      const nextTree = await getProjectTree(nextActiveProject.id);
+      const nextProjectTabs = resolveProjectTabs(tabsByProject, nextActiveProject.id, nextTree);
+      setActiveProject(nextActiveProject);
+      setTree(nextTree);
+      setTabs(nextProjectTabs.openTabs);
+      setActiveDocumentId(nextProjectTabs.activeDocumentId);
+      if (!nextActiveProject.isGitRepository) setHistoryOpen(false);
+    } catch (error) {
+      showError(error, "No se pudo eliminar el proyecto.");
+    }
+  }
+
+  function showError(error: unknown, fallback: string) {
+    setNotice({
+      title: "No se pudo completar la operación",
+      message: getApiErrorMessage(error, fallback),
+      tone: "error",
+    });
+  }
+
+  function handleLayoutConfigChange(nextLayoutConfig: Partial<LayoutConfig>) {
+    setLayoutConfig((currentLayoutConfig) => ({ ...currentLayoutConfig, ...nextLayoutConfig }));
+  }
+
+  function handleTreeContextAction(action: DocumentTreeAction, node: DocumentTreeNode) {
+    if (action === "rename") {
+      setTree((currentTree) => markNodeEditing(currentTree, node.id));
+      return;
+    }
+
+    if (action === "create-folder") {
+      void handleCreateFolder(node.id);
+      return;
+    }
+
+    if (action === "create-document") {
+      setCreateDocumentParentId(node.id);
+      setCreateDocumentOpen(true);
+      return;
+    }
+
+    if (action === "delete") {
+      void handleDeleteNode(node);
+      return;
+    }
+
+    if (action === "duplicate") {
+      void handleDuplicateDocument(node);
+      return;
+    }
+
+    if (action === "move") {
+      setMoveNode(node);
+    }
+  }
+
+  async function handleDeleteNode(node: DocumentTreeNode) {
+    if (!activeProject) return;
+    const message = node.type === "folder"
+      ? `Se eliminará la carpeta "${node.name}" y su contenido del disco. Esta acción no se puede deshacer.`
+      : `Se eliminará el documento "${node.name}" del disco. Esta acción no se puede deshacer.`;
+    if (!window.confirm(message)) return;
+
+    try {
+      const result = await deleteTreeNode(activeProject.id, node.id);
+      applyFileOperationResult(result);
+    } catch (error) {
+      showError(error, "No se pudo eliminar el elemento.");
+    }
+  }
+
+  async function handleDuplicateDocument(node: DocumentTreeNode) {
+    if (!activeProject || node.type !== "document") return;
+    try {
+      const result = await duplicateProjectDocument(activeProject.id, node.id);
+      applyFileOperationResult(result);
+      if (result.node?.type === "document") {
+        openOrReplaceTab(result.node.id, result.node.name);
+      }
+    } catch (error) {
+      showError(error, "No se pudo duplicar el documento.");
+    }
+  }
+
+  async function handleMoveNode(targetFolderId: string | null) {
+    if (!activeProject || !moveNode) return;
+    try {
+      const result = await moveTreeNode(activeProject.id, moveNode.id, targetFolderId);
+      applyFileOperationResult(result);
+      setMoveNode(null);
+    } catch (error) {
+      showError(error, "No se pudo mover el elemento.");
+    }
+  }
+
+  function openOrReplaceTab(documentId: string, name: string) {
+    setTabs((currentTabs) => (
+      currentTabs.some((tab) => tab.id === documentId)
+        ? currentTabs.map((tab) => (tab.id === documentId ? { id: documentId, name } : tab))
+        : [...currentTabs, { id: documentId, name }]
+    ));
+    setActiveDocumentId(documentId);
+  }
+
+  function applyFileOperationResult(result: FileOperationResult) {
+    setTree(result.tree);
+
+    if (result.affectedDocuments.length === 0) return;
+
+    setTabs((currentTabs) => {
+      let nextTabs = currentTabs;
+      for (const affectedDocument of result.affectedDocuments) {
+        if (affectedDocument.newId) {
+          nextTabs = nextTabs.map((tab) => (
+            tab.id === affectedDocument.oldId
+              ? { id: affectedDocument.newId!, name: affectedDocument.name ?? tab.name }
+              : tab
+          ));
+        } else {
+          nextTabs = nextTabs.filter((tab) => tab.id !== affectedDocument.oldId);
+        }
+      }
+      return nextTabs;
+    });
+
+    setDocumentSessions((currentSessions) => {
+      let nextSessions = { ...currentSessions };
+      for (const affectedDocument of result.affectedDocuments) {
+        const currentSession = nextSessions[affectedDocument.oldId];
+        if (!currentSession) continue;
+
+        delete nextSessions[affectedDocument.oldId];
+        if (affectedDocument.newId) {
+          nextSessions[affectedDocument.newId] = {
+            ...currentSession,
+            document: currentSession.document
+              ? {
+                ...currentSession.document,
+                id: affectedDocument.newId,
+                name: affectedDocument.name ?? currentSession.document.name,
+              }
+              : currentSession.document,
+            loadVersion: currentSession.loadVersion + 1,
+          };
+        }
+      }
+      return nextSessions;
+    });
+
+    const activeChange = result.affectedDocuments.find((affectedDocument) => affectedDocument.oldId === activeDocumentId);
+    if (activeChange?.newId) {
+      setActiveDocumentId(activeChange.newId);
+      return;
+    }
+
+    if (activeChange && !activeChange.newId) {
+      const firstDocument = findFirstDocument(result.tree);
+      setActiveDocumentId(firstDocument?.id ?? "");
+      setTabs((currentTabs) => currentTabs.length > 0 ? currentTabs : firstDocument ? [{ id: firstDocument.id, name: firstDocument.name }] : []);
+    }
+  }
+
+  return (
+    <>
+      <DesktopLayout
+        appVersion={APP_VERSION}
+        projects={projects}
+        activeProject={activeProject}
+        tree={tree}
+        tabs={tabs}
+        activeTab={activeTab}
+        activeDocumentId={activeDocumentId}
+        editorSessions={editorSessions}
+        activeDocument={activeSession?.document ?? null}
+        activeMarkdown={activeSession?.markdown ?? ""}
+        activeDocumentDirty={activeSession?.isDirty ?? false}
+        activeDocumentConflictStatus={activeSession?.conflictStatus ?? "none"}
+        activeDocumentHasRecoveredDraft={activeSession?.hasRecoveredDraft ?? false}
+        activeDocumentDiskChanged={activeSession?.diskChanged ?? false}
+        dirtyDocumentIds={dirtyDocumentIds}
+        saveState={activeSession?.saveState ?? "idle"}
+        historyOpen={historyOpen}
+        historyEnabled={activeProject?.isGitRepository ?? false}
+        layoutConfig={layoutConfig}
+        onSelectProject={handleSelectProject}
+        onCreateProject={() => setCreateProjectOpen(true)}
+        onConfigureProject={() => {
+          if (activeProject) setEditProjectOpen(true);
+        }}
+        onCreateFolder={() => void handleCreateFolder()}
+        onRenameNode={handleRenameNode}
+        onToggleNode={handleToggleNode}
+        onExpandTree={handleExpandTree}
+        onCollapseTree={handleCollapseTree}
+        onCreateDocument={() => {
+          setCreateDocumentParentId(null);
+          setCreateDocumentOpen(true);
+        }}
+        onOpenDocument={handleOpenDocument}
+        onSelectTab={handleSelectTab}
+        onCloseTab={handleCloseTab}
+        onTreeContextAction={handleTreeContextAction}
+        onMarkdownChange={handleMarkdownChange}
+        onSave={() => void handleSave()}
+        onKeepLocalVersion={() => void handleSave(activeDocumentId, true)}
+        onLoadDiskVersion={() => void handleLoadDiskVersion()}
+        onToggleHistory={() => {
+          if (activeProject?.isGitRepository) setHistoryOpen((isOpen) => !isOpen);
+        }}
+        onCloseHistory={() => setHistoryOpen(false)}
+        onLayoutConfigChange={handleLayoutConfigChange}
+      />
+      <AppNoticeBanner notice={notice} onClose={() => setNotice(null)} />
+      <CreateDocumentDialog
+        open={createDocumentOpen}
+        onClose={() => {
+          setCreateDocumentOpen(false);
+          setCreateDocumentParentId(null);
+        }}
+        onCreate={handleCreateDocument}
+      />
+      <CreateProjectDialog
+        open={createProjectOpen}
+        onClose={() => setCreateProjectOpen(false)}
+        onCreate={handleCreateProject}
+      />
+      <CreateProjectDialog
+        open={editProjectOpen}
+        mode="edit"
+        project={activeProject}
+        onClose={() => setEditProjectOpen(false)}
+        onCreate={handleCreateProject}
+        onUpdate={handleUpdateProject}
+        onDelete={handleDeleteProject}
+      />
+      <MoveDocumentDialog
+        open={moveNode !== null}
+        node={moveNode}
+        folders={collectFolders(tree)}
+        onClose={() => setMoveNode(null)}
+        onMove={handleMoveNode}
+      />
+      <CloseDirtyDocumentDialog
+        open={closeDocumentId !== null}
+        documentName={closeDocumentId ? tabs.find((tab) => tab.id === closeDocumentId)?.name ?? "documento" : ""}
+        onCancel={() => setCloseDocumentId(null)}
+        onDiscard={() => {
+          if (!closeDocumentId) return;
+          const documentId = closeDocumentId;
+          setCloseDocumentId(null);
+          void discardDocumentDraft(documentId)
+            .then(() => closeTabNow(documentId))
+            .catch((error) => showError(error, "No se pudo descartar el borrador interno."));
+        }}
+        onSave={() => {
+          if (!closeDocumentId) return;
+          const documentId = closeDocumentId;
+          void handleSave(documentId).then((saved) => {
+            setCloseDocumentId(null);
+            if (saved) closeTabNow(documentId);
+          });
+        }}
+      />
+    </>
+  );
+
+  async function loadDocumentSession(documentId: string, forceReload = false) {
+    setDocumentSessions((currentSessions) => {
+      const currentSession = currentSessions[documentId];
+      if (currentSession?.isLoading && !forceReload) return currentSessions;
+      return {
+        ...currentSessions,
+        [documentId]: {
+          ...createEmptyDocumentSession(currentSession?.loadVersion ?? 0),
+          ...currentSession,
+          isLoading: true,
+          loadVersion: forceReload ? (currentSession?.loadVersion ?? 0) + 1 : currentSession?.loadVersion ?? 0,
+        },
+      };
+    });
+
+    try {
+      const record = await getDocument(documentId);
+      const hasRecoveredDraft = Boolean(record.hasDraft || record.isDirty);
+      setDocumentSessions((currentSessions) => {
+        const currentSession = currentSessions[documentId];
+        return {
+          ...currentSessions,
+          [documentId]: {
+            document: record,
+            markdown: record.markdown,
+            savedMarkdown: hasRecoveredDraft ? currentSession?.savedMarkdown ?? record.markdown : record.markdown,
+            isDirty: hasRecoveredDraft,
+            isLoading: false,
+            saveState: "idle",
+            loadVersion: currentSession?.loadVersion ?? 0,
+            lastDraftMarkdown: hasRecoveredDraft ? record.markdown : "",
+            baseFingerprint: record.baseFingerprint,
+            conflictStatus: record.conflictStatus ?? (record.diskChanged ? "disk-changed" : "none"),
+            diskChanged: Boolean(record.diskChanged),
+            hasRecoveredDraft,
+            draftUpdatedAt: record.draftUpdatedAt,
+          },
+        };
+      });
+    } catch (error) {
+      setDocumentSessions((currentSessions) => {
+        const { [documentId]: _failedSession, ...nextSessions } = currentSessions;
+        return nextSessions;
+      });
+      showError(error, "No se pudo abrir el documento.");
+    }
+  }
+
+  async function persistDraft(documentId: string, session: DocumentSession) {
+    if (!shouldPersistDraft(session)) return;
+    try {
+      const draft = await saveDocumentDraft(documentId, {
+        markdown: session.markdown,
+        baseFingerprint: session.baseFingerprint,
+      });
+      setDocumentSessions((currentSessions) => {
+        const currentSession = currentSessions[documentId];
+        if (!currentSession) return currentSessions;
+        return updateSession(currentSessions, documentId, {
+          lastDraftMarkdown: session.markdown,
+          draftUpdatedAt: draft.draftUpdatedAt,
+          hasRecoveredDraft: true,
+        });
+      });
+    } catch (error) {
+      showError(error, "No se pudo guardar el borrador interno del documento.");
+    }
+  }
+
+  async function flushPendingDrafts() {
+    const pendingDrafts = Object.entries(documentSessions).filter(([, session]) => shouldPersistDraft(session));
+    await Promise.all(pendingDrafts.map(([documentId, session]) => persistDraft(documentId, session)));
+  }
+
+  async function handleLoadDiskVersion() {
+    if (!activeDocumentId) return;
+    await discardDocumentDraft(activeDocumentId);
+    await loadDocumentSession(activeDocumentId, true);
+  }
+}
+
+function createEmptyDocumentSession(loadVersion: number): DocumentSession {
+  return {
+    document: null,
+    markdown: "",
+    savedMarkdown: "",
+    isDirty: false,
+    isLoading: false,
+    saveState: "idle",
+    loadVersion,
+    lastDraftMarkdown: "",
+    baseFingerprint: null,
+    conflictStatus: "none",
+    diskChanged: false,
+    hasRecoveredDraft: false,
+    draftUpdatedAt: null,
+  };
+}
+
+function updateSession(
+  sessions: Record<string, DocumentSession>,
+  documentId: string,
+  patch: Partial<DocumentSession>,
+): Record<string, DocumentSession> {
+  const session = sessions[documentId];
+  if (!session) return sessions;
+  return {
+    ...sessions,
+    [documentId]: {
+      ...session,
+      ...patch,
+    },
+  };
+}
+
+function shouldPersistDraft(session: DocumentSession) {
+  return Boolean(
+    session.document &&
+    !session.isLoading &&
+    session.isDirty &&
+    session.markdown !== session.lastDraftMarkdown,
+  );
+}
+
+function countWords(markdown: string) {
+  return markdown.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function getUniqueFolderName(nodes: DocumentTreeNode[]) {
+  const names = new Set(nodes.filter((node) => node.type === "folder").map((node) => node.name));
+  if (!names.has("Nueva carpeta")) return "Nueva carpeta";
+
+  let counter = 2;
+  while (names.has(`Nueva carpeta ${counter}`)) counter += 1;
+  return `Nueva carpeta ${counter}`;
+}
+
+function renameNode(nodes: DocumentTreeNode[], nodeId: string, name: string): DocumentTreeNode[] {
+  return nodes.map((node) => {
+    if (node.id === nodeId) return { ...node, name, isEditing: false };
+    if (node.children) return { ...node, children: renameNode(node.children, nodeId, name) };
+    return node;
+  });
+}
+
+function toggleNodeOpen(nodes: DocumentTreeNode[], nodeId: string): DocumentTreeNode[] {
+  return nodes.map((node) => {
+    if (node.id === nodeId && node.type === "folder") return { ...node, open: !node.open };
+    if (node.children) return { ...node, children: toggleNodeOpen(node.children, nodeId) };
+    return node;
+  });
+}
+
+function setAllFoldersOpen(nodes: DocumentTreeNode[], open: boolean): DocumentTreeNode[] {
+  return nodes.map((node) => {
+    if (node.type === "folder") {
+      return {
+        ...node,
+        open,
+        children: node.children ? setAllFoldersOpen(node.children, open) : node.children,
+      };
+    }
+
+    return node;
+  });
+}
+
+function getTemplateMarkdown(template: string, documentName: string) {
+  const title = documentName.replace(/\.md$/i, "").replace(/-/g, " ");
+
+  if (template === "meeting") {
+    return `# ${title}\n\n## Información general\n\n## Asistentes\n\n## Acuerdos\n\n- [ ] Nueva tarea\n`;
+  }
+
+  if (template === "requirements") {
+    return `# ${title}\n\n## Requisitos funcionales\n\n- \n\n## Requisitos no funcionales\n\n- \n`;
+  }
+
+  if (template === "decision") {
+    return `# ${title}\n\n## Contexto\n\n## Decisión\n\n## Consecuencias\n\n`;
+  }
+
+  return `# ${title}\n\n`;
+}
+
+function resolveProjectTabs(tabsByProject: Record<string, ProjectTabsConfig>, projectId: string, tree: DocumentTreeNode[]) {
+  const configuredTabs = normalizeProjectTabs(tabsByProject[projectId] ?? defaultProjectTabsConfig);
+  const knownDocumentIds = new Set(collectDocuments(tree).map((node) => node.id));
+  if (knownDocumentIds.size === 0) return { openTabs: [], activeDocumentId: "" };
+
+  const openTabs = configuredTabs.openTabs.filter((tab) => knownDocumentIds.has(tab.id));
+  if (openTabs.length > 0) {
+    return normalizeProjectTabs({
+      openTabs,
+      activeDocumentId: knownDocumentIds.has(configuredTabs.activeDocumentId) ? configuredTabs.activeDocumentId : openTabs[0].id,
+    });
+  }
+
+  return { openTabs: [], activeDocumentId: "" };
+}
+
+function normalizeProjectTabs(projectTabs: ProjectTabsConfig): ProjectTabsConfig {
+  const seen = new Set<string>();
+  const openTabs = projectTabs.openTabs.filter((tab) => {
+    if (!tab.id || !tab.name || seen.has(tab.id)) return false;
+    seen.add(tab.id);
+    return true;
+  });
+
+  const normalizedOpenTabs = openTabs;
+  const activeDocumentId = normalizedOpenTabs.some((tab) => tab.id === projectTabs.activeDocumentId)
+    ? projectTabs.activeDocumentId
+    : normalizedOpenTabs[0]?.id ?? "";
+
+  return {
+    openTabs: normalizedOpenTabs,
+    activeDocumentId,
+  };
+}
+
+function AppNoticeBanner({ notice, onClose }: { notice: AppNotice | null; onClose: () => void }) {
+  if (!notice) return null;
+
+  return (
+    <div className="fixed right-5 top-[70px] z-[100] w-[380px] rounded-lg border border-red-200 bg-white p-4 shadow-menu">
+      <div className="flex items-start gap-3">
+        <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-red-600" />
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-semibold text-ink-primary">{notice.title}</p>
+          <p className="mt-1 text-[12px] leading-5 text-ink-secondary">{notice.message}</p>
+        </div>
+        <button className="rounded px-2 py-1 text-[12px] text-ink-secondary hover:bg-panel" onClick={onClose}>
+          Cerrar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CloseDirtyDocumentDialog({
+  open,
+  documentName,
+  onCancel,
+  onDiscard,
+  onSave,
+}: {
+  open: boolean;
+  documentName: string;
+  onCancel: () => void;
+  onDiscard: () => void;
+  onSave: () => void;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[90] grid place-items-center bg-black/20">
+      <section className="w-[430px] rounded-lg border border-line bg-white shadow-menu">
+        <header className="border-b border-line px-5 py-4">
+          <h2 className="text-[15px] font-semibold">Cerrar documento con cambios</h2>
+          <p className="mt-1 truncate text-[12px] text-ink-secondary">{documentName}</p>
+        </header>
+        <div className="px-5 py-5 text-[13px] leading-5 text-ink-secondary">
+          El documento tiene cambios pendientes de guardar en disco. Puedes guardarlos, descartar el borrador interno o cancelar el cierre.
+        </div>
+        <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
+          <button className="h-9 rounded-md border border-line px-4 text-[13px] hover:bg-panel" onClick={onCancel}>
+            Cancelar
+          </button>
+          <button className="h-9 rounded-md border border-line px-4 text-[13px] text-red-700 hover:bg-red-50" onClick={onDiscard}>
+            Descartar
+          </button>
+          <button className="h-9 rounded-md bg-brand-orange px-4 text-[13px] font-semibold text-white hover:bg-brand-dark" onClick={onSave}>
+            Guardar
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function areProjectTabsEqual(first: ProjectTabsConfig | undefined, second: ProjectTabsConfig) {
+  if (!first) return false;
+  if (first.activeDocumentId !== second.activeDocumentId) return false;
+  if (first.openTabs.length !== second.openTabs.length) return false;
+
+  return first.openTabs.every((tab, index) => {
+    const otherTab = second.openTabs[index];
+    return tab.id === otherTab.id && tab.name === otherTab.name;
+  });
+}
+
+function findNodeById(nodes: DocumentTreeNode[], nodeId: string): DocumentTreeNode | null {
+  for (const node of nodes) {
+    if (node.id === nodeId) return node;
+    if (node.children) {
+      const child = findNodeById(node.children, nodeId);
+      if (child) return child;
+    }
+  }
+  return null;
+}
+
+function markNodeEditing(nodes: DocumentTreeNode[], nodeId: string | null): DocumentTreeNode[] {
+  return nodes.map((node) => ({
+    ...node,
+    isEditing: node.id === nodeId,
+    children: node.children ? markNodeEditing(node.children, nodeId) : node.children,
+  }));
+}
+
+function collectDocuments(nodes: DocumentTreeNode[]): DocumentTreeNode[] {
+  return nodes.flatMap((node) => {
+    if (node.type === "document") return [node];
+    return node.children ? collectDocuments(node.children) : [];
+  });
+}
+
+function findFirstDocument(nodes: DocumentTreeNode[]): DocumentTreeNode | null {
+  for (const node of nodes) {
+    if (node.type === "document") return node;
+    if (node.children) {
+      const child = findFirstDocument(node.children);
+      if (child) return child;
+    }
+  }
+  return null;
+}
+
+function collectFolders(nodes: DocumentTreeNode[]): DocumentTreeNode[] {
+  return nodes.flatMap((node) => {
+    if (node.type !== "folder") return [];
+    return [node, ...(node.children ? collectFolders(node.children) : [])];
+  });
+}
+
+function MoveDocumentDialog({
+  open,
+  node,
+  folders,
+  onClose,
+  onMove,
+}: {
+  open: boolean;
+  node: DocumentTreeNode | null;
+  folders: DocumentTreeNode[];
+  onClose: () => void;
+  onMove: (targetFolderId: string | null) => void;
+}) {
+  const [targetFolderId, setTargetFolderId] = useState("");
+
+  useEffect(() => {
+    if (open) setTargetFolderId("");
+  }, [open]);
+
+  if (!open || !node) return null;
+
+  return (
+    <div className="fixed inset-0 z-[80] grid place-items-center bg-black/20">
+      <section className="w-[420px] rounded-lg border border-line bg-white shadow-menu">
+        <header className="border-b border-line px-5 py-4">
+          <h2 className="text-[15px] font-semibold">Mover documento</h2>
+          <p className="mt-1 truncate text-[12px] text-ink-secondary">{node.name}</p>
+        </header>
+        <div className="px-5 py-5">
+          <label className="block text-[12px] font-medium text-ink-secondary">
+            Carpeta de destino
+            <select
+              className="mt-2 h-10 w-full rounded-md border border-line bg-white px-3 text-[13px] text-ink-primary outline-none focus:border-brand-orange"
+              value={targetFolderId}
+              onChange={(event) => setTargetFolderId(event.target.value)}
+            >
+              <option value="">Raíz del proyecto</option>
+              {folders.map((folder) => (
+                <option key={folder.id} value={folder.id}>
+                  {folder.path || folder.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
+          <button className="h-9 rounded-md border border-line px-4 text-[13px] hover:bg-panel" onClick={onClose}>
+            Cancelar
+          </button>
+          <button
+            className="h-9 rounded-md bg-brand-orange px-4 text-[13px] font-semibold text-white hover:bg-brand-dark"
+            onClick={() => onMove(targetFolderId || null)}
+          >
+            Mover
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}

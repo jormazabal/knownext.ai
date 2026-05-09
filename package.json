@@ -1,0 +1,22 @@
+{
+  "name": "knownext-ai",
+  "private": true,
+  "version": "0.3.0",
+  "description": "KnowNext.ai desktop product for Markdown project documentation.",
+  "packageManager": "pnpm@11.0.8",
+  "scripts": {
+    "dev": "pnpm --filter @knownext/desktop dev",
+    "desktop": "pnpm --filter @knownext/desktop tauri:dev",
+    "build": "pnpm --filter @knownext/desktop build",
+    "test": "pnpm --filter @knownext/desktop test",
+    "backend:dev": "cd backend && python -m uvicorn app.main:app --reload --port 8765",
+    "backend:test": "cd backend && python -m pytest",
+    "version:check": "node scripts/check-version.mjs",
+    "release:check": "pnpm version:check && pnpm build && pnpm test && pnpm backend:test"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

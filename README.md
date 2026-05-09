@@ -1,0 +1,58 @@
+# KnowNext.ai
+
+KnowNext.ai is a desktop product for managing, editing, versioning, and querying Markdown documentation by project.
+
+This first version establishes the product foundation:
+
+- Tauri desktop shell.
+- React + TypeScript frontend.
+- Tailwind CSS visual system.
+- Milkdown visual Markdown editor.
+- FastAPI local backend with JSON persistence and replaceable services.
+- Encapsulated frontend API layer.
+- Local project registry and layout persistence through `projects.json` and `config.json`.
+- Local folder scanning and real Markdown file read/write for project documentation.
+- Mock version history and AI prompt response pending the post-foundation implementation phases.
+
+## Run Locally
+
+Install frontend dependencies:
+
+```bash
+pnpm install
+```
+
+Run the frontend:
+
+```bash
+pnpm dev
+```
+
+Run the Tauri desktop app:
+
+```bash
+pnpm desktop
+```
+
+Run the FastAPI backend:
+
+```bash
+pnpm backend:dev
+```
+
+Backend health check:
+
+```bash
+curl http://127.0.0.1:8765/health
+```
+
+## Documentation
+
+- Product definition: `docs/product/product-definition.md`
+- Architecture overview: `docs/architecture/architecture-overview.md`
+- Desktop runtime: `docs/architecture/desktop-runtime.md`
+- Getting started: `docs/development/getting-started.md`
+- Release process: `docs/development/release-process.md`
+- Manual test checklist: `docs/development/manual-test-checklist.md`
+- 1.0 release readiness: `docs/development/release-1.0-readiness.md`
+- Agent instructions: `AGENTS.md`
