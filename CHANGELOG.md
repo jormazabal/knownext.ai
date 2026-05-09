@@ -4,9 +4,10 @@ All KnowNext.ai releases use a single monolithic application version for the des
 
 ## 0.4.2 - 2026-05-09
 
-- Prepared Windows Authenticode signing for Tauri release builds through a CI-imported PFX certificate.
+- Prepared optional Windows Authenticode signing for Tauri release builds through a CI-imported PFX certificate.
 - Made the packaged desktop app default to local mock services until the FastAPI backend is bundled as a managed sidecar.
 - Kept backend-backed development behavior enabled by default while allowing `VITE_USE_BACKEND=true` to force backend usage.
+- Documented that unsigned Windows installers may show SmartScreen or endpoint protection warnings in the open source distribution.
 
 ## 0.4.1 - 2026-05-09
 

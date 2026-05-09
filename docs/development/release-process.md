@@ -54,16 +54,16 @@ The Windows updater currently prefers the NSIS installer when generating `latest
 
 ## Windows Authenticode Signing
 
-Windows release artifacts must be signed with Authenticode to reduce SmartScreen and corporate endpoint protection blocks when users download the installer manually.
+Windows release artifacts can be signed with Authenticode to reduce SmartScreen and corporate endpoint protection blocks when users download the installer manually.
 
-Required GitHub Actions secrets:
+Optional GitHub Actions secrets:
 
 - `WINDOWS_CERTIFICATE`: base64-encoded `.pfx` code signing certificate.
 - `WINDOWS_CERTIFICATE_PASSWORD`: export password for the `.pfx` certificate.
 
-The release workflow imports the certificate into the current user certificate store, exposes its thumbprint through `WINDOWS_CERTIFICATE_THUMBPRINT`, and Tauri calls `scripts/sign-windows.ps1` through `bundle.windows.signCommand`.
+When configured, the release workflow imports the certificate into the current user certificate store, exposes its thumbprint through `WINDOWS_CERTIFICATE_THUMBPRINT`, and Tauri calls `scripts/sign-windows.ps1` through `bundle.windows.signCommand`.
 
-Do not tag a Windows release if these secrets are missing. A self-signed certificate is not enough for public distribution because it does not establish publisher trust or SmartScreen reputation.
+A self-signed certificate is not enough for public distribution because it does not establish publisher trust or SmartScreen reputation. If no public code signing certificate is available, publish the release unsigned, keep the Tauri updater signature enabled, and document the expected Windows warning plus SHA256 verification path.
 
 ## GitHub Release Flow
 

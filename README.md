@@ -27,6 +27,8 @@ The desktop app also checks the signed updater manifest at:
 https://github.com/jormazabal/knownext.ai/releases/latest/download/latest.json
 ```
 
+Windows may show a SmartScreen or endpoint protection warning for unsigned open source builds. The Tauri updater manifest and update artifacts are signed, but the manually downloaded Windows installer may not have Authenticode signing. You can verify the installer hash against the SHA256 digest shown on the GitHub release asset.
+
 ## Run Locally
 
 Install frontend dependencies:
