@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.3.1",
   "description": "KnowNext.ai desktop product for Markdown project documentation.",
+  "license": "Apache-2.0",
   "packageManager": "pnpm@11.0.8",
   "scripts": {
     "dev": "pnpm --filter @knownext/desktop dev",

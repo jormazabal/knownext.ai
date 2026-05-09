@@ -8,6 +8,11 @@ __pycache__/
 .pytest_cache/
 .venv/
 .env
+*.key
+*.pem
+*.p12
+*.pfx
+*.clixml
 *.pyc
 *.pyo
 *.pyd

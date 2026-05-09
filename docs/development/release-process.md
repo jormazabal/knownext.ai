@@ -43,8 +43,8 @@ Required GitHub Actions secrets:
 
 The production updater key is kept outside the repository at:
 
-- `C:\Users\j.ormazabal\.tauri\knownext-ai-updater.key`
-- `C:\Users\j.ormazabal\.tauri\knownext-ai-updater.password.clixml`
+- `%USERPROFILE%\.tauri\knownext-ai-updater.key`
+- `%USERPROFILE%\.tauri\knownext-ai-updater.password.clixml`
 
 The password file is encrypted with Windows DPAPI for the current user. Do not commit either file.
 

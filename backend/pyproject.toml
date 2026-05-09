@@ -2,6 +2,7 @@
 name = "knownext-backend"
 version = "0.3.1"
 description = "FastAPI backend for KnowNext.ai local desktop services."
+license = "Apache-2.0"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115.0",

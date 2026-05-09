@@ -55,4 +55,15 @@ curl http://127.0.0.1:8765/health
 - Release process: `docs/development/release-process.md`
 - Manual test checklist: `docs/development/manual-test-checklist.md`
 - 1.0 release readiness: `docs/development/release-1.0-readiness.md`
+- Open source readiness: `docs/legal/open-source-readiness.md`
 - Agent instructions: `AGENTS.md`
+
+## Contributing
+
+Contributions are welcome under the Apache-2.0 license. See `CONTRIBUTING.md`
+and `SECURITY.md` before submitting code or reporting vulnerabilities.
+
+## License
+
+KnowNext.ai is licensed under the Apache License, Version 2.0. See `LICENSE`,
+`NOTICE`, and `THIRD_PARTY_NOTICES.md`.

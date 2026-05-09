@@ -2,9 +2,9 @@
 name = "knownext-ai-desktop"
 version = "0.3.1"
 description = "KnowNext.ai desktop application"
-authors = ["KnowNext.ai"]
-license = "UNLICENSED"
-repository = ""
+authors = ["KnowNext.ai contributors"]
+license = "Apache-2.0"
+repository = "https://github.com/jormazabal/knownext.ai"
 edition = "2021"
 
 [lib]
