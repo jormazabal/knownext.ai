@@ -2,6 +2,11 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.4.1 - 2026-05-09
+
+- Added the public Windows installer URL to the README.
+- Documented the public releases page and signed updater manifest URL for users installing the desktop app.
+
 ## 0.4.0 - 2026-05-09
 
 - Published KnowNext.ai as an open source project under Apache-2.0.
