@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "KnowNext.ai",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "identifier": "ai.knownext.desktop",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -28,6 +28,21 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all"
+    "targets": "all",
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYyQjNFQkRCNUY2NTE4OEUKUldTT0dHVmYyK3V6WW5pNjBXSDh4WlhUclhOaU0wejZIZlUwTndLU0x3NER4ejR3ZFBleWRIUEEK",
+      "endpoints": [
+        "https://github.com/jormazabal/knownext.ai/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

@@ -1,6 +1,6 @@
 [project]
 name = "knownext-backend"
-version = "0.3.0"
+version = "0.3.1"
 description = "FastAPI backend for KnowNext.ai local desktop services."
 requires-python = ">=3.12"
 dependencies = [

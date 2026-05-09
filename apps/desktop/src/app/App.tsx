@@ -8,6 +8,13 @@ import { API_BASE_URL, ApiError, getApiErrorMessage } from "../lib/api/client";
 import { discardDocumentDraft, getDocument, saveDocument, saveDocumentDraft } from "../lib/api/documents";
 import { APP_VERSION } from "../lib/appVersion";
 import {
+  checkForUpdate,
+  getUpdaterStatus,
+  installUpdate,
+  type AvailableUpdate,
+  type UpdateDownloadProgress,
+} from "../lib/runtime/updater";
+import {
   createFolder,
   createProjectDocument,
   createProject,
@@ -39,6 +46,8 @@ type AppNotice = {
   message: string;
   tone: "error" | "info";
 };
+
+type UpdateState = "idle" | "checking" | "available" | "not-available" | "unsupported" | "downloading" | "installing" | "error";
 
 type DocumentSession = {
   document: DocumentRecord | null;
@@ -74,6 +83,10 @@ export function App() {
   const [configLoaded, setConfigLoaded] = useState(false);
   const [notice, setNotice] = useState<AppNotice | null>(null);
   const [closeDocumentId, setCloseDocumentId] = useState<string | null>(null);
+  const [updateState, setUpdateState] = useState<UpdateState>("idle");
+  const [availableUpdate, setAvailableUpdate] = useState<AvailableUpdate | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<UpdateDownloadProgress | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -172,6 +185,16 @@ export function App() {
 
     return () => window.clearTimeout(timeout);
   }, [documentSessions]);
+
+  useEffect(() => {
+    if (!configLoaded) return;
+
+    const timeout = window.setTimeout(() => {
+      void handleCheckForUpdates("automatic");
+    }, 5000);
+
+    return () => window.clearTimeout(timeout);
+  }, [configLoaded]);
 
   const activeTab = useMemo(
     () => tabs.find((tab) => tab.id === activeDocumentId) ?? tabs[0],
@@ -463,6 +486,93 @@ export function App() {
     }
   }
 
+  async function handleCheckForUpdates(source: "automatic" | "manual") {
+    if (updateState === "checking" || updateState === "downloading" || updateState === "installing") return;
+
+    const status = getUpdaterStatus();
+    if (!status.supported) {
+      setUpdateState("unsupported");
+      if (source === "manual") {
+        setNotice({
+          title: "Actualizador no disponible",
+          message: status.reason ?? "El actualizador solo funciona dentro de la aplicación Tauri instalada.",
+          tone: "info",
+        });
+      }
+      return;
+    }
+
+    setUpdateState("checking");
+    setAvailableUpdate(null);
+    setUpdateProgress(null);
+    setUpdateError(null);
+    try {
+      const result = await checkForUpdate();
+      if (!result.supported) {
+        setUpdateState("unsupported");
+        return;
+      }
+
+      if (!result.update) {
+        setUpdateState("not-available");
+        if (source === "manual") {
+          setNotice({
+            title: "KnowNext.ai está actualizado",
+            message: `La versión instalada es v${APP_VERSION}.`,
+            tone: "info",
+          });
+        }
+        return;
+      }
+
+      setAvailableUpdate(result.update);
+      setUpdateState("available");
+    } catch (error) {
+      setUpdateState("error");
+      const message = error instanceof Error ? error.message : "No se pudo comprobar si hay actualizaciones.";
+      setUpdateError(message);
+      if (source === "manual") {
+        setNotice({
+          title: "No se pudo buscar actualizaciones",
+          message,
+          tone: "error",
+        });
+      }
+    }
+  }
+
+  async function handleInstallUpdate() {
+    if (!availableUpdate || updateState === "downloading" || updateState === "installing") return;
+
+    if (!await flushPendingDrafts()) {
+      setNotice({
+        title: "No se pudo preparar la actualización",
+        message: "Hay borradores pendientes que no se pudieron guardar. Revisa el aviso activo antes de actualizar.",
+        tone: "error",
+      });
+      return;
+    }
+
+    setUpdateState("downloading");
+    setUpdateProgress(null);
+    setUpdateError(null);
+    try {
+      await installUpdate((progress) => {
+        setUpdateProgress(progress);
+        if (progress.percent === 100) setUpdateState("installing");
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo instalar la actualización.";
+      setUpdateState("error");
+      setUpdateError(message);
+      setNotice({
+        title: "No se pudo instalar la actualización",
+        message,
+        tone: "error",
+      });
+    }
+  }
+
   function showError(error: unknown, fallback: string) {
     setNotice({
       title: "No se pudo completar la operación",
@@ -631,6 +741,7 @@ export function App() {
         activeDocumentHasRecoveredDraft={activeSession?.hasRecoveredDraft ?? false}
         activeDocumentDiskChanged={activeSession?.diskChanged ?? false}
         dirtyDocumentIds={dirtyDocumentIds}
+        isCheckingForUpdates={updateState === "checking"}
         saveState={activeSession?.saveState ?? "idle"}
         historyOpen={historyOpen}
         historyEnabled={activeProject?.isGitRepository ?? false}
@@ -649,6 +760,7 @@ export function App() {
           setCreateDocumentParentId(null);
           setCreateDocumentOpen(true);
         }}
+        onCheckForUpdates={() => void handleCheckForUpdates("manual")}
         onOpenDocument={handleOpenDocument}
         onSelectTab={handleSelectTab}
         onCloseTab={handleCloseTab}
@@ -664,6 +776,19 @@ export function App() {
         onLayoutConfigChange={handleLayoutConfigChange}
       />
       <AppNoticeBanner notice={notice} onClose={() => setNotice(null)} />
+      <UpdateAvailableDialog
+        update={availableUpdate}
+        state={updateState}
+        progress={updateProgress}
+        error={updateError}
+        onClose={() => {
+          if (updateState === "downloading" || updateState === "installing") return;
+          setAvailableUpdate(null);
+          setUpdateError(null);
+          setUpdateState("idle");
+        }}
+        onInstall={() => void handleInstallUpdate()}
+      />
       <CreateDocumentDialog
         open={createDocumentOpen}
         onClose={() => {
@@ -766,7 +891,7 @@ export function App() {
   }
 
   async function persistDraft(documentId: string, session: DocumentSession) {
-    if (!shouldPersistDraft(session)) return;
+    if (!shouldPersistDraft(session)) return true;
     try {
       const draft = await saveDocumentDraft(documentId, {
         markdown: session.markdown,
@@ -781,14 +906,17 @@ export function App() {
           hasRecoveredDraft: true,
         });
       });
+      return true;
     } catch (error) {
       showError(error, "No se pudo guardar el borrador interno del documento.");
+      return false;
     }
   }
 
   async function flushPendingDrafts() {
     const pendingDrafts = Object.entries(documentSessions).filter(([, session]) => shouldPersistDraft(session));
-    await Promise.all(pendingDrafts.map(([documentId, session]) => persistDraft(documentId, session)));
+    const results = await Promise.all(pendingDrafts.map(([documentId, session]) => persistDraft(documentId, session)));
+    return results.every(Boolean);
   }
 
   async function handleLoadDiskVersion() {
@@ -940,10 +1068,14 @@ function normalizeProjectTabs(projectTabs: ProjectTabsConfig): ProjectTabsConfig
 function AppNoticeBanner({ notice, onClose }: { notice: AppNotice | null; onClose: () => void }) {
   if (!notice) return null;
 
+  const toneClasses = notice.tone === "error"
+    ? { border: "border-red-200", dot: "bg-red-600" }
+    : { border: "border-orange-200", dot: "bg-brand-orange" };
+
   return (
-    <div className="fixed right-5 top-[70px] z-[100] w-[380px] rounded-lg border border-red-200 bg-white p-4 shadow-menu">
+    <div className={["fixed right-5 top-[70px] z-[100] w-[380px] rounded-lg border bg-white p-4 shadow-menu", toneClasses.border].join(" ")}>
       <div className="flex items-start gap-3">
-        <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-red-600" />
+        <span className={["mt-1 h-2 w-2 shrink-0 rounded-full", toneClasses.dot].join(" ")} />
         <div className="min-w-0 flex-1">
           <p className="text-[13px] font-semibold text-ink-primary">{notice.title}</p>
           <p className="mt-1 text-[12px] leading-5 text-ink-secondary">{notice.message}</p>
@@ -954,6 +1086,99 @@ function AppNoticeBanner({ notice, onClose }: { notice: AppNotice | null; onClos
       </div>
     </div>
   );
+}
+
+function UpdateAvailableDialog({
+  update,
+  state,
+  progress,
+  error,
+  onClose,
+  onInstall,
+}: {
+  update: AvailableUpdate | null;
+  state: UpdateState;
+  progress: UpdateDownloadProgress | null;
+  error: string | null;
+  onClose: () => void;
+  onInstall: () => void;
+}) {
+  if (!update) return null;
+
+  const busy = state === "downloading" || state === "installing";
+  const progressLabel = progress?.percent !== undefined ? `${progress.percent}%` : "Preparando";
+  const releaseDate = update.date ? formatDateTime(update.date) : null;
+
+  return (
+    <div className="fixed inset-0 z-[95] grid place-items-center bg-black/20">
+      <section className="w-[460px] rounded-lg border border-line bg-white shadow-menu">
+        <header className="border-b border-line px-5 py-4">
+          <h2 className="text-[15px] font-semibold">Actualización disponible</h2>
+          <p className="mt-1 text-[12px] text-ink-secondary">
+            KnowNext.ai v{update.version} está lista para instalar.
+          </p>
+        </header>
+        <div className="space-y-4 px-5 py-5 text-[13px] text-ink-secondary">
+          <div className="flex items-center justify-between rounded-md border border-line bg-panel px-3 py-2">
+            <span>Versión instalada</span>
+            <span className="font-mono text-[12px] text-ink-primary">v{update.currentVersion}</span>
+          </div>
+          <div className="flex items-center justify-between rounded-md border border-orange-200 bg-brand-hover px-3 py-2">
+            <span>Nueva versión</span>
+            <span className="font-mono text-[12px] font-semibold text-brand-orange">v{update.version}</span>
+          </div>
+          {releaseDate ? <p className="text-[12px]">Publicada el {releaseDate}.</p> : null}
+          {update.notes ? (
+            <div className="max-h-28 overflow-y-auto rounded-md border border-line bg-white px-3 py-2 text-[12px] leading-5">
+              {update.notes}
+            </div>
+          ) : null}
+          {busy ? (
+            <div>
+              <div className="flex items-center justify-between text-[12px]">
+                <span>{state === "installing" ? "Instalando" : "Descargando"}</span>
+                <span>{progressLabel}</span>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-panel">
+                <div
+                  className="h-full rounded-full bg-brand-orange transition-all"
+                  style={{ width: `${progress?.percent ?? 20}%` }}
+                />
+              </div>
+            </div>
+          ) : null}
+          {error ? <p className="text-[12px] text-red-700">{error}</p> : null}
+        </div>
+        <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
+          <button
+            className="h-9 rounded-md border border-line px-4 text-[13px] hover:bg-panel disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={busy}
+            onClick={onClose}
+          >
+            Más tarde
+          </button>
+          <button
+            className="h-9 rounded-md bg-brand-orange px-4 text-[13px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={busy}
+            onClick={onInstall}
+          >
+            {busy ? "Actualizando" : "Actualizar"}
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function formatDateTime(value: string) {
+  try {
+    return new Intl.DateTimeFormat("es", {
+      dateStyle: "short",
+      timeStyle: "short",
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
 }
 
 function CloseDirtyDocumentDialog({

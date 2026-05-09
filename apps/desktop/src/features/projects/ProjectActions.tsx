@@ -4,6 +4,7 @@ import {
   FilePlus2,
   FolderPlus,
   LogOut,
+  RefreshCw,
   Search,
   Settings,
   UserPlus,
@@ -20,11 +21,13 @@ const actions = [
 
 type ProjectActionsProps = {
   appVersion: string;
+  isCheckingForUpdates: boolean;
   onCreateFolder: () => void;
   onCreateDocument: () => void;
   onExpandTree: () => void;
   onCollapseTree: () => void;
   onConfigureProject: () => void;
+  onCheckForUpdates: () => void;
 };
 
 const userMenuItems = [
@@ -35,11 +38,13 @@ const userMenuItems = [
 
 export function ProjectActions({
   appVersion,
+  isCheckingForUpdates,
   onCreateFolder,
   onCreateDocument,
   onExpandTree,
   onCollapseTree,
   onConfigureProject,
+  onCheckForUpdates,
 }: ProjectActionsProps) {
   function handleAction(actionId: string) {
     if (actionId === "folder") onCreateFolder();
@@ -93,6 +98,14 @@ export function ProjectActions({
                 <span>{item.label}</span>
               </button>
             ))}
+            <button
+              className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[12px] hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={isCheckingForUpdates}
+              onClick={onCheckForUpdates}
+            >
+              <RefreshCw size={14} className={isCheckingForUpdates ? "animate-spin" : ""} />
+              <span>{isCheckingForUpdates ? "Buscando actualizaciones" : "Buscar actualizaciones"}</span>
+            </button>
           </div>
         </div>
       </div>

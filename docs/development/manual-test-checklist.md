@@ -54,6 +54,13 @@
 - [ ] Submit the AI prompt with no document open and confirm it is accepted as a project documentation prompt.
 - [ ] Hover over Ana Domínguez and confirm the account menu appears with icon and text options.
 - [ ] Confirm the account menu shows the current application version.
+- [ ] Click Buscar actualizaciones from the account menu while no update is available and confirm the app remains usable.
+- [ ] Install the previous packaged release, publish a higher GitHub release, and confirm Buscar actualizaciones detects the new version.
+- [ ] Confirm the update dialog shows the new version, release date or notes when available, and Actualizar / Más tarde actions.
+- [ ] Edit a document without saving, start the update, and confirm pending drafts are saved before installation continues.
+- [ ] Complete the update and confirm the app relaunches with the new visible version.
+- [ ] Confirm documents, projects, drafts, tabs, panel widths, and local configuration remain intact after the update.
+- [ ] Disable network access or publish a build with an invalid updater signature in a disposable test release and confirm the app does not get blocked.
 - [ ] Confirm no Git branch name is shown anywhere.
 - [ ] Confirm no blue primary action is present.
 - [ ] Corrupt `config.json` in a disposable test profile, restart the backend, and confirm a `config.json.corrupt-*` backup is created.

@@ -45,6 +45,7 @@ type DesktopLayoutProps = {
   activeDocumentHasRecoveredDraft: boolean;
   activeDocumentDiskChanged: boolean;
   dirtyDocumentIds: string[];
+  isCheckingForUpdates: boolean;
   saveState: "idle" | "saving" | "saved";
   historyOpen: boolean;
   historyEnabled: boolean;
@@ -58,6 +59,7 @@ type DesktopLayoutProps = {
   onExpandTree: () => void;
   onCollapseTree: () => void;
   onCreateDocument: () => void;
+  onCheckForUpdates: () => void;
   onOpenDocument: (documentId: string, name: string) => void;
   onSelectTab: (documentId: string) => void;
   onCloseTab: (documentId: string) => void;
@@ -153,11 +155,13 @@ export function DesktopLayout(props: DesktopLayoutProps) {
           </div>
           <ProjectActions
             appVersion={props.appVersion}
+            isCheckingForUpdates={props.isCheckingForUpdates}
             onCreateFolder={props.onCreateFolder}
             onCreateDocument={props.onCreateDocument}
             onExpandTree={props.onExpandTree}
             onCollapseTree={props.onCollapseTree}
             onConfigureProject={props.onConfigureProject}
+            onCheckForUpdates={props.onCheckForUpdates}
           />
         </aside>
         <PanelResizeHandle

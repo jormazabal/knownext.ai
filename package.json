@@ -1,7 +1,7 @@
 {
   "name": "knownext-ai",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "KnowNext.ai desktop product for Markdown project documentation.",
   "packageManager": "pnpm@11.0.8",
   "scripts": {

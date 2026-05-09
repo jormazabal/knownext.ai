@@ -3,5 +3,12 @@
   "identifier": "default",
   "description": "Default permissions for the KnowNext.ai desktop window.",
   "windows": ["main"],
-  "permissions": ["core:default", "shell:default", "dialog:default", "dialog:allow-open"]
+  "permissions": [
+    "core:default",
+    "shell:default",
+    "dialog:default",
+    "dialog:allow-open",
+    "process:default",
+    "updater:default"
+  ]
 }
