@@ -2,6 +2,12 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.4.3 - 2026-05-09
+
+- Fixed the Windows desktop build opening an extra terminal window in release installs.
+- Added NSIS installer hooks to close a running KnowNext.ai process before update file replacement.
+- Relaunch KnowNext.ai after passive/silent NSIS update installation completes.
+
 ## 0.4.2 - 2026-05-09
 
 - Prepared optional Windows Authenticode signing for Tauri release builds through a CI-imported PFX certificate.

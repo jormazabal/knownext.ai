@@ -59,6 +59,8 @@
 - [ ] Confirm the update dialog shows the new version, release date or notes when available, and Actualizar / Más tarde actions.
 - [ ] Edit a document without saving, start the update, and confirm pending drafts are saved before installation continues.
 - [ ] Complete the update and confirm the app relaunches with the new visible version.
+- [ ] Confirm the updated Windows app opens without a separate terminal window.
+- [ ] Confirm the NSIS update replaces the installed `knownext-ai-desktop.exe` while the previous app version is running.
 - [ ] Confirm documents, projects, drafts, tabs, panel widths, and local configuration remain intact after the update.
 - [ ] Disable network access or publish a build with an invalid updater signature in a disposable test release and confirm the app does not get blocked.
 - [ ] Confirm no Git branch name is shown anywhere.
