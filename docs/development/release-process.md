@@ -50,7 +50,7 @@ The password file is encrypted with Windows DPAPI for the current user. Do not c
 
 The public updater key is configured in `apps/desktop/src-tauri/tauri.conf.json`. If the production key is regenerated, update `plugins.updater.pubkey`, update the GitHub secrets, and rebuild a release from a clean commit.
 
-The Windows updater currently prefers the NSIS installer when generating `latest.json`.
+The Windows updater currently prefers the MSI artifact when generating `latest.json`. Keep the NSIS `.exe` as the README/manual installer link.
 
 ## Windows Authenticode Signing
 
@@ -79,7 +79,7 @@ git push origin HEAD
 git push origin v0.3.1
 ```
 
-Pushing the tag runs `.github/workflows/release.yml`. The workflow builds Windows, uploads the NSIS installer, uploads updater signatures, and publishes `latest.json` through `tauri-apps/tauri-action@v0.6.2`.
+Pushing the tag runs `.github/workflows/release.yml`. The workflow builds Windows, uploads the NSIS installer, MSI installer, updater signatures, and publishes `latest.json` through `tauri-apps/tauri-action@v0.6.2`.
 
 After the workflow completes, inspect the release before publishing it:
 
@@ -91,12 +91,14 @@ The release must contain the Windows installer, the matching `.sig` file, and `l
 
 For Windows updater changes, install the previous release and update through the in-app updater. Confirm the app process is closed, the installer replaces `knownext-ai-desktop.exe`, and the updated app relaunches with the new visible version.
 
-After publishing, verify that the README download link resolves and that the updater manifest points at the published NSIS installer:
+After publishing, verify that the README download link resolves and that the updater manifest points at the published MSI update artifact:
 
 ```bash
 curl -I https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_<version>_x64-setup.exe
 curl https://github.com/jormazabal/knownext.ai/releases/latest/download/latest.json
 ```
+
+The README should continue linking to the NSIS `.exe` for manual installs. The updater manifest should prefer the MSI artifact for in-app Windows updates.
 
 Do not tag or publish a release if `pnpm release:check` fails or if the working tree contains unrelated changes that should not ship in the release.
 
