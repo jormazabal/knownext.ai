@@ -2,6 +2,13 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.6.7 - 2026-05-10
+
+- Fixed packaged backend startup by resolving the installed `knownext-backend.exe` next to the desktop executable instead of using the build-time `binaries/` sidecar path.
+- Added clearer backend startup diagnostics with the resolved sidecar path and captured backend stdout/stderr in `knownext.log`.
+- Changed the Windows updater manifest to prefer the NSIS setup artifact so normal per-user updates do not require administrator permissions.
+- Updated release metadata and installer download links for `0.6.7`.
+
 ## 0.6.6 - 2026-05-10
 
 - Included the root `VERSION` file in the PyInstaller backend sidecar so `/health` reports the packaged application version instead of `0.0.0`.

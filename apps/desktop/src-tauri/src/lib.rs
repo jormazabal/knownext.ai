@@ -1,36 +1,40 @@
-#[cfg(all(desktop, not(debug_assertions)))]
-use std::io::Read;
 use std::io::Write;
 #[cfg(all(desktop, not(debug_assertions)))]
+use std::io::{BufRead, BufReader, Read};
+#[cfg(all(desktop, not(debug_assertions)))]
 use std::net::{TcpStream, ToSocketAddrs};
-use std::path::PathBuf;
+#[cfg(all(desktop, not(debug_assertions)))]
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+use std::path::{Path, PathBuf};
+#[cfg(all(desktop, not(debug_assertions)))]
+use std::process::{Child, Stdio};
 use std::sync::Mutex;
 #[cfg(all(desktop, not(debug_assertions)))]
 use std::time::Duration;
 use tauri::Manager;
-#[cfg(all(desktop, not(debug_assertions)))]
-use tauri_plugin_shell::{
-    process::{CommandChild, CommandEvent},
-    ShellExt,
-};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 static TRACE_LOG_LOCK: Mutex<()> = Mutex::new(());
 #[cfg(all(desktop, not(debug_assertions)))]
-const BACKEND_SIDECAR: &str = "binaries/knownext-backend";
+const BACKEND_SIDECAR_EXE: &str = "knownext-backend.exe";
+#[cfg(all(desktop, not(debug_assertions)))]
+const BACKEND_SIDECAR_TARGET_EXE: &str = "knownext-backend-x86_64-pc-windows-msvc.exe";
 #[cfg(all(desktop, not(debug_assertions)))]
 const BACKEND_HOST: &str = "127.0.0.1";
 #[cfg(all(desktop, not(debug_assertions)))]
 const BACKEND_PORT: u16 = 8765;
+#[cfg(all(desktop, not(debug_assertions), target_os = "windows"))]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[cfg(all(desktop, not(debug_assertions)))]
-struct BackendProcess(Mutex<Option<CommandChild>>);
+struct BackendProcess(Mutex<Option<Child>>);
 
 #[cfg(all(desktop, not(debug_assertions)))]
 impl Drop for BackendProcess {
     fn drop(&mut self) {
         if let Ok(child_slot) = self.0.get_mut() {
-            if let Some(child) = child_slot.take() {
+            if let Some(mut child) = child_slot.take() {
                 let _ = child.kill();
             }
         }
@@ -202,6 +206,93 @@ fn wait_for_backend(max_wait: Duration) -> bool {
 }
 
 #[cfg(all(desktop, not(debug_assertions)))]
+fn push_sidecar_candidates_from_dir(candidates: &mut Vec<PathBuf>, directory: &Path) {
+    candidates.push(directory.join(BACKEND_SIDECAR_EXE));
+    candidates.push(directory.join("binaries").join(BACKEND_SIDECAR_EXE));
+    candidates.push(directory.join(BACKEND_SIDECAR_TARGET_EXE));
+    candidates.push(directory.join("binaries").join(BACKEND_SIDECAR_TARGET_EXE));
+}
+
+#[cfg(all(desktop, not(debug_assertions)))]
+fn backend_sidecar_candidates(app: &tauri::AppHandle) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Ok(explicit_path) = std::env::var("KNOWNEXT_BACKEND_SIDECAR") {
+        if !explicit_path.trim().is_empty() {
+            candidates.push(PathBuf::from(explicit_path));
+        }
+    }
+
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(directory) = current_exe.parent() {
+            push_sidecar_candidates_from_dir(&mut candidates, directory);
+        }
+    }
+
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        push_sidecar_candidates_from_dir(&mut candidates, &resource_dir);
+    }
+
+    candidates
+}
+
+#[cfg(all(desktop, not(debug_assertions)))]
+fn resolve_backend_sidecar_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let candidates = backend_sidecar_candidates(app);
+    candidates
+        .iter()
+        .find(|candidate| candidate.is_file())
+        .cloned()
+        .ok_or_else(|| {
+            let checked_paths = candidates
+                .iter()
+                .map(|candidate| format!("- {}", candidate.display()))
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("Backend sidecar executable was not found. Checked:\n{checked_paths}")
+        })
+}
+
+#[cfg(all(desktop, not(debug_assertions)))]
+fn backend_log_level(default_level: &'static str, message: &str) -> &'static str {
+    if message.starts_with("ERROR:") || message.starts_with("CRITICAL:") {
+        "error"
+    } else if message.starts_with("WARNING:") {
+        "warning"
+    } else if message.starts_with("INFO:") {
+        "info"
+    } else {
+        default_level
+    }
+}
+
+#[cfg(all(desktop, not(debug_assertions)))]
+fn spawn_backend_log_reader<R>(
+    app: tauri::AppHandle,
+    level: &'static str,
+    source: &'static str,
+    stream: R,
+) where
+    R: Read + Send + 'static,
+{
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stream);
+        for line in reader.lines().map_while(Result::ok) {
+            let message = line.trim();
+            if !message.is_empty() {
+                let _ = append_trace_log(
+                    &app,
+                    backend_log_level(level, message),
+                    source,
+                    message,
+                    None,
+                );
+            }
+        }
+    });
+}
+
+#[cfg(all(desktop, not(debug_assertions)))]
 fn start_backend_sidecar(app: &tauri::AppHandle) -> Result<(), String> {
     if is_backend_healthy() {
         let _ = append_trace_log(
@@ -220,83 +311,56 @@ fn start_backend_sidecar(app: &tauri::AppHandle) -> Result<(), String> {
         .map_err(|error| error.to_string())?
         .to_string_lossy()
         .to_string();
-    let command = app
-        .shell()
-        .sidecar(BACKEND_SIDECAR)
-        .map_err(|error| error.to_string())?
+    let sidecar_path = resolve_backend_sidecar_path(app)?;
+    let mut command = std::process::Command::new(&sidecar_path);
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+    let mut child = command
         .env("KNOWNEXT_APP_DATA_DIR", &app_data_dir)
         .env("KNOWNEXT_API_HOST", BACKEND_HOST)
-        .env("KNOWNEXT_API_PORT", BACKEND_PORT.to_string());
-    let (mut events, child) = command.spawn().map_err(|error| error.to_string())?;
+        .env("KNOWNEXT_API_PORT", BACKEND_PORT.to_string())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| {
+            format!(
+                "Failed to spawn backend sidecar at {}: {}",
+                sidecar_path.display(),
+                error
+            )
+        })?;
+
+    if let Some(stdout) = child.stdout.take() {
+        spawn_backend_log_reader(app.clone(), "info", "backend.stdout", stdout);
+    }
+    if let Some(stderr) = child.stderr.take() {
+        spawn_backend_log_reader(app.clone(), "warning", "backend.stderr", stderr);
+    }
 
     let process_state = app.state::<BackendProcess>();
     *process_state.0.lock().map_err(|error| error.to_string())? = Some(child);
 
-    let app_handle = app.clone();
-    tauri::async_runtime::spawn(async move {
-        while let Some(event) = events.recv().await {
-            match event {
-                CommandEvent::Stdout(bytes) => {
-                    let message = String::from_utf8_lossy(&bytes).trim().to_string();
-                    if !message.is_empty() {
-                        let _ =
-                            append_trace_log(&app_handle, "info", "backend.stdout", &message, None);
-                    }
-                }
-                CommandEvent::Stderr(bytes) => {
-                    let message = String::from_utf8_lossy(&bytes).trim().to_string();
-                    if !message.is_empty() {
-                        let _ = append_trace_log(
-                            &app_handle,
-                            "warning",
-                            "backend.stderr",
-                            &message,
-                            None,
-                        );
-                    }
-                }
-                CommandEvent::Error(error) => {
-                    let _ = append_trace_log(
-                        &app_handle,
-                        "error",
-                        "backend.sidecar",
-                        "Backend sidecar emitted an execution error.",
-                        Some(&error),
-                    );
-                }
-                CommandEvent::Terminated(payload) => {
-                    let detail =
-                        format!("exit_code={:?}; signal={:?}", payload.code, payload.signal);
-                    let _ = append_trace_log(
-                        &app_handle,
-                        "error",
-                        "backend.sidecar",
-                        "Backend sidecar stopped.",
-                        Some(&detail),
-                    );
-                    break;
-                }
-                _ => {}
-            }
-        }
-    });
-
-    if wait_for_backend(Duration::from_secs(12)) {
+    if wait_for_backend(Duration::from_secs(45)) {
+        let detail = format!("path={}", sidecar_path.display());
         append_trace_log(
             app,
             "info",
             "backend.sidecar",
             "Local API started and passed the /health check.",
-            None,
+            Some(&detail),
         )?;
         Ok(())
     } else {
+        let detail = format!(
+            "path={}\nThe UI can open, but API requests may fail until the backend becomes available.",
+            sidecar_path.display()
+        );
         append_trace_log(
             app,
             "error",
             "backend.sidecar",
             "Local API sidecar was started but did not pass the /health check before timeout.",
-            Some("The UI can open, but API requests may fail until the backend becomes available."),
+            Some(&detail),
         )?;
         Ok(())
     }
