@@ -18,7 +18,9 @@ import {
   defaultLayoutConfig,
   defaultProjectTabsConfig,
   getAppConfig,
+  readLocalAppPreferences,
   updateAppConfig,
+  writeLocalAppPreferences,
 } from "../lib/api/config";
 import { API_BASE_URL, ApiError, getApiErrorMessage, isBackendEnabled } from "../lib/api/client";
 import {
@@ -125,6 +127,7 @@ export function App() {
   const [lastRunAppVersion, setLastRunAppVersion] = useState<string | null>(null);
   const [lastSeenReleaseNotesVersion, setLastSeenReleaseNotesVersion] = useState<string | null>(null);
   const [configLoaded, setConfigLoaded] = useState(false);
+  const [configPersistenceAvailable, setConfigPersistenceAvailable] = useState(true);
   const [notice, setNotice] = useState<AppNotice | null>(null);
   const [closeDocumentId, setCloseDocumentId] = useState<string | null>(null);
   const [orphanDrafts, setOrphanDrafts] = useState<OrphanDraft[]>([]);
@@ -145,6 +148,7 @@ export function App() {
 
   useEffect(() => {
     void (async () => {
+      const localPreferences = readLocalAppPreferences();
       try {
         const [projectList, appConfig, auth, capabilities] = await Promise.all([
           listProjects(),
@@ -171,6 +175,7 @@ export function App() {
         setLayoutConfig(appConfig.layout);
         setAppearanceConfig(appConfig.appearance ?? defaultAppearanceConfig);
         setDiagnosticsConfig(appConfig.diagnostics ?? defaultDiagnosticsConfig);
+        setConfigPersistenceAvailable(true);
         setTabsByProject(appConfig.tabsByProject);
         setOpenUtilityTabs(nextOpenUtilityTabs);
         setActiveUtilityTab(shouldOpenReleaseNotes ? RELEASE_NOTES_UTILITY_TAB_ID : appConfig.activeUtilityTab ?? null);
@@ -190,6 +195,9 @@ export function App() {
         setTree([]);
         setTabs([]);
         setActiveDocumentId("");
+        setAppearanceConfig(localPreferences.appearance ?? defaultAppearanceConfig);
+        setDiagnosticsConfig(localPreferences.diagnostics ?? defaultDiagnosticsConfig);
+        setConfigPersistenceAvailable(false);
         setOpenUtilityTabs([]);
         setActiveUtilityTab(null);
       } finally {
@@ -202,6 +210,13 @@ export function App() {
     if (!configLoaded) return;
 
     const timeout = window.setTimeout(() => {
+      writeLocalAppPreferences({
+        appearance: appearanceConfig,
+        diagnostics: diagnosticsConfig,
+      });
+
+      if (!configPersistenceAvailable) return;
+
       void updateAppConfig({
         layout: layoutConfig,
         appearance: appearanceConfig,
@@ -221,6 +236,7 @@ export function App() {
     activeUtilityTab,
     appearanceConfig,
     configLoaded,
+    configPersistenceAvailable,
     diagnosticsConfig,
     lastRunAppVersion,
     lastSeenReleaseNotesVersion,
@@ -970,11 +986,19 @@ export function App() {
   }
 
   function handleAppearanceConfigChange(nextAppearanceConfig: Partial<AppearanceConfig>) {
-    setAppearanceConfig((currentAppearanceConfig) => ({ ...currentAppearanceConfig, ...nextAppearanceConfig }));
+    setAppearanceConfig((currentAppearanceConfig) => {
+      const updatedAppearanceConfig = { ...currentAppearanceConfig, ...nextAppearanceConfig };
+      writeLocalAppPreferences({ appearance: updatedAppearanceConfig });
+      return updatedAppearanceConfig;
+    });
   }
 
   function handleDiagnosticsConfigChange(nextDiagnosticsConfig: Partial<DiagnosticsConfig>) {
-    setDiagnosticsConfig((currentDiagnosticsConfig) => ({ ...currentDiagnosticsConfig, ...nextDiagnosticsConfig }));
+    setDiagnosticsConfig((currentDiagnosticsConfig) => {
+      const updatedDiagnosticsConfig = { ...currentDiagnosticsConfig, ...nextDiagnosticsConfig };
+      writeLocalAppPreferences({ diagnostics: updatedDiagnosticsConfig });
+      return updatedDiagnosticsConfig;
+    });
   }
 
   async function refreshTraceLogStatus() {
@@ -1141,6 +1165,7 @@ export function App() {
     <>
       <DesktopLayout
         appVersion={APP_VERSION}
+        appLanguage={appearanceConfig.language}
         authStatus={authStatus}
         projects={projects}
         activeProject={activeProject}
