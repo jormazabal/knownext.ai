@@ -4,8 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import { DocumentTabs } from "./DocumentTabs";
 
 const tabs = [
-  { id: "doc-a", name: "Acta.md" },
-  { id: "doc-b", name: "Esquemas.md" },
+  { kind: "document" as const, id: "doc-a", name: "Acta.md" },
+  { kind: "document" as const, id: "doc-b", name: "Esquemas.md" },
 ];
 
 describe("DocumentTabs", () => {
@@ -15,7 +15,7 @@ describe("DocumentTabs", () => {
     const { unmount } = render(
       <DocumentTabs
         tabs={tabs}
-        activeDocumentId="doc-a"
+        activeTabId="doc-a"
         dirtyDocumentIds={[]}
         onOpenNavigation={onOpenNavigation}
         onSelectTab={vi.fn()}
@@ -35,7 +35,7 @@ describe("DocumentTabs", () => {
     render(
       <DocumentTabs
         tabs={tabs}
-        activeDocumentId="doc-a"
+        activeTabId="doc-a"
         dirtyDocumentIds={["doc-b"]}
         onSelectTab={vi.fn()}
         onCloseTab={onCloseTab}
@@ -50,5 +50,26 @@ describe("DocumentTabs", () => {
     await userEvent.click(dirtyCloseTarget);
 
     expect(onCloseTab).toHaveBeenCalledWith("doc-b");
+  });
+
+  it("shows and closes release notes without a dirty marker", async () => {
+    const onCloseTab = vi.fn();
+
+    render(
+      <DocumentTabs
+        tabs={[...tabs, { kind: "release-notes", id: "app-release-notes", name: "Notas de release", utilityTabId: "release-notes", readonly: true }]}
+        activeTabId="app-release-notes"
+        dirtyDocumentIds={["app-release-notes"]}
+        onSelectTab={vi.fn()}
+        onCloseTab={onCloseTab}
+      />,
+    );
+
+    expect(screen.getByText("Notas de release")).toBeInTheDocument();
+    expect(screen.getByLabelText("Cerrar Notas de release").querySelector(".bg-brand-orange")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByLabelText("Cerrar Notas de release"));
+
+    expect(onCloseTab).toHaveBeenCalledWith("app-release-notes");
   });
 });

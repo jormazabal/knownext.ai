@@ -143,6 +143,12 @@ textarea {
   font-family: Inter, ui-sans-serif, system-ui, "Segoe UI", Arial, sans-serif !important;
 }
 
+.knownext-readonly-editor .milkdown .editor,
+.knownext-readonly-editor .milkdown .ProseMirror {
+  cursor: default;
+  user-select: text;
+}
+
 .knownext-editor h1,
 .knownext-editor .ProseMirror h1 {
   margin: 0 0 14px;

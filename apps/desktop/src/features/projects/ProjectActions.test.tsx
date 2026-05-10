@@ -25,11 +25,39 @@ describe("ProjectActions", () => {
         onConfigureProject={vi.fn()}
         onOpenRecoverableDrafts={vi.fn()}
         onCheckForUpdates={onCheckForUpdates}
+        onOpenReleaseNotes={vi.fn()}
       />,
     );
 
     fireEvent.click(screen.getByText("Buscar actualizaciones"));
 
     expect(onCheckForUpdates).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens release notes from the account menu", () => {
+    const onOpenReleaseNotes = vi.fn();
+
+    render(
+      <ProjectActions
+        appVersion="0.5.0"
+        authStatus={{ isAuthenticated: false, provider: null, user: null, scopes: [] }}
+        orphanDraftCount={0}
+        isCheckingForUpdates={false}
+        onLoginGithub={vi.fn()}
+        onLogout={vi.fn()}
+        onCreateFolder={vi.fn()}
+        onCreateDocument={vi.fn()}
+        onExpandTree={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onConfigureProject={vi.fn()}
+        onOpenRecoverableDrafts={vi.fn()}
+        onCheckForUpdates={vi.fn()}
+        onOpenReleaseNotes={onOpenReleaseNotes}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Notas de release"));
+
+    expect(onOpenReleaseNotes).toHaveBeenCalledTimes(1);
   });
 });

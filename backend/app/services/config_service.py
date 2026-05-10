@@ -38,6 +38,10 @@ def _default_config() -> dict:
         "schemaVersion": 1,
         "layout": deepcopy(DEFAULT_LAYOUT),
         "tabsByProject": deepcopy(DEFAULT_TABS),
+        "lastRunAppVersion": None,
+        "lastSeenReleaseNotesVersion": None,
+        "openUtilityTabs": [],
+        "activeUtilityTab": None,
         "updatedAt": _now_iso(),
     }
 
@@ -98,6 +102,23 @@ def _normalize_tabs_by_project(value: object) -> dict:
     return normalized or deepcopy(DEFAULT_TABS)
 
 
+def _normalize_optional_string(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _normalize_utility_tabs(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return ["release-notes"] if "release-notes" in value else []
+
+
+def _normalize_active_utility_tab(value: object, open_utility_tabs: list[str]) -> str | None:
+    return "release-notes" if value == "release-notes" and "release-notes" in open_utility_tabs else None
+
+
 class ConfigService:
     def __init__(self) -> None:
         self.store = JsonFileStore("config.json")
@@ -123,6 +144,19 @@ class ConfigService:
                 }
             )
 
+        if "lastRunAppVersion" in payload.model_fields_set:
+            data["lastRunAppVersion"] = _normalize_optional_string(payload.lastRunAppVersion)
+
+        if "lastSeenReleaseNotesVersion" in payload.model_fields_set:
+            data["lastSeenReleaseNotesVersion"] = _normalize_optional_string(payload.lastSeenReleaseNotesVersion)
+
+        if payload.openUtilityTabs is not None:
+            data["openUtilityTabs"] = _normalize_utility_tabs(payload.openUtilityTabs)
+
+        if "activeUtilityTab" in payload.model_fields_set:
+            data["activeUtilityTab"] = _normalize_active_utility_tab(payload.activeUtilityTab, data.get("openUtilityTabs", []))
+
+        data["activeUtilityTab"] = _normalize_active_utility_tab(data.get("activeUtilityTab"), data.get("openUtilityTabs", []))
         data["updatedAt"] = _now_iso()
         self.store.write(data)
         return AppConfig(**data)
@@ -136,11 +170,17 @@ class ConfigService:
             self.store.write(data)
             return data
 
+        legacy_config_without_version_state = "lastRunAppVersion" not in data
+
         data["layout"] = {
             "sidebarWidth": _clamp_width("sidebarWidth", _read_width(layout, "sidebarWidth")),
             "historyWidth": _clamp_width("historyWidth", _read_width(layout, "historyWidth")),
         }
         data["tabsByProject"] = _normalize_tabs_by_project(data.get("tabsByProject"))
+        data["lastRunAppVersion"] = "legacy" if legacy_config_without_version_state else _normalize_optional_string(data.get("lastRunAppVersion"))
+        data["lastSeenReleaseNotesVersion"] = _normalize_optional_string(data.get("lastSeenReleaseNotesVersion"))
+        data["openUtilityTabs"] = _normalize_utility_tabs(data.get("openUtilityTabs"))
+        data["activeUtilityTab"] = _normalize_active_utility_tab(data.get("activeUtilityTab"), data["openUtilityTabs"])
         data["updatedAt"] = str(data.get("updatedAt") or _now_iso())
         return data
 

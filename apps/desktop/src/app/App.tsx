@@ -24,6 +24,7 @@ import {
   saveDocumentDraft,
 } from "../lib/api/documents";
 import { APP_VERSION } from "../lib/appVersion";
+import { RELEASE_NOTES_MARKDOWN } from "../lib/releaseNotes";
 import { getAuthStatus, logout as logoutGithub, pollGithubDeviceFlow, startGithubDeviceFlow } from "../lib/api/auth";
 import { listGithubRepositories } from "../lib/api/github";
 import { createProjectVersion } from "../lib/api/versions";
@@ -54,6 +55,7 @@ import {
 } from "../lib/api/projects";
 import type {
   AuthStatus,
+  AppUtilityTabId,
   DocumentRecord,
   DocumentTreeNode,
   FileOperationResult,
@@ -68,7 +70,15 @@ import type {
   GithubDeviceStartResponse,
   GithubRepositorySummary,
   CreateVersionResponse,
+  WorkspaceTab,
 } from "../types/domain";
+import {
+  ensureReleaseNotesTab,
+  RELEASE_NOTES_UTILITY_TAB_ID,
+  RELEASE_NOTES_WORKSPACE_TAB_ID,
+  removeReleaseNotesTab,
+  shouldOpenReleaseNotesAfterStartup,
+} from "./releaseNotesState";
 
 type AppNotice = {
   title: string;
@@ -97,6 +107,10 @@ export function App() {
   const [editProjectOpen, setEditProjectOpen] = useState(false);
   const [layoutConfig, setLayoutConfig] = useState<LayoutConfig>(defaultLayoutConfig);
   const [tabsByProject, setTabsByProject] = useState<Record<string, ProjectTabsConfig>>({});
+  const [openUtilityTabs, setOpenUtilityTabs] = useState<AppUtilityTabId[]>([]);
+  const [activeUtilityTab, setActiveUtilityTab] = useState<AppUtilityTabId | null>(null);
+  const [lastRunAppVersion, setLastRunAppVersion] = useState<string | null>(null);
+  const [lastSeenReleaseNotesVersion, setLastSeenReleaseNotesVersion] = useState<string | null>(null);
   const [configLoaded, setConfigLoaded] = useState(false);
   const [notice, setNotice] = useState<AppNotice | null>(null);
   const [closeDocumentId, setCloseDocumentId] = useState<string | null>(null);
@@ -129,6 +143,10 @@ export function App() {
         const activeProjectTabs = active
           ? resolveProjectTabs(appConfig.tabsByProject, active.id, projectTree)
           : { openTabs: [], activeDocumentId: "" };
+        const shouldOpenReleaseNotes = shouldOpenReleaseNotesAfterStartup(appConfig, APP_VERSION);
+        const nextOpenUtilityTabs = shouldOpenReleaseNotes
+          ? ensureReleaseNotesTab(appConfig.openUtilityTabs)
+          : appConfig.openUtilityTabs;
         setProjects(projectList);
         setActiveProject(active ?? null);
         setAuthStatus(auth);
@@ -137,6 +155,10 @@ export function App() {
         setTree(projectTree);
         setLayoutConfig(appConfig.layout);
         setTabsByProject(appConfig.tabsByProject);
+        setOpenUtilityTabs(nextOpenUtilityTabs);
+        setActiveUtilityTab(shouldOpenReleaseNotes ? RELEASE_NOTES_UTILITY_TAB_ID : appConfig.activeUtilityTab ?? null);
+        setLastRunAppVersion(APP_VERSION);
+        setLastSeenReleaseNotesVersion(appConfig.lastSeenReleaseNotesVersion ?? null);
         setTabs(activeProjectTabs.openTabs);
         setActiveDocumentId(activeProjectTabs.activeDocumentId);
       } catch (error) {
@@ -151,6 +173,8 @@ export function App() {
         setTree([]);
         setTabs([]);
         setActiveDocumentId("");
+        setOpenUtilityTabs([]);
+        setActiveUtilityTab(null);
       } finally {
         setConfigLoaded(true);
       }
@@ -161,13 +185,20 @@ export function App() {
     if (!configLoaded) return;
 
     const timeout = window.setTimeout(() => {
-      void updateAppConfig({ layout: layoutConfig, tabsByProject }).catch((error) => {
+      void updateAppConfig({
+        layout: layoutConfig,
+        tabsByProject,
+        lastRunAppVersion,
+        lastSeenReleaseNotesVersion,
+        openUtilityTabs,
+        activeUtilityTab,
+      }).catch((error) => {
         showError(error, "No se pudo guardar la configuración de la aplicación.");
       });
     }, 350);
 
     return () => window.clearTimeout(timeout);
-  }, [configLoaded, layoutConfig, tabsByProject]);
+  }, [activeUtilityTab, configLoaded, lastRunAppVersion, lastSeenReleaseNotesVersion, layoutConfig, openUtilityTabs, tabsByProject]);
 
   useEffect(() => {
     if (!configLoaded || !activeProject) return;
@@ -287,10 +318,19 @@ export function App() {
     return () => window.clearTimeout(timeout);
   }, [configLoaded]);
 
-  const activeTab = useMemo(
-    () => tabs.find((tab) => tab.id === activeDocumentId) ?? tabs[0],
-    [activeDocumentId, tabs],
-  );
+  const workspaceTabs = useMemo<WorkspaceTab[]>(() => [
+    ...tabs.map((tab) => ({ ...tab, kind: "document" as const })),
+    ...(openUtilityTabs.includes(RELEASE_NOTES_UTILITY_TAB_ID)
+      ? [{
+        kind: "release-notes" as const,
+        id: RELEASE_NOTES_WORKSPACE_TAB_ID,
+        name: "Notas de release" as const,
+        utilityTabId: RELEASE_NOTES_UTILITY_TAB_ID,
+        readonly: true as const,
+      }]
+      : []),
+  ], [openUtilityTabs, tabs]);
+  const activeTabId = activeUtilityTab === RELEASE_NOTES_UTILITY_TAB_ID ? RELEASE_NOTES_WORKSPACE_TAB_ID : activeDocumentId;
   const activeSession = activeDocumentId ? documentSessions[activeDocumentId] : undefined;
   const dirtyDocumentIds = useMemo(
     () => Object.entries(documentSessions).filter(([, session]) => session.isDirty).map(([documentId]) => documentId),
@@ -314,6 +354,7 @@ export function App() {
         : [...currentTabs, { id: documentId, name }]
     ));
     setActiveDocumentId(documentId);
+    setActiveUtilityTab(null);
   }
 
   async function refreshProjectCapabilityState(projectId = activeProject?.id) {
@@ -342,7 +383,23 @@ export function App() {
     }
   }
 
-  function handleCloseTab(documentId: string) {
+  function handleCloseTab(tabId: string) {
+    if (tabId === RELEASE_NOTES_WORKSPACE_TAB_ID) {
+      const nextOpenUtilityTabs = removeReleaseNotesTab(openUtilityTabs);
+      setOpenUtilityTabs(nextOpenUtilityTabs);
+      setActiveUtilityTab(null);
+      setLastSeenReleaseNotesVersion(APP_VERSION);
+      void updateAppConfig({
+        openUtilityTabs: nextOpenUtilityTabs,
+        activeUtilityTab: null,
+        lastSeenReleaseNotesVersion: APP_VERSION,
+      }).catch((error) => {
+        showError(error, "No se pudo guardar la configuración de las notas de release.");
+      });
+      return;
+    }
+
+    const documentId = tabId;
     if (documentSessions[documentId]?.isDirty) {
       setCloseDocumentId(documentId);
       return;
@@ -357,16 +414,29 @@ export function App() {
       const { [documentId]: _closedSession, ...nextSessions } = currentSessions;
       return nextSessions;
     });
-    if (documentId === activeDocumentId) {
+    if (documentId === activeDocumentId && activeUtilityTab === null) {
       setActiveDocumentId(nextTabs[0]?.id ?? "");
     }
   }
 
-  function handleSelectTab(documentId: string) {
+  function handleSelectTab(tabId: string) {
+    if (tabId === RELEASE_NOTES_WORKSPACE_TAB_ID) {
+      setOpenUtilityTabs((currentTabs) => ensureReleaseNotesTab(currentTabs));
+      setActiveUtilityTab(RELEASE_NOTES_UTILITY_TAB_ID);
+      return;
+    }
+
+    const documentId = tabId;
     if (activeDocumentId && documentSessions[activeDocumentId]) {
       void persistDraft(activeDocumentId, documentSessions[activeDocumentId]);
     }
+    setActiveUtilityTab(null);
     setActiveDocumentId(documentId);
+  }
+
+  function handleOpenReleaseNotes() {
+    setOpenUtilityTabs((currentTabs) => ensureReleaseNotesTab(currentTabs));
+    setActiveUtilityTab(RELEASE_NOTES_UTILITY_TAB_ID);
   }
 
   function handleMarkdownChange(documentId: string, nextMarkdown: string) {
@@ -894,6 +964,7 @@ export function App() {
         : [...currentTabs, { id: documentId, name }]
     ));
     setActiveDocumentId(documentId);
+    setActiveUtilityTab(null);
   }
 
   function applyFileOperationResult(result: FileOperationResult) {
@@ -964,10 +1035,11 @@ export function App() {
         projects={projects}
         activeProject={activeProject}
         tree={tree}
-        tabs={tabs}
-        activeTab={activeTab}
+        tabs={workspaceTabs}
+        activeTabId={activeTabId}
         activeDocumentId={activeDocumentId}
         editorSessions={editorSessions}
+        releaseNotesMarkdown={RELEASE_NOTES_MARKDOWN}
         activeDocument={activeSession?.document ?? null}
         activeMarkdown={activeSession?.markdown ?? ""}
         activeDocumentDirty={activeSession?.isDirty ?? false}
@@ -1001,6 +1073,7 @@ export function App() {
           void refreshOrphanDrafts();
         }}
         onCheckForUpdates={() => void handleCheckForUpdates("manual")}
+        onOpenReleaseNotes={handleOpenReleaseNotes}
         onLoginGithub={() => void handleOpenGithubLogin()}
         onLogout={() => void handleLogoutGithub()}
         onPullProject={() => void handlePullProject()}

@@ -1,16 +1,16 @@
-import { FileText, PanelLeftOpen, X } from "lucide-react";
-import type { OpenDocumentTab } from "../../types/domain";
+import { FileText, PanelLeftOpen, ScrollText, X } from "lucide-react";
+import type { WorkspaceTab } from "../../types/domain";
 
 type DocumentTabsProps = {
-  tabs: OpenDocumentTab[];
-  activeDocumentId: string;
+  tabs: WorkspaceTab[];
+  activeTabId: string;
   dirtyDocumentIds: string[];
   onOpenNavigation?: () => void;
-  onSelectTab: (documentId: string) => void;
-  onCloseTab: (documentId: string) => void;
+  onSelectTab: (tabId: string) => void;
+  onCloseTab: (tabId: string) => void;
 };
 
-export function DocumentTabs({ tabs, activeDocumentId, dirtyDocumentIds, onOpenNavigation, onSelectTab, onCloseTab }: DocumentTabsProps) {
+export function DocumentTabs({ tabs, activeTabId, dirtyDocumentIds, onOpenNavigation, onSelectTab, onCloseTab }: DocumentTabsProps) {
   const dirtyIds = new Set(dirtyDocumentIds);
 
   return (
@@ -28,8 +28,9 @@ export function DocumentTabs({ tabs, activeDocumentId, dirtyDocumentIds, onOpenN
       ) : null}
       <div className="flex h-full min-w-0 flex-1 items-end overflow-x-auto">
         {tabs.map((tab) => {
-          const active = tab.id === activeDocumentId;
-          const dirty = dirtyIds.has(tab.id);
+          const active = tab.id === activeTabId;
+          const dirty = tab.kind === "document" && dirtyIds.has(tab.id);
+          const Icon = tab.kind === "release-notes" ? ScrollText : FileText;
           return (
             <button
               key={tab.id}
@@ -39,7 +40,7 @@ export function DocumentTabs({ tabs, activeDocumentId, dirtyDocumentIds, onOpenN
               ].join(" ")}
               onClick={() => onSelectTab(tab.id)}
             >
-              <FileText size={15} className={active ? "text-brand-orange" : "text-ink-secondary"} />
+              <Icon size={15} className={active ? "text-brand-orange" : "text-ink-secondary"} />
               <span className="truncate">{tab.name}</span>
               <span
                 className="ml-auto grid h-5 w-5 place-items-center rounded hover:bg-brand-hover"

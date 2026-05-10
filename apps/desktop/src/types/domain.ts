@@ -106,16 +106,26 @@ export type ProjectTabsConfig = {
   activeDocumentId: string;
 };
 
+export type AppUtilityTabId = "release-notes";
+
 export type AppConfig = {
   schemaVersion: number;
   layout: LayoutConfig;
   tabsByProject: Record<string, ProjectTabsConfig>;
+  lastRunAppVersion?: string | null;
+  lastSeenReleaseNotesVersion?: string | null;
+  openUtilityTabs: AppUtilityTabId[];
+  activeUtilityTab?: AppUtilityTabId | null;
   updatedAt: string;
 };
 
 export type AppConfigUpdate = {
   layout?: LayoutConfig;
   tabsByProject?: Record<string, ProjectTabsConfig>;
+  lastRunAppVersion?: string | null;
+  lastSeenReleaseNotesVersion?: string | null;
+  openUtilityTabs?: AppUtilityTabId[];
+  activeUtilityTab?: AppUtilityTabId | null;
 };
 
 export type DocumentTreeNode = {
@@ -170,6 +180,20 @@ export type OpenDocumentTab = {
   id: string;
   name: string;
 };
+
+export type DocumentWorkspaceTab = OpenDocumentTab & {
+  kind: "document";
+};
+
+export type ReleaseNotesWorkspaceTab = {
+  kind: "release-notes";
+  id: "app-release-notes";
+  name: "Notas de release";
+  utilityTabId: "release-notes";
+  readonly: true;
+};
+
+export type WorkspaceTab = DocumentWorkspaceTab | ReleaseNotesWorkspaceTab;
 
 export type VersionRecord = {
   id: string;
