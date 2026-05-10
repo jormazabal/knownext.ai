@@ -2,6 +2,15 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.5.0 - 2026-05-10
+
+- Added GitHub authentication scaffolding and repository discovery through the FastAPI-mediated API layer.
+- Added local Git and GitHub-backed project versioning contracts, sync status, pull/push actions, and conflict handling.
+- Added recoverable draft tracking for orphaned document drafts and disk-change detection for open documents.
+- Tightened the compact desktop workspace with responsive navigation, lazy Milkdown loading, stable toolbar state, and native Tauri window controls.
+- Expanded backend contract coverage for project creation modes, document sync status, Git version creation, and GitHub conflict paths.
+- Updated release metadata and installer download links for `0.5.0`.
+
 ## 0.4.7 - 2026-05-10
 
 - Added release-management documentation for future agents and maintainers.

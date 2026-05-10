@@ -1,20 +1,32 @@
-import { FileText, X } from "lucide-react";
+import { FileText, PanelLeftOpen, X } from "lucide-react";
 import type { OpenDocumentTab } from "../../types/domain";
 
 type DocumentTabsProps = {
   tabs: OpenDocumentTab[];
   activeDocumentId: string;
   dirtyDocumentIds: string[];
+  onOpenNavigation?: () => void;
   onSelectTab: (documentId: string) => void;
   onCloseTab: (documentId: string) => void;
 };
 
-export function DocumentTabs({ tabs, activeDocumentId, dirtyDocumentIds, onSelectTab, onCloseTab }: DocumentTabsProps) {
+export function DocumentTabs({ tabs, activeDocumentId, dirtyDocumentIds, onOpenNavigation, onSelectTab, onCloseTab }: DocumentTabsProps) {
   const dirtyIds = new Set(dirtyDocumentIds);
 
   return (
-    <div className="flex h-[54px] items-end border-b border-line bg-white">
-      <div className="flex h-full min-w-0 items-end">
+    <div className="flex h-9 items-end border-b border-line bg-white">
+      {onOpenNavigation ? (
+        <button
+          className="grid h-full w-10 shrink-0 place-items-center border-r border-line text-ink-secondary hover:bg-brand-hover hover:text-brand-orange lg:hidden"
+          data-tooltip="Abrir documentos"
+          data-tooltip-placement="bottom"
+          aria-label="Abrir panel de documentos"
+          onClick={onOpenNavigation}
+        >
+          <PanelLeftOpen size={16} />
+        </button>
+      ) : null}
+      <div className="flex h-full min-w-0 flex-1 items-end overflow-x-auto">
         {tabs.map((tab) => {
           const active = tab.id === activeDocumentId;
           const dirty = dirtyIds.has(tab.id);
@@ -22,7 +34,7 @@ export function DocumentTabs({ tabs, activeDocumentId, dirtyDocumentIds, onSelec
             <button
               key={tab.id}
               className={[
-                "group relative flex h-full min-w-[180px] max-w-[230px] items-center gap-2 border-r border-line px-4 text-[13px]",
+                "group relative flex h-full min-w-[150px] max-w-[210px] items-center gap-1.5 border-r border-line px-2.5 text-[11px]",
                 active ? "bg-white font-semibold" : "text-ink-primary hover:bg-panel",
               ].join(" ")}
               onClick={() => onSelectTab(tab.id)}
@@ -30,7 +42,7 @@ export function DocumentTabs({ tabs, activeDocumentId, dirtyDocumentIds, onSelec
               <FileText size={15} className={active ? "text-brand-orange" : "text-ink-secondary"} />
               <span className="truncate">{tab.name}</span>
               <span
-                className="ml-auto grid h-6 w-6 place-items-center rounded hover:bg-brand-hover"
+                className="ml-auto grid h-5 w-5 place-items-center rounded hover:bg-brand-hover"
                 aria-label={dirty ? `Cerrar ${tab.name}, con cambios sin guardar` : `Cerrar ${tab.name}`}
                 onClick={(event) => {
                   event.stopPropagation();

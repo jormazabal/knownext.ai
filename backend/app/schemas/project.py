@@ -1,4 +1,42 @@
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+
+StorageMode = Literal["local-files", "local-cache"]
+VersioningMode = Literal["none", "local-git", "github-api"]
+SyncMode = Literal["none", "manual-github"]
+
+
+class GithubRepository(BaseModel):
+    owner: str
+    repo: str
+    defaultRef: str | None = None
+    rootPath: str = ""
+    permissions: list[str] = Field(default_factory=list)
+
+
+class ProjectVersioningStatus(BaseModel):
+    enabled: bool
+    available: bool
+    reason: str | None = None
+    storageMode: StorageMode
+    versioningMode: VersioningMode
+    syncMode: SyncMode
+    statusLabel: str
+    hasLocalChanges: bool = False
+    hasRemoteChanges: bool = False
+    lastVersionHash: str | None = None
+    lastVersionRelativeTime: str | None = None
+
+
+class ProjectCapabilities(BaseModel):
+    canCreateLocalProject: bool = True
+    canOpenLocalFolder: bool = True
+    canUseLocalGit: bool
+    canConnectGithub: bool
+    canUseGithubApi: bool
+    requiresGithubLoginForVersioning: bool = True
 
 
 class Project(BaseModel):
@@ -7,7 +45,12 @@ class Project(BaseModel):
     folderPath: str
     icon: str
     iconColor: str
-    isGitRepository: bool
+    storageMode: StorageMode = "local-files"
+    versioningMode: VersioningMode = "none"
+    syncMode: SyncMode = "none"
+    authRequired: bool = False
+    githubRepository: GithubRepository | None = None
+    isGitRepository: bool = False
     active: bool = False
 
 
@@ -16,6 +59,11 @@ class ProjectPayload(BaseModel):
     folderPath: str
     icon: str
     iconColor: str
+    creationMode: Literal["new-local", "open-local", "github-repository"] = "open-local"
+    storageMode: StorageMode = "local-files"
+    versioningMode: VersioningMode = "none"
+    syncMode: SyncMode = "none"
+    githubRepository: GithubRepository | None = None
 
 
 class TreeNode(BaseModel):

@@ -9,6 +9,26 @@ const tabs = [
 ];
 
 describe("DocumentTabs", () => {
+  it("shows a compact navigation opener when provided", async () => {
+    const onOpenNavigation = vi.fn();
+
+    const { unmount } = render(
+      <DocumentTabs
+        tabs={tabs}
+        activeDocumentId="doc-a"
+        dirtyDocumentIds={[]}
+        onOpenNavigation={onOpenNavigation}
+        onSelectTab={vi.fn()}
+        onCloseTab={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByLabelText("Abrir panel de documentos"));
+
+    expect(onOpenNavigation).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
   it("shows an orange dirty marker instead of the close icon on any dirty tab", async () => {
     const onCloseTab = vi.fn();
 

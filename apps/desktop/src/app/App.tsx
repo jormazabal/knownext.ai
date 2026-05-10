@@ -3,10 +3,30 @@ import type { DocumentTreeAction } from "../features/documents/DocumentTree";
 import { CreateDocumentDialog } from "../features/documents/CreateDocumentDialog";
 import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
 import { DesktopLayout } from "../layouts/DesktopLayout";
+import {
+  countWords,
+  createEmptyDocumentSession,
+  createLoadedDocumentSession,
+  shouldPersistDraft,
+  updateSession,
+  type DocumentSession,
+} from "./documentSessions";
 import { defaultLayoutConfig, defaultProjectTabsConfig, getAppConfig, updateAppConfig } from "../lib/api/config";
 import { API_BASE_URL, ApiError, getApiErrorMessage, isBackendEnabled } from "../lib/api/client";
-import { discardDocumentDraft, getDocument, saveDocument, saveDocumentDraft } from "../lib/api/documents";
+import {
+  discardDocumentDraft,
+  discardOrphanDraft,
+  getDocument,
+  getDocumentsSyncStatus,
+  listOrphanDrafts,
+  restoreOrphanDraft,
+  saveDocument,
+  saveDocumentDraft,
+} from "../lib/api/documents";
 import { APP_VERSION } from "../lib/appVersion";
+import { getAuthStatus, logout as logoutGithub, pollGithubDeviceFlow, startGithubDeviceFlow } from "../lib/api/auth";
+import { listGithubRepositories } from "../lib/api/github";
+import { createProjectVersion } from "../lib/api/versions";
 import {
   checkForUpdate,
   getUpdaterStatus,
@@ -22,23 +42,32 @@ import {
   deleteTreeNode,
   duplicateProjectDocument,
   getProjectTree,
+  getProjectCapabilities,
+  getProjectVersioningStatus,
   listProjects,
   moveTreeNode,
+  pullProject,
+  pushProject,
   renameTreeNode,
   setActiveProject as persistActiveProject,
   updateProject,
 } from "../lib/api/projects";
 import type {
+  AuthStatus,
   DocumentRecord,
-  DocumentConflictStatus,
-  DocumentFingerprint,
   DocumentTreeNode,
   FileOperationResult,
   LayoutConfig,
   OpenDocumentTab,
+  OrphanDraft,
   Project,
+  ProjectCapabilities,
   ProjectPayload,
   ProjectTabsConfig,
+  ProjectVersioningStatus,
+  GithubDeviceStartResponse,
+  GithubRepositorySummary,
+  CreateVersionResponse,
 } from "../types/domain";
 
 type AppNotice = {
@@ -48,26 +77,14 @@ type AppNotice = {
 };
 
 type UpdateState = "idle" | "checking" | "available" | "not-available" | "unsupported" | "downloading" | "installing" | "error";
-
-type DocumentSession = {
-  document: DocumentRecord | null;
-  markdown: string;
-  savedMarkdown: string;
-  isDirty: boolean;
-  isLoading: boolean;
-  saveState: "idle" | "saving" | "saved";
-  loadVersion: number;
-  lastDraftMarkdown: string;
-  baseFingerprint?: DocumentFingerprint | null;
-  conflictStatus: DocumentConflictStatus;
-  diskChanged: boolean;
-  hasRecoveredDraft: boolean;
-  draftUpdatedAt?: string | null;
-};
+type GithubLoginState = "idle" | "starting" | "waiting" | "authenticated" | "error";
 
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
+  const [authStatus, setAuthStatus] = useState<AuthStatus>({ isAuthenticated: false, provider: null, user: null, scopes: [] });
+  const [projectCapabilities, setProjectCapabilities] = useState<ProjectCapabilities | null>(null);
+  const [versioningStatus, setVersioningStatus] = useState<ProjectVersioningStatus | null>(null);
   const [tree, setTree] = useState<DocumentTreeNode[]>([]);
   const [tabs, setTabs] = useState<OpenDocumentTab[]>(defaultProjectTabsConfig.openTabs);
   const [activeDocumentId, setActiveDocumentId] = useState(defaultProjectTabsConfig.activeDocumentId);
@@ -83,22 +100,40 @@ export function App() {
   const [configLoaded, setConfigLoaded] = useState(false);
   const [notice, setNotice] = useState<AppNotice | null>(null);
   const [closeDocumentId, setCloseDocumentId] = useState<string | null>(null);
+  const [orphanDrafts, setOrphanDrafts] = useState<OrphanDraft[]>([]);
+  const [recoverableDraftsOpen, setRecoverableDraftsOpen] = useState(false);
   const [updateState, setUpdateState] = useState<UpdateState>("idle");
   const [availableUpdate, setAvailableUpdate] = useState<AvailableUpdate | null>(null);
   const [updateProgress, setUpdateProgress] = useState<UpdateDownloadProgress | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const [githubLoginOpen, setGithubLoginOpen] = useState(false);
+  const [githubLoginState, setGithubLoginState] = useState<GithubLoginState>("idle");
+  const [githubDevice, setGithubDevice] = useState<GithubDeviceStartResponse | null>(null);
+  const [githubLoginError, setGithubLoginError] = useState<string | null>(null);
+  const [githubRepositories, setGithubRepositories] = useState<GithubRepositorySummary[]>([]);
+  const [githubRepositoriesLoading, setGithubRepositoriesLoading] = useState(false);
+  const [syncState, setSyncState] = useState<"idle" | "pulling" | "pushing">("idle");
 
   useEffect(() => {
     void (async () => {
       try {
-        const [projectList, appConfig] = await Promise.all([listProjects(), getAppConfig()]);
+        const [projectList, appConfig, auth, capabilities] = await Promise.all([
+          listProjects(),
+          getAppConfig(),
+          getAuthStatus(),
+          getProjectCapabilities(),
+        ]);
         const active = projectList.find((project) => project.active) ?? projectList[0];
         const projectTree = active ? await getProjectTree(active.id) : [];
+        const activeVersioningStatus = active ? await getProjectVersioningStatus(active.id) : null;
         const activeProjectTabs = active
           ? resolveProjectTabs(appConfig.tabsByProject, active.id, projectTree)
           : { openTabs: [], activeDocumentId: "" };
         setProjects(projectList);
         setActiveProject(active ?? null);
+        setAuthStatus(auth);
+        setProjectCapabilities(capabilities);
+        setVersioningStatus(activeVersioningStatus);
         setTree(projectTree);
         setLayoutConfig(appConfig.layout);
         setTabsByProject(appConfig.tabsByProject);
@@ -112,6 +147,7 @@ export function App() {
         });
         setProjects([]);
         setActiveProject(null);
+        setVersioningStatus(null);
         setTree([]);
         setTabs([]);
         setActiveDocumentId("");
@@ -132,6 +168,29 @@ export function App() {
 
     return () => window.clearTimeout(timeout);
   }, [configLoaded, layoutConfig, tabsByProject]);
+
+  useEffect(() => {
+    if (!configLoaded || !activeProject) return;
+    void refreshProjectCapabilityState(activeProject.id);
+  }, [authStatus.isAuthenticated, activeProject?.id, configLoaded]);
+
+  useEffect(() => {
+    if (!authStatus.isAuthenticated) {
+      setGithubRepositories([]);
+      return;
+    }
+    void refreshGithubRepositories();
+  }, [authStatus.isAuthenticated]);
+
+  useEffect(() => {
+    if (!githubLoginOpen || githubLoginState !== "waiting" || !githubDevice) return;
+
+    const timeout = window.setTimeout(() => {
+      void handlePollGithubLogin();
+    }, Math.max(githubDevice.interval, 1) * 1000);
+
+    return () => window.clearTimeout(timeout);
+  }, [githubDevice, githubLoginOpen, githubLoginState]);
 
   useEffect(() => {
     function handlePageHide() {
@@ -176,6 +235,21 @@ export function App() {
   }, [activeDocumentId, documentSessions]);
 
   useEffect(() => {
+    if (!configLoaded) return;
+    void refreshOrphanDrafts();
+  }, [configLoaded]);
+
+  useEffect(() => {
+    if (!configLoaded) return;
+
+    const interval = window.setInterval(() => {
+      void refreshOrphanDrafts();
+    }, 30000);
+
+    return () => window.clearInterval(interval);
+  }, [configLoaded]);
+
+  useEffect(() => {
     const pendingDrafts = Object.entries(documentSessions).filter(([, session]) => shouldPersistDraft(session));
     if (pendingDrafts.length === 0) return;
 
@@ -187,6 +261,21 @@ export function App() {
 
     return () => window.clearTimeout(timeout);
   }, [documentSessions]);
+
+  useEffect(() => {
+    if (!configLoaded) return;
+
+    const check = () => {
+      void checkOpenDocumentSync();
+    };
+    const interval = window.setInterval(check, 12000);
+    window.addEventListener("focus", check);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", check);
+    };
+  }, [configLoaded, documentSessions]);
 
   useEffect(() => {
     if (!configLoaded) return;
@@ -227,6 +316,32 @@ export function App() {
     setActiveDocumentId(documentId);
   }
 
+  async function refreshProjectCapabilityState(projectId = activeProject?.id) {
+    try {
+      const [capabilities, status] = await Promise.all([
+        getProjectCapabilities(),
+        projectId ? getProjectVersioningStatus(projectId) : Promise.resolve(null),
+      ]);
+      setProjectCapabilities(capabilities);
+      setVersioningStatus(status);
+      if (!status?.enabled) setHistoryOpen(false);
+    } catch (error) {
+      showError(error, "No se pudo actualizar el estado de versionado del proyecto.");
+    }
+  }
+
+  async function refreshGithubRepositories() {
+    if (!authStatus.isAuthenticated) return;
+    setGithubRepositoriesLoading(true);
+    try {
+      setGithubRepositories(await listGithubRepositories());
+    } catch (error) {
+      showError(error, "No se pudieron cargar los repositorios de GitHub.");
+    } finally {
+      setGithubRepositoriesLoading(false);
+    }
+  }
+
   function handleCloseTab(documentId: string) {
     if (documentSessions[documentId]?.isDirty) {
       setCloseDocumentId(documentId);
@@ -263,7 +378,7 @@ export function App() {
         [documentId]: {
           ...session,
           markdown: nextMarkdown,
-          isDirty: session.hasRecoveredDraft || nextMarkdown !== session.savedMarkdown,
+          isDirty: nextMarkdown !== session.savedMarkdown,
           saveState: "idle",
           document: session.document ? { ...session.document, wordCount: countWords(nextMarkdown) } : session.document,
         },
@@ -281,6 +396,9 @@ export function App() {
         baseFingerprint: session.baseFingerprint,
         force,
       });
+      if (force && session.orphaned && activeProject?.id === saved.projectId) {
+        setTree(await getProjectTree(saved.projectId));
+      }
       setDocumentSessions((currentSessions) => updateSession(currentSessions, documentId, {
         document: saved,
         markdown: saved.markdown,
@@ -291,6 +409,7 @@ export function App() {
         baseFingerprint: saved.baseFingerprint,
         conflictStatus: "none",
         diskChanged: false,
+        orphaned: false,
         hasRecoveredDraft: false,
         draftUpdatedAt: null,
       }));
@@ -301,6 +420,7 @@ export function App() {
           return updateSession(currentSessions, documentId, { saveState: "idle" });
         });
       }, 1400);
+      await refreshProjectCapabilityState(saved.projectId);
       return true;
     } catch (error) {
       setDocumentSessions((currentSessions) => updateSession(currentSessions, documentId, { saveState: "idle" }));
@@ -323,7 +443,7 @@ export function App() {
 
   async function handleSelectProject(project: Project) {
     if (project.id === activeProject?.id) return;
-    await flushPendingDrafts();
+    if (!await flushPendingDrafts()) return;
     if (activeProject) {
       setTabsByProject((currentTabsByProject) => ({
         ...currentTabsByProject,
@@ -334,16 +454,18 @@ export function App() {
     try {
       const active = await persistActiveProject(project.id);
       const nextTree = await getProjectTree(active.id);
+      const nextVersioningStatus = await getProjectVersioningStatus(active.id);
       const nextProjectTabs = resolveProjectTabs(tabsByProject, active.id, nextTree);
       setProjects((currentProjects) => currentProjects.map((currentProject) => ({
         ...currentProject,
         active: currentProject.id === active.id,
       })));
       setActiveProject(active);
+      setVersioningStatus(nextVersioningStatus);
       setTree(nextTree);
       setTabs(nextProjectTabs.openTabs);
       setActiveDocumentId(nextProjectTabs.activeDocumentId);
-      if (!active.isGitRepository) setHistoryOpen(false);
+      if (!nextVersioningStatus.enabled) setHistoryOpen(false);
     } catch (error) {
       showError(error, "No se pudo cambiar de proyecto.");
     }
@@ -408,7 +530,7 @@ export function App() {
 
   async function handleCreateProject(project: ProjectPayload) {
     try {
-      await flushPendingDrafts();
+      if (!await flushPendingDrafts()) return;
       const nextProject = await createProject(project);
 
       setProjects((currentProjects) => [
@@ -427,6 +549,7 @@ export function App() {
       }));
       setHistoryOpen(false);
       setCreateProjectOpen(false);
+      await refreshProjectCapabilityState(nextProject.id);
     } catch (error) {
       showError(error, "No se pudo crear el proyecto.");
     }
@@ -443,10 +566,13 @@ export function App() {
       ));
       if (activeProject?.id === projectId) {
         const nextTree = await getProjectTree(projectId);
+        const nextVersioningStatus = await getProjectVersioningStatus(projectId);
         setTree(nextTree);
+        setVersioningStatus(nextVersioningStatus);
         const nextProjectTabs = resolveProjectTabs(tabsByProject, projectId, nextTree);
         setTabs(nextProjectTabs.openTabs);
         setActiveDocumentId(nextProjectTabs.activeDocumentId);
+        if (!nextVersioningStatus.enabled) setHistoryOpen(false);
       }
       setEditProjectOpen(false);
     } catch (error) {
@@ -456,7 +582,7 @@ export function App() {
 
   async function handleDeleteProject(projectId: string) {
     try {
-      await flushPendingDrafts();
+      if (!await flushPendingDrafts()) return;
       const nextProjects = await deleteProject(projectId);
       const nextActiveProject = nextProjects.find((project) => project.active) ?? nextProjects[0];
 
@@ -477,14 +603,117 @@ export function App() {
       }
 
       const nextTree = await getProjectTree(nextActiveProject.id);
+      const nextVersioningStatus = await getProjectVersioningStatus(nextActiveProject.id);
       const nextProjectTabs = resolveProjectTabs(tabsByProject, nextActiveProject.id, nextTree);
       setActiveProject(nextActiveProject);
+      setVersioningStatus(nextVersioningStatus);
       setTree(nextTree);
       setTabs(nextProjectTabs.openTabs);
       setActiveDocumentId(nextProjectTabs.activeDocumentId);
-      if (!nextActiveProject.isGitRepository) setHistoryOpen(false);
+      if (!nextVersioningStatus.enabled) setHistoryOpen(false);
     } catch (error) {
       showError(error, "No se pudo eliminar el proyecto.");
+    }
+  }
+
+  async function handleOpenGithubLogin() {
+    setGithubLoginOpen(true);
+    if (!githubDevice && githubLoginState === "idle") {
+      await handleStartGithubLogin();
+    }
+  }
+
+  async function handleStartGithubLogin() {
+    setGithubLoginState("starting");
+    setGithubLoginError(null);
+    try {
+      const device = await startGithubDeviceFlow();
+      setGithubDevice(device);
+      setGithubLoginState("waiting");
+    } catch (error) {
+      setGithubLoginState("error");
+      setGithubLoginError(getApiErrorMessage(error, "No se pudo iniciar el login con GitHub."));
+    }
+  }
+
+  async function handlePollGithubLogin() {
+    if (!githubDevice) return;
+    setGithubLoginError(null);
+    try {
+      const response = await pollGithubDeviceFlow(githubDevice.deviceCode);
+      if (response.status === "authenticated") {
+        setAuthStatus(response.auth);
+        setGithubLoginState("authenticated");
+        setGithubLoginOpen(false);
+        setGithubDevice(null);
+        await refreshProjectCapabilityState();
+        return;
+      }
+      setGithubLoginState(response.status === "pending" ? "waiting" : response.status);
+      if (response.interval && githubDevice) {
+        setGithubDevice({ ...githubDevice, interval: response.interval });
+      }
+      setGithubLoginError(response.error && response.error !== "authorization_pending" ? response.error : null);
+    } catch (error) {
+      setGithubLoginState("error");
+      setGithubLoginError(getApiErrorMessage(error, "No se pudo completar el login con GitHub."));
+    }
+  }
+
+  async function handleLogoutGithub() {
+    try {
+      const auth = await logoutGithub();
+      setAuthStatus(auth);
+      setHistoryOpen(false);
+      await refreshProjectCapabilityState();
+    } catch (error) {
+      showError(error, "No se pudo cerrar sesión de GitHub.");
+    }
+  }
+
+  async function handlePullProject() {
+    if (!activeProject || syncState !== "idle") return;
+    setSyncState("pulling");
+    try {
+      const response = await pullProject(activeProject.id);
+      setTree(await getProjectTree(activeProject.id));
+      await refreshProjectCapabilityState(activeProject.id);
+      setNotice({ title: "Sincronización completada", message: response.message, tone: "info" });
+    } catch (error) {
+      showError(error, "No se pudo traer cambios del proveedor remoto.");
+    } finally {
+      setSyncState("idle");
+    }
+  }
+
+  async function handlePushProject() {
+    if (!activeProject || syncState !== "idle") return;
+    setSyncState("pushing");
+    try {
+      const response = await pushProject(activeProject.id);
+      await refreshProjectCapabilityState(activeProject.id);
+      setNotice({ title: "Sincronización completada", message: response.message, tone: "info" });
+    } catch (error) {
+      showError(error, "No se pudieron enviar cambios al proveedor remoto.");
+    } finally {
+      setSyncState("idle");
+    }
+  }
+
+  async function handleCreateActiveVersion(title: string): Promise<CreateVersionResponse | null> {
+    if (!activeProject || !activeDocumentId) return null;
+    const session = documentSessions[activeDocumentId];
+    if (session?.isDirty) {
+      const saved = await handleSave(activeDocumentId);
+      if (!saved) return null;
+    }
+    try {
+      const response = await createProjectVersion(activeProject.id, activeDocumentId, title);
+      await refreshProjectCapabilityState(activeProject.id);
+      return response;
+    } catch (error) {
+      showError(error, "No se pudo crear la versión del documento.");
+      return null;
     }
   }
 
@@ -725,10 +954,13 @@ export function App() {
     }
   }
 
+  const historyEnabled = Boolean(activeProject && authStatus.isAuthenticated && versioningStatus?.enabled);
+
   return (
     <>
       <DesktopLayout
         appVersion={APP_VERSION}
+        authStatus={authStatus}
         projects={projects}
         activeProject={activeProject}
         tree={tree}
@@ -743,10 +975,12 @@ export function App() {
         activeDocumentHasRecoveredDraft={activeSession?.hasRecoveredDraft ?? false}
         activeDocumentDiskChanged={activeSession?.diskChanged ?? false}
         dirtyDocumentIds={dirtyDocumentIds}
+        orphanDraftCount={orphanDrafts.length}
         isCheckingForUpdates={updateState === "checking"}
         saveState={activeSession?.saveState ?? "idle"}
         historyOpen={historyOpen}
-        historyEnabled={activeProject?.isGitRepository ?? false}
+        historyEnabled={historyEnabled}
+        versioningStatus={versioningStatus}
         layoutConfig={layoutConfig}
         onSelectProject={handleSelectProject}
         onCreateProject={() => setCreateProjectOpen(true)}
@@ -762,7 +996,17 @@ export function App() {
           setCreateDocumentParentId(null);
           setCreateDocumentOpen(true);
         }}
+        onOpenRecoverableDrafts={() => {
+          setRecoverableDraftsOpen(true);
+          void refreshOrphanDrafts();
+        }}
         onCheckForUpdates={() => void handleCheckForUpdates("manual")}
+        onLoginGithub={() => void handleOpenGithubLogin()}
+        onLogout={() => void handleLogoutGithub()}
+        onPullProject={() => void handlePullProject()}
+        onPushProject={() => void handlePushProject()}
+        onCreateVersion={handleCreateActiveVersion}
+        isSyncingProject={syncState !== "idle"}
         onOpenDocument={handleOpenDocument}
         onSelectTab={handleSelectTab}
         onCloseTab={handleCloseTab}
@@ -772,7 +1016,7 @@ export function App() {
         onKeepLocalVersion={() => void handleSave(activeDocumentId, true)}
         onLoadDiskVersion={() => void handleLoadDiskVersion()}
         onToggleHistory={() => {
-          if (activeProject?.isGitRepository) setHistoryOpen((isOpen) => !isOpen);
+          if (historyEnabled) setHistoryOpen((isOpen) => !isOpen);
         }}
         onCloseHistory={() => setHistoryOpen(false)}
         onLayoutConfigChange={handleLayoutConfigChange}
@@ -791,6 +1035,18 @@ export function App() {
         }}
         onInstall={() => void handleInstallUpdate()}
       />
+      <GithubLoginDialog
+        open={githubLoginOpen}
+        state={githubLoginState}
+        device={githubDevice}
+        error={githubLoginError}
+        onClose={() => setGithubLoginOpen(false)}
+        onStart={() => void handleStartGithubLogin()}
+        onOpenGithub={() => {
+          if (githubDevice) window.open(githubDevice.verificationUri, "_blank", "noopener,noreferrer");
+        }}
+        onPoll={() => void handlePollGithubLogin()}
+      />
       <CreateDocumentDialog
         open={createDocumentOpen}
         onClose={() => {
@@ -803,6 +1059,12 @@ export function App() {
         open={createProjectOpen}
         onClose={() => setCreateProjectOpen(false)}
         onCreate={handleCreateProject}
+        authStatus={authStatus}
+        capabilities={projectCapabilities}
+        githubRepositories={githubRepositories}
+        githubRepositoriesLoading={githubRepositoriesLoading}
+        onLoginGithub={() => void handleOpenGithubLogin()}
+        onRefreshGithubRepositories={() => void refreshGithubRepositories()}
       />
       <CreateProjectDialog
         open={editProjectOpen}
@@ -812,6 +1074,12 @@ export function App() {
         onCreate={handleCreateProject}
         onUpdate={handleUpdateProject}
         onDelete={handleDeleteProject}
+        authStatus={authStatus}
+        capabilities={projectCapabilities}
+        githubRepositories={githubRepositories}
+        githubRepositoriesLoading={githubRepositoriesLoading}
+        onLoginGithub={() => void handleOpenGithubLogin()}
+        onRefreshGithubRepositories={() => void refreshGithubRepositories()}
       />
       <MoveDocumentDialog
         open={moveNode !== null}
@@ -841,6 +1109,14 @@ export function App() {
           });
         }}
       />
+      <RecoverableDraftsDialog
+        open={recoverableDraftsOpen}
+        drafts={orphanDrafts}
+        onClose={() => setRecoverableDraftsOpen(false)}
+        onRefresh={() => void refreshOrphanDrafts()}
+        onRestore={(draft) => void handleRestoreOrphanDraft(draft)}
+        onDiscard={(draftKey) => void handleDiscardOrphanDraft(draftKey)}
+      />
     </>
   );
 
@@ -861,26 +1137,11 @@ export function App() {
 
     try {
       const record = await getDocument(documentId);
-      const hasRecoveredDraft = Boolean(record.hasDraft || record.isDirty);
       setDocumentSessions((currentSessions) => {
         const currentSession = currentSessions[documentId];
         return {
           ...currentSessions,
-          [documentId]: {
-            document: record,
-            markdown: record.markdown,
-            savedMarkdown: hasRecoveredDraft ? currentSession?.savedMarkdown ?? record.markdown : record.markdown,
-            isDirty: hasRecoveredDraft,
-            isLoading: false,
-            saveState: "idle",
-            loadVersion: currentSession?.loadVersion ?? 0,
-            lastDraftMarkdown: hasRecoveredDraft ? record.markdown : "",
-            baseFingerprint: record.baseFingerprint,
-            conflictStatus: record.conflictStatus ?? (record.diskChanged ? "disk-changed" : "none"),
-            diskChanged: Boolean(record.diskChanged),
-            hasRecoveredDraft,
-            draftUpdatedAt: record.draftUpdatedAt,
-          },
+          [documentId]: createLoadedDocumentSession(record, currentSession),
         };
       });
     } catch (error) {
@@ -926,53 +1187,113 @@ export function App() {
     await discardDocumentDraft(activeDocumentId);
     await loadDocumentSession(activeDocumentId, true);
   }
-}
 
-function createEmptyDocumentSession(loadVersion: number): DocumentSession {
-  return {
-    document: null,
-    markdown: "",
-    savedMarkdown: "",
-    isDirty: false,
-    isLoading: false,
-    saveState: "idle",
-    loadVersion,
-    lastDraftMarkdown: "",
-    baseFingerprint: null,
-    conflictStatus: "none",
-    diskChanged: false,
-    hasRecoveredDraft: false,
-    draftUpdatedAt: null,
-  };
-}
+  async function checkOpenDocumentSync() {
+    const documents = Object.entries(documentSessions)
+      .filter(([, session]) => session.document && !session.isLoading)
+      .map(([documentId, session]) => ({
+        documentId,
+        baseFingerprint: session.baseFingerprint,
+      }));
+    if (documents.length === 0) return;
 
-function updateSession(
-  sessions: Record<string, DocumentSession>,
-  documentId: string,
-  patch: Partial<DocumentSession>,
-): Record<string, DocumentSession> {
-  const session = sessions[documentId];
-  if (!session) return sessions;
-  return {
-    ...sessions,
-    [documentId]: {
-      ...session,
-      ...patch,
-    },
-  };
-}
+    try {
+      const response = await getDocumentsSyncStatus(documents);
+      const cleanChangedDocumentIds = response.documents
+        .filter((status) => {
+          if (!status.diskChanged) return false;
+          const session = documentSessions[status.documentId];
+          return Boolean(session && !session.isDirty && !session.hasRecoveredDraft && !status.hasDraft);
+        })
+        .map((status) => status.documentId);
 
-function shouldPersistDraft(session: DocumentSession) {
-  return Boolean(
-    session.document &&
-    !session.isLoading &&
-    session.isDirty &&
-    session.markdown !== session.lastDraftMarkdown,
-  );
-}
+      setDocumentSessions((currentSessions) => {
+        let nextSessions = currentSessions;
+        for (const status of response.documents) {
+          const session = nextSessions[status.documentId];
+          if (!session) continue;
 
-function countWords(markdown: string) {
-  return markdown.trim().split(/\s+/).filter(Boolean).length;
+          const patch: Partial<DocumentSession> = {};
+          if (!status.exists && status.orphaned) {
+            patch.orphaned = true;
+            patch.conflictStatus = "orphaned";
+            patch.isDirty = true;
+            patch.hasRecoveredDraft = true;
+          } else if (status.diskChanged) {
+            if (!session.isDirty && !session.hasRecoveredDraft && !status.hasDraft) continue;
+            patch.diskChanged = true;
+            patch.conflictStatus = "disk-changed";
+          } else if (!session.isDirty && status.currentFingerprint) {
+            patch.baseFingerprint = status.currentFingerprint;
+            patch.diskChanged = false;
+            patch.orphaned = false;
+            patch.conflictStatus = status.hasDraft ? "draft" : "none";
+          }
+
+          if (Object.keys(patch).length > 0) {
+            nextSessions = updateSession(nextSessions, status.documentId, patch);
+          }
+        }
+        return nextSessions;
+      });
+
+      for (const documentId of cleanChangedDocumentIds) {
+        void loadDocumentSession(documentId, true);
+      }
+    } catch (error) {
+      showError(error, "No se pudo comprobar el estado de sincronización de los documentos.");
+    }
+  }
+
+  async function refreshOrphanDrafts() {
+    try {
+      setOrphanDrafts(await listOrphanDrafts());
+    } catch (error) {
+      showError(error, "No se pudieron cargar los borradores recuperables.");
+    }
+  }
+
+  async function handleRestoreOrphanDraft(draft: OrphanDraft) {
+    try {
+      const restored = await restoreOrphanDraft(draft.draftKey);
+      setOrphanDrafts((currentDrafts) => currentDrafts.filter((currentDraft) => currentDraft.draftKey !== draft.draftKey));
+      if (activeProject?.id === restored.document.projectId) {
+        setTree(await getProjectTree(restored.document.projectId));
+      }
+      openOrReplaceTab(restored.document.id, restored.document.name);
+      setDocumentSessions((currentSessions) => ({
+        ...currentSessions,
+        [restored.document.id]: {
+          document: restored.document,
+          markdown: restored.document.markdown,
+          savedMarkdown: restored.document.markdown,
+          isDirty: false,
+          isLoading: false,
+          saveState: "idle",
+          loadVersion: 0,
+          lastDraftMarkdown: "",
+          baseFingerprint: restored.document.baseFingerprint,
+          conflictStatus: "none",
+          diskChanged: false,
+          orphaned: false,
+          hasRecoveredDraft: false,
+          draftUpdatedAt: null,
+        },
+      }));
+      setRecoverableDraftsOpen(false);
+    } catch (error) {
+      showError(error, "No se pudo recrear el archivo desde el borrador.");
+    }
+  }
+
+  async function handleDiscardOrphanDraft(draftKey: string) {
+    try {
+      await discardOrphanDraft(draftKey);
+      setOrphanDrafts((currentDrafts) => currentDrafts.filter((draft) => draft.draftKey !== draftKey));
+    } catch (error) {
+      showError(error, "No se pudo descartar el borrador recuperable.");
+    }
+  }
 }
 
 function getUniqueFolderName(nodes: DocumentTreeNode[]) {
@@ -1079,13 +1400,91 @@ function AppNoticeBanner({ notice, onClose }: { notice: AppNotice | null; onClos
       <div className="flex items-start gap-3">
         <span className={["mt-1 h-2 w-2 shrink-0 rounded-full", toneClasses.dot].join(" ")} />
         <div className="min-w-0 flex-1">
-          <p className="text-[13px] font-semibold text-ink-primary">{notice.title}</p>
-          <p className="mt-1 text-[12px] leading-5 text-ink-secondary">{notice.message}</p>
+          <p className="text-[11px] font-semibold text-ink-primary">{notice.title}</p>
+          <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{notice.message}</p>
         </div>
-        <button className="rounded px-2 py-1 text-[12px] text-ink-secondary hover:bg-panel" onClick={onClose}>
+        <button className="rounded px-2 py-1 text-[11px] text-ink-secondary hover:bg-panel" onClick={onClose}>
           Cerrar
         </button>
       </div>
+    </div>
+  );
+}
+
+function GithubLoginDialog({
+  open,
+  state,
+  device,
+  error,
+  onClose,
+  onStart,
+  onOpenGithub,
+  onPoll,
+}: {
+  open: boolean;
+  state: GithubLoginState;
+  device: GithubDeviceStartResponse | null;
+  error: string | null;
+  onClose: () => void;
+  onStart: () => void;
+  onOpenGithub: () => void;
+  onPoll: () => void;
+}) {
+  if (!open) return null;
+
+  const busy = state === "starting";
+  return (
+    <div className="fixed inset-0 z-[95] grid place-items-center bg-black/20">
+      <section className="w-[460px] rounded-lg border border-line bg-white shadow-menu">
+        <header className="border-b border-line px-5 py-4">
+          <h2 className="text-[15px] font-semibold">Conectar GitHub</h2>
+          <p className="mt-1 text-[11px] leading-5 text-ink-secondary">
+            La cuenta GitHub activa el historial versionado, la sincronización manual y los proyectos conectados a repositorios.
+          </p>
+        </header>
+        <div className="space-y-4 px-5 py-5 text-[11px] text-ink-secondary">
+          {device ? (
+            <>
+              <div className="rounded-md border border-line bg-panel px-3 py-3">
+                <div className="text-[10px] uppercase text-ink-secondary">Código de verificación</div>
+                <div className="mt-1 font-mono text-[22px] font-semibold tracking-normal text-ink-primary">{device.userCode}</div>
+              </div>
+              <p>Abre GitHub, introduce el código y vuelve aquí para confirmar la conexión.</p>
+              {device.mock ? (
+                <p className="rounded-md border border-orange-200 bg-brand-hover px-3 py-2">
+                  Modo desarrollo: no hay `KNOWNEXT_GITHUB_CLIENT_ID`, así que la autorización se completará con una cuenta mock.
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <p>Inicia el flujo de dispositivo para autorizar KnowNext.ai desde GitHub.</p>
+          )}
+          {error ? <p className="text-red-700">{error}</p> : null}
+        </div>
+        <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
+          <button className="h-9 rounded-md border border-line px-4 text-[11px] hover:bg-panel" onClick={onClose}>
+            Cerrar
+          </button>
+          {!device ? (
+            <button
+              className="h-9 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-60"
+              disabled={busy}
+              onClick={onStart}
+            >
+              {busy ? "Preparando" : "Iniciar login"}
+            </button>
+          ) : (
+            <>
+              <button className="h-9 rounded-md border border-brand-orange px-4 text-[11px] font-semibold text-brand-orange hover:bg-brand-hover" onClick={onOpenGithub}>
+                Abrir GitHub
+              </button>
+              <button className="h-9 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark" onClick={onPoll}>
+                Ya autoricé
+              </button>
+            </>
+          )}
+        </footer>
+      </section>
     </div>
   );
 }
@@ -1116,28 +1515,28 @@ function UpdateAvailableDialog({
       <section className="w-[460px] rounded-lg border border-line bg-white shadow-menu">
         <header className="border-b border-line px-5 py-4">
           <h2 className="text-[15px] font-semibold">Actualización disponible</h2>
-          <p className="mt-1 text-[12px] text-ink-secondary">
+          <p className="mt-1 text-[11px] text-ink-secondary">
             KnowNext.ai v{update.version} está lista para instalar.
           </p>
         </header>
-        <div className="space-y-4 px-5 py-5 text-[13px] text-ink-secondary">
+        <div className="space-y-4 px-5 py-5 text-[11px] text-ink-secondary">
           <div className="flex items-center justify-between rounded-md border border-line bg-panel px-3 py-2">
             <span>Versión instalada</span>
-            <span className="font-mono text-[12px] text-ink-primary">v{update.currentVersion}</span>
+            <span className="font-mono text-[11px] text-ink-primary">v{update.currentVersion}</span>
           </div>
           <div className="flex items-center justify-between rounded-md border border-orange-200 bg-brand-hover px-3 py-2">
             <span>Nueva versión</span>
-            <span className="font-mono text-[12px] font-semibold text-brand-orange">v{update.version}</span>
+            <span className="font-mono text-[11px] font-semibold text-brand-orange">v{update.version}</span>
           </div>
-          {releaseDate ? <p className="text-[12px]">Publicada el {releaseDate}.</p> : null}
+          {releaseDate ? <p className="text-[11px]">Publicada el {releaseDate}.</p> : null}
           {update.notes ? (
-            <div className="max-h-28 overflow-y-auto rounded-md border border-line bg-white px-3 py-2 text-[12px] leading-5">
+            <div className="max-h-28 overflow-y-auto rounded-md border border-line bg-white px-3 py-2 text-[11px] leading-5">
               {update.notes}
             </div>
           ) : null}
           {busy ? (
             <div>
-              <div className="flex items-center justify-between text-[12px]">
+              <div className="flex items-center justify-between text-[11px]">
                 <span>{state === "installing" ? "Instalando" : "Descargando"}</span>
                 <span>{progressLabel}</span>
               </div>
@@ -1149,18 +1548,18 @@ function UpdateAvailableDialog({
               </div>
             </div>
           ) : null}
-          {error ? <p className="text-[12px] text-red-700">{error}</p> : null}
+          {error ? <p className="text-[11px] text-red-700">{error}</p> : null}
         </div>
         <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
           <button
-            className="h-9 rounded-md border border-line px-4 text-[13px] hover:bg-panel disabled:cursor-not-allowed disabled:opacity-60"
+            className="h-9 rounded-md border border-line px-4 text-[11px] hover:bg-panel disabled:cursor-not-allowed disabled:opacity-60"
             disabled={busy}
             onClick={onClose}
           >
             Más tarde
           </button>
           <button
-            className="h-9 rounded-md bg-brand-orange px-4 text-[13px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
+            className="h-9 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
             disabled={busy}
             onClick={onInstall}
           >
@@ -1170,17 +1569,6 @@ function UpdateAvailableDialog({
       </section>
     </div>
   );
-}
-
-function formatDateTime(value: string) {
-  try {
-    return new Intl.DateTimeFormat("es", {
-      dateStyle: "short",
-      timeStyle: "short",
-    }).format(new Date(value));
-  } catch {
-    return value;
-  }
 }
 
 function CloseDirtyDocumentDialog({
@@ -1203,25 +1591,114 @@ function CloseDirtyDocumentDialog({
       <section className="w-[430px] rounded-lg border border-line bg-white shadow-menu">
         <header className="border-b border-line px-5 py-4">
           <h2 className="text-[15px] font-semibold">Cerrar documento con cambios</h2>
-          <p className="mt-1 truncate text-[12px] text-ink-secondary">{documentName}</p>
+          <p className="mt-1 truncate text-[11px] text-ink-secondary">{documentName}</p>
         </header>
-        <div className="px-5 py-5 text-[13px] leading-5 text-ink-secondary">
+        <div className="px-5 py-5 text-[11px] leading-5 text-ink-secondary">
           El documento tiene cambios pendientes de guardar en disco. Puedes guardarlos, descartar el borrador interno o cancelar el cierre.
         </div>
         <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
-          <button className="h-9 rounded-md border border-line px-4 text-[13px] hover:bg-panel" onClick={onCancel}>
+          <button className="h-9 rounded-md border border-line px-4 text-[11px] hover:bg-panel" onClick={onCancel}>
             Cancelar
           </button>
-          <button className="h-9 rounded-md border border-line px-4 text-[13px] text-red-700 hover:bg-red-50" onClick={onDiscard}>
+          <button className="h-9 rounded-md border border-line px-4 text-[11px] text-red-700 hover:bg-red-50" onClick={onDiscard}>
             Descartar
           </button>
-          <button className="h-9 rounded-md bg-brand-orange px-4 text-[13px] font-semibold text-white hover:bg-brand-dark" onClick={onSave}>
+          <button className="h-9 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark" onClick={onSave}>
             Guardar
           </button>
         </footer>
       </section>
     </div>
   );
+}
+
+function RecoverableDraftsDialog({
+  open,
+  drafts,
+  onClose,
+  onRefresh,
+  onRestore,
+  onDiscard,
+}: {
+  open: boolean;
+  drafts: OrphanDraft[];
+  onClose: () => void;
+  onRefresh: () => void;
+  onRestore: (draft: OrphanDraft) => void;
+  onDiscard: (draftKey: string) => void;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[90] grid place-items-center bg-black/20">
+      <section className="flex max-h-[72vh] w-[620px] flex-col rounded-lg border border-line bg-white shadow-menu">
+        <header className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
+          <div>
+            <h2 className="text-[15px] font-semibold">Borradores recuperables</h2>
+            <p className="mt-1 text-[11px] text-ink-secondary">Borradores internos cuyo archivo original ya no está disponible.</p>
+          </div>
+          <button className="rounded px-2 py-1 text-[11px] text-ink-secondary hover:bg-panel" onClick={onClose}>
+            Cerrar
+          </button>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          {drafts.length === 0 ? (
+            <div className="rounded-md border border-line bg-panel px-4 py-6 text-center text-[11px] text-ink-secondary">
+              No hay borradores huérfanos pendientes.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {drafts.map((draft) => (
+                <article key={draft.draftKey} className="rounded-md border border-line bg-white px-4 py-3">
+                  <div className="flex items-start gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[11px] font-semibold text-ink-primary">{draft.name}</p>
+                      <p className="mt-1 truncate text-[11px] text-ink-secondary">{draft.path}</p>
+                      <p className="mt-2 text-[11px] text-ink-secondary">
+                        {draft.wordCount} palabras · {formatDateTime(draft.draftUpdatedAt)}
+                        {!draft.recoverable && draft.reason ? ` · ${draft.reason}` : ""}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 gap-2">
+                      <button
+                        className="h-8 rounded-md border border-line px-3 text-[11px] text-red-700 hover:bg-red-50"
+                        onClick={() => onDiscard(draft.draftKey)}
+                      >
+                        Descartar
+                      </button>
+                      <button
+                        className="h-8 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
+                        disabled={!draft.recoverable}
+                        onClick={() => onRestore(draft)}
+                      >
+                        Recrear archivo
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
+        <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
+          <button className="h-9 rounded-md border border-line px-4 text-[11px] hover:bg-panel" onClick={onRefresh}>
+            Actualizar
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function formatDateTime(value: string) {
+  try {
+    return new Intl.DateTimeFormat("es", {
+      dateStyle: "short",
+      timeStyle: "short",
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
 }
 
 function areProjectTabsEqual(first: ProjectTabsConfig | undefined, second: ProjectTabsConfig) {
@@ -1305,13 +1782,13 @@ function MoveDocumentDialog({
       <section className="w-[420px] rounded-lg border border-line bg-white shadow-menu">
         <header className="border-b border-line px-5 py-4">
           <h2 className="text-[15px] font-semibold">Mover documento</h2>
-          <p className="mt-1 truncate text-[12px] text-ink-secondary">{node.name}</p>
+          <p className="mt-1 truncate text-[11px] text-ink-secondary">{node.name}</p>
         </header>
         <div className="px-5 py-5">
-          <label className="block text-[12px] font-medium text-ink-secondary">
+          <label className="block text-[11px] font-medium text-ink-secondary">
             Carpeta de destino
             <select
-              className="mt-2 h-10 w-full rounded-md border border-line bg-white px-3 text-[13px] text-ink-primary outline-none focus:border-brand-orange"
+              className="mt-2 h-10 w-full rounded-md border border-line bg-white px-3 text-[11px] text-ink-primary outline-none focus:border-brand-orange"
               value={targetFolderId}
               onChange={(event) => setTargetFolderId(event.target.value)}
             >
@@ -1325,11 +1802,11 @@ function MoveDocumentDialog({
           </label>
         </div>
         <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
-          <button className="h-9 rounded-md border border-line px-4 text-[13px] hover:bg-panel" onClick={onClose}>
+          <button className="h-9 rounded-md border border-line px-4 text-[11px] hover:bg-panel" onClick={onClose}>
             Cancelar
           </button>
           <button
-            className="h-9 rounded-md bg-brand-orange px-4 text-[13px] font-semibold text-white hover:bg-brand-dark"
+            className="h-9 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark"
             onClick={() => onMove(targetFolderId || null)}
           >
             Mover

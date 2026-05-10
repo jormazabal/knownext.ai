@@ -12,13 +12,18 @@ describe("ProjectActions", () => {
 
     render(
       <ProjectActions
-        appVersion="0.3.1"
+        appVersion="0.5.0"
+        authStatus={{ isAuthenticated: false, provider: null, user: null, scopes: [] }}
+        orphanDraftCount={0}
         isCheckingForUpdates={false}
+        onLoginGithub={vi.fn()}
+        onLogout={vi.fn()}
         onCreateFolder={vi.fn()}
         onCreateDocument={vi.fn()}
         onExpandTree={vi.fn()}
         onCollapseTree={vi.fn()}
         onConfigureProject={vi.fn()}
+        onOpenRecoverableDrafts={vi.fn()}
         onCheckForUpdates={onCheckForUpdates}
       />,
     );

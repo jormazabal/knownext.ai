@@ -70,7 +70,7 @@ export function DocumentTree({
   }
 
   return (
-    <div className="cursor-default space-y-0.5 text-[13px]" onScroll={() => setOpenMenu(null)}>
+    <div className="cursor-default text-[11px]" onScroll={() => setOpenMenu(null)}>
       <div>
         {nodes.length > 0 ? (
           nodes.map((node) => (
@@ -88,7 +88,7 @@ export function DocumentTree({
             />
           ))
         ) : (
-          <div className="px-3 py-2 text-[12px] leading-5 text-ink-secondary">
+          <div className="px-3 py-2 text-[11px] leading-5 text-ink-secondary">
             No hay documentos Markdown en esta carpeta.
           </div>
         )}
@@ -145,27 +145,27 @@ function TreeNode({
     <div>
       <div
         className={[
-          "tree-row group relative flex h-7 cursor-default select-none items-center rounded-md pr-2",
+          "tree-row group relative flex h-6 cursor-default select-none items-center rounded-md pr-1.5",
           isActive || hasOpenMenu ? "bg-brand-hover" : "hover:bg-brand-hover",
         ].join(" ")}
-        style={{ paddingLeft: 8 + depth * 20 }}
+        style={{ paddingLeft: 6 + depth * 18 }}
         onClick={() => {
           if (node.isEditing) return;
           if (isFolder) onToggleNode(node.id);
           if (!isFolder) onOpenDocument(node.id, node.name);
         }}
       >
-        <span className="mr-1 grid h-5 w-4 place-items-center">
+        <span className="mr-0.5 grid h-5 w-4 place-items-center">
           {isFolder ? (node.open ? <ChevronDown size={14} /> : <ChevronRight size={14} />) : null}
         </span>
         {isFolder ? (
-          <Folder size={15} className="mr-2 text-brand-orange" />
+          <Folder size={15} className="mr-1.5 text-brand-orange" />
         ) : (
-          <FileText size={14} className="mr-2 text-ink-secondary" />
+          <FileText size={14} className="mr-1.5 text-ink-secondary" />
         )}
         {node.isEditing ? (
           <input
-            className="min-w-0 flex-1 cursor-text rounded border border-brand-orange bg-white px-1 py-0.5 text-[13px] outline-none"
+            className="min-w-0 flex-1 cursor-text rounded border border-brand-orange bg-white px-1 py-0.5 text-[11px] outline-none"
             autoFocus
             defaultValue={node.name}
             onClick={(event) => event.stopPropagation()}
@@ -183,7 +183,7 @@ function TreeNode({
           <>
             <span className="min-w-0 flex-1 truncate">{node.name}</span>
             <button
-              className="grid h-6 w-6 place-items-center rounded-md opacity-0 hover:bg-white group-hover:opacity-100"
+              className="grid h-5 w-5 place-items-center rounded-md opacity-0 hover:bg-white group-hover:opacity-100"
               aria-label={`Abrir menú de ${node.name}`}
               onClick={(event) => event.stopPropagation()}
               onMouseEnter={(event) => onMenuEnter(node, event)}

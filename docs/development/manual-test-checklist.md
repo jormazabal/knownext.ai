@@ -6,11 +6,27 @@
 - [ ] Select Proyecto Beta or Proyecto Gamma.
 - [ ] Restart the app and confirm the selected project is restored from `projects.json`.
 - [ ] Confirm Nuevo proyecto is inside the selector dropdown.
-- [ ] Create a project and confirm it is present after restarting the app.
+- [ ] Open Nuevo proyecto and confirm the assistant shows Crear desde 0, Cargar carpeta, and Repo GitHub.
+- [ ] Without GitHub login, confirm Repo GitHub, Git local + sync, and GitHub versionado are visible but disabled with explanatory copy.
+- [ ] In Crear desde 0, type a new folder path that does not exist yet and confirm the project is created with that folder on disk.
+- [ ] Create a local files project without login and confirm it is present after restarting the app.
+- [ ] Confirm the history toolbar button is disabled in a local files project and the tooltip explains that history is unavailable.
+- [ ] Open the account menu and click Conectar GitHub.
+- [ ] Confirm the GitHub device login dialog shows a verification code and an Abrir GitHub action.
+- [ ] Complete the development/mock GitHub login and confirm the account menu changes to a connected GitHub user.
+- [ ] Reopen Nuevo proyecto and confirm Git local + sync and GitHub versionado are enabled after login.
+- [ ] In Repo GitHub mode, refresh the repository list and confirm selecting a repository fills owner, repo, and project name.
+- [ ] Create a GitHub versionado project from a repository and confirm the local cache loads Markdown documents when network and permissions allow it.
+- [ ] In a GitHub versionado project, change the same document on GitHub before creating a local version and confirm KnowNext.ai blocks the version with a remote conflict message.
+- [ ] Create a Git local + sync project and confirm the status bar shows a versioning state instead of Sin historial.
 - [ ] Inspect the folder/document tree levels and confirm they match the active project's local folder.
 - [ ] Confirm only Markdown documents and folders are shown in the navigation tree.
 - [ ] Drag the divider next to the folder/document tree and confirm the panel width changes with a visible vertical resize line.
 - [ ] Restart the app and confirm the folder/document tree width is restored from `config.json`.
+- [ ] Resize the app to a tablet/mobile width and confirm the folder/document tree becomes a left drawer opened by the icon to the left of the document tabs.
+- [ ] In tablet/mobile width, open the document drawer and confirm the top-right icon inside the drawer hides it.
+- [ ] In tablet/mobile width, open a document from the drawer and confirm the drawer closes while the selected document tab remains active.
+- [ ] In tablet/mobile width, confirm the drawer closes when clicking outside it or pressing Escape.
 - [ ] Expand and collapse individual folder nodes.
 - [ ] Use Expandir árbol and Contraer árbol from the compact icon actions.
 - [ ] Click Configurar proyecto and confirm the edit project dialog opens with the active project name, folder, icon, and color already filled.
@@ -41,34 +57,38 @@
 - [ ] Edit a document, do not save, close the browser/app, reopen it, and confirm the document appears with Borrador recuperado and remains pending save to disk.
 - [ ] Confirm draft files are created only under the KnowNext.ai app data directory and not inside the project documentation folder.
 - [ ] Edit a document, let the draft autosave, change the same file on disk externally, return to KnowNext.ai, and confirm the conflict warning offers Cargar disco and Mantener mi versión.
+- [ ] With the app still open, change a document externally and confirm the conflict appears after the sync polling interval or after refocusing the window.
+- [ ] Delete an edited document externally and confirm the active document shows Archivo no encontrado and allows recreating from the local draft.
 - [ ] Resolve a conflict with Cargar disco and confirm the draft is discarded.
 - [ ] Resolve a conflict with Mantener mi versión and confirm the draft is written to the real Markdown file.
+- [ ] Open the account menu, choose Borradores recuperables, and confirm orphan drafts are listed with route, date, word count, Recrear archivo, and Descartar.
+- [ ] Restore an orphan draft and confirm the file is recreated, the tree refreshes, and the document opens.
+- [ ] Try restoring an orphan draft after recreating the original file externally and confirm KnowNext.ai refuses to overwrite it.
 - [ ] Stop the FastAPI backend while using the browser build and confirm API failures are visible in the UI instead of silently showing mock data.
-- [ ] Open the version history panel.
+- [ ] Without GitHub login, switch to a versioned project and confirm the history button is disabled with Historial requiere GitHub.
+- [ ] With GitHub login, open the version history panel on a versioned project.
+- [ ] Click Crear versión and confirm either a new version is created or a clear no-changes/provider error appears.
+- [ ] In a Git local + sync project, use Traer cambios and Subir cambios from the history panel and confirm status feedback is visible.
 - [ ] Drag the divider next to the version history panel and confirm the panel width changes with a visible vertical resize line.
 - [ ] Restart the app, open history, and confirm the history panel width is restored from `config.json`.
+- [ ] In tablet/mobile width, open version history and confirm it appears as a floating right drawer over the editor without a resize divider.
+- [ ] In tablet/mobile width, confirm version history closes from its X button, by clicking outside it, and by pressing Escape.
 - [ ] Confirm latest version appears first and has Actual.
 - [ ] Close the version history panel.
 - [ ] Write text in the AI prompt input.
 - [ ] Submit the prompt.
 - [ ] Submit the AI prompt with no document open and confirm it is accepted as a project documentation prompt.
-- [ ] Hover over Ana Domínguez and confirm the account menu appears with icon and text options.
+- [ ] Hover over the account area and confirm the account menu appears with GitHub login/logout, recoverable drafts, and update actions.
+- [ ] Log out from GitHub and confirm versioned project history is disabled without removing local project files.
 - [ ] Confirm the account menu shows the current application version.
-- [ ] Click Buscar actualizaciones from the account menu while no update is available and confirm the app remains usable.
-- [ ] Install the previous packaged release, publish a higher GitHub release, and confirm Buscar actualizaciones detects the new version.
-- [ ] Confirm the update dialog shows the new version, release date or notes when available, and Actualizar / Más tarde actions.
-- [ ] Edit a document without saving, start the update, and confirm pending drafts are saved before installation continues.
-- [ ] Complete the update and confirm the app relaunches with the new visible version.
-- [ ] Confirm the published `latest.json` version matches `VERSION` and points Windows updates to the MSI artifact.
-- [ ] Confirm the README Windows download link resolves to the current NSIS `.exe` installer.
-- [ ] Confirm the updated Windows app opens without a separate terminal window.
-- [ ] Confirm the custom Windows title bar buttons minimize, maximize or restore, and close the app.
-- [ ] Confirm dragging the top title area moves the frameless app window.
-- [ ] Confirm dragging the top edge reduces and expands the frameless app window height.
-- [ ] Confirm dragging each app window edge and corner resizes the frameless app window.
-- [ ] Confirm the MSI update replaces the installed `knownext-ai-desktop.exe` while the previous app version is running.
-- [ ] Confirm documents, projects, drafts, tabs, panel widths, and local configuration remain intact after the update.
-- [ ] Disable network access or publish a build with an invalid updater signature in a disposable test release and confirm the app does not get blocked.
+- [ ] In the installed Tauri app, open the account menu and click Buscar actualizaciones.
+- [ ] With no newer release available, confirm the app reports that the installed version is current.
+- [ ] Publish a disposable newer Windows release and confirm the installed previous version detects it.
+- [ ] Confirm the update dialog shows installed version, new version, release notes when present, Actualizar, and Más tarde.
+- [ ] Start the update with edited documents open and confirm pending drafts are persisted before installation starts.
+- [ ] Confirm the updater downloads, installs, relaunches the app, and the visible app version changes.
+- [ ] Confirm projects, open tabs, local config, documents, and internal drafts remain intact after relaunch.
+- [ ] Temporarily break the updater signature or latest.json in a disposable release and confirm KnowNext.ai shows a recoverable update error without blocking editing.
 - [ ] Confirm no Git branch name is shown anywhere.
 - [ ] Confirm no blue primary action is present.
 - [ ] Corrupt `config.json` in a disposable test profile, restart the backend, and confirm a `config.json.corrupt-*` backup is created.

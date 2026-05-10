@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,6 +31,7 @@ def _fingerprint_dict(fingerprint: DocumentFingerprint | dict[str, Any] | None) 
 
 class DraftService:
     schema_version = 1
+    draft_key_pattern = re.compile(r"^[a-f0-9]{64}$")
 
     @property
     def drafts_dir(self) -> Path:
@@ -66,6 +68,36 @@ class DraftService:
 
         return data
 
+    def get_draft_by_key(self, draft_key: str) -> dict[str, Any] | None:
+        if not self._is_valid_draft_key(draft_key):
+            return None
+        path = self.drafts_dir / f"{draft_key}.json"
+        if not path.exists():
+            return None
+
+        try:
+            with path.open("r", encoding="utf-8") as file:
+                data = json.load(file)
+        except (OSError, json.JSONDecodeError):
+            self._move_corrupt(path)
+            return None
+
+        if not isinstance(data, dict) or not isinstance(data.get("documentId"), str) or not self._is_valid_draft(data, data["documentId"]):
+            self._move_corrupt(path)
+            return None
+
+        return data
+
+    def list_drafts(self) -> list[dict[str, Any]]:
+        self.run_maintenance()
+        drafts: list[dict[str, Any]] = []
+        for path in sorted(self.drafts_dir.glob("*.json")):
+            draft_key = path.stem
+            draft = self.get_draft_by_key(draft_key)
+            if draft is not None:
+                drafts.append({**draft, "draftKey": draft_key})
+        return drafts
+
     def save_draft(
         self,
         *,
@@ -98,6 +130,16 @@ class DraftService:
             path.unlink()
         except FileNotFoundError:
             pass
+
+    def delete_draft_by_key(self, draft_key: str) -> bool:
+        if not self._is_valid_draft_key(draft_key):
+            return False
+        path = self.drafts_dir / f"{draft_key}.json"
+        try:
+            path.unlink()
+            return True
+        except FileNotFoundError:
+            return False
 
     def migrate_draft(self, old_document_id: str, new_document_id: str) -> None:
         draft = self.get_draft(old_document_id)
@@ -135,6 +177,9 @@ class DraftService:
     def _draft_path(self, document_id: str) -> Path:
         digest = hashlib.sha256(document_id.encode("utf-8")).hexdigest()
         return self.drafts_dir / f"{digest}.json"
+
+    def _is_valid_draft_key(self, draft_key: str) -> bool:
+        return bool(self.draft_key_pattern.fullmatch(draft_key))
 
     def _write_draft(self, document_id: str, data: dict[str, Any]) -> None:
         self.drafts_dir.mkdir(parents=True, exist_ok=True)

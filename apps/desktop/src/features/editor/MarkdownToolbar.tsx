@@ -22,7 +22,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { MouseEvent } from "react";
-import type { MarkdownEditorAction, MarkdownEditorFormatState } from "./editorCommands";
+import type { MarkdownEditorAction, MarkdownEditorFormatState } from "./editorTypes";
 
 const leftTools = [
   { label: "Texto normal", icon: Pilcrow, action: "paragraph" },
@@ -47,6 +47,7 @@ const leftTools = [
 type MarkdownToolbarProps = {
   historyOpen: boolean;
   historyEnabled: boolean;
+  historyDisabledReason: string;
   editorReady: boolean;
   activeActions: MarkdownEditorFormatState;
   onRunEditorAction: (action: MarkdownEditorAction) => void;
@@ -56,6 +57,7 @@ type MarkdownToolbarProps = {
 export function MarkdownToolbar({
   historyOpen,
   historyEnabled,
+  historyDisabledReason,
   editorReady,
   activeActions,
   onRunEditorAction,
@@ -66,13 +68,13 @@ export function MarkdownToolbar({
   }
 
   return (
-    <div className="flex h-[58px] shrink-0 items-center border-b border-line bg-white px-7">
-      <div className="flex items-center gap-2">
+    <div className="flex h-9 shrink-0 items-center border-b border-line bg-white px-3">
+      <div className="flex items-center gap-0.5">
         {leftTools.map((tool, index) => {
           const active = Boolean(activeActions[tool.action]);
 
           return (
-            <div key={tool.label} className="flex items-center gap-2">
+            <div key={tool.label} className="flex items-center gap-0.5">
               <button
                 className={`toolbar-button ${active ? "toolbar-button-active" : ""} ${editorReady ? "" : "opacity-40"}`}
                 data-tooltip={tool.label}
@@ -82,24 +84,24 @@ export function MarkdownToolbar({
                 onMouseDown={keepEditorSelection}
                 onClick={() => onRunEditorAction(tool.action)}
               >
-                <tool.icon size={18} />
+                <tool.icon size={15} />
               </button>
-              {[3, 7, 10, 12, 16].includes(index) ? <span className="mx-1 h-7 border-l border-line" /> : null}
+              {[3, 7, 10, 12, 16].includes(index) ? <span className="mx-1 h-5 border-l border-line" /> : null}
             </div>
           );
         })}
         <button
           className={`toolbar-button ml-1 ${historyOpen ? "border-brand-orange text-brand-orange" : ""} ${historyEnabled ? "" : "opacity-40"}`}
-          data-tooltip={historyEnabled ? "Histórico de versiones" : "Historial no disponible: la carpeta no está asociada a Git"}
+          data-tooltip={historyEnabled ? "Histórico de versiones" : historyDisabledReason}
           aria-label="Histórico de versiones"
           onMouseDown={keepEditorSelection}
           onClick={historyEnabled ? onToggleHistory : undefined}
           disabled={!historyEnabled}
         >
-          <History size={18} />
+          <History size={15} />
         </button>
       </div>
-      <div className="ml-auto flex items-center gap-3">
+      <div className="ml-auto flex items-center gap-1">
         <button
           className={`toolbar-button ${editorReady ? "" : "opacity-40"}`}
           data-tooltip="Deshacer"
@@ -108,7 +110,7 @@ export function MarkdownToolbar({
           onMouseDown={keepEditorSelection}
           onClick={() => onRunEditorAction("undo")}
         >
-          <Undo2 size={18} />
+          <Undo2 size={15} />
         </button>
         <button
           className={`toolbar-button ${editorReady ? "" : "opacity-40"}`}
@@ -118,7 +120,7 @@ export function MarkdownToolbar({
           onMouseDown={keepEditorSelection}
           onClick={() => onRunEditorAction("redo")}
         >
-          <Redo2 size={18} />
+          <Redo2 size={15} />
         </button>
       </div>
     </div>

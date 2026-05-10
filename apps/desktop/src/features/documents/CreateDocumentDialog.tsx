@@ -40,20 +40,20 @@ export function CreateDocumentDialog({ open, onClose, onCreate }: CreateDocument
           </button>
         </header>
         <div className="space-y-4 px-5 py-5">
-          <label className="block text-[12px] font-medium text-ink-secondary">
+          <label className="block text-[11px] font-medium text-ink-secondary">
             Nombre del documento
             <input
-              className="mt-2 h-10 w-full rounded-md border border-line px-3 text-[13px] text-ink-primary outline-none focus:border-brand-orange"
+              className="mt-2 h-10 w-full rounded-md border border-line px-3 text-[11px] text-ink-primary outline-none focus:border-brand-orange"
               value={name}
               onChange={(event) => setName(event.target.value)}
               placeholder="ej. decisiones-arquitectura.md"
               autoFocus
             />
           </label>
-          <label className="block text-[12px] font-medium text-ink-secondary">
+          <label className="block text-[11px] font-medium text-ink-secondary">
             Plantilla
             <select
-              className="mt-2 h-10 w-full rounded-md border border-line bg-white px-3 text-[13px] text-ink-primary outline-none focus:border-brand-orange"
+              className="mt-2 h-10 w-full rounded-md border border-line bg-white px-3 text-[11px] text-ink-primary outline-none focus:border-brand-orange"
               value={template}
               onChange={(event) => setTemplate(event.target.value)}
             >
@@ -66,10 +66,10 @@ export function CreateDocumentDialog({ open, onClose, onCreate }: CreateDocument
           </label>
         </div>
         <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
-          <button className="h-9 rounded-md border border-line px-4 text-[13px] hover:bg-panel" onClick={onClose}>
+          <button className="h-9 rounded-md border border-line px-4 text-[11px] hover:bg-panel" onClick={onClose}>
             Cancelar
           </button>
-          <button className="h-9 rounded-md bg-brand-orange px-4 text-[13px] font-semibold text-white hover:bg-brand-dark" onClick={handleCreate}>
+          <button className="h-9 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark" onClick={handleCreate}>
             Crear documento
           </button>
         </footer>

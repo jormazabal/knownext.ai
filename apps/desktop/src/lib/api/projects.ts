@@ -1,6 +1,6 @@
 import { documentTree, projects } from "../mockData";
 import { isBackendEnabled, mockDelay, requestJson } from "./client";
-import type { DocumentTreeNode, FileOperationResult, Project, ProjectPayload } from "../../types/domain";
+import type { DocumentTreeNode, FileOperationResult, Project, ProjectCapabilities, ProjectPayload, ProjectVersioningStatus } from "../../types/domain";
 
 export async function listProjects(): Promise<Project[]> {
   if (isBackendEnabled()) {
@@ -21,6 +21,52 @@ export async function getProjectTree(projectId: string): Promise<DocumentTreeNod
     return requestJson<DocumentTreeNode[]>(`/api/projects/${projectId}/tree`);
   }
   return mockDelay(documentTree);
+}
+
+export async function getProjectCapabilities(): Promise<ProjectCapabilities> {
+  if (isBackendEnabled()) {
+    return requestJson<ProjectCapabilities>("/api/projects/capabilities");
+  }
+  return mockDelay({
+    canCreateLocalProject: true,
+    canOpenLocalFolder: true,
+    canUseLocalGit: false,
+    canConnectGithub: false,
+    canUseGithubApi: false,
+    requiresGithubLoginForVersioning: true,
+  });
+}
+
+export async function getProjectVersioningStatus(projectId: string): Promise<ProjectVersioningStatus> {
+  if (isBackendEnabled()) {
+    return requestJson<ProjectVersioningStatus>(`/api/projects/${projectId}/versioning/status`);
+  }
+  const project = projects.find((currentProject) => currentProject.id === projectId);
+  return mockDelay({
+    enabled: Boolean(project && project.versioningMode !== "none"),
+    available: false,
+    reason: project?.versioningMode === "none" ? null : "github-login-required",
+    storageMode: project?.storageMode ?? "local-files",
+    versioningMode: project?.versioningMode ?? "none",
+    syncMode: project?.syncMode ?? "none",
+    statusLabel: project?.versioningMode === "none" ? "Sin historial" : "Historial requiere GitHub",
+    hasLocalChanges: false,
+    hasRemoteChanges: false,
+  });
+}
+
+export async function pullProject(projectId: string): Promise<{ status: string; message: string }> {
+  if (isBackendEnabled()) {
+    return requestJson<{ status: string; message: string }>(`/api/projects/${projectId}/sync/pull`, { method: "POST" });
+  }
+  return mockDelay({ status: "ok", message: "Proyecto actualizado" });
+}
+
+export async function pushProject(projectId: string): Promise<{ status: string; message: string }> {
+  if (isBackendEnabled()) {
+    return requestJson<{ status: string; message: string }>(`/api/projects/${projectId}/sync/push`, { method: "POST" });
+  }
+  return mockDelay({ status: "ok", message: "Cambios enviados" });
 }
 
 export async function createFolder(projectId: string, parentId: string | null, name: string): Promise<FileOperationResult> {
@@ -108,7 +154,8 @@ export async function createProject(payload: ProjectPayload): Promise<Project> {
     ...payload,
     id: `project-${crypto.randomUUID()}`,
     active: true,
-    isGitRepository: false,
+    authRequired: payload.versioningMode !== "none",
+    isGitRepository: payload.versioningMode === "local-git",
   });
 }
 
@@ -126,8 +173,15 @@ export async function updateProject(projectId: string, payload: ProjectPayload):
       id: projectId,
       active: false,
       isGitRepository: false,
+      authRequired: false,
+      storageMode: "local-files",
+      versioningMode: "none",
+      syncMode: "none",
+      githubRepository: null,
     }),
     ...payload,
+    authRequired: payload.versioningMode !== "none",
+    isGitRepository: payload.versioningMode === "local-git",
   });
 }
 

@@ -11,6 +11,7 @@ describe("MarkdownToolbar", () => {
       <MarkdownToolbar
         historyOpen={false}
         historyEnabled
+        historyDisabledReason="Historial no disponible"
         editorReady
         activeActions={{
           "heading-2": true,

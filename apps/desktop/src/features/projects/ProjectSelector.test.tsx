@@ -2,14 +2,20 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ProjectSelector } from "./ProjectSelector";
+import type { Project } from "../../types/domain";
 
-const projects = [
+const projects: Project[] = [
   {
     id: "project-alpha",
     name: "Proyecto Alpha",
     folderPath: "C:\\Documentacion\\Proyecto Alpha",
     icon: "book",
     iconColor: "#F37021",
+    storageMode: "local-files",
+    versioningMode: "local-git",
+    syncMode: "none",
+    authRequired: true,
+    githubRepository: null,
     isGitRepository: true,
     active: true,
   },
@@ -19,6 +25,11 @@ const projects = [
     folderPath: "C:\\Documentacion\\Proyecto Beta",
     icon: "folder",
     iconColor: "#7C3AED",
+    storageMode: "local-files",
+    versioningMode: "none",
+    syncMode: "none",
+    authRequired: false,
+    githubRepository: null,
     isGitRepository: false,
   },
   {
@@ -27,6 +38,11 @@ const projects = [
     folderPath: "C:\\Documentacion\\Proyecto Gamma",
     icon: "folder",
     iconColor: "#059669",
+    storageMode: "local-files",
+    versioningMode: "local-git",
+    syncMode: "manual-github",
+    authRequired: true,
+    githubRepository: null,
     isGitRepository: true,
   },
 ];
