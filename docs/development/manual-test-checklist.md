@@ -59,6 +59,8 @@
 - [ ] Confirm the update dialog shows the new version, release date or notes when available, and Actualizar / Más tarde actions.
 - [ ] Edit a document without saving, start the update, and confirm pending drafts are saved before installation continues.
 - [ ] Complete the update and confirm the app relaunches with the new visible version.
+- [ ] Confirm the published `latest.json` version matches `VERSION` and points Windows updates to the MSI artifact.
+- [ ] Confirm the README Windows download link resolves to the current NSIS `.exe` installer.
 - [ ] Confirm the updated Windows app opens without a separate terminal window.
 - [ ] Confirm the custom Windows title bar buttons minimize, maximize or restore, and close the app.
 - [ ] Confirm dragging the top title area moves the frameless app window.
