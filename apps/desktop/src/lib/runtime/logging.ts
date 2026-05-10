@@ -19,11 +19,25 @@ type TauriWindow = Window & {
 };
 
 export async function getTraceLogStatus() {
+  if (isTauriRuntime()) {
+    return invoke<TraceLogStatus>("get_trace_log_status");
+  }
+
   return requestRuntimeJson<TraceLogStatus>("/api/runtime/logging");
 }
 
 export async function recordTraceLog(payload: TraceLogPayload) {
   try {
+    if (isTauriRuntime()) {
+      await invoke<TraceLogStatus>("record_trace_log", {
+        level: payload.level ?? "error",
+        source: payload.source,
+        message: payload.message,
+        detail: payload.detail ?? null,
+      });
+      return;
+    }
+
     await requestRuntimeJson<TraceLogStatus>("/api/runtime/logging", {
       method: "POST",
       body: JSON.stringify({

@@ -1,19 +1,40 @@
 import { Check, ChevronDown, Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { Project } from "../../types/domain";
+import type { AppearanceConfig, Project } from "../../types/domain";
 import { getProjectIcon } from "./projectVisuals";
 
 type ProjectSelectorProps = {
   projects: Project[];
   activeProject: Project | null;
+  language?: AppearanceConfig["language"];
   onSelectProject: (project: Project) => void;
   onCreateProject: () => void;
 };
 
-export function ProjectSelector({ projects, activeProject, onSelectProject, onCreateProject }: ProjectSelectorProps) {
+const copy = {
+  es: {
+    firstProjectTitle: "Crea tu primer proyecto",
+    firstProjectDescription: "Crea tu primer proyecto para empezar a trabajar con documentación Markdown en KnowNext.ai.",
+    addFirstProject: "Añadir primer proyecto",
+    currentProject: "PROYECTO ACTUAL",
+    noActiveProject: "Sin proyecto activo",
+    newProject: "Nuevo proyecto",
+  },
+  en: {
+    firstProjectTitle: "Create your first project",
+    firstProjectDescription: "Create your first project to start working with Markdown documentation in KnowNext.ai.",
+    addFirstProject: "Add first project",
+    currentProject: "CURRENT PROJECT",
+    noActiveProject: "No active project",
+    newProject: "New project",
+  },
+};
+
+export function ProjectSelector({ projects, activeProject, language = "es", onSelectProject, onCreateProject }: ProjectSelectorProps) {
   const [open, setOpen] = useState(false);
   const firstProjectButtonRef = useRef<HTMLButtonElement | null>(null);
   const ActiveProjectIcon = getProjectIcon(activeProject?.icon);
+  const text = copy[language];
 
   useEffect(() => {
     if (projects.length === 0) firstProjectButtonRef.current?.focus();
@@ -22,9 +43,9 @@ export function ProjectSelector({ projects, activeProject, onSelectProject, onCr
   if (projects.length === 0) {
     return (
       <div className="rounded-md border border-line bg-white px-3 py-3 shadow-[0_1px_2px_rgba(17,24,39,0.03)]">
-        <div className="text-[11px] font-semibold text-ink-primary">Crea tu primer proyecto</div>
+        <div className="text-[11px] font-semibold text-ink-primary">{text.firstProjectTitle}</div>
         <p className="mt-1 text-[11px] leading-4 text-ink-secondary">
-          Crea tu primer proyecto para empezar a trabajar con documentación Markdown en KnowNext.ai.
+          {text.firstProjectDescription}
         </p>
         <button
           ref={firstProjectButtonRef}
@@ -32,7 +53,7 @@ export function ProjectSelector({ projects, activeProject, onSelectProject, onCr
           onClick={onCreateProject}
         >
           <Plus size={15} />
-          Añadir primer proyecto
+          {text.addFirstProject}
         </button>
       </div>
     );
@@ -41,7 +62,7 @@ export function ProjectSelector({ projects, activeProject, onSelectProject, onCr
   return (
     <div className="relative w-full">
       <div className="mb-1.5 text-[11px] font-medium uppercase tracking-normal text-ink-primary">
-        PROYECTO ACTUAL
+        {text.currentProject}
       </div>
       <button
         className="flex h-8 w-full items-center justify-between rounded-md border border-line bg-white px-2.5 text-[11px] shadow-[0_1px_2px_rgba(17,24,39,0.03)]"
@@ -49,7 +70,7 @@ export function ProjectSelector({ projects, activeProject, onSelectProject, onCr
       >
         <span className="flex min-w-0 items-center gap-2">
           <ActiveProjectIcon size={15} style={{ color: activeProject?.iconColor ?? "#F37021" }} />
-          <span className="truncate">{activeProject?.name ?? "Sin proyecto activo"}</span>
+          <span className="truncate">{activeProject?.name ?? text.noActiveProject}</span>
         </span>
         <ChevronDown size={14} />
       </button>
@@ -84,7 +105,7 @@ export function ProjectSelector({ projects, activeProject, onSelectProject, onCr
             }}
           >
             <Plus size={15} />
-            Nuevo proyecto
+            {text.newProject}
           </button>
         </div>
       ) : null}

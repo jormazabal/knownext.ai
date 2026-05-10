@@ -16,7 +16,7 @@ import { ProjectSelector } from "../features/projects/ProjectSelector";
 import { ReleaseNotesViewer } from "../features/releaseNotes/ReleaseNotesViewer";
 import { VersionHistoryPanel } from "../features/versions/VersionHistoryPanel";
 import { TitleBar } from "../components/window/TitleBar";
-import type { AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentTreeNode, LayoutConfig, Project, ProjectVersioningStatus, WorkspaceTab } from "../types/domain";
+import type { AppearanceConfig, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentTreeNode, LayoutConfig, Project, ProjectVersioningStatus, WorkspaceTab } from "../types/domain";
 
 const sidebarWidthConfig = {
   defaultWidth: 338,
@@ -34,6 +34,7 @@ const MarkdownEditor = lazy(() => import("../features/editor/MarkdownEditor").th
 
 type DesktopLayoutProps = {
   appVersion: string;
+  appLanguage: AppearanceConfig["language"];
   authStatus: AuthStatus;
   projects: Project[];
   activeProject: Project | null;
@@ -205,6 +206,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
               <ProjectSelector
                 projects={props.projects}
                 activeProject={props.activeProject}
+                language={props.appLanguage}
                 onSelectProject={props.onSelectProject}
                 onCreateProject={props.onCreateProject}
               />
@@ -233,6 +235,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
           </div>
           <ProjectActions
             appVersion={props.appVersion}
+            language={props.appLanguage}
             authStatus={props.authStatus}
             hasActiveProject={Boolean(props.activeProject)}
             orphanDraftCount={props.orphanDraftCount}

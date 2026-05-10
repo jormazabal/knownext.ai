@@ -2,6 +2,15 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.6.2 - 2026-05-10
+
+- Fixed the settings trace log folder staying on `Preparando carpeta de logs` when the local API is unavailable.
+- Resolved the log folder path through the Tauri runtime and kept the `Abrir carpeta en el explorador` action available in packaged builds.
+- Added local fallback persistence for appearance and diagnostics settings when FastAPI configuration cannot be reached.
+- Made the settings modal, account menu, and first-project state react to the selected Spanish/English language.
+- Kept the zoom slider cursor as the standard arrow cursor.
+- Updated release metadata and installer download links for `0.6.2`.
+
 ## 0.6.1 - 2026-05-10
 
 - Added the application settings modal from the account menu with left-side sections and right-side configuration detail.

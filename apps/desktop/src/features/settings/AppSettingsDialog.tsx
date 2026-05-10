@@ -16,11 +16,6 @@ type AppSettingsDialogProps = {
   onOpenTraceLogFolder: () => void;
 };
 
-const sections: Array<{ id: AppSettingsSection; label: string; description: string; icon: typeof Eye }> = [
-  { id: "appearance", label: "Apariencia", description: "Idioma y escala visual", icon: Eye },
-  { id: "diagnostics", label: "Trazas", description: "Registro local de errores", icon: ListChecks },
-];
-
 export function AppSettingsDialog({
   open,
   appearance,
@@ -32,6 +27,11 @@ export function AppSettingsDialog({
   onOpenTraceLogFolder,
 }: AppSettingsDialogProps) {
   const [activeSection, setActiveSection] = useStableSection(open);
+  const text = settingsCopy[appearance.language];
+  const sections: Array<{ id: AppSettingsSection; label: string; description: string; icon: typeof Eye }> = [
+    { id: "appearance", label: text.appearanceNav, description: text.appearanceNavDescription, icon: Eye },
+    { id: "diagnostics", label: text.diagnosticsNav, description: text.diagnosticsNavDescription, icon: ListChecks },
+  ];
 
   if (!open) return null;
 
@@ -45,13 +45,13 @@ export function AppSettingsDialog({
       >
         <header className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
           <div className="min-w-0">
-            <h2 id="app-settings-title" className="text-[15px] font-semibold text-ink-primary">Configuración de la app</h2>
-            <p className="mt-1 text-[11px] text-ink-secondary">Ajustes locales de interfaz y diagnóstico.</p>
+            <h2 id="app-settings-title" className="text-[15px] font-semibold text-ink-primary">{text.title}</h2>
+            <p className="mt-1 text-[11px] text-ink-secondary">{text.subtitle}</p>
           </div>
           <button
             className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
-            data-tooltip="Cerrar"
-            aria-label="Cerrar configuración"
+            data-tooltip={text.close}
+            aria-label={text.closeSettings}
             onClick={onClose}
           >
             <X size={16} />
@@ -59,7 +59,7 @@ export function AppSettingsDialog({
         </header>
 
         <div className="grid min-h-0 flex-1 grid-cols-[210px_minmax(0,1fr)]">
-          <nav className="border-r border-line bg-panel p-2" aria-label="Apartados de configuración">
+          <nav className="border-r border-line bg-panel p-2" aria-label={text.sectionsLabel}>
             {sections.map((section) => (
               <button
                 key={section.id}
@@ -80,11 +80,12 @@ export function AppSettingsDialog({
 
           <div className="min-h-0 overflow-y-auto px-6 py-5">
             {activeSection === "appearance" ? (
-              <AppearanceSettings appearance={appearance} onAppearanceChange={onAppearanceChange} />
+              <AppearanceSettings appearance={appearance} text={text} onAppearanceChange={onAppearanceChange} />
             ) : (
               <DiagnosticsSettings
                 diagnostics={diagnostics}
                 traceLogStatus={traceLogStatus}
+                text={text}
                 onDiagnosticsChange={onDiagnosticsChange}
                 onOpenTraceLogFolder={onOpenTraceLogFolder}
               />
@@ -98,9 +99,11 @@ export function AppSettingsDialog({
 
 function AppearanceSettings({
   appearance,
+  text,
   onAppearanceChange,
 }: {
   appearance: AppearanceConfig;
+  text: SettingsCopy;
   onAppearanceChange: (appearance: Partial<AppearanceConfig>) => void;
 }) {
   return (
@@ -108,15 +111,15 @@ function AppearanceSettings({
       <section>
         <div className="flex items-center gap-2">
           <Languages size={16} className="text-brand-orange" />
-          <h3 className="text-[13px] font-semibold text-ink-primary">Apariencia</h3>
+          <h3 className="text-[13px] font-semibold text-ink-primary">{text.appearanceHeading}</h3>
         </div>
         <p className="mt-1 text-[11px] leading-5 text-ink-secondary">
-          Ajusta cómo se presenta la interfaz en este equipo.
+          {text.appearanceDescription}
         </p>
       </section>
 
       <label className="block">
-        <span className="text-[11px] font-medium text-ink-secondary">Idioma</span>
+        <span className="text-[11px] font-medium text-ink-secondary">{text.languageLabel}</span>
         <select
           className="mt-2 h-9 w-full rounded-md border border-line bg-white px-3 text-[11px] text-ink-primary outline-none focus:border-brand-orange"
           value={appearance.language}
@@ -130,7 +133,7 @@ function AppearanceSettings({
       <div>
         <div className="flex items-center justify-between gap-3">
           <label htmlFor="app-zoom" className="text-[11px] font-medium text-ink-secondary">
-            Zoom de la interfaz
+            {text.zoomLabel}
           </label>
           <span className="rounded border border-line bg-panel px-2 py-1 font-mono text-[10px] text-ink-secondary">
             {appearance.zoomPercent}%
@@ -138,7 +141,7 @@ function AppearanceSettings({
         </div>
         <input
           id="app-zoom"
-          className="mt-3 w-full accent-brand-orange"
+          className="mt-3 w-full cursor-default accent-brand-orange"
           type="range"
           min={85}
           max={125}
@@ -147,9 +150,9 @@ function AppearanceSettings({
           onChange={(event) => onAppearanceChange({ zoomPercent: Number(event.target.value) })}
         />
         <div className="mt-1 flex justify-between text-[10px] text-ink-secondary">
-          <span>Reducir</span>
-          <span>Normal</span>
-          <span>Ampliar</span>
+          <span>{text.zoomReduce}</span>
+          <span>{text.zoomNormal}</span>
+          <span>{text.zoomIncrease}</span>
         </div>
       </div>
     </div>
@@ -159,11 +162,13 @@ function AppearanceSettings({
 function DiagnosticsSettings({
   diagnostics,
   traceLogStatus,
+  text,
   onDiagnosticsChange,
   onOpenTraceLogFolder,
 }: {
   diagnostics: DiagnosticsConfig;
   traceLogStatus: TraceLogStatus | null;
+  text: SettingsCopy;
   onDiagnosticsChange: (diagnostics: Partial<DiagnosticsConfig>) => void;
   onOpenTraceLogFolder: () => void;
 }) {
@@ -172,18 +177,18 @@ function DiagnosticsSettings({
       <section>
         <div className="flex items-center gap-2">
           <ListChecks size={16} className="text-brand-orange" />
-          <h3 className="text-[13px] font-semibold text-ink-primary">Trazas</h3>
+          <h3 className="text-[13px] font-semibold text-ink-primary">{text.diagnosticsHeading}</h3>
         </div>
         <p className="mt-1 text-[11px] leading-5 text-ink-secondary">
-          Registra errores de la aplicación en un archivo local dedicado para revisar incidencias.
+          {text.diagnosticsDescription}
         </p>
       </section>
 
       <div className="flex items-center justify-between gap-4 rounded-md border border-line px-4 py-3">
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold text-ink-primary">Registro de trazas</p>
+          <p className="text-[11px] font-semibold text-ink-primary">{text.traceToggleLabel}</p>
           <p className="mt-1 text-[11px] leading-5 text-ink-secondary">
-            Cuando está activo, los errores visibles y fallos no controlados se anexan a `knownext.log`.
+            {text.traceToggleDescription}
           </p>
         </div>
         <button
@@ -193,7 +198,7 @@ function DiagnosticsSettings({
           ].join(" ")}
           role="switch"
           aria-checked={diagnostics.traceLoggingEnabled}
-          aria-label="Activar registro de trazas"
+          aria-label={text.traceToggleAria}
           onClick={() => onDiagnosticsChange({ traceLoggingEnabled: !diagnostics.traceLoggingEnabled })}
         >
           <span
@@ -207,9 +212,9 @@ function DiagnosticsSettings({
 
       {diagnostics.traceLoggingEnabled ? (
         <div className="rounded-md border border-orange-200 bg-brand-hover px-4 py-3">
-          <p className="text-[11px] font-semibold text-ink-primary">Carpeta de logs</p>
+          <p className="text-[11px] font-semibold text-ink-primary">{text.logFolderLabel}</p>
           <p className="mt-1 break-all font-mono text-[10px] leading-5 text-ink-secondary">
-            {traceLogStatus?.folderPath ?? "Preparando carpeta de logs"}
+            {traceLogStatus?.folderPath ?? text.preparingLogFolder}
           </p>
           <button
             className="mt-3 inline-flex h-8 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
@@ -217,13 +222,70 @@ function DiagnosticsSettings({
             onClick={onOpenTraceLogFolder}
           >
             <FolderOpen size={14} />
-            Abrir carpeta en el explorador
+            {text.openLogFolder}
           </button>
         </div>
       ) : null}
     </div>
   );
 }
+
+type SettingsCopy = typeof settingsCopy.es;
+
+const settingsCopy = {
+  es: {
+    title: "Configuración de la app",
+    subtitle: "Ajustes locales de interfaz y diagnóstico.",
+    close: "Cerrar",
+    closeSettings: "Cerrar configuración",
+    sectionsLabel: "Apartados de configuración",
+    appearanceNav: "Apariencia",
+    appearanceNavDescription: "Idioma y escala visual",
+    diagnosticsNav: "Trazas",
+    diagnosticsNavDescription: "Registro local de errores",
+    appearanceHeading: "Apariencia",
+    appearanceDescription: "Ajusta cómo se presenta la interfaz en este equipo.",
+    languageLabel: "Idioma",
+    zoomLabel: "Zoom de la interfaz",
+    zoomReduce: "Reducir",
+    zoomNormal: "Normal",
+    zoomIncrease: "Ampliar",
+    diagnosticsHeading: "Trazas",
+    diagnosticsDescription: "Registra errores de la aplicación en un archivo local dedicado para revisar incidencias.",
+    traceToggleLabel: "Registro de trazas",
+    traceToggleDescription: "Cuando está activo, los errores visibles y fallos no controlados se anexan a `knownext.log`.",
+    traceToggleAria: "Activar registro de trazas",
+    logFolderLabel: "Carpeta de logs",
+    preparingLogFolder: "Preparando carpeta de logs",
+    openLogFolder: "Abrir carpeta en el explorador",
+  },
+  en: {
+    title: "App settings",
+    subtitle: "Local interface and diagnostics settings.",
+    close: "Close",
+    closeSettings: "Close settings",
+    sectionsLabel: "Settings sections",
+    appearanceNav: "Appearance",
+    appearanceNavDescription: "Language and visual scale",
+    diagnosticsNav: "Traces",
+    diagnosticsNavDescription: "Local error logging",
+    appearanceHeading: "Appearance",
+    appearanceDescription: "Adjust how the interface is presented on this computer.",
+    languageLabel: "Language",
+    zoomLabel: "Interface zoom",
+    zoomReduce: "Reduce",
+    zoomNormal: "Normal",
+    zoomIncrease: "Increase",
+    diagnosticsHeading: "Traces",
+    diagnosticsDescription: "Record application errors in a dedicated local file for troubleshooting.",
+    traceToggleLabel: "Trace logging",
+    traceToggleDescription: "When enabled, visible errors and unhandled failures are appended to `knownext.log`.",
+    traceToggleAria: "Enable trace logging",
+    logFolderLabel: "Log folder",
+    preparingLogFolder: "Preparing log folder",
+    openLogFolder: "Open folder in Explorer",
+  },
+};
 
 function useStableSection(open: boolean): [AppSettingsSection, (section: AppSettingsSection) => void] {
   const [activeSection, setActiveSection] = useState<AppSettingsSection>("appearance");

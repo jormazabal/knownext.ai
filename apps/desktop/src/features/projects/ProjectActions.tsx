@@ -11,7 +11,7 @@ import {
   Settings,
   UserPlus,
 } from "lucide-react";
-import type { AuthStatus } from "../../types/domain";
+import type { AppearanceConfig, AuthStatus } from "../../types/domain";
 
 const actions = [
   { id: "search", label: "Buscar", icon: Search },
@@ -24,6 +24,7 @@ const actions = [
 
 type ProjectActionsProps = {
   appVersion: string;
+  language?: AppearanceConfig["language"];
   authStatus: AuthStatus;
   hasActiveProject: boolean;
   orphanDraftCount: number;
@@ -43,6 +44,7 @@ type ProjectActionsProps = {
 
 export function ProjectActions({
   appVersion,
+  language = "es",
   authStatus,
   hasActiveProject,
   orphanDraftCount,
@@ -59,6 +61,8 @@ export function ProjectActions({
   onCheckForUpdates,
   onOpenReleaseNotes,
 }: ProjectActionsProps) {
+  const text = projectActionsCopy[language];
+
   function handleAction(actionId: string) {
     if (actionId === "folder") onCreateFolder();
     if (actionId === "document") onCreateDocument();
@@ -67,7 +71,7 @@ export function ProjectActions({
     if (actionId === "settings") onConfigureProject();
   }
 
-  const accountName = authStatus.user?.name || authStatus.user?.login || "Sin cuenta GitHub";
+  const accountName = authStatus.user?.name || authStatus.user?.login || text.noGithubAccount;
   const accountInitials = getInitials(accountName);
 
   return (
@@ -100,7 +104,7 @@ export function ProjectActions({
                 <div className="min-w-0">
                   <p className="truncate text-[11px] font-semibold text-ink-primary">{accountName}</p>
                   <p className="text-[10px] text-ink-secondary">
-                    {authStatus.isAuthenticated ? "Cuenta GitHub conectada" : "Historial bloqueado sin GitHub"}
+                    {authStatus.isAuthenticated ? text.githubConnectedStatus : text.githubBlockedStatus}
                   </p>
                 </div>
                 <span className="shrink-0 rounded border border-line bg-panel px-1.5 py-0.5 text-[10px] font-medium text-ink-secondary">
@@ -114,14 +118,14 @@ export function ProjectActions({
               disabled={authStatus.isAuthenticated}
             >
               <UserPlus size={14} />
-              <span>{authStatus.isAuthenticated ? "GitHub conectado" : "Conectar GitHub"}</span>
+              <span>{authStatus.isAuthenticated ? text.githubConnected : text.connectGithub}</span>
             </button>
             <button
               className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
               onClick={onOpenAppSettings}
             >
               <Settings size={14} />
-              <span>Configuración de la app</span>
+              <span>{text.appSettings}</span>
             </button>
             <button
               className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
@@ -129,7 +133,7 @@ export function ProjectActions({
               disabled={!authStatus.isAuthenticated}
             >
               <LogOut size={14} />
-              <span>Cerrar sesión</span>
+              <span>{text.logout}</span>
             </button>
             <button
               className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
@@ -137,21 +141,21 @@ export function ProjectActions({
               onClick={onCheckForUpdates}
             >
               <RefreshCw size={14} className={isCheckingForUpdates ? "animate-spin" : ""} />
-              <span>{isCheckingForUpdates ? "Buscando actualizaciones" : "Buscar actualizaciones"}</span>
+              <span>{isCheckingForUpdates ? text.checkingUpdates : text.checkUpdates}</span>
             </button>
             <button
               className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
               onClick={onOpenReleaseNotes}
             >
               <ScrollText size={14} />
-              <span>Notas de release</span>
+              <span>{text.releaseNotes}</span>
             </button>
             <button
               className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
               onClick={onOpenRecoverableDrafts}
             >
               <FileClock size={14} />
-              <span className="min-w-0 flex-1 truncate">Borradores recuperables</span>
+              <span className="min-w-0 flex-1 truncate">{text.recoverableDrafts}</span>
               {orphanDraftCount > 0 ? (
                 <span className="rounded bg-brand-orange px-1.5 py-0.5 text-[10px] font-semibold text-white">
                   {orphanDraftCount}
@@ -164,6 +168,35 @@ export function ProjectActions({
     </div>
   );
 }
+
+const projectActionsCopy = {
+  es: {
+    noGithubAccount: "Sin cuenta GitHub",
+    githubConnectedStatus: "Cuenta GitHub conectada",
+    githubBlockedStatus: "Historial bloqueado sin GitHub",
+    githubConnected: "GitHub conectado",
+    connectGithub: "Conectar GitHub",
+    appSettings: "Configuración de la app",
+    logout: "Cerrar sesión",
+    checkingUpdates: "Buscando actualizaciones",
+    checkUpdates: "Buscar actualizaciones",
+    releaseNotes: "Notas de release",
+    recoverableDrafts: "Borradores recuperables",
+  },
+  en: {
+    noGithubAccount: "No GitHub account",
+    githubConnectedStatus: "GitHub account connected",
+    githubBlockedStatus: "History locked without GitHub",
+    githubConnected: "GitHub connected",
+    connectGithub: "Connect GitHub",
+    appSettings: "App settings",
+    logout: "Sign out",
+    checkingUpdates: "Checking for updates",
+    checkUpdates: "Check for updates",
+    releaseNotes: "Release notes",
+    recoverableDrafts: "Recoverable drafts",
+  },
+};
 
 function getInitials(name: string) {
   const parts = name.split(/\s+/).filter(Boolean);
