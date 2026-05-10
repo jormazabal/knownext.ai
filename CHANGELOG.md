@@ -2,6 +2,13 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.6.8 - 2026-05-10
+
+- Fixed GitHub device login so `slow_down` responses keep the authorization pending instead of showing a raw error.
+- Kept GitHub authorization polling active while the login dialog is waiting and prevented duplicate checks from repeated manual clicks.
+- Opened the GitHub verification page through Tauri's native shell integration with a browser fallback for development.
+- Updated release metadata and installer download links for `0.6.8`.
+
 ## 0.6.7 - 2026-05-10
 
 - Fixed packaged backend startup by resolving the installed `knownext-backend.exe` next to the desktop executable instead of using the build-time `binaries/` sidecar path.
