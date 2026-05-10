@@ -33,6 +33,8 @@ Any remaining mock fixtures must be limited to tests, Storybook/demo surfaces, o
 - GitHub auth status and device-flow login go through `src/lib/api/auth.ts`; tokens are never exposed to arbitrary UI components.
 - Project capabilities and versioning status are fetched per project so the assistant can show disabled Git/GitHub options without hiding them.
 - Layout widths and per-project open document tabs go through `src/lib/api/config.ts` and are persisted by FastAPI in `config.json`.
+- Application settings for appearance and diagnostics also go through `src/lib/api/config.ts`; UI components receive these values as props and dispatch setting changes to the root app state.
+- Runtime trace logging helpers live under `src/lib/runtime/logging.ts`. React can request log status, record frontend errors, and ask the runtime to open the dedicated log folder, but it does not write log files directly.
 - The document tree goes through `src/lib/api/projects.ts` and reflects the Markdown files and folders under the active project's local folder.
 - Open documents are tracked as per-tab editing sessions in the root app state. Each session owns its own Markdown content, dirty state, draft metadata, and Milkdown instance while the tab remains open.
 - Unsaved document changes are autosaved through `src/lib/api/documents.ts` to FastAPI-managed internal drafts. React must not write draft files directly.
@@ -61,6 +63,14 @@ Any remaining mock fixtures must be limited to tests, Storybook/demo surfaces, o
 - Clamp left navigation and history widths so the central single-column editor keeps enough readable width.
 - In tablet/mobile layout, navigation and history become overlay drawers and the desktop separators are hidden.
 - Window resizing, panel resizing, and drawer transitions must not remount active document sessions or reset Milkdown undo/redo state.
+
+## Application Settings Modal
+
+- `Configuración de la app` opens a modal settings surface over the current workspace.
+- The modal has a left settings list and a right detail pane.
+- `Apariencia` owns the persisted locale and zoom percentage.
+- `Trazas` owns the persisted trace logging toggle and the action to open the dedicated log folder.
+- The settings component remains visual: persistence goes through root app state and FastAPI config updates, while folder opening and log writes go through runtime/API helpers.
 
 ## Project Creation Modal Structure
 

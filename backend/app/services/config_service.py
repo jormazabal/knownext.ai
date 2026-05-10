@@ -12,12 +12,23 @@ DEFAULT_LAYOUT = {
     "historyWidth": 320,
 }
 
+DEFAULT_APPEARANCE = {
+    "language": "es",
+    "zoomPercent": 100,
+}
+
+DEFAULT_DIAGNOSTICS = {
+    "traceLoggingEnabled": False,
+}
+
 DEFAULT_TABS = {}
 
 LAYOUT_LIMITS = {
     "sidebarWidth": (260, 480),
     "historyWidth": (280, 460),
 }
+
+ZOOM_LIMITS = (85, 125)
 
 
 def _now_iso() -> str:
@@ -28,6 +39,8 @@ def _default_config() -> dict:
     return {
         "schemaVersion": 1,
         "layout": deepcopy(DEFAULT_LAYOUT),
+        "appearance": deepcopy(DEFAULT_APPEARANCE),
+        "diagnostics": deepcopy(DEFAULT_DIAGNOSTICS),
         "tabsByProject": deepcopy(DEFAULT_TABS),
         "lastRunAppVersion": None,
         "lastSeenReleaseNotesVersion": None,
@@ -47,6 +60,35 @@ def _read_width(layout: dict, name: str) -> int:
         return int(layout.get(name, DEFAULT_LAYOUT[name]))
     except (TypeError, ValueError):
         return DEFAULT_LAYOUT[name]
+
+
+def _normalize_appearance(value: object) -> dict:
+    if not isinstance(value, dict):
+        return deepcopy(DEFAULT_APPEARANCE)
+
+    language = value.get("language")
+    if language not in ("es", "en"):
+        language = DEFAULT_APPEARANCE["language"]
+
+    try:
+        zoom_percent = int(value.get("zoomPercent", DEFAULT_APPEARANCE["zoomPercent"]))
+    except (TypeError, ValueError):
+        zoom_percent = DEFAULT_APPEARANCE["zoomPercent"]
+
+    min_zoom, max_zoom = ZOOM_LIMITS
+    return {
+        "language": language,
+        "zoomPercent": min(max(zoom_percent, min_zoom), max_zoom),
+    }
+
+
+def _normalize_diagnostics(value: object) -> dict:
+    if not isinstance(value, dict):
+        return deepcopy(DEFAULT_DIAGNOSTICS)
+
+    return {
+        "traceLoggingEnabled": bool(value.get("traceLoggingEnabled", DEFAULT_DIAGNOSTICS["traceLoggingEnabled"])),
+    }
 
 
 def _normalize_tabs_by_project(value: object) -> dict:
@@ -127,6 +169,12 @@ class ConfigService:
                 "historyWidth": _clamp_width("historyWidth", payload.layout.historyWidth),
             }
 
+        if payload.appearance is not None:
+            data["appearance"] = _normalize_appearance(payload.appearance.model_dump())
+
+        if payload.diagnostics is not None:
+            data["diagnostics"] = _normalize_diagnostics(payload.diagnostics.model_dump())
+
         if payload.tabsByProject is not None:
             data["tabsByProject"] = _normalize_tabs_by_project(
                 {
@@ -167,6 +215,8 @@ class ConfigService:
             "sidebarWidth": _clamp_width("sidebarWidth", _read_width(layout, "sidebarWidth")),
             "historyWidth": _clamp_width("historyWidth", _read_width(layout, "historyWidth")),
         }
+        data["appearance"] = _normalize_appearance(data.get("appearance"))
+        data["diagnostics"] = _normalize_diagnostics(data.get("diagnostics"))
         data["tabsByProject"] = _normalize_tabs_by_project(data.get("tabsByProject"))
         data["lastRunAppVersion"] = "legacy" if legacy_config_without_version_state else _normalize_optional_string(data.get("lastRunAppVersion"))
         data["lastSeenReleaseNotesVersion"] = _normalize_optional_string(data.get("lastSeenReleaseNotesVersion"))

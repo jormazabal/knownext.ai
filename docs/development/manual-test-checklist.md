@@ -98,6 +98,14 @@
 - [ ] Submit the prompt.
 - [ ] Submit the AI prompt with no document open and confirm it is accepted as a project documentation prompt.
 - [ ] Hover over the account area and confirm the account menu appears with GitHub login/logout, recoverable drafts, and update actions.
+- [ ] Open the account menu and click Configuración de la app.
+- [ ] Confirm the settings modal opens with a left section list and right configuration pane.
+- [ ] In Apariencia, change Idioma and confirm the selection persists after closing and reopening the modal.
+- [ ] In Apariencia, adjust Zoom and confirm the interface scales immediately and persists after restart.
+- [ ] In Trazas, activate Registro de trazas and confirm the log folder path appears.
+- [ ] With Registro de trazas active, trigger a recoverable API error and confirm `knownext.log` is written under the dedicated `logs` folder in the KnowNext.ai app data directory.
+- [ ] Click Abrir carpeta en el explorador and confirm Windows Explorer opens the dedicated log folder.
+- [ ] Disable Registro de trazas and confirm new recoverable errors are no longer appended to `knownext.log`.
 - [ ] Log out from GitHub and confirm versioned project history is disabled without removing local project files.
 - [ ] Confirm the account menu shows the current application version.
 - [ ] In the installed Tauri app, open the account menu and click Buscar actualizaciones.

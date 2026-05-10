@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { DocumentTreeAction } from "../features/documents/DocumentTree";
 import { CreateDocumentDialog } from "../features/documents/CreateDocumentDialog";
 import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
+import { AppSettingsDialog } from "../features/settings/AppSettingsDialog";
 import { DesktopLayout } from "../layouts/DesktopLayout";
 import {
   countWords,
@@ -11,7 +12,14 @@ import {
   updateSession,
   type DocumentSession,
 } from "./documentSessions";
-import { defaultLayoutConfig, defaultProjectTabsConfig, getAppConfig, updateAppConfig } from "../lib/api/config";
+import {
+  defaultAppearanceConfig,
+  defaultDiagnosticsConfig,
+  defaultLayoutConfig,
+  defaultProjectTabsConfig,
+  getAppConfig,
+  updateAppConfig,
+} from "../lib/api/config";
 import { API_BASE_URL, ApiError, getApiErrorMessage, isBackendEnabled } from "../lib/api/client";
 import {
   discardDocumentDraft,
@@ -35,6 +43,7 @@ import {
   type AvailableUpdate,
   type UpdateDownloadProgress,
 } from "../lib/runtime/updater";
+import { getTraceLogStatus, openTraceLogFolder, recordTraceLog, type TraceLogStatus } from "../lib/runtime/logging";
 import {
   createFolder,
   createProjectDocument,
@@ -55,7 +64,9 @@ import {
 } from "../lib/api/projects";
 import type {
   AuthStatus,
+  AppearanceConfig,
   AppUtilityTabId,
+  DiagnosticsConfig,
   DocumentRecord,
   DocumentTreeNode,
   FileOperationResult,
@@ -106,6 +117,8 @@ export function App() {
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [editProjectOpen, setEditProjectOpen] = useState(false);
   const [layoutConfig, setLayoutConfig] = useState<LayoutConfig>(defaultLayoutConfig);
+  const [appearanceConfig, setAppearanceConfig] = useState<AppearanceConfig>(defaultAppearanceConfig);
+  const [diagnosticsConfig, setDiagnosticsConfig] = useState<DiagnosticsConfig>(defaultDiagnosticsConfig);
   const [tabsByProject, setTabsByProject] = useState<Record<string, ProjectTabsConfig>>({});
   const [openUtilityTabs, setOpenUtilityTabs] = useState<AppUtilityTabId[]>([]);
   const [activeUtilityTab, setActiveUtilityTab] = useState<AppUtilityTabId | null>(null);
@@ -116,6 +129,8 @@ export function App() {
   const [closeDocumentId, setCloseDocumentId] = useState<string | null>(null);
   const [orphanDrafts, setOrphanDrafts] = useState<OrphanDraft[]>([]);
   const [recoverableDraftsOpen, setRecoverableDraftsOpen] = useState(false);
+  const [appSettingsOpen, setAppSettingsOpen] = useState(false);
+  const [traceLogStatus, setTraceLogStatus] = useState<TraceLogStatus | null>(null);
   const [updateState, setUpdateState] = useState<UpdateState>("idle");
   const [availableUpdate, setAvailableUpdate] = useState<AvailableUpdate | null>(null);
   const [updateProgress, setUpdateProgress] = useState<UpdateDownloadProgress | null>(null);
@@ -154,6 +169,8 @@ export function App() {
         setVersioningStatus(activeVersioningStatus);
         setTree(projectTree);
         setLayoutConfig(appConfig.layout);
+        setAppearanceConfig(appConfig.appearance ?? defaultAppearanceConfig);
+        setDiagnosticsConfig(appConfig.diagnostics ?? defaultDiagnosticsConfig);
         setTabsByProject(appConfig.tabsByProject);
         setOpenUtilityTabs(nextOpenUtilityTabs);
         setActiveUtilityTab(shouldOpenReleaseNotes ? RELEASE_NOTES_UTILITY_TAB_ID : appConfig.activeUtilityTab ?? null);
@@ -187,6 +204,8 @@ export function App() {
     const timeout = window.setTimeout(() => {
       void updateAppConfig({
         layout: layoutConfig,
+        appearance: appearanceConfig,
+        diagnostics: diagnosticsConfig,
         tabsByProject,
         lastRunAppVersion,
         lastSeenReleaseNotesVersion,
@@ -198,7 +217,62 @@ export function App() {
     }, 350);
 
     return () => window.clearTimeout(timeout);
-  }, [activeUtilityTab, configLoaded, lastRunAppVersion, lastSeenReleaseNotesVersion, layoutConfig, openUtilityTabs, tabsByProject]);
+  }, [
+    activeUtilityTab,
+    appearanceConfig,
+    configLoaded,
+    diagnosticsConfig,
+    lastRunAppVersion,
+    lastSeenReleaseNotesVersion,
+    layoutConfig,
+    openUtilityTabs,
+    tabsByProject,
+  ]);
+
+  useEffect(() => {
+    document.documentElement.lang = appearanceConfig.language;
+    document.documentElement.style.setProperty("zoom", `${appearanceConfig.zoomPercent}%`);
+  }, [appearanceConfig.language, appearanceConfig.zoomPercent]);
+
+  useEffect(() => {
+    if (!configLoaded || !diagnosticsConfig.traceLoggingEnabled) {
+      setTraceLogStatus(null);
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      void refreshTraceLogStatus();
+    }, 450);
+
+    return () => window.clearTimeout(timeout);
+  }, [configLoaded, diagnosticsConfig.traceLoggingEnabled]);
+
+  useEffect(() => {
+    if (!configLoaded || !diagnosticsConfig.traceLoggingEnabled) return;
+
+    function handleUnhandledError(event: ErrorEvent) {
+      void recordTraceLog({
+        source: "window.onerror",
+        message: event.message || "Error no controlado en la interfaz.",
+        detail: event.error instanceof Error ? event.error.stack ?? event.error.message : String(event.error ?? ""),
+      });
+    }
+
+    function handleUnhandledRejection(event: PromiseRejectionEvent) {
+      void recordTraceLog({
+        source: "window.unhandledrejection",
+        message: "Promesa rechazada sin gestionar en la interfaz.",
+        detail: event.reason instanceof Error ? event.reason.stack ?? event.reason.message : String(event.reason ?? ""),
+      });
+    }
+
+    window.addEventListener("error", handleUnhandledError);
+    window.addEventListener("unhandledrejection", handleUnhandledRejection);
+    return () => {
+      window.removeEventListener("error", handleUnhandledError);
+      window.removeEventListener("unhandledrejection", handleUnhandledRejection);
+    };
+  }, [configLoaded, diagnosticsConfig.traceLoggingEnabled]);
 
   useEffect(() => {
     if (!configLoaded || !activeProject) return;
@@ -877,6 +951,13 @@ export function App() {
   }
 
   function showError(error: unknown, fallback: string) {
+    if (diagnosticsConfig.traceLoggingEnabled) {
+      void recordTraceLog({
+        source: "app.showError",
+        message: getApiErrorMessage(error, fallback),
+        detail: describeError(error),
+      });
+    }
     setNotice({
       title: "No se pudo completar la operación",
       message: getApiErrorMessage(error, fallback),
@@ -886,6 +967,33 @@ export function App() {
 
   function handleLayoutConfigChange(nextLayoutConfig: Partial<LayoutConfig>) {
     setLayoutConfig((currentLayoutConfig) => ({ ...currentLayoutConfig, ...nextLayoutConfig }));
+  }
+
+  function handleAppearanceConfigChange(nextAppearanceConfig: Partial<AppearanceConfig>) {
+    setAppearanceConfig((currentAppearanceConfig) => ({ ...currentAppearanceConfig, ...nextAppearanceConfig }));
+  }
+
+  function handleDiagnosticsConfigChange(nextDiagnosticsConfig: Partial<DiagnosticsConfig>) {
+    setDiagnosticsConfig((currentDiagnosticsConfig) => ({ ...currentDiagnosticsConfig, ...nextDiagnosticsConfig }));
+  }
+
+  async function refreshTraceLogStatus() {
+    try {
+      setTraceLogStatus(await getTraceLogStatus());
+    } catch (error) {
+      showError(error, "No se pudo cargar el estado de las trazas.");
+    }
+  }
+
+  async function handleOpenTraceLogFolder() {
+    const folderPath = traceLogStatus?.folderPath;
+    if (!folderPath) return;
+
+    try {
+      await openTraceLogFolder(folderPath);
+    } catch (error) {
+      showError(error, "No se pudo abrir la carpeta de logs.");
+    }
   }
 
   function handleTreeContextAction(action: DocumentTreeAction, node: DocumentTreeNode) {
@@ -1061,6 +1169,7 @@ export function App() {
         onConfigureProject={() => {
           if (activeProject) setEditProjectOpen(true);
         }}
+        onOpenAppSettings={() => setAppSettingsOpen(true)}
         onCreateFolder={() => void handleCreateFolder()}
         onRenameNode={handleRenameNode}
         onToggleNode={handleToggleNode}
@@ -1098,6 +1207,16 @@ export function App() {
       />
       <StartupOverlay loading={!configLoaded} />
       <AppNoticeBanner notice={notice} onClose={() => setNotice(null)} />
+      <AppSettingsDialog
+        open={appSettingsOpen}
+        appearance={appearanceConfig}
+        diagnostics={diagnosticsConfig}
+        traceLogStatus={traceLogStatus}
+        onClose={() => setAppSettingsOpen(false)}
+        onAppearanceChange={handleAppearanceConfigChange}
+        onDiagnosticsChange={handleDiagnosticsConfigChange}
+        onOpenTraceLogFolder={() => void handleOpenTraceLogFolder()}
+      />
       <UpdateAvailableDialog
         update={availableUpdate}
         state={updateState}
@@ -1815,6 +1934,15 @@ function formatDateTime(value: string) {
     }).format(new Date(value));
   } catch {
     return value;
+  }
+}
+
+function describeError(error: unknown) {
+  if (error instanceof Error) return error.stack ?? error.message;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
   }
 }
 

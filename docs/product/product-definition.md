@@ -87,6 +87,24 @@ In desktop layout, the internal structure must also be width-resizable:
 - On tablet/mobile widths, the folder/document panel becomes a left drawer and the history panel becomes a right drawer. Drawer mode must not expose desktop resize handles.
 - Panel resizing must not change document content, lose editor focus unexpectedly, reset Milkdown state, or mark documents dirty.
 
+## Application Settings
+
+The account menu includes `Configuración de la app`. It opens a modal settings window instead of navigating away from the workspace.
+
+The modal requirements are:
+
+- The left side lists settings sections.
+- The right side shows the options for the selected section.
+- `Apariencia` includes a language selector and an interface zoom control.
+- The language selector persists the selected locale and applies it to the application document language.
+- The zoom control persists a percentage between 85% and 125% and applies it to the current interface immediately.
+- `Trazas` includes a toggle for local trace logging.
+- When trace logging is enabled, KnowNext.ai writes user-visible errors and unhandled runtime failures to `knownext.log`.
+- Logs live in a dedicated `logs` folder under the KnowNext.ai app data directory.
+- When trace logging is enabled, the settings panel shows an action to open that dedicated log folder in Windows Explorer.
+- Logging must not expose prompts, document contents, or provider secrets; entries are limited to timestamp, level, source, message, and technical detail.
+- If the local API is unavailable, the UI still shows the normal API error. Trace logging resumes when the backend is available and the setting remains enabled.
+
 ## Project Creation Flow UX
 
 The new-project modal contains enough content that it must not be a single dense form on smaller screens. It should be structured as tabs or a short assistant/wizard.

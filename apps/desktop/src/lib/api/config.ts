@@ -1,9 +1,18 @@
-import type { AppConfig, AppConfigUpdate, LayoutConfig, ProjectTabsConfig } from "../../types/domain";
+import type { AppConfig, AppConfigUpdate, AppearanceConfig, DiagnosticsConfig, LayoutConfig, ProjectTabsConfig } from "../../types/domain";
 import { requestJson } from "./client";
 
 export const defaultLayoutConfig: LayoutConfig = {
   sidebarWidth: 338,
   historyWidth: 320,
+};
+
+export const defaultAppearanceConfig: AppearanceConfig = {
+  language: "es",
+  zoomPercent: 100,
+};
+
+export const defaultDiagnosticsConfig: DiagnosticsConfig = {
+  traceLoggingEnabled: false,
 };
 
 export const defaultProjectTabsConfig: ProjectTabsConfig = {
@@ -14,6 +23,8 @@ export const defaultProjectTabsConfig: ProjectTabsConfig = {
 export const defaultAppConfig: AppConfig = {
   schemaVersion: 1,
   layout: defaultLayoutConfig,
+  appearance: defaultAppearanceConfig,
+  diagnostics: defaultDiagnosticsConfig,
   tabsByProject: {},
   lastRunAppVersion: null,
   lastSeenReleaseNotesVersion: null,

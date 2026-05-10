@@ -7,3 +7,20 @@ class FolderSelectionRequest(BaseModel):
 
 class FolderSelectionResponse(BaseModel):
     folderPath: str | None = None
+
+
+class FolderOpenRequest(BaseModel):
+    folderPath: str
+
+
+class TraceLogRequest(BaseModel):
+    level: str = "error"
+    source: str
+    message: str
+    detail: str | None = None
+
+
+class TraceLogStatus(BaseModel):
+    enabled: bool
+    folderPath: str
+    filePath: str

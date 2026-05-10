@@ -24,6 +24,7 @@ describe("ProjectActions", () => {
         onExpandTree={vi.fn()}
         onCollapseTree={vi.fn()}
         onConfigureProject={vi.fn()}
+        onOpenAppSettings={vi.fn()}
         onOpenRecoverableDrafts={vi.fn()}
         onCheckForUpdates={onCheckForUpdates}
         onOpenReleaseNotes={vi.fn()}
@@ -52,6 +53,7 @@ describe("ProjectActions", () => {
         onExpandTree={vi.fn()}
         onCollapseTree={vi.fn()}
         onConfigureProject={vi.fn()}
+        onOpenAppSettings={vi.fn()}
         onOpenRecoverableDrafts={vi.fn()}
         onCheckForUpdates={vi.fn()}
         onOpenReleaseNotes={onOpenReleaseNotes}
@@ -61,5 +63,34 @@ describe("ProjectActions", () => {
     fireEvent.click(screen.getByText("Notas de release"));
 
     expect(onOpenReleaseNotes).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens application settings from the account menu", () => {
+    const onOpenAppSettings = vi.fn();
+
+    render(
+      <ProjectActions
+        appVersion="0.5.0"
+        authStatus={{ isAuthenticated: false, provider: null, user: null, scopes: [] }}
+        hasActiveProject
+        orphanDraftCount={0}
+        isCheckingForUpdates={false}
+        onLoginGithub={vi.fn()}
+        onLogout={vi.fn()}
+        onCreateFolder={vi.fn()}
+        onCreateDocument={vi.fn()}
+        onExpandTree={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onConfigureProject={vi.fn()}
+        onOpenAppSettings={onOpenAppSettings}
+        onOpenRecoverableDrafts={vi.fn()}
+        onCheckForUpdates={vi.fn()}
+        onOpenReleaseNotes={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Configuración de la app"));
+
+    expect(onOpenAppSettings).toHaveBeenCalledTimes(1);
   });
 });
