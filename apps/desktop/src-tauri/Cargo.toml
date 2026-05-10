@@ -1,6 +1,6 @@
 [package]
 name = "knownext-ai-desktop"
-version = "0.6.3"
+version = "0.6.4"
 description = "KnowNext.ai desktop application"
 authors = ["KnowNext.ai contributors"]
 license = "Apache-2.0"
@@ -22,3 +22,4 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+time = { version = "0.3", features = ["formatting"] }

@@ -1720,7 +1720,7 @@ dependencies = [
 
 [[package]]
 name = "knownext-ai-desktop"
-version = "0.6.3"
+version = "0.6.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -1730,6 +1730,7 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-shell",
  "tauri-plugin-updater",
+ "time",
 ]
 
 [[package]]
