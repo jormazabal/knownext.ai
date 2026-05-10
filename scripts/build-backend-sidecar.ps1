@@ -6,13 +6,14 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $backendDir = Join-Path $repoRoot "backend"
+$versionFile = Join-Path $repoRoot "VERSION"
 $sidecarDir = Join-Path $repoRoot "apps\desktop\src-tauri\binaries"
 $distExe = Join-Path $backendDir "dist\knownext-backend.exe"
 $targetExe = Join-Path $sidecarDir "knownext-backend-$TargetTriple.exe"
 
 Push-Location $backendDir
 try {
-  python -m PyInstaller --noconfirm --clean --onefile --name knownext-backend --hidden-import app.main --collect-submodules app knownext_backend.py
+  python -m PyInstaller --noconfirm --clean --onefile --name knownext-backend --hidden-import app.main --collect-submodules app --add-data "$versionFile;." knownext_backend.py
 }
 finally {
   Pop-Location

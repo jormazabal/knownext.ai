@@ -2,6 +2,12 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.6.6 - 2026-05-10
+
+- Included the root `VERSION` file in the PyInstaller backend sidecar so `/health` reports the packaged application version instead of `0.0.0`.
+- Kept the packaged backend sidecar, readable trace logs, shared app data profile, and release-workflow sidecar health validation from the unpublished `0.6.4` and `0.6.5` tags.
+- Updated release metadata and installer download links for `0.6.6`.
+
 ## 0.6.5 - 2026-05-10
 
 - Strengthened backend sidecar packaging by collecting all backend `app.*` submodules during PyInstaller builds.
