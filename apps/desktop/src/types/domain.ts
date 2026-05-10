@@ -101,6 +101,15 @@ export type LayoutConfig = {
   historyWidth: number;
 };
 
+export type AppearanceConfig = {
+  language: "es" | "en";
+  zoomPercent: number;
+};
+
+export type DiagnosticsConfig = {
+  traceLoggingEnabled: boolean;
+};
+
 export type ProjectTabsConfig = {
   openTabs: OpenDocumentTab[];
   activeDocumentId: string;
@@ -111,6 +120,8 @@ export type AppUtilityTabId = "release-notes";
 export type AppConfig = {
   schemaVersion: number;
   layout: LayoutConfig;
+  appearance: AppearanceConfig;
+  diagnostics: DiagnosticsConfig;
   tabsByProject: Record<string, ProjectTabsConfig>;
   lastRunAppVersion?: string | null;
   lastSeenReleaseNotesVersion?: string | null;
@@ -121,6 +132,8 @@ export type AppConfig = {
 
 export type AppConfigUpdate = {
   layout?: LayoutConfig;
+  appearance?: AppearanceConfig;
+  diagnostics?: DiagnosticsConfig;
   tabsByProject?: Record<string, ProjectTabsConfig>;
   lastRunAppVersion?: string | null;
   lastSeenReleaseNotesVersion?: string | null;

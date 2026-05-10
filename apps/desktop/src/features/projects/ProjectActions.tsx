@@ -35,6 +35,7 @@ type ProjectActionsProps = {
   onExpandTree: () => void;
   onCollapseTree: () => void;
   onConfigureProject: () => void;
+  onOpenAppSettings: () => void;
   onOpenRecoverableDrafts: () => void;
   onCheckForUpdates: () => void;
   onOpenReleaseNotes: () => void;
@@ -53,6 +54,7 @@ export function ProjectActions({
   onExpandTree,
   onCollapseTree,
   onConfigureProject,
+  onOpenAppSettings,
   onOpenRecoverableDrafts,
   onCheckForUpdates,
   onOpenReleaseNotes,
@@ -116,6 +118,7 @@ export function ProjectActions({
             </button>
             <button
               className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
+              onClick={onOpenAppSettings}
             >
               <Settings size={14} />
               <span>Configuración de la app</span>

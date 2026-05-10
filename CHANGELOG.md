@@ -2,6 +2,16 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.6.1 - 2026-05-10
+
+- Added the application settings modal from the account menu with left-side sections and right-side configuration detail.
+- Added appearance settings for persisted language selection and interface zoom.
+- Added diagnostics settings to enable or disable local trace logging.
+- Added a dedicated `logs/knownext.log` trace file under the KnowNext.ai app data directory for user-visible errors and runtime failures.
+- Added a Tauri/runtime action to open the dedicated log folder from settings when trace logging is enabled.
+- Updated product, architecture, and manual acceptance documentation for application settings and trace logging.
+- Updated release metadata and installer download links for `0.6.1`.
+
 ## 0.6.0 - 2026-05-10
 
 - Removed normal runtime fallback to frontend/backend mock data so empty projects, disconnected users, unavailable AI, and API failures render as explicit product states.

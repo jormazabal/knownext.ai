@@ -60,6 +60,7 @@ type DesktopLayoutProps = {
   onSelectProject: (project: Project) => void;
   onCreateProject: () => void;
   onConfigureProject: () => void;
+  onOpenAppSettings: () => void;
   onCreateFolder: () => void;
   onRenameNode: (nodeId: string, name: string) => void;
   onToggleNode: (nodeId: string) => void;
@@ -242,6 +243,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             onExpandTree={props.onExpandTree}
             onCollapseTree={props.onCollapseTree}
             onConfigureProject={props.onConfigureProject}
+            onOpenAppSettings={props.onOpenAppSettings}
             onOpenRecoverableDrafts={props.onOpenRecoverableDrafts}
             onCheckForUpdates={props.onCheckForUpdates}
             onOpenReleaseNotes={props.onOpenReleaseNotes}

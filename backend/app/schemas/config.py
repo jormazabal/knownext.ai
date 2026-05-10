@@ -11,6 +11,15 @@ class LayoutConfig(BaseModel):
     historyWidth: int
 
 
+class AppearanceConfig(BaseModel):
+    language: Literal["es", "en"] = "es"
+    zoomPercent: int = 100
+
+
+class DiagnosticsConfig(BaseModel):
+    traceLoggingEnabled: bool = False
+
+
 class OpenTabConfig(BaseModel):
     id: str
     name: str
@@ -24,6 +33,8 @@ class ProjectTabsConfig(BaseModel):
 class AppConfig(BaseModel):
     schemaVersion: int
     layout: LayoutConfig
+    appearance: AppearanceConfig
+    diagnostics: DiagnosticsConfig
     tabsByProject: dict[str, ProjectTabsConfig]
     lastRunAppVersion: str | None = None
     lastSeenReleaseNotesVersion: str | None = None
@@ -34,6 +45,8 @@ class AppConfig(BaseModel):
 
 class AppConfigUpdate(BaseModel):
     layout: LayoutConfig | None = None
+    appearance: AppearanceConfig | None = None
+    diagnostics: DiagnosticsConfig | None = None
     tabsByProject: dict[str, ProjectTabsConfig] | None = None
     lastRunAppVersion: str | None = None
     lastSeenReleaseNotesVersion: str | None = None

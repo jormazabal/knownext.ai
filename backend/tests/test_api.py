@@ -21,7 +21,7 @@ def test_health() -> None:
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
-    assert response.json()["version"] == "0.6.0"
+    assert response.json()["version"] == "0.6.1"
 
 
 def test_projects_and_tree() -> None:
@@ -166,12 +166,16 @@ def test_config_writes_config_json(tmp_path) -> None:
     config = client.get("/api/config")
     assert config.status_code == 200
     assert config.json()["layout"]["sidebarWidth"] == 338
+    assert config.json()["appearance"] == {"language": "es", "zoomPercent": 100}
+    assert config.json()["diagnostics"] == {"traceLoggingEnabled": False}
     assert config.json()["tabsByProject"] == {}
 
     updated = client.put(
         "/api/config",
         json={
             "layout": {"sidebarWidth": 420, "historyWidth": 360},
+            "appearance": {"language": "en", "zoomPercent": 115},
+            "diagnostics": {"traceLoggingEnabled": True},
             "tabsByProject": {
                 "project-alpha": {
                     "openTabs": [
@@ -185,12 +189,41 @@ def test_config_writes_config_json(tmp_path) -> None:
     )
     assert updated.status_code == 200
     assert updated.json()["layout"] == {"sidebarWidth": 420, "historyWidth": 360}
+    assert updated.json()["appearance"] == {"language": "en", "zoomPercent": 115}
+    assert updated.json()["diagnostics"] == {"traceLoggingEnabled": True}
     assert updated.json()["tabsByProject"]["project-alpha"]["openTabs"][0]["id"] == "decision-tech"
 
     config_file = tmp_path / "config.json"
     persisted_config = json.loads(config_file.read_text(encoding="utf-8"))
     assert persisted_config["layout"] == {"sidebarWidth": 420, "historyWidth": 360}
+    assert persisted_config["appearance"] == {"language": "en", "zoomPercent": 115}
+    assert persisted_config["diagnostics"] == {"traceLoggingEnabled": True}
     assert persisted_config["tabsByProject"]["project-alpha"]["activeDocumentId"] == "decision-tech"
+
+
+def test_trace_logging_writes_only_when_enabled(tmp_path) -> None:
+    disabled = client.post(
+        "/api/runtime/logging",
+        json={"source": "test", "message": "disabled"},
+    )
+    assert disabled.status_code == 200
+    assert disabled.json()["enabled"] is False
+    assert not (tmp_path / "logs" / "knownext.log").exists()
+
+    client.put("/api/config", json={"diagnostics": {"traceLoggingEnabled": True}})
+    enabled = client.post(
+        "/api/runtime/logging",
+        json={"level": "error", "source": "test", "message": "enabled", "detail": "stack"},
+    )
+    assert enabled.status_code == 200
+    assert enabled.json()["enabled"] is True
+    assert enabled.json()["folderPath"] == str(tmp_path / "logs")
+
+    log_file = tmp_path / "logs" / "knownext.log"
+    entry = json.loads(log_file.read_text(encoding="utf-8").strip())
+    assert entry["source"] == "test"
+    assert entry["message"] == "enabled"
+    assert entry["detail"] == "stack"
 
 
 def test_invalid_config_file_is_backed_up(tmp_path) -> None:
