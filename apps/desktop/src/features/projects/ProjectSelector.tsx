@@ -1,5 +1,5 @@
 import { Check, ChevronDown, Plus } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Project } from "../../types/domain";
 import { getProjectIcon } from "./projectVisuals";
 
@@ -12,7 +12,31 @@ type ProjectSelectorProps = {
 
 export function ProjectSelector({ projects, activeProject, onSelectProject, onCreateProject }: ProjectSelectorProps) {
   const [open, setOpen] = useState(false);
+  const firstProjectButtonRef = useRef<HTMLButtonElement | null>(null);
   const ActiveProjectIcon = getProjectIcon(activeProject?.icon);
+
+  useEffect(() => {
+    if (projects.length === 0) firstProjectButtonRef.current?.focus();
+  }, [projects.length]);
+
+  if (projects.length === 0) {
+    return (
+      <div className="rounded-md border border-line bg-white px-3 py-3 shadow-[0_1px_2px_rgba(17,24,39,0.03)]">
+        <div className="text-[11px] font-semibold text-ink-primary">Crea tu primer proyecto</div>
+        <p className="mt-1 text-[11px] leading-4 text-ink-secondary">
+          Crea tu primer proyecto para empezar a trabajar con documentación Markdown en KnowNext.ai.
+        </p>
+        <button
+          ref={firstProjectButtonRef}
+          className="mt-3 flex h-8 w-full items-center justify-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white outline-none transition hover:bg-brand-dark focus-visible:ring-2 focus-visible:ring-brand-orange focus-visible:ring-offset-2"
+          onClick={onCreateProject}
+        >
+          <Plus size={15} />
+          Añadir primer proyecto
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="relative w-full">
@@ -25,7 +49,7 @@ export function ProjectSelector({ projects, activeProject, onSelectProject, onCr
       >
         <span className="flex min-w-0 items-center gap-2">
           <ActiveProjectIcon size={15} style={{ color: activeProject?.iconColor ?? "#F37021" }} />
-          <span className="truncate">{activeProject?.name ?? "Proyecto Alpha"}</span>
+          <span className="truncate">{activeProject?.name ?? "Sin proyecto activo"}</span>
         </span>
         <ChevronDown size={14} />
       </button>

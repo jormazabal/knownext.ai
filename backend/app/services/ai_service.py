@@ -3,25 +3,23 @@ from app.schemas.ai import AiPromptRequest, AiPromptResponse
 
 class AiService:
     def prompt_document(self, document_id: str, payload: AiPromptRequest) -> AiPromptResponse:
-        prompt = payload.prompt.strip()
         return AiPromptResponse(
             answer=(
-                "Respuesta simulada para el documento "
-                f"{document_id}: se ha recibido la consulta '{prompt}'. "
-                "La integración real se conectará aquí mediante un proveedor IA gestionado por FastAPI."
+                "La asistencia IA todavía no está configurada para este documento. "
+                "KnowNext.ai no generará respuestas simuladas; cuando se active un proveedor real, "
+                "la consulta se resolverá desde FastAPI con contexto del documento activo."
             ),
-            suggestedActions=["Resumir documento", "Extraer acuerdos", "Crear lista de tareas"],
+            suggestedActions=[],
         )
 
     def prompt_project(self, project_id: str, payload: AiPromptRequest) -> AiPromptResponse:
-        prompt = payload.prompt.strip()
         return AiPromptResponse(
             answer=(
-                "Respuesta simulada para la documentación del proyecto "
-                f"{project_id}: se ha recibido la consulta '{prompt}'. "
-                "La integración real consultará el contexto documental del proyecto desde FastAPI."
+                "La asistencia IA todavía no está configurada para este proyecto. "
+                "KnowNext.ai no generará respuestas simuladas; cuando se active un proveedor real, "
+                "la consulta se resolverá desde FastAPI con contexto de la documentación del proyecto."
             ),
-            suggestedActions=["Buscar en el proyecto", "Resumir documentación", "Detectar tareas pendientes"],
+            suggestedActions=[],
         )
 
 

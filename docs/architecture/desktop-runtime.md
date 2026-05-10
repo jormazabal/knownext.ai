@@ -6,8 +6,26 @@ KnowNext.ai uses Tauri as the desktop shell.
 
 - Tauri loads the Vite React app.
 - FastAPI is run manually during development.
-- The frontend can use local mocks or call FastAPI with `VITE_USE_BACKEND=true`.
+- The frontend calls FastAPI for product data and must not silently fall back to local mock data.
 - Tauri owns desktop update checks through the updater plugin. React calls only the runtime wrapper under `apps/desktop/src/lib/runtime`, and the updater downloads signed packages from GitHub Releases.
+- The Tauri window must be user-resizable from operating-system edges and corners, with a practical minimum size instead of a fixed mockup-sized viewport.
+
+## Window Resizing
+
+- The packaged desktop window must keep native resizing enabled.
+- The app should set minimum width and height values that protect the compact workspace from broken layout, while still allowing tablet-like widths for responsive drawer behavior.
+- The React workspace must respond to continuous window resize without reloading the frontend, restarting the backend, losing unsaved drafts, or resetting the active Milkdown editor.
+- Runtime integrations such as updater dialogs, GitHub login, project creation, and recoverable drafts must remain usable inside the resized window.
+
+## Startup Runtime UX
+
+The desktop shell must keep startup visually clean while the runtime and API-backed state initialize.
+
+- Show a loading layer before revealing the workspace state.
+- Do not render mock projects, default active project labels, stale tabs, or document chrome while initial state is unresolved.
+- Resolve startup into exactly one visible state: real workspace, first-project empty state, recoverable runtime/API error, or explicit disconnected capability state.
+- When FastAPI is not running in development or the future sidecar fails in the packaged app, show a runtime/API error with retry guidance. Do not show sample data as a fallback.
+- Fade the loading layer out over roughly 180-260ms after the target state is ready so the user never sees partially initialized controls.
 
 ## Auto Updates
 

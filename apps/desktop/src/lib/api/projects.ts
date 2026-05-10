@@ -1,83 +1,39 @@
-import { documentTree, projects } from "../mockData";
-import { isBackendEnabled, mockDelay, requestJson } from "./client";
+import { requestJson } from "./client";
 import type { DocumentTreeNode, FileOperationResult, Project, ProjectCapabilities, ProjectPayload, ProjectVersioningStatus } from "../../types/domain";
 
 export async function listProjects(): Promise<Project[]> {
-  if (isBackendEnabled()) {
-    return requestJson<Project[]>("/api/projects");
-  }
-  return mockDelay(projects);
+  return requestJson<Project[]>("/api/projects");
 }
 
 export async function getActiveProject(): Promise<Project> {
-  if (isBackendEnabled()) {
-    return requestJson<Project>("/api/projects/active");
-  }
-  return mockDelay(projects.find((project) => project.active) ?? projects[0]);
+  return requestJson<Project>("/api/projects/active");
 }
 
 export async function getProjectTree(projectId: string): Promise<DocumentTreeNode[]> {
-  if (isBackendEnabled()) {
-    return requestJson<DocumentTreeNode[]>(`/api/projects/${projectId}/tree`);
-  }
-  return mockDelay(documentTree);
+  return requestJson<DocumentTreeNode[]>(`/api/projects/${projectId}/tree`);
 }
 
 export async function getProjectCapabilities(): Promise<ProjectCapabilities> {
-  if (isBackendEnabled()) {
-    return requestJson<ProjectCapabilities>("/api/projects/capabilities");
-  }
-  return mockDelay({
-    canCreateLocalProject: true,
-    canOpenLocalFolder: true,
-    canUseLocalGit: false,
-    canConnectGithub: false,
-    canUseGithubApi: false,
-    requiresGithubLoginForVersioning: true,
-  });
+  return requestJson<ProjectCapabilities>("/api/projects/capabilities");
 }
 
 export async function getProjectVersioningStatus(projectId: string): Promise<ProjectVersioningStatus> {
-  if (isBackendEnabled()) {
-    return requestJson<ProjectVersioningStatus>(`/api/projects/${projectId}/versioning/status`);
-  }
-  const project = projects.find((currentProject) => currentProject.id === projectId);
-  return mockDelay({
-    enabled: Boolean(project && project.versioningMode !== "none"),
-    available: false,
-    reason: project?.versioningMode === "none" ? null : "github-login-required",
-    storageMode: project?.storageMode ?? "local-files",
-    versioningMode: project?.versioningMode ?? "none",
-    syncMode: project?.syncMode ?? "none",
-    statusLabel: project?.versioningMode === "none" ? "Sin historial" : "Historial requiere GitHub",
-    hasLocalChanges: false,
-    hasRemoteChanges: false,
-  });
+  return requestJson<ProjectVersioningStatus>(`/api/projects/${projectId}/versioning/status`);
 }
 
 export async function pullProject(projectId: string): Promise<{ status: string; message: string }> {
-  if (isBackendEnabled()) {
-    return requestJson<{ status: string; message: string }>(`/api/projects/${projectId}/sync/pull`, { method: "POST" });
-  }
-  return mockDelay({ status: "ok", message: "Proyecto actualizado" });
+  return requestJson<{ status: string; message: string }>(`/api/projects/${projectId}/sync/pull`, { method: "POST" });
 }
 
 export async function pushProject(projectId: string): Promise<{ status: string; message: string }> {
-  if (isBackendEnabled()) {
-    return requestJson<{ status: string; message: string }>(`/api/projects/${projectId}/sync/push`, { method: "POST" });
-  }
-  return mockDelay({ status: "ok", message: "Cambios enviados" });
+  return requestJson<{ status: string; message: string }>(`/api/projects/${projectId}/sync/push`, { method: "POST" });
 }
 
 export async function createFolder(projectId: string, parentId: string | null, name: string): Promise<FileOperationResult> {
-  if (isBackendEnabled()) {
-    return requestJson<FileOperationResult>(`/api/projects/${projectId}/folders`, {
-      method: "POST",
-      body: JSON.stringify({ parentId, name }),
-    });
-  }
-
-  return mockDelay({ tree: documentTree, affectedDocuments: [] });
+  return requestJson<FileOperationResult>(`/api/projects/${projectId}/folders`, {
+    method: "POST",
+    body: JSON.stringify({ parentId, name }),
+  });
 }
 
 export async function createProjectDocument(
@@ -86,45 +42,29 @@ export async function createProjectDocument(
   name: string,
   markdown: string,
 ): Promise<FileOperationResult> {
-  if (isBackendEnabled()) {
-    return requestJson<FileOperationResult>(`/api/projects/${projectId}/documents`, {
-      method: "POST",
-      body: JSON.stringify({ parentId, name, markdown }),
-    });
-  }
-
-  return mockDelay({ tree: documentTree, affectedDocuments: [] });
+  return requestJson<FileOperationResult>(`/api/projects/${projectId}/documents`, {
+    method: "POST",
+    body: JSON.stringify({ parentId, name, markdown }),
+  });
 }
 
 export async function renameTreeNode(projectId: string, nodeId: string, name: string): Promise<FileOperationResult> {
-  if (isBackendEnabled()) {
-    return requestJson<FileOperationResult>(`/api/projects/${projectId}/nodes/${encodeURIComponent(nodeId)}/rename`, {
-      method: "PATCH",
-      body: JSON.stringify({ name }),
-    });
-  }
-
-  return mockDelay({ tree: documentTree, affectedDocuments: [] });
+  return requestJson<FileOperationResult>(`/api/projects/${projectId}/nodes/${encodeURIComponent(nodeId)}/rename`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
 }
 
 export async function deleteTreeNode(projectId: string, nodeId: string): Promise<FileOperationResult> {
-  if (isBackendEnabled()) {
-    return requestJson<FileOperationResult>(`/api/projects/${projectId}/nodes/${encodeURIComponent(nodeId)}`, {
-      method: "DELETE",
-    });
-  }
-
-  return mockDelay({ tree: documentTree, affectedDocuments: [] });
+  return requestJson<FileOperationResult>(`/api/projects/${projectId}/nodes/${encodeURIComponent(nodeId)}`, {
+    method: "DELETE",
+  });
 }
 
 export async function duplicateProjectDocument(projectId: string, documentId: string): Promise<FileOperationResult> {
-  if (isBackendEnabled()) {
-    return requestJson<FileOperationResult>(`/api/projects/${projectId}/documents/${encodeURIComponent(documentId)}/duplicate`, {
-      method: "POST",
-    });
-  }
-
-  return mockDelay({ tree: documentTree, affectedDocuments: [] });
+  return requestJson<FileOperationResult>(`/api/projects/${projectId}/documents/${encodeURIComponent(documentId)}/duplicate`, {
+    method: "POST",
+  });
 }
 
 export async function moveTreeNode(
@@ -132,75 +72,34 @@ export async function moveTreeNode(
   nodeId: string,
   targetFolderId: string | null,
 ): Promise<FileOperationResult> {
-  if (isBackendEnabled()) {
-    return requestJson<FileOperationResult>(`/api/projects/${projectId}/nodes/${encodeURIComponent(nodeId)}/move`, {
-      method: "PATCH",
-      body: JSON.stringify({ targetFolderId }),
-    });
-  }
-
-  return mockDelay({ tree: documentTree, affectedDocuments: [] });
+  return requestJson<FileOperationResult>(`/api/projects/${projectId}/nodes/${encodeURIComponent(nodeId)}/move`, {
+    method: "PATCH",
+    body: JSON.stringify({ targetFolderId }),
+  });
 }
 
 export async function createProject(payload: ProjectPayload): Promise<Project> {
-  if (isBackendEnabled()) {
-    return requestJson<Project>("/api/projects", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-  }
-
-  return mockDelay({
-    ...payload,
-    id: `project-${crypto.randomUUID()}`,
-    active: true,
-    authRequired: payload.versioningMode !== "none",
-    isGitRepository: payload.versioningMode === "local-git",
+  return requestJson<Project>("/api/projects", {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
 
 export async function updateProject(projectId: string, payload: ProjectPayload): Promise<Project> {
-  if (isBackendEnabled()) {
-    return requestJson<Project>(`/api/projects/${projectId}`, {
-      method: "PUT",
-      body: JSON.stringify(payload),
-    });
-  }
-
-  const currentProject = projects.find((project) => project.id === projectId);
-  return mockDelay({
-    ...(currentProject ?? {
-      id: projectId,
-      active: false,
-      isGitRepository: false,
-      authRequired: false,
-      storageMode: "local-files",
-      versioningMode: "none",
-      syncMode: "none",
-      githubRepository: null,
-    }),
-    ...payload,
-    authRequired: payload.versioningMode !== "none",
-    isGitRepository: payload.versioningMode === "local-git",
+  return requestJson<Project>(`/api/projects/${projectId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
   });
 }
 
 export async function deleteProject(projectId: string): Promise<Project[]> {
-  if (isBackendEnabled()) {
-    return requestJson<Project[]>(`/api/projects/${projectId}`, {
-      method: "DELETE",
-    });
-  }
-
-  return mockDelay(projects.filter((project) => project.id !== projectId));
+  return requestJson<Project[]>(`/api/projects/${projectId}`, {
+    method: "DELETE",
+  });
 }
 
 export async function setActiveProject(projectId: string): Promise<Project> {
-  if (isBackendEnabled()) {
-    return requestJson<Project>(`/api/projects/${projectId}/active`, {
-      method: "PUT",
-    });
-  }
-
-  return mockDelay(projects.find((project) => project.id === projectId) ?? projects[0]);
+  return requestJson<Project>(`/api/projects/${projectId}/active`, {
+    method: "PUT",
+  });
 }

@@ -17,7 +17,6 @@ from app.schemas.document import (
 from app.services.draft_service import draft_service
 from app.services.filesystem_service import decode_document_id
 from app.services.filesystem_service import filesystem_service
-from app.services.mock_store import mock_store
 from app.services.project_service import project_service
 
 
@@ -86,10 +85,7 @@ class DocumentService:
             )
             return self._apply_draft(document)
 
-        document = mock_store.documents.get(document_id)
-        if document is None:
-            raise HTTPException(status_code=404, detail="Document not found")
-        return self._apply_draft(Document(**document))
+        raise HTTPException(status_code=404, detail="Document not found")
 
     def save_document(self, document_id: str, markdown: str, base_fingerprint: DocumentFingerprint | None = None, force: bool = False) -> Document:
         if document_id.startswith("fs_"):
@@ -143,10 +139,7 @@ class DocumentService:
                 baseFingerprint=fingerprint,
             )
 
-        if document_id not in mock_store.documents:
-            raise HTTPException(status_code=404, detail="Document not found")
-        draft_service.delete_draft(document_id)
-        return Document(**mock_store.save_document(document_id, markdown))
+        raise HTTPException(status_code=404, detail="Document not found")
 
     def save_draft(self, document_id: str, markdown: str, base_fingerprint: DocumentFingerprint | None = None) -> DraftResponse:
         try:
@@ -199,10 +192,7 @@ class DocumentService:
                 baseFingerprint=fingerprint,
             )
 
-        document = mock_store.documents.get(document_id)
-        if document is None:
-            raise HTTPException(status_code=404, detail="Document not found")
-        return Document(**document)
+        raise HTTPException(status_code=404, detail="Document not found")
 
     def _apply_draft(self, document: Document) -> Document:
         draft = draft_service.get_draft(document.id)
@@ -274,13 +264,12 @@ class DocumentService:
         draft = draft_service.get_draft(document_id)
 
         if not document_id.startswith("fs_"):
-            exists = document_id in mock_store.documents
             return DocumentSyncStatus(
                 documentId=document_id,
-                exists=exists,
+                exists=False,
                 hasDraft=draft is not None,
-                orphaned=not exists and draft is not None,
-                conflictStatus="orphaned" if not exists and draft is not None else "none",
+                orphaned=draft is not None,
+                conflictStatus="orphaned" if draft is not None else "missing",
             )
 
         try:

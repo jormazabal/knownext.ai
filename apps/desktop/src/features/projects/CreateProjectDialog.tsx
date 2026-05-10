@@ -140,8 +140,8 @@ export function CreateProjectDialog({
 
   return (
     <div className="fixed inset-0 z-[80] grid place-items-center bg-black/20">
-      <section className="w-[560px] rounded-lg border border-line bg-white shadow-menu">
-        <header className="flex items-center justify-between border-b border-line px-5 py-4">
+      <section className="flex max-h-[calc(100vh-32px)] w-[min(680px,calc(100vw-32px))] flex-col rounded-lg border border-line bg-white shadow-menu">
+        <header className="flex shrink-0 items-center justify-between border-b border-line px-5 py-4">
           <div className="flex items-center gap-3">
             <span className="grid h-8 w-8 place-items-center rounded-md bg-brand-orange text-white">
               <FolderPlus size={17} />
@@ -154,90 +154,17 @@ export function CreateProjectDialog({
             <X size={17} />
           </button>
         </header>
-        <div className="space-y-4 px-5 py-5">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
           {!isEditing ? (
-            <>
-              <div>
-                <div className="mb-2 text-[11px] font-medium text-ink-secondary">Cómo quieres empezar</div>
-                <div className="grid grid-cols-3 gap-2">
-                  <WizardCard
-                    active={creationMode === "new-local"}
-                    icon={FolderPlus}
-                    title="Crear desde 0"
-                    description="Nueva carpeta local para documentación Markdown."
-                    onClick={() => {
-                      setCreationMode("new-local");
-                      setVersioningMode("none");
-                    }}
-                  />
-                  <WizardCard
-                    active={creationMode === "open-local"}
-                    icon={HardDrive}
-                    title="Cargar carpeta"
-                    description="Usa una carpeta local ya creada."
-                    onClick={() => {
-                      setCreationMode("open-local");
-                      setVersioningMode("none");
-                    }}
-                  />
-                  <WizardCard
-                    active={creationMode === "github-repository"}
-                    disabled={!authStatus.isAuthenticated}
-                    icon={Github}
-                    title="Repo GitHub"
-                    description="Descarga y configura un repositorio."
-                    onClick={() => {
-                      setCreationMode("github-repository");
-                      setVersioningMode("github-api");
-                    }}
-                  />
-                </div>
-              </div>
-              <div>
-                <div className="mb-2 flex items-center justify-between gap-3 text-[11px] font-medium text-ink-secondary">
-                  <span>Modo de historial</span>
-                  {!authStatus.isAuthenticated ? (
-                    <button className="text-[11px] font-semibold text-brand-orange hover:text-brand-dark" type="button" onClick={onLoginGithub}>
-                      Conectar GitHub
-                    </button>
-                  ) : null}
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <WizardCard
-                    active={versioningMode === "none"}
-                    icon={HardDrive}
-                    title="Archivos locales"
-                    description="Persistencia en disco sin historial."
-                    onClick={() => setVersioningMode("none")}
-                  />
-                  <WizardCard
-                    active={versioningMode === "local-git"}
-                    disabled={!capabilities?.canUseLocalGit}
-                    icon={GitBranch}
-                    title="Git local + sync"
-                    description="Versiones locales y sincronización manual."
-                    onClick={() => setVersioningMode("local-git")}
-                  />
-                  <WizardCard
-                    active={versioningMode === "github-api"}
-                    disabled={!capabilities?.canUseGithubApi}
-                    icon={Github}
-                    title="GitHub versionado"
-                    description="GitHub actúa como proveedor de versiones."
-                    onClick={() => {
-                      setCreationMode("github-repository");
-                      setVersioningMode("github-api");
-                    }}
-                  />
-                </div>
-                {!authStatus.isAuthenticated ? (
-                  <div className="mt-2 flex items-center gap-2 rounded-md border border-orange-200 bg-brand-hover px-3 py-2 text-[11px] text-ink-secondary">
-                    <Lock size={14} className="text-brand-orange" />
-                    Las opciones versionadas se activan al conectar GitHub. Los proyectos locales funcionan sin cuenta.
-                  </div>
-                ) : null}
-              </div>
-            </>
+            <ProjectSourceTabs
+              creationMode={creationMode}
+              authStatus={authStatus}
+              onLoginGithub={onLoginGithub}
+              onSelect={(nextMode) => {
+                setCreationMode(nextMode);
+                setVersioningMode(nextMode === "github-repository" ? "github-api" : "none");
+              }}
+            />
           ) : null}
           <label className="block text-[11px] font-medium text-ink-secondary">
             Nombre del proyecto
@@ -254,8 +181,31 @@ export function CreateProjectDialog({
               />
             </div>
           </label>
+          {!isEditing && creationMode !== "github-repository" ? (
+            <VersioningModeSelector
+              versioningMode={versioningMode}
+              authStatus={authStatus}
+              capabilities={capabilities}
+              onLoginGithub={onLoginGithub}
+              onSelect={(nextMode) => {
+                setVersioningMode(nextMode);
+                if (nextMode === "github-api") setCreationMode("github-repository");
+              }}
+            />
+          ) : null}
           {versioningMode === "github-api" ? (
             <div className="space-y-3">
+              {!authStatus.isAuthenticated ? (
+                <div className="flex items-center justify-between gap-3 rounded-md border border-orange-200 bg-brand-hover px-3 py-2 text-[11px] text-ink-secondary">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <Lock size={14} className="shrink-0 text-brand-orange" />
+                    Conecta GitHub para cargar repositorios y crear proyectos versionados.
+                  </span>
+                  <button className="shrink-0 font-semibold text-brand-orange hover:text-brand-dark" type="button" onClick={onLoginGithub}>
+                    Conectar
+                  </button>
+                </div>
+              ) : null}
               <div className="flex items-center justify-between gap-3">
                 <label className="min-w-0 flex-1 text-[11px] font-medium text-ink-secondary">
                   Repositorio GitHub
@@ -391,7 +341,7 @@ export function CreateProjectDialog({
             </div>
           </div>
         </div>
-        <footer className="flex items-center justify-between gap-3 border-t border-line px-5 py-4">
+        <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-line bg-white px-5 py-4">
           {isEditing && project && onDelete ? (
             <button
               className="flex h-9 items-center gap-2 rounded-md px-3 text-[11px] font-medium text-red-700 hover:bg-red-50"
@@ -455,7 +405,117 @@ export function CreateProjectDialog({
   );
 }
 
-function WizardCard({
+function ProjectSourceTabs({
+  creationMode,
+  authStatus,
+  onLoginGithub,
+  onSelect,
+}: {
+  creationMode: ProjectCreationMode;
+  authStatus: AuthStatus;
+  onLoginGithub?: () => void;
+  onSelect: (mode: ProjectCreationMode) => void;
+}) {
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[11px] font-semibold text-ink-primary">Origen del proyecto</div>
+          <p className="mt-0.5 text-[11px] text-ink-secondary">Elige cómo quieres empezar.</p>
+        </div>
+        {!authStatus.isAuthenticated ? (
+          <button className="text-[11px] font-semibold text-brand-orange hover:text-brand-dark" type="button" onClick={onLoginGithub}>
+            Conectar GitHub
+          </button>
+        ) : null}
+      </div>
+      <div role="tablist" aria-label="Origen del proyecto" className="grid grid-cols-1 gap-1 rounded-md border border-line bg-panel p-1 sm:grid-cols-3">
+        <ModeTab
+          active={creationMode === "new-local"}
+          icon={FolderPlus}
+          title="Crear desde 0"
+          description="Nueva carpeta Markdown."
+          onClick={() => onSelect("new-local")}
+        />
+        <ModeTab
+          active={creationMode === "open-local"}
+          icon={HardDrive}
+          title="Cargar carpeta"
+          description="Usa documentación existente."
+          onClick={() => onSelect("open-local")}
+        />
+        <ModeTab
+          active={creationMode === "github-repository"}
+          disabled={!authStatus.isAuthenticated}
+          icon={Github}
+          title="Repo GitHub"
+          description={authStatus.isAuthenticated ? "Cache local versionada." : "Requiere conexión."}
+          onClick={() => onSelect("github-repository")}
+        />
+      </div>
+      {!authStatus.isAuthenticated ? (
+        <div className="mt-2 flex items-center gap-2 rounded-md border border-orange-200 bg-brand-hover px-3 py-2 text-[11px] text-ink-secondary">
+          <Lock size={14} className="text-brand-orange" />
+          Las opciones GitHub y versionadas se activan al conectar GitHub. Los proyectos locales funcionan sin cuenta.
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function VersioningModeSelector({
+  versioningMode,
+  authStatus,
+  capabilities,
+  onLoginGithub,
+  onSelect,
+}: {
+  versioningMode: VersioningMode;
+  authStatus: AuthStatus;
+  capabilities: ProjectCapabilities | null;
+  onLoginGithub?: () => void;
+  onSelect: (mode: VersioningMode) => void;
+}) {
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between gap-3 text-[11px] font-medium text-ink-secondary">
+        <span>Historial</span>
+        {!authStatus.isAuthenticated ? (
+          <button className="font-semibold text-brand-orange hover:text-brand-dark" type="button" onClick={onLoginGithub}>
+            Conectar GitHub
+          </button>
+        ) : null}
+      </div>
+      <div className="grid grid-cols-1 gap-1 rounded-md border border-line bg-panel p-1 sm:grid-cols-3">
+        <ModeTab
+          active={versioningMode === "none"}
+          icon={HardDrive}
+          title="Archivos locales"
+          description="Sin historial."
+          onClick={() => onSelect("none")}
+        />
+        <ModeTab
+          active={versioningMode === "local-git"}
+          disabled={!capabilities?.canUseLocalGit}
+          icon={GitBranch}
+          title="Git local + sync"
+          description="Versiones locales."
+          onClick={() => onSelect("local-git")}
+        />
+        <ModeTab
+          active={versioningMode === "github-api"}
+          disabled={!capabilities?.canUseGithubApi}
+          icon={Github}
+          title="GitHub versionado"
+          description="GitHub como historial."
+          onClick={() => onSelect("github-api")}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ModeTab({
   active,
   disabled = false,
   icon: Icon,
@@ -472,21 +532,23 @@ function WizardCard({
 }) {
   return (
     <button
+      role="tab"
+      aria-selected={active}
       className={[
-        "min-h-[96px] rounded-md border p-3 text-left transition",
-        active ? "border-brand-orange bg-brand-hover text-ink-primary" : "border-line bg-white text-ink-primary hover:bg-panel",
-        disabled ? "cursor-not-allowed opacity-45 hover:bg-white" : "",
+        "min-h-[58px] rounded px-3 py-2 text-left transition",
+        active ? "bg-white text-ink-primary shadow-[0_1px_2px_rgba(17,24,39,0.08)]" : "text-ink-primary hover:bg-white/70",
+        disabled ? "cursor-not-allowed opacity-45 hover:bg-transparent" : "",
       ].join(" ")}
       type="button"
       disabled={disabled}
       onClick={onClick}
     >
-      <div className="mb-2 flex items-center gap-2">
+      <div className="flex items-center gap-2">
         <Icon size={16} className={active ? "text-brand-orange" : "text-ink-secondary"} />
         <span className="text-[11px] font-semibold">{title}</span>
         {disabled ? <Lock size={13} className="ml-auto text-ink-secondary" /> : null}
       </div>
-      <p className="text-[10px] leading-4 text-ink-secondary">{description}</p>
+      <p className="mt-0.5 text-[10px] leading-4 text-ink-secondary">{description}</p>
     </button>
   );
 }

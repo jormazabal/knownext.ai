@@ -25,6 +25,7 @@ const actions = [
 type ProjectActionsProps = {
   appVersion: string;
   authStatus: AuthStatus;
+  hasActiveProject: boolean;
   orphanDraftCount: number;
   isCheckingForUpdates: boolean;
   onLoginGithub: () => void;
@@ -42,6 +43,7 @@ type ProjectActionsProps = {
 export function ProjectActions({
   appVersion,
   authStatus,
+  hasActiveProject,
   orphanDraftCount,
   isCheckingForUpdates,
   onLoginGithub,
@@ -72,9 +74,10 @@ export function ProjectActions({
         {actions.map((action) => (
           <button
             key={action.label}
-            className="grid h-6 w-6 place-items-center rounded-md hover:bg-brand-hover"
+            className="grid h-6 w-6 place-items-center rounded-md hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-40"
             data-tooltip={action.label}
             aria-label={action.label}
+            disabled={!hasActiveProject && action.id !== "search"}
             onClick={() => handleAction(action.id)}
           >
             <action.icon size={15} />

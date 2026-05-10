@@ -21,8 +21,8 @@ Backend code lives in `backend/app`.
 - `auth_service` and `credential_service`: optional GitHub identity, OAuth device flow, and local credential storage. Tokens are never stored in project metadata.
 - `git_service`: local Git operations mediated by FastAPI; React never executes Git.
 - `github_service`: GitHub REST API access for repository discovery, cache hydration, history, and commit creation.
-- `version_service`: provider abstraction for mocked, local Git, and GitHub API histories.
-- `ai_service`: document-aware AI prompt handling.
+- `version_service`: provider abstraction for local Git and GitHub API histories. Development fakes must not be exposed as production history.
+- `ai_service`: document-aware AI prompt handling. If a real provider is not configured, the API must return an explicit unavailable/placeholder state rather than a production-looking fake answer.
 
 ## Local Application Files
 
@@ -35,6 +35,8 @@ The local API owns application metadata files. React must access them through AP
 
 By default these files are stored in `%APPDATA%/KnowNext.ai` on Windows and `~/.knownext.ai` elsewhere. Tests and local tooling can override the directory with `KNOWNEXT_APP_DATA_DIR`.
 
+Layout width values in `config.json` are user preferences. Services should preserve known width fields, tolerate missing legacy values, and return defaults when values are absent or invalid so the frontend can clamp and render resizable panels safely.
+
 ## Project Modes
 
 - `local-files` + `none`: available without login; document operations read and write the selected local folder.
@@ -42,6 +44,13 @@ By default these files are stored in `%APPDATA%/KnowNext.ai` on Windows and `~/.
 - `local-cache` + `github-api`: requires GitHub login; GitHub is the versioning authority while KnowNext.ai keeps a local cache for editing and drafts.
 
 Project metadata remains in local JSON, while document tree and Markdown document operations are mediated by backend services. Unsaved document content is mediated by `draft_service` until the user explicitly saves or versions it. Routers should stay thin and call services when contracts evolve.
+
+## Empty And Unavailable Data Contracts
+
+- `GET /api/projects` may return an empty array. This is a valid loaded state and must not be replaced by seeded projects unless an explicit onboarding/import action creates them.
+- `GET /api/projects/active` must clearly represent no active project when no projects exist, either through a documented `null`/empty contract or an explicit not-found response consumed by the frontend as the first-project state.
+- Auth endpoints must distinguish anonymous/disconnected users from authenticated users. They must not return mock users in normal product runtime.
+- History and AI endpoints must distinguish unavailable providers, empty results, and service errors with structured responses or documented status errors so the UI can show the correct empty or disabled state.
 
 ## Draft and Sync Contracts
 

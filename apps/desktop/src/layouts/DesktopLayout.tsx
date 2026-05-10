@@ -219,18 +219,21 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             </button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-1.5">
-            <DocumentTree
-              nodes={props.tree}
-              activeDocumentId={props.activeDocumentId}
-              onOpenDocument={handleOpenDocument}
-              onRenameNode={props.onRenameNode}
-              onToggleNode={props.onToggleNode}
-              onContextAction={props.onTreeContextAction}
-            />
+            {props.activeProject ? (
+              <DocumentTree
+                nodes={props.tree}
+                activeDocumentId={props.activeDocumentId}
+                onOpenDocument={handleOpenDocument}
+                onRenameNode={props.onRenameNode}
+                onToggleNode={props.onToggleNode}
+                onContextAction={props.onTreeContextAction}
+              />
+            ) : null}
           </div>
           <ProjectActions
             appVersion={props.appVersion}
             authStatus={props.authStatus}
+            hasActiveProject={Boolean(props.activeProject)}
             orphanDraftCount={props.orphanDraftCount}
             onLoginGithub={props.onLoginGithub}
             onLogout={props.onLogout}

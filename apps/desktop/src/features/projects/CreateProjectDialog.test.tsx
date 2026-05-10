@@ -153,7 +153,7 @@ describe("CreateProjectDialog", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: /crear desde 0/i }));
+    await userEvent.click(screen.getByRole("tab", { name: /crear desde 0/i }));
     await userEvent.type(screen.getByLabelText(/carpeta local/i), "C:\\Docs\\Nuevo proyecto");
     await userEvent.click(screen.getByRole("button", { name: /crear proyecto/i }));
 
@@ -267,7 +267,7 @@ describe("CreateProjectDialog", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: /repo github/i }));
+    await userEvent.click(screen.getByRole("tab", { name: /repo github/i }));
     await userEvent.selectOptions(screen.getByLabelText(/repositorio github/i), "knownext/docs");
     await userEvent.click(screen.getByRole("button", { name: /crear proyecto/i }));
 

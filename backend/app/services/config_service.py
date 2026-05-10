@@ -12,16 +12,7 @@ DEFAULT_LAYOUT = {
     "historyWidth": 320,
 }
 
-DEFAULT_TABS = {
-    "project-alpha": {
-        "openTabs": [
-            {"id": "meeting-minutes", "name": "acta-reunion.md"},
-            {"id": "requirements-functional", "name": "requisitos-funcionales.md"},
-            {"id": "decision-tech", "name": "decision-tecnologica.md"},
-        ],
-        "activeDocumentId": "meeting-minutes",
-    }
-}
+DEFAULT_TABS = {}
 
 LAYOUT_LIMITS = {
     "sidebarWidth": (260, 480),
@@ -99,7 +90,7 @@ def _normalize_tabs_by_project(value: object) -> dict:
             "activeDocumentId": active_document_id,
         }
 
-    return normalized or deepcopy(DEFAULT_TABS)
+    return normalized
 
 
 def _normalize_optional_string(value: object) -> str | None:

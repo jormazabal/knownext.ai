@@ -1,19 +1,35 @@
 # Manual Test Checklist
 
 - [ ] Open the application.
+- [ ] Confirm startup first shows a clean loading layer before any workspace, project selector, document tree, tabs, or account state appears.
+- [ ] Confirm the loading layer uses a quiet white/light-panel treatment with orange progress accent and no fake project/document placeholders.
+- [ ] Confirm the transition from loading to the resolved app state is smooth, with no flash of Proyecto Alpha, sample documents, stale tabs, or partially initialized controls.
+- [ ] Start the app with a clean profile and no `projects.json` projects, then confirm the sidebar shows no project selector dropdown.
+- [ ] In the no-projects state, confirm the sidebar shows `Añadir primer proyecto` with a plus icon and explanatory copy about creating the first project before working with the application.
+- [ ] Confirm pressing `Añadir primer proyecto` opens the same new-project flow used by `Nuevo proyecto`.
+- [ ] Restart with no projects and confirm the first-project empty state is restored instead of seeding sample projects.
+- [ ] Confirm no mock projects, mock documents, mock users, mock history, or mock AI answers appear in the normal application runtime.
 - [ ] Confirm the window top bar shows KnowNext.ai and simulated window controls.
+- [ ] In the packaged Tauri app, resize the application freely from each window edge and corner and confirm the workspace follows the window without clipping critical controls.
+- [ ] Resize the window down to the minimum practical size and confirm text, buttons, tabs, drawers, and dialogs remain usable without overlap.
+- [ ] Resize the window repeatedly while a document has unsaved edits and confirm the active editor, dirty state, undo/redo state, and save feedback are preserved.
+- [ ] Create or import at least two real test projects before continuing project-switching checks.
 - [ ] Open and close the project selector.
-- [ ] Select Proyecto Beta or Proyecto Gamma.
+- [ ] Select another real test project from the project selector.
 - [ ] Restart the app and confirm the selected project is restored from `projects.json`.
 - [ ] Confirm Nuevo proyecto is inside the selector dropdown.
-- [ ] Open Nuevo proyecto and confirm the assistant shows Crear desde 0, Cargar carpeta, and Repo GitHub.
+- [ ] Open Nuevo proyecto and confirm project creation is organized as tabs or an assistant/wizard rather than a single dense long form.
+- [ ] Confirm Crear desde 0, Cargar carpeta, and Repo GitHub are available as clear tabs/steps.
+- [ ] Resize the app to a smaller width/height with Nuevo proyecto open and confirm the modal fits the viewport with an internal scroll area and visible footer actions.
+- [ ] In Nuevo proyecto, switch between tabs/steps after entering values and confirm the values are preserved during the same modal session.
+- [ ] In Nuevo proyecto, trigger validation errors and confirm focus moves to the active invalid field or step.
 - [ ] Without GitHub login, confirm Repo GitHub, Git local + sync, and GitHub versionado are visible but disabled with explanatory copy.
 - [ ] In Crear desde 0, type a new folder path that does not exist yet and confirm the project is created with that folder on disk.
 - [ ] Create a local files project without login and confirm it is present after restarting the app.
 - [ ] Confirm the history toolbar button is disabled in a local files project and the tooltip explains that history is unavailable.
 - [ ] Open the account menu and click Conectar GitHub.
 - [ ] Confirm the GitHub device login dialog shows a verification code and an Abrir GitHub action.
-- [ ] Complete the development/mock GitHub login and confirm the account menu changes to a connected GitHub user.
+- [ ] Complete GitHub login and confirm the account menu changes to the authenticated GitHub user. If a development-only auth fake is used, confirm it is explicitly labeled and not enabled in normal product runtime.
 - [ ] Reopen Nuevo proyecto and confirm Git local + sync and GitHub versionado are enabled after login.
 - [ ] In Repo GitHub mode, refresh the repository list and confirm selecting a repository fills owner, repo, and project name.
 - [ ] Create a GitHub versionado project from a repository and confirm the local cache loads Markdown documents when network and permissions allow it.
@@ -21,9 +37,11 @@
 - [ ] Create a Git local + sync project and confirm the status bar shows a versioning state instead of Sin historial.
 - [ ] Inspect the folder/document tree levels and confirm they match the active project's local folder.
 - [ ] Confirm only Markdown documents and folders are shown in the navigation tree.
-- [ ] Drag the divider next to the folder/document tree and confirm the panel width changes with a visible vertical resize line.
+- [ ] In desktop width, drag the divider next to the folder/document tree and confirm the left panel width changes with a visible vertical orange resize line.
+- [ ] In desktop width, focus the folder/document tree divider with the keyboard and confirm arrow keys resize the left panel within min/max limits.
 - [ ] Restart the app and confirm the folder/document tree width is restored from `config.json`.
 - [ ] Resize the app to a tablet/mobile width and confirm the folder/document tree becomes a left drawer opened by the icon to the left of the document tabs.
+- [ ] In tablet/mobile width, confirm the folder/document drawer does not show the desktop resize divider.
 - [ ] In tablet/mobile width, open the document drawer and confirm the top-right icon inside the drawer hides it.
 - [ ] In tablet/mobile width, open a document from the drawer and confirm the drawer closes while the selected document tab remains active.
 - [ ] In tablet/mobile width, confirm the drawer closes when clicking outside it or pressing Escape.
@@ -69,7 +87,8 @@
 - [ ] With GitHub login, open the version history panel on a versioned project.
 - [ ] Click Crear versión and confirm either a new version is created or a clear no-changes/provider error appears.
 - [ ] In a Git local + sync project, use Traer cambios and Subir cambios from the history panel and confirm status feedback is visible.
-- [ ] Drag the divider next to the version history panel and confirm the panel width changes with a visible vertical resize line.
+- [ ] In desktop width, drag the divider next to the version history panel and confirm the right panel width changes with a visible vertical orange resize line.
+- [ ] In desktop width, focus the version history divider with the keyboard and confirm arrow keys resize the right panel within min/max limits.
 - [ ] Restart the app, open history, and confirm the history panel width is restored from `config.json`.
 - [ ] In tablet/mobile width, open version history and confirm it appears as a floating right drawer over the editor without a resize divider.
 - [ ] In tablet/mobile width, confirm version history closes from its X button, by clicking outside it, and by pressing Escape.
