@@ -1,6 +1,10 @@
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Manager;
+
+static TRACE_LOG_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(serde::Serialize)]
 struct TraceLogStatus {
@@ -48,9 +52,14 @@ fn record_trace_log(
 ) -> Result<TraceLogStatus, String> {
     let (log_dir, log_file) = trace_log_paths(&app)?;
     std::fs::create_dir_all(&log_dir).map_err(|error| error.to_string())?;
+    let _guard = TRACE_LOG_LOCK.lock().map_err(|error| error.to_string())?;
+    let timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default();
 
     let entry = serde_json::json!({
-        "timestamp": format!("{:?}", std::time::SystemTime::now()),
+        "timestamp": timestamp_ms,
         "level": if level.is_empty() { "error" } else { level.as_str() },
         "source": source,
         "message": message,

@@ -62,3 +62,7 @@ export function getApiErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+export function isApiConnectionError(error: unknown) {
+  return error instanceof TypeError || (error instanceof DOMException && error.name === "AbortError");
+}
+
