@@ -14,6 +14,7 @@ describe("ProjectActions", () => {
       <ProjectActions
         appVersion="0.5.0"
         authStatus={{ isAuthenticated: false, provider: null, user: null, scopes: [] }}
+        hasActiveProject
         orphanDraftCount={0}
         isCheckingForUpdates={false}
         onLoginGithub={vi.fn()}
@@ -41,6 +42,7 @@ describe("ProjectActions", () => {
       <ProjectActions
         appVersion="0.5.0"
         authStatus={{ isAuthenticated: false, provider: null, user: null, scopes: [] }}
+        hasActiveProject
         orphanDraftCount={0}
         isCheckingForUpdates={false}
         onLoginGithub={vi.fn()}

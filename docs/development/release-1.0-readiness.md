@@ -8,7 +8,7 @@ Status: not ready for commercial 1.0.
 
 The current application has a working professional workspace, local project registry, local configuration persistence, Markdown editing, local folder scanning, and real Markdown file operations. It is suitable for internal validation and controlled pilot use.
 
-It is not yet ready to sell as a standalone desktop product because the packaged Tauri app does not start and supervise the FastAPI backend as a controlled sidecar, and Git history plus AI assistance are still mock services.
+It is not yet ready to sell as a standalone desktop product because the packaged Tauri app does not start and supervise the FastAPI backend as a controlled sidecar, and Git history plus AI assistance still have development/mock-backed gaps that must not appear as production behavior.
 
 ## Completed 1.0 Foundations
 
@@ -28,6 +28,7 @@ It is not yet ready to sell as a standalone desktop product because the packaged
 
 - Package the FastAPI backend as a controlled Tauri sidecar.
 - Start, health-check, stop, and recover the backend from the Tauri runtime.
+- Remove normal runtime fallback to frontend mock data; empty, disconnected, unavailable, and error states must be explicit.
 - Replace mock Git history with a local Git service mediated by FastAPI.
 - Decide whether AI is included in 1.0; if included, replace mock AI with a FastAPI-mediated provider integration and privacy controls.
 - Add installer signing, update policy, license/EULA, and release artifact validation.

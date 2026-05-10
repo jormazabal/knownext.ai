@@ -21,17 +21,16 @@ def test_health() -> None:
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
-    assert response.json()["version"] == "0.5.1"
+    assert response.json()["version"] == "0.6.0"
 
 
 def test_projects_and_tree() -> None:
     projects = client.get("/api/projects")
     assert projects.status_code == 200
-    assert projects.json()[0]["name"] == "Proyecto Alpha"
+    assert projects.json() == []
 
-    tree = client.get("/api/projects/project-alpha/tree")
-    assert tree.status_code == 200
-    assert tree.json() == []
+    active = client.get("/api/projects/active")
+    assert active.status_code == 404
 
 
 def test_project_tree_reads_local_folder_and_manages_files(tmp_path) -> None:
@@ -127,10 +126,11 @@ def test_project_registry_writes_projects_json(tmp_path) -> None:
     deleted = client.delete(f"/api/projects/{project_id}")
     assert deleted.status_code == 200
     assert all(project["id"] != project_id for project in deleted.json())
+    assert deleted.json() == []
 
     registry_after_delete = json.loads(projects_file.read_text(encoding="utf-8"))
     assert all(project["id"] != project_id for project in registry_after_delete["projects"])
-    assert registry_after_delete["activeProjectId"] != project_id
+    assert registry_after_delete["activeProjectId"] is None
 
 
 def test_new_local_project_creates_folder_and_open_local_requires_existing_folder(tmp_path) -> None:
@@ -166,7 +166,7 @@ def test_config_writes_config_json(tmp_path) -> None:
     config = client.get("/api/config")
     assert config.status_code == 200
     assert config.json()["layout"]["sidebarWidth"] == 338
-    assert config.json()["tabsByProject"]["project-alpha"]["activeDocumentId"] == "meeting-minutes"
+    assert config.json()["tabsByProject"] == {}
 
     updated = client.put(
         "/api/config",
@@ -205,17 +205,27 @@ def test_invalid_config_file_is_backed_up(tmp_path) -> None:
     assert list(tmp_path.glob("config.json.corrupt-*"))
 
 
-def test_document_save_and_versions() -> None:
-    document = client.get("/api/documents/meeting-minutes")
-    assert document.status_code == 200
-    assert document.json()["name"] == "acta-reunion.md"
+def test_document_save_and_versions(tmp_path) -> None:
+    docs_root = tmp_path / "docs"
+    docs_root.mkdir()
+    (docs_root / "meeting.md").write_text("# Reunión\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "Docs", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    document_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
 
-    saved = client.put("/api/documents/meeting-minutes", json={"markdown": "# Guardado\n\nContenido actualizado."})
+    document = client.get(f"/api/documents/{document_id}")
+    assert document.status_code == 200
+    assert document.json()["name"] == "meeting.md"
+
+    saved = client.put(f"/api/documents/{document_id}", json={"markdown": "# Guardado\n\nContenido actualizado."})
     assert saved.status_code == 200
     assert saved.json()["wordCount"] == 4
 
-    versions = client.get("/api/documents/meeting-minutes/versions")
-    assert versions.status_code == 403
+    versions = client.get(f"/api/documents/{document_id}/versions")
+    assert versions.status_code == 409
 
     device = client.post("/api/auth/github/device/start")
     assert device.status_code == 200
@@ -223,9 +233,8 @@ def test_document_save_and_versions() -> None:
     assert authenticated.status_code == 200
     assert authenticated.json()["auth"]["isAuthenticated"] is True
 
-    versions = client.get("/api/documents/meeting-minutes/versions")
-    assert versions.status_code == 200
-    assert versions.json()[0]["current"] is True
+    versions = client.get(f"/api/documents/{document_id}/versions")
+    assert versions.status_code == 409
 
 
 def test_projects_registry_migrates_v1_project_modes(tmp_path) -> None:
@@ -624,22 +633,41 @@ def test_draft_maintenance_removes_tmp_and_moves_corrupt_files(tmp_path) -> None
     assert list((drafts_dir / "corrupt").glob("*.corrupt-*"))
 
 
-def test_ai_prompt() -> None:
+def test_ai_prompt(tmp_path) -> None:
+    docs_root = tmp_path / "ai-docs"
+    docs_root.mkdir()
+    (docs_root / "context.md").write_text("# Documento\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Docs", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    document_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
+
     response = client.post(
-        "/api/documents/meeting-minutes/ai/prompt",
+        f"/api/documents/{document_id}/ai/prompt",
         json={"prompt": "Resume acuerdos", "markdown": "# Documento"},
     )
     assert response.status_code == 200
-    assert "Respuesta simulada" in response.json()["answer"]
+    assert "no está configurada" in response.json()["answer"]
+    assert response.json()["suggestedActions"] == []
 
 
-def test_project_ai_prompt() -> None:
+def test_project_ai_prompt(tmp_path) -> None:
+    docs_root = tmp_path / "project-ai"
+    docs_root.mkdir()
+    created = client.post(
+        "/api/projects",
+        json={"name": "Project AI", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+
     response = client.post(
-        "/api/projects/project-alpha/ai/prompt",
+        f"/api/projects/{project_id}/ai/prompt",
         json={"prompt": "Resume la documentación del proyecto"},
     )
     assert response.status_code == 200
-    assert "documentación del proyecto project-alpha" in response.json()["answer"]
+    assert "no está configurada" in response.json()["answer"]
 
 
 def test_runtime_select_folder_returns_path(monkeypatch) -> None:

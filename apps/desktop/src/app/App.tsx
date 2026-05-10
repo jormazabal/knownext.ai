@@ -665,9 +665,11 @@ export function App() {
 
       if (!nextActiveProject) {
         setActiveProject(null);
+        setVersioningStatus(null);
         setTree([]);
         setTabs([]);
         setActiveDocumentId("");
+        setDocumentSessions({});
         setHistoryOpen(false);
         return;
       }
@@ -1094,6 +1096,7 @@ export function App() {
         onCloseHistory={() => setHistoryOpen(false)}
         onLayoutConfigChange={handleLayoutConfigChange}
       />
+      <StartupOverlay loading={!configLoaded} />
       <AppNoticeBanner notice={notice} onClose={() => setNotice(null)} />
       <UpdateAvailableDialog
         update={availableUpdate}
@@ -1479,6 +1482,47 @@ function AppNoticeBanner({ notice, onClose }: { notice: AppNotice | null; onClos
         <button className="rounded px-2 py-1 text-[11px] text-ink-secondary hover:bg-panel" onClick={onClose}>
           Cerrar
         </button>
+      </div>
+    </div>
+  );
+}
+
+function StartupOverlay({ loading }: { loading: boolean }) {
+  const [rendered, setRendered] = useState(true);
+
+  useEffect(() => {
+    if (loading) {
+      setRendered(true);
+      return;
+    }
+
+    const timeout = window.setTimeout(() => setRendered(false), 260);
+    return () => window.clearTimeout(timeout);
+  }, [loading]);
+
+  if (!rendered) return null;
+
+  return (
+    <div
+      className={[
+        "fixed inset-0 z-[120] grid place-items-center bg-white transition-opacity duration-200 ease-out",
+        loading ? "opacity-100" : "pointer-events-none opacity-0",
+      ].join(" ")}
+      aria-busy={loading}
+      aria-live="polite"
+    >
+      <div className="w-[min(320px,calc(100vw-48px))] text-center">
+        <img
+          className="mx-auto h-10 w-10 object-contain"
+          src="/brand/knownext-logo.png"
+          alt=""
+          aria-hidden="true"
+        />
+        <p className="mt-4 text-[13px] font-semibold text-ink-primary">Preparando espacio de trabajo</p>
+        <p className="mt-1 text-[11px] text-ink-secondary">Cargando proyectos, configuración y estado local.</p>
+        <div className="mt-4 h-1 overflow-hidden rounded-full bg-panel">
+          <div className="h-full w-1/2 animate-[startup-progress_1.1s_ease-in-out_infinite] rounded-full bg-brand-orange" />
+        </div>
       </div>
     </div>
   );

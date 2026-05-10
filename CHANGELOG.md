@@ -2,6 +2,16 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.6.0 - 2026-05-10
+
+- Removed normal runtime fallback to frontend/backend mock data so empty projects, disconnected users, unavailable AI, and API failures render as explicit product states.
+- Added a clean startup loading layer before the user workspace appears.
+- Added the first-project empty state with `Añadir primer proyecto` instead of a project dropdown when no projects exist.
+- Reworked the project creation dialog into responsive tabs/steps with constrained height, internal scrolling, and persistent footer actions.
+- Kept the desktop workspace resizable with persisted left navigation and right history panel widths, and lowered the Tauri minimum window size for responsive drawer validation.
+- Updated UX/UI, architecture, release-readiness, and manual acceptance documentation for the non-mock startup and resizing contracts.
+- Updated release metadata and installer download links for `0.6.0`.
+
 ## 0.5.1 - 2026-05-10
 
 - Added the missing `Notas de release` account-menu action to open the packaged changelog manually.

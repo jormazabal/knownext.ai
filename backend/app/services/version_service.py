@@ -9,7 +9,6 @@ from app.services.document_service import document_service
 from app.services.filesystem_service import decode_document_id
 from app.services.git_service import git_service
 from app.services.github_service import github_service
-from app.services.mock_store import VERSIONS
 from app.services.project_service import project_service
 
 
@@ -23,7 +22,7 @@ class VersionService:
             return git_service.document_history(Path(project["folderPath"]), relative_path)
         if project["versioningMode"] == "github-api" and project.get("githubRepository"):
             return github_service.document_history(GithubRepository(**project["githubRepository"]), relative_path)
-        return [VersionRecord(**version) for version in VERSIONS]
+        raise HTTPException(status_code=409, detail="Unsupported versioning provider")
 
     def create_version(self, project_id: str, payload: CreateVersionRequest) -> CreateVersionResponse:
         registry = project_service._read_registry()

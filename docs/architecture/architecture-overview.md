@@ -19,9 +19,11 @@ FastAPI backend
 ## Current Data Flow
 
 1. React components call `src/lib/api/*`.
-2. The API layer returns mock data by default.
-3. Setting `VITE_USE_BACKEND=true` points the API layer at FastAPI.
-4. FastAPI routers call mock services.
+2. The API layer calls FastAPI for product state and operations.
+3. FastAPI routers call services that read/write local application data and project files.
+4. If the backend is unavailable or data is absent, the frontend renders explicit loading, empty, disconnected, or error states.
+
+The product must not silently fall back to frontend mock data. Test fixtures and development-only service doubles may exist, but they must be opt-in and visibly non-production when used.
 
 ## Future Data Flow
 
@@ -35,4 +37,3 @@ FastAPI backend
 - React owns UI and local interaction state.
 - FastAPI owns document persistence, Git operations, and AI orchestration.
 - Tauri owns desktop shell behavior and process lifecycle.
-

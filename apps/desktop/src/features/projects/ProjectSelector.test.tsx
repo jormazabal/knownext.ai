@@ -48,6 +48,19 @@ const projects: Project[] = [
 ];
 
 describe("ProjectSelector", () => {
+  it("shows a first-project action instead of a dropdown when there are no projects", async () => {
+    const onCreateProject = vi.fn();
+
+    render(<ProjectSelector projects={[]} activeProject={null} onSelectProject={vi.fn()} onCreateProject={onCreateProject} />);
+
+    expect(screen.queryByText("PROYECTO ACTUAL")).not.toBeInTheDocument();
+    expect(screen.getByText(/crea tu primer proyecto para empezar/i)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /añadir primer proyecto/i }));
+
+    expect(onCreateProject).toHaveBeenCalledTimes(1);
+  });
+
   it("shows the project dropdown with the create option inside it", async () => {
     render(<ProjectSelector projects={projects} activeProject={projects[0]} onSelectProject={vi.fn()} onCreateProject={vi.fn()} />);
 

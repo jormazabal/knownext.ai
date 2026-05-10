@@ -11,13 +11,17 @@ type AiPromptInputProps = {
 export function AiPromptInput({ documentId, projectId, markdown }: AiPromptInputProps) {
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
+  const canPrompt = Boolean(documentId || projectId);
 
   async function handleSubmit() {
-    if (!prompt.trim()) return;
+    if (!prompt.trim() || !canPrompt) return;
     setLoading(true);
-    await promptAssistant({ documentId, projectId, markdown, prompt });
-    setLoading(false);
-    setPrompt("");
+    try {
+      await promptAssistant({ documentId, projectId, markdown, prompt });
+      setPrompt("");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -34,17 +38,20 @@ export function AiPromptInput({ documentId, projectId, markdown }: AiPromptInput
             if (event.key === "Enter") void handleSubmit();
           }}
           placeholder={
-            documentId
+            !canPrompt
+              ? "Crea un proyecto para activar la asistencia de documentación."
+              : documentId
               ? "Pregunta algo sobre este documento... (ej. Resúmelo, enumera los acuerdos, crea tareas, etc.)"
               : "Pregunta algo sobre la documentación del proyecto... (ej. Resume, busca acuerdos, crea tareas, etc.)"
           }
+          disabled={!canPrompt}
         />
         <button
           className="grid h-6 w-6 place-items-center rounded-md text-brand-orange hover:bg-brand-hover disabled:opacity-50"
           data-tooltip="Enviar"
           aria-label="Enviar"
           onClick={() => void handleSubmit()}
-          disabled={loading}
+          disabled={loading || !canPrompt}
         >
           <SendHorizontal size={16} />
         </button>

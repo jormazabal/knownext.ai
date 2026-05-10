@@ -21,7 +21,6 @@ from app.services.draft_service import draft_service
 from app.services.filesystem_service import filesystem_service
 from app.services.git_service import git_service
 from app.services.github_service import github_service
-from app.services.mock_store import PROJECTS
 
 
 class ProjectService:
@@ -42,7 +41,9 @@ class ProjectService:
 
     def get_active_project(self) -> Project:
         projects = self.list_projects()
-        active = next((project for project in projects if project.active), projects[0])
+        active = next((project for project in projects if project.active), None)
+        if active is None:
+            raise HTTPException(status_code=404, detail="No active project")
         return active
 
     def create_project(self, payload: ProjectPayload) -> Project:
@@ -121,12 +122,11 @@ class ProjectService:
         if project_id not in {project["id"] for project in projects}:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        if len(projects) == 1:
-            raise HTTPException(status_code=400, detail="Cannot delete the last project")
-
         remaining_projects = [project for project in projects if project["id"] != project_id]
         active_project_id = registry["activeProjectId"]
-        if active_project_id == project_id:
+        if not remaining_projects:
+            active_project_id = None
+        elif active_project_id == project_id:
             active_project_id = remaining_projects[0]["id"]
 
         registry["activeProjectId"] = active_project_id
@@ -258,8 +258,15 @@ class ProjectService:
         registry = self.store.read(self._default_registry())
         projects = registry.get("projects")
 
-        if not isinstance(projects, list) or not projects:
+        if not isinstance(projects, list):
             registry = self._default_registry()
+            self.store.write(registry)
+            return registry
+
+        if not projects:
+            registry["projects"] = []
+            registry["activeProjectId"] = None
+            registry["schemaVersion"] = 2
             self.store.write(registry)
             return registry
 
@@ -294,11 +301,10 @@ class ProjectService:
         return root
 
     def _default_registry(self) -> dict:
-        active_project_id = next((project["id"] for project in PROJECTS if project.get("active")), PROJECTS[0]["id"])
         return {
             "schemaVersion": 2,
-            "activeProjectId": active_project_id,
-            "projects": [self._normalize_project({**project, "active": project["id"] == active_project_id}) for project in PROJECTS],
+            "activeProjectId": None,
+            "projects": [],
         }
 
     def _normalize_project(self, project: dict) -> dict:

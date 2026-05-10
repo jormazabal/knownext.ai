@@ -38,6 +38,18 @@ textarea {
   cursor: text;
 }
 
+@keyframes startup-progress {
+  0% {
+    transform: translateX(-110%);
+  }
+  55% {
+    transform: translateX(70%);
+  }
+  100% {
+    transform: translateX(220%);
+  }
+}
+
 @layer components {
   .window-control {
     @apply grid h-6 w-6 place-items-center rounded-md hover:bg-brand-hover;
