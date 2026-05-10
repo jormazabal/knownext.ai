@@ -60,6 +60,18 @@ KnowNext.ai is a Tauri desktop application for managing, editing, versioning, an
 - Future backend startup must use a controlled sidecar approach.
 - Do not block the UI thread with filesystem, Git, or backend operations.
 
+## Release And Updater Rules
+
+- Use `docs/skills/release-management-skill.md` when preparing or publishing a release.
+- Keep `VERSION` as the release source of truth and keep all checked manifests aligned.
+- Public Windows releases are distributed from GitHub Releases in `jormazabal/knownext.ai`.
+- The README manual download link must point to the versioned NSIS installer using the `/releases/latest/download/KnowNext.ai_<version>_x64-setup.exe` URL.
+- The in-app updater must use the signed Tauri `latest.json` manifest and currently must prefer the MSI artifact for `windows-x86_64`.
+- Do not publish a release unless the GitHub release contains the NSIS installer, MSI installer, both `.sig` files, and `latest.json`.
+- After publishing, verify that `latest.json` resolves to the new version and that its Windows URL points to the MSI artifact.
+- Updater signing with `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` is mandatory; Authenticode is recommended but optional until a public code-signing certificate exists.
+- Do not regenerate the Tauri updater key unless explicitly requested; changing it can strand already installed clients.
+
 ## Git And Versioning Rules
 
 - Version history is based on commits in the repository conceptually.
@@ -114,6 +126,7 @@ KnowNext.ai is a Tauri desktop application for managing, editing, versioning, an
 - Update product, architecture, and development docs when contracts or structure change.
 - Document known limitations and next technical steps.
 - Keep docs practical for future agents and engineers.
+- For release changes, update `CHANGELOG.md`, `docs/releases/<version>.md`, `docs/development/release-process.md` when the process changes, and the manual test checklist when acceptance steps change.
 
 ## Working By Phases
 

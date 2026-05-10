@@ -2,6 +2,12 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.4.7 - 2026-05-10
+
+- Added release-management documentation for future agents and maintainers.
+- Documented the Windows download and updater artifact contract so manual installs and in-app updates keep resolving correctly.
+- Added a dedicated release-management skill for publishing GitHub Releases with signed updater assets.
+
 ## 0.4.6 - 2026-05-10
 
 - Restored native top-edge height resizing for the custom Windows title bar.

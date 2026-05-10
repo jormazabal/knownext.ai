@@ -32,6 +32,8 @@ This validates version consistency, builds the desktop frontend, runs frontend t
 
 Manual acceptance must also pass using `docs/development/manual-test-checklist.md`. For packaged releases, run the checklist against the packaged Tauri app, not only the browser dev server.
 
+For release work, also follow `docs/skills/release-management-skill.md`. That skill captures the installer and updater invariants future agents must preserve.
+
 ## Updater Signing
 
 The Tauri updater uses signed artifacts from public GitHub Releases. This signature is mandatory and independent from Windows Authenticode signing.
@@ -51,6 +53,14 @@ The password file is encrypted with Windows DPAPI for the current user. Do not c
 The public updater key is configured in `apps/desktop/src-tauri/tauri.conf.json`. If the production key is regenerated, update `plugins.updater.pubkey`, update the GitHub secrets, and rebuild a release from a clean commit.
 
 The Windows updater currently prefers the MSI artifact when generating `latest.json`. Keep the NSIS `.exe` as the README/manual installer link.
+
+Distribution contract:
+
+- Manual install link: `https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_<version>_x64-setup.exe`
+- Updater manifest: `https://github.com/jormazabal/knownext.ai/releases/latest/download/latest.json`
+- Windows updater artifact inside `latest.json`: `KnowNext.ai_<version>_x64_en-US.msi`
+
+This split is intentional. New users get the familiar setup `.exe`; installed users update through the signed MSI selected by the Tauri updater manifest.
 
 ## Windows Authenticode Signing
 
@@ -81,26 +91,52 @@ git push origin v0.3.1
 
 Pushing the tag runs `.github/workflows/release.yml`. The workflow builds Windows, uploads the NSIS installer, MSI installer, updater signatures, and publishes `latest.json` through `tauri-apps/tauri-action@v0.6.2`.
 
-After the workflow completes, inspect the release before publishing it:
+After the workflow completes, inspect the draft release before publishing it:
 
 ```bash
-gh release view v0.3.1 --repo jormazabal/knownext.ai --json isDraft,assets
+gh release view v0.3.1 --repo jormazabal/knownext.ai --json isDraft,isPrerelease,name,tagName,url,assets
 ```
 
-The release must contain the Windows installer, the matching `.sig` file, and `latest.json`.
+The release must contain:
+
+- `KnowNext.ai_<version>_x64-setup.exe`
+- `KnowNext.ai_<version>_x64-setup.exe.sig`
+- `KnowNext.ai_<version>_x64_en-US.msi`
+- `KnowNext.ai_<version>_x64_en-US.msi.sig`
+- `latest.json`
+
+Publish the draft only after those assets are present:
+
+```bash
+gh release edit v0.3.1 --repo jormazabal/knownext.ai --draft=false
+```
 
 For Windows updater changes, install the previous release and update through the in-app updater. Confirm the app process is closed, the installer replaces `knownext-ai-desktop.exe`, and the updated app relaunches with the new visible version.
 
-After publishing, verify that the README download link resolves and that the updater manifest points at the published MSI update artifact:
+After publishing, verify that the README download link resolves and that the updater manifest points at the published MSI update artifact. Use PowerShell on Windows so redirects and JSON parsing are explicit:
 
-```bash
-curl -I https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_<version>_x64-setup.exe
-curl https://github.com/jormazabal/knownext.ai/releases/latest/download/latest.json
+```powershell
+$version = "0.3.1"
+$manifestUrl = "https://github.com/jormazabal/knownext.ai/releases/latest/download/latest.json"
+$manifestResponse = Invoke-WebRequest -UseBasicParsing -Uri $manifestUrl -MaximumRedirection 10
+$manifestText = [System.Text.Encoding]::UTF8.GetString($manifestResponse.Content)
+$manifest = $manifestText | ConvertFrom-Json
+$installerUrl = "https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_${version}_x64-setup.exe"
+$installerResponse = Invoke-WebRequest -UseBasicParsing -Method Head -Uri $installerUrl -MaximumRedirection 10
+[pscustomobject]@{
+  ManifestStatus = $manifestResponse.StatusCode
+  ManifestVersion = $manifest.version
+  WindowsUrl = $manifest.platforms.'windows-x86_64'.url
+  SignatureLength = $manifest.platforms.'windows-x86_64'.signature.Length
+  ManualInstallerStatus = $installerResponse.StatusCode
+  ManualInstallerUrl = $installerUrl
+}
 ```
 
 The README should continue linking to the NSIS `.exe` for manual installs. The updater manifest should prefer the MSI artifact for in-app Windows updates.
 
 Do not tag or publish a release if `pnpm release:check` fails or if the working tree contains unrelated changes that should not ship in the release.
+Do not announce a release if `/releases/latest/download/latest.json` still resolves to the previous version.
 
 ## Next Releases
 
