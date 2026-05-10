@@ -2,6 +2,14 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.6.3 - 2026-05-10
+
+- Stopped expected local API connection failures from repeatedly showing notices or flooding diagnostics during background settings and draft checks.
+- Added trace-log de-duplication for repeated frontend errors within a short interval.
+- Serialized Tauri trace-log writes so concurrent diagnostics cannot interleave and corrupt `knownext.log` lines.
+- Replaced Rust debug timestamps in trace entries with stable Unix millisecond timestamps.
+- Updated release metadata and installer download links for `0.6.3`.
+
 ## 0.6.2 - 2026-05-10
 
 - Fixed the settings trace log folder staying on `Preparando carpeta de logs` when the local API is unavailable.

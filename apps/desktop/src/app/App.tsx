@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { DocumentTreeAction } from "../features/documents/DocumentTree";
 import { CreateDocumentDialog } from "../features/documents/CreateDocumentDialog";
 import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
@@ -22,7 +22,7 @@ import {
   updateAppConfig,
   writeLocalAppPreferences,
 } from "../lib/api/config";
-import { API_BASE_URL, ApiError, getApiErrorMessage, isBackendEnabled } from "../lib/api/client";
+import { API_BASE_URL, ApiError, getApiErrorMessage, isApiConnectionError, isBackendEnabled } from "../lib/api/client";
 import {
   discardDocumentDraft,
   discardOrphanDraft,
@@ -145,6 +145,7 @@ export function App() {
   const [githubRepositories, setGithubRepositories] = useState<GithubRepositorySummary[]>([]);
   const [githubRepositoriesLoading, setGithubRepositoriesLoading] = useState(false);
   const [syncState, setSyncState] = useState<"idle" | "pulling" | "pushing">("idle");
+  const lastTraceLogRef = useRef<{ fingerprint: string; timestamp: number } | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -227,7 +228,10 @@ export function App() {
         openUtilityTabs,
         activeUtilityTab,
       }).catch((error) => {
-        showError(error, "No se pudo guardar la configuración de la aplicación.");
+        showError(error, "No se pudo guardar la configuración de la aplicación.", {
+          source: "app.configPersistence",
+          suppressApiConnectionNotice: true,
+        });
       });
     }, 350);
 
@@ -966,19 +970,38 @@ export function App() {
     }
   }
 
-  function showError(error: unknown, fallback: string) {
+  function showError(
+    error: unknown,
+    fallback: string,
+    options: { source?: string; suppressApiConnectionNotice?: boolean } = {},
+  ) {
+    const message = getApiErrorMessage(error, fallback);
+    const detail = describeError(error);
+    const isConnectionError = isApiConnectionError(error);
+    if (isConnectionError) setConfigPersistenceAvailable(false);
+
     if (diagnosticsConfig.traceLoggingEnabled) {
-      void recordTraceLog({
-        source: "app.showError",
-        message: getApiErrorMessage(error, fallback),
-        detail: describeError(error),
-      });
+      recordDiagnosticError(options.source ?? "app.showError", message, detail);
     }
+
+    if (options.suppressApiConnectionNotice && isConnectionError) return;
+
     setNotice({
       title: "No se pudo completar la operación",
-      message: getApiErrorMessage(error, fallback),
+      message,
       tone: "error",
     });
+  }
+
+  function recordDiagnosticError(source: string, message: string, detail: string) {
+    const fingerprint = `${source}:${message}:${detail.slice(0, 400)}`;
+    const now = Date.now();
+    if (lastTraceLogRef.current?.fingerprint === fingerprint && now - lastTraceLogRef.current.timestamp < 10_000) {
+      return;
+    }
+
+    lastTraceLogRef.current = { fingerprint, timestamp: now };
+    void recordTraceLog({ source, message, detail });
   }
 
   function handleLayoutConfigChange(nextLayoutConfig: Partial<LayoutConfig>) {
@@ -1461,7 +1484,10 @@ export function App() {
         void loadDocumentSession(documentId, true);
       }
     } catch (error) {
-      showError(error, "No se pudo comprobar el estado de sincronización de los documentos.");
+      showError(error, "No se pudo comprobar el estado de sincronización de los documentos.", {
+        source: "app.documentSync",
+        suppressApiConnectionNotice: true,
+      });
     }
   }
 
@@ -1469,7 +1495,10 @@ export function App() {
     try {
       setOrphanDrafts(await listOrphanDrafts());
     } catch (error) {
-      showError(error, "No se pudieron cargar los borradores recuperables.");
+      showError(error, "No se pudieron cargar los borradores recuperables.", {
+        source: "app.orphanDrafts",
+        suppressApiConnectionNotice: true,
+      });
     }
   }
 
