@@ -90,22 +90,43 @@ jobs:
           $env:KNOWNEXT_API_HOST = "127.0.0.1"
           $env:KNOWNEXT_API_PORT = "8765"
           $expectedVersion = (Get-Content ./VERSION -Raw).Trim()
+          $stdoutPath = Join-Path $env:RUNNER_TEMP "knownext-backend.stdout.log"
+          $stderrPath = Join-Path $env:RUNNER_TEMP "knownext-backend.stderr.log"
           New-Item -ItemType Directory -Force -Path $env:KNOWNEXT_APP_DATA_DIR | Out-Null
-          $process = Start-Process -FilePath "./apps/desktop/src-tauri/binaries/knownext-backend-x86_64-pc-windows-msvc.exe" -PassThru -WindowStyle Hidden
+          $process = Start-Process `
+            -FilePath "./apps/desktop/src-tauri/binaries/knownext-backend-x86_64-pc-windows-msvc.exe" `
+            -PassThru `
+            -WindowStyle Hidden `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath
           try {
             $healthy = $false
             for ($i = 0; $i -lt 40; $i++) {
+              if ($process.HasExited) {
+                Write-Host "Backend sidecar exited with code $($process.ExitCode)."
+                break
+              }
               try {
                 $response = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:8765/health" -TimeoutSec 1
                 if ($response.status -eq "ok" -and $response.version -eq $expectedVersion) {
                   $healthy = $true
                   break
                 }
+                Write-Host "Unexpected /health response: status=$($response.status); version=$($response.version); expected=$expectedVersion"
               } catch {
-                Start-Sleep -Milliseconds 500
+                Write-Host "Waiting for backend sidecar: $($_.Exception.Message)"
               }
+              Start-Sleep -Milliseconds 500
             }
             if (-not $healthy) {
+              if (Test-Path $stdoutPath) {
+                Write-Host "Backend stdout:"
+                Get-Content $stdoutPath
+              }
+              if (Test-Path $stderrPath) {
+                Write-Host "Backend stderr:"
+                Get-Content $stderrPath
+              }
               throw "Backend sidecar did not pass /health."
             }
           } finally {

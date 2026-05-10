@@ -21,7 +21,7 @@ def test_health() -> None:
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
-    assert response.json()["version"] == "0.6.4"
+    assert response.json()["version"] == "0.6.5"
 
 
 def test_projects_and_tree() -> None:

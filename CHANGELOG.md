@@ -2,6 +2,13 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.6.5 - 2026-05-10
+
+- Strengthened backend sidecar packaging by collecting all backend `app.*` submodules during PyInstaller builds.
+- Added release-workflow diagnostics for backend sidecar stdout and stderr when the `/health` validation fails.
+- Kept the packaged FastAPI sidecar startup, shared app data directory, readable trace log format, and background diagnostics cleanup introduced for the unpublished `0.6.4` tag.
+- Updated release metadata and installer download links for `0.6.5`.
+
 ## 0.6.4 - 2026-05-10
 
 - Packaged the FastAPI backend as a Windows sidecar and start it from Tauri in release builds.

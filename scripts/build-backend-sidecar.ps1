@@ -12,7 +12,7 @@ $targetExe = Join-Path $sidecarDir "knownext-backend-$TargetTriple.exe"
 
 Push-Location $backendDir
 try {
-  python -m PyInstaller --noconfirm --clean --onefile --name knownext-backend --hidden-import app.main knownext_backend.py
+  python -m PyInstaller --noconfirm --clean --onefile --name knownext-backend --hidden-import app.main --collect-submodules app knownext_backend.py
 }
 finally {
   Pop-Location
