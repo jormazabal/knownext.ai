@@ -46,6 +46,7 @@ import {
   type UpdateDownloadProgress,
 } from "../lib/runtime/updater";
 import { getTraceLogStatus, openTraceLogFolder, recordTraceLog, type TraceLogStatus } from "../lib/runtime/logging";
+import { openExternalUrl } from "../lib/runtime/links";
 import {
   createFolder,
   createProjectDocument,
@@ -142,10 +143,12 @@ export function App() {
   const [githubLoginState, setGithubLoginState] = useState<GithubLoginState>("idle");
   const [githubDevice, setGithubDevice] = useState<GithubDeviceStartResponse | null>(null);
   const [githubLoginError, setGithubLoginError] = useState<string | null>(null);
+  const [githubLoginPolling, setGithubLoginPolling] = useState(false);
   const [githubRepositories, setGithubRepositories] = useState<GithubRepositorySummary[]>([]);
   const [githubRepositoriesLoading, setGithubRepositoriesLoading] = useState(false);
   const [syncState, setSyncState] = useState<"idle" | "pulling" | "pushing">("idle");
   const lastTraceLogRef = useRef<{ fingerprint: string; timestamp: number } | null>(null);
+  const githubLoginPollingRef = useRef(false);
 
   useEffect(() => {
     void (async () => {
@@ -310,11 +313,11 @@ export function App() {
   useEffect(() => {
     if (!githubLoginOpen || githubLoginState !== "waiting" || !githubDevice) return;
 
-    const timeout = window.setTimeout(() => {
+    const interval = window.setInterval(() => {
       void handlePollGithubLogin();
     }, Math.max(githubDevice.interval, 1) * 1000);
 
-    return () => window.clearTimeout(timeout);
+    return () => window.clearInterval(interval);
   }, [githubDevice, githubLoginOpen, githubLoginState]);
 
   useEffect(() => {
@@ -803,7 +806,9 @@ export function App() {
   }
 
   async function handlePollGithubLogin() {
-    if (!githubDevice) return;
+    if (!githubDevice || githubLoginPollingRef.current) return;
+    githubLoginPollingRef.current = true;
+    setGithubLoginPolling(true);
     setGithubLoginError(null);
     try {
       const response = await pollGithubDeviceFlow(githubDevice.deviceCode);
@@ -816,13 +821,26 @@ export function App() {
         return;
       }
       setGithubLoginState(response.status === "pending" ? "waiting" : response.status);
-      if (response.interval && githubDevice) {
-        setGithubDevice({ ...githubDevice, interval: response.interval });
+      const nextInterval = response.interval ?? (response.error === "slow_down" ? githubDevice.interval + 5 : null);
+      if (nextInterval) {
+        setGithubDevice({ ...githubDevice, interval: nextInterval });
       }
-      setGithubLoginError(response.error && response.error !== "authorization_pending" ? response.error : null);
+      setGithubLoginError(response.status === "error" ? getGithubDeviceFlowErrorMessage(response.error) : null);
     } catch (error) {
       setGithubLoginState("error");
       setGithubLoginError(getApiErrorMessage(error, "No se pudo completar el login con GitHub."));
+    } finally {
+      githubLoginPollingRef.current = false;
+      setGithubLoginPolling(false);
+    }
+  }
+
+  async function handleOpenGithubDevicePage() {
+    if (!githubDevice) return;
+    try {
+      await openExternalUrl(githubDevice.verificationUri);
+    } catch (error) {
+      setGithubLoginError(getApiErrorMessage(error, "No se pudo abrir GitHub en el navegador."));
     }
   }
 
@@ -1283,11 +1301,10 @@ export function App() {
         state={githubLoginState}
         device={githubDevice}
         error={githubLoginError}
+        polling={githubLoginPolling}
         onClose={() => setGithubLoginOpen(false)}
         onStart={() => void handleStartGithubLogin()}
-        onOpenGithub={() => {
-          if (githubDevice) window.open(githubDevice.verificationUri, "_blank", "noopener,noreferrer");
-        }}
+        onOpenGithub={() => void handleOpenGithubDevicePage()}
         onPoll={() => void handlePollGithubLogin()}
       />
       <CreateDocumentDialog
@@ -1706,6 +1723,7 @@ function GithubLoginDialog({
   state,
   device,
   error,
+  polling,
   onClose,
   onStart,
   onOpenGithub,
@@ -1715,6 +1733,7 @@ function GithubLoginDialog({
   state: GithubLoginState;
   device: GithubDeviceStartResponse | null;
   error: string | null;
+  polling: boolean;
   onClose: () => void;
   onStart: () => void;
   onOpenGithub: () => void;
@@ -1740,6 +1759,7 @@ function GithubLoginDialog({
                 <div className="mt-1 font-mono text-[22px] font-semibold tracking-normal text-ink-primary">{device.userCode}</div>
               </div>
               <p>Abre GitHub, introduce el código y vuelve aquí para confirmar la conexión.</p>
+              <p>KnowNext.ai comprobará la autorización automáticamente cada {Math.max(device.interval, 1)} s.</p>
               {device.mock ? (
                 <p className="rounded-md border border-orange-200 bg-brand-hover px-3 py-2">
                   Modo desarrollo: no hay `KNOWNEXT_GITHUB_CLIENT_ID`, así que la autorización se completará con una cuenta mock.
@@ -1768,8 +1788,12 @@ function GithubLoginDialog({
               <button className="h-9 rounded-md border border-brand-orange px-4 text-[11px] font-semibold text-brand-orange hover:bg-brand-hover" onClick={onOpenGithub}>
                 Abrir GitHub
               </button>
-              <button className="h-9 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark" onClick={onPoll}>
-                Ya autoricé
+              <button
+                className="h-9 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={polling}
+                onClick={onPoll}
+              >
+                {polling ? "Comprobando" : "Ya autoricé"}
               </button>
             </>
           )}
@@ -1777,6 +1801,13 @@ function GithubLoginDialog({
       </section>
     </div>
   );
+}
+
+function getGithubDeviceFlowErrorMessage(error?: string | null) {
+  if (error === "expired_token") return "El código ha caducado. Inicia un nuevo login para generar otro código.";
+  if (error === "access_denied") return "La autorización fue cancelada en GitHub.";
+  if (error === "incorrect_device_code") return "GitHub no reconoce este código de dispositivo. Inicia el login de nuevo.";
+  return error ?? "GitHub no pudo completar la autorización.";
 }
 
 function UpdateAvailableDialog({

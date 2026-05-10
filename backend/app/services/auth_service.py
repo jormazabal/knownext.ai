@@ -17,6 +17,7 @@ from app.services.credential_service import credential_service
 GITHUB_DEVICE_CODE_URL = "https://github.com/login/device/code"
 GITHUB_ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token"
 GITHUB_USER_URL = "https://api.github.com/user"
+GITHUB_DEVICE_PENDING_ERRORS = {"authorization_pending", "slow_down"}
 
 
 class AuthService:
@@ -82,7 +83,7 @@ class AuthService:
         ).encode("utf-8")
         data = self._post_form(GITHUB_ACCESS_TOKEN_URL, payload)
         if "error" in data:
-            status = "pending" if data["error"] == "authorization_pending" else "error"
+            status = "pending" if data["error"] in GITHUB_DEVICE_PENDING_ERRORS else "error"
             return GithubDevicePollResponse(
                 status=status,
                 auth=self.get_status(),

@@ -21,7 +21,7 @@ def test_health() -> None:
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
-    assert response.json()["version"] == "0.6.7"
+    assert response.json()["version"] == "0.6.8"
 
 
 def test_projects_and_tree() -> None:
@@ -336,6 +336,20 @@ def test_auth_status_mock_login_logout_and_capabilities() -> None:
     logout = client.post("/api/auth/logout")
     assert logout.status_code == 200
     assert logout.json()["isAuthenticated"] is False
+
+
+def test_github_device_poll_keeps_slow_down_as_pending(monkeypatch) -> None:
+    from app.services.auth_service import auth_service
+
+    monkeypatch.setenv("KNOWNEXT_GITHUB_CLIENT_ID", "client-id")
+    monkeypatch.setattr(auth_service, "_post_form", lambda _url, _payload: {"error": "slow_down"})
+
+    response = client.post("/api/auth/github/device/poll", json={"deviceCode": "device-code"})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "pending"
+    assert response.json()["error"] == "slow_down"
+    assert response.json()["auth"]["isAuthenticated"] is False
 
 
 def test_local_git_project_versions_document(tmp_path) -> None:
