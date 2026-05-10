@@ -6,6 +6,7 @@ import {
   FolderPlus,
   LogOut,
   RefreshCw,
+  ScrollText,
   Search,
   Settings,
   UserPlus,
@@ -35,6 +36,7 @@ type ProjectActionsProps = {
   onConfigureProject: () => void;
   onOpenRecoverableDrafts: () => void;
   onCheckForUpdates: () => void;
+  onOpenReleaseNotes: () => void;
 };
 
 export function ProjectActions({
@@ -51,6 +53,7 @@ export function ProjectActions({
   onConfigureProject,
   onOpenRecoverableDrafts,
   onCheckForUpdates,
+  onOpenReleaseNotes,
 }: ProjectActionsProps) {
   function handleAction(actionId: string) {
     if (actionId === "folder") onCreateFolder();
@@ -129,6 +132,13 @@ export function ProjectActions({
             >
               <RefreshCw size={14} className={isCheckingForUpdates ? "animate-spin" : ""} />
               <span>{isCheckingForUpdates ? "Buscando actualizaciones" : "Buscar actualizaciones"}</span>
+            </button>
+            <button
+              className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
+              onClick={onOpenReleaseNotes}
+            >
+              <ScrollText size={14} />
+              <span>Notas de release</span>
             </button>
             <button
               className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"

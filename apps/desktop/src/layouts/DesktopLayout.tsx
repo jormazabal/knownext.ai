@@ -13,9 +13,10 @@ import {
 } from "../features/editor/editorTypes";
 import { ProjectActions } from "../features/projects/ProjectActions";
 import { ProjectSelector } from "../features/projects/ProjectSelector";
+import { ReleaseNotesViewer } from "../features/releaseNotes/ReleaseNotesViewer";
 import { VersionHistoryPanel } from "../features/versions/VersionHistoryPanel";
 import { TitleBar } from "../components/window/TitleBar";
-import type { AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentTreeNode, LayoutConfig, OpenDocumentTab, Project, ProjectVersioningStatus } from "../types/domain";
+import type { AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentTreeNode, LayoutConfig, Project, ProjectVersioningStatus, WorkspaceTab } from "../types/domain";
 
 const sidebarWidthConfig = {
   defaultWidth: 338,
@@ -37,10 +38,11 @@ type DesktopLayoutProps = {
   projects: Project[];
   activeProject: Project | null;
   tree: DocumentTreeNode[];
-  tabs: OpenDocumentTab[];
-  activeTab?: OpenDocumentTab;
+  tabs: WorkspaceTab[];
+  activeTabId: string;
   activeDocumentId: string;
   editorSessions: EditorDocumentSession[];
+  releaseNotesMarkdown: string;
   activeDocument: DocumentRecord | null;
   activeMarkdown: string;
   activeDocumentDirty: boolean;
@@ -66,6 +68,7 @@ type DesktopLayoutProps = {
   onCreateDocument: () => void;
   onOpenRecoverableDrafts: () => void;
   onCheckForUpdates: () => void;
+  onOpenReleaseNotes: () => void;
   onLoginGithub: () => void;
   onLogout: () => void;
   onPullProject: () => void;
@@ -97,7 +100,10 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   const [editorControllers, setEditorControllers] = useState<Record<string, MarkdownEditorController>>({});
   const [editorFormatState, setEditorFormatState] = useState<MarkdownEditorFormatState>(emptyMarkdownEditorFormatState);
   const [navigationOpen, setNavigationOpen] = useState(false);
-  const hasOpenDocument = props.tabs.length > 0 && Boolean(props.activeDocumentId);
+  const activeWorkspaceTab = props.tabs.find((tab) => tab.id === props.activeTabId);
+  const hasOpenDocument = activeWorkspaceTab?.kind === "document" && Boolean(props.activeDocumentId);
+  const hasReleaseNotes = activeWorkspaceTab?.kind === "release-notes";
+  const hasOpenTab = hasOpenDocument || hasReleaseNotes;
   const activeEditorController = editorControllers[props.activeDocumentId] ?? null;
   const sidebar = useResizablePanelWidth({
     ...sidebarWidthConfig,
@@ -235,6 +241,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             onConfigureProject={props.onConfigureProject}
             onOpenRecoverableDrafts={props.onOpenRecoverableDrafts}
             onCheckForUpdates={props.onCheckForUpdates}
+            onOpenReleaseNotes={props.onOpenReleaseNotes}
             isCheckingForUpdates={props.isCheckingForUpdates}
           />
         </aside>
@@ -251,16 +258,17 @@ export function DesktopLayout(props: DesktopLayoutProps) {
         </div>
 
         <main className="flex min-w-0 flex-1 flex-col bg-white">
-          {hasOpenDocument ? (
+          {hasOpenTab ? (
             <>
           <DocumentTabs
             tabs={props.tabs}
-            activeDocumentId={props.activeDocumentId}
+            activeTabId={props.activeTabId}
             dirtyDocumentIds={props.dirtyDocumentIds}
             onOpenNavigation={() => setNavigationOpen(true)}
             onSelectTab={props.onSelectTab}
             onCloseTab={props.onCloseTab}
           />
+              {hasReleaseNotes ? null : (
               <MarkdownToolbar
                 historyOpen={props.historyOpen}
                 historyEnabled={props.historyEnabled}
@@ -270,14 +278,19 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 onRunEditorAction={handleRunEditorAction}
                 onToggleHistory={props.onToggleHistory}
               />
+              )}
             </>
           ) : null}
           <div className="flex min-h-0 flex-1">
-            <section className={["relative flex min-w-0 flex-1 flex-col", hasOpenDocument ? "bg-white" : "bg-[#F7F7F7]"].join(" ")}>
-              {hasOpenDocument ? (
+            <section className={["relative flex min-w-0 flex-1 flex-col", hasOpenTab ? "bg-white" : "bg-[#F7F7F7]"].join(" ")}>
+              {hasOpenTab ? (
                 <>
                   <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-24 pt-4">
                     <div className="mx-auto max-w-[900px]">
+                      {hasReleaseNotes ? (
+                        <ReleaseNotesViewer markdown={props.releaseNotesMarkdown} />
+                      ) : (
+                        <>
                       {props.activeDocumentDiskChanged || props.activeDocumentConflictStatus === "orphaned" ? (
                         <DocumentConflictBanner
                           conflictStatus={props.activeDocumentConflictStatus}
@@ -306,6 +319,8 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                           )}
                         </div>
                       ))}
+                        </>
+                      )}
                     </div>
                   </div>
                   <div className="pointer-events-none absolute inset-x-0 bottom-9 h-28 bg-gradient-to-t from-white via-white/95 to-transparent" />

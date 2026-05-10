@@ -21,6 +21,10 @@ export const defaultAppConfig: AppConfig = {
   tabsByProject: {
     "project-alpha": defaultProjectTabsConfig,
   },
+  lastRunAppVersion: null,
+  lastSeenReleaseNotesVersion: null,
+  openUtilityTabs: [],
+  activeUtilityTab: null,
   updatedAt: new Date(0).toISOString(),
 };
 
@@ -36,6 +40,10 @@ export async function updateAppConfig(payload: AppConfigUpdate): Promise<AppConf
       ...payload,
       layout: payload.layout ?? defaultLayoutConfig,
       tabsByProject: payload.tabsByProject ?? defaultAppConfig.tabsByProject,
+      lastRunAppVersion: payload.lastRunAppVersion ?? defaultAppConfig.lastRunAppVersion,
+      lastSeenReleaseNotesVersion: payload.lastSeenReleaseNotesVersion ?? defaultAppConfig.lastSeenReleaseNotesVersion,
+      openUtilityTabs: payload.openUtilityTabs ?? defaultAppConfig.openUtilityTabs,
+      activeUtilityTab: payload.activeUtilityTab ?? defaultAppConfig.activeUtilityTab,
     };
   }
 

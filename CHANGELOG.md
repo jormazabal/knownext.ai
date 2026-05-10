@@ -2,6 +2,13 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.5.1 - 2026-05-10
+
+- Added the missing `Notas de release` account-menu action to open the packaged changelog manually.
+- Added the global readonly release notes tab backed by Milkdown, separated from project documents, drafts, save state, and version history.
+- Added legacy config handling so existing installations that predate release-note state can show the changelog after updating.
+- Updated release metadata and installer download links for `0.5.1`.
+
 ## 0.5.0 - 2026-05-10
 
 - Added GitHub authentication scaffolding and repository discovery through the FastAPI-mediated API layer.
