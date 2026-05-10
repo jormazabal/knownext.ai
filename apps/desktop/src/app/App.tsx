@@ -980,11 +980,11 @@ export function App() {
     const isConnectionError = isApiConnectionError(error);
     if (isConnectionError) setConfigPersistenceAvailable(false);
 
+    if (options.suppressApiConnectionNotice && isConnectionError) return;
+
     if (diagnosticsConfig.traceLoggingEnabled) {
       recordDiagnosticError(options.source ?? "app.showError", message, detail);
     }
-
-    if (options.suppressApiConnectionNotice && isConnectionError) return;
 
     setNotice({
       title: "No se pudo completar la operación",

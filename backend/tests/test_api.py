@@ -21,7 +21,7 @@ def test_health() -> None:
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
-    assert response.json()["version"] == "0.6.3"
+    assert response.json()["version"] == "0.6.4"
 
 
 def test_projects_and_tree() -> None:
@@ -220,10 +220,11 @@ def test_trace_logging_writes_only_when_enabled(tmp_path) -> None:
     assert enabled.json()["folderPath"] == str(tmp_path / "logs")
 
     log_file = tmp_path / "logs" / "knownext.log"
-    entry = json.loads(log_file.read_text(encoding="utf-8").strip())
-    assert entry["source"] == "test"
-    assert entry["message"] == "enabled"
-    assert entry["detail"] == "stack"
+    entry = log_file.read_text(encoding="utf-8")
+    assert "[ERROR] test" in entry
+    assert "Message: enabled" in entry
+    assert "Detail:\nstack" in entry
+    assert entry.rstrip().endswith("---")
 
 
 def test_invalid_config_file_is_backed_up(tmp_path) -> None:

@@ -2,6 +2,16 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.6.4 - 2026-05-10
+
+- Packaged the FastAPI backend as a Windows sidecar and start it from Tauri in release builds.
+- Added a startup health check so the local API is expected to be ready before the frontend begins normal API calls.
+- Passed the Tauri app data directory to the backend through `KNOWNEXT_APP_DATA_DIR` so runtime state and logs use the same profile.
+- Changed frontend, Tauri, and backend trace entries from compact JSON lines to readable timestamped log blocks.
+- Stopped suppressed background API connection failures from being written repeatedly to diagnostics.
+- Updated the Windows release workflow to build the backend sidecar before creating Tauri installer artifacts.
+- Updated release metadata and installer download links for `0.6.4`.
+
 ## 0.6.3 - 2026-05-10
 
 - Stopped expected local API connection failures from repeatedly showing notices or flooding diagnostics during background settings and draft checks.

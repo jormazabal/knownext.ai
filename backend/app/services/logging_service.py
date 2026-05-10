@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,17 +36,15 @@ class TraceLoggingService:
             return False
 
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "level": level.lower() if level else "error",
-            "source": source,
-            "message": message,
-            "detail": detail,
-        }
+        normalized_level = (level or "error").upper()
+        timestamp = datetime.now(timezone.utc).isoformat()
+        entry = f"{timestamp} [{normalized_level}] {source}\nMessage: {message}\n"
+        if detail and detail.strip():
+            entry += f"Detail:\n{detail.rstrip()}\n"
+        entry += "---\n"
 
         with self.log_file.open("a", encoding="utf-8") as file:
-            file.write(json.dumps(entry, ensure_ascii=False, sort_keys=True))
-            file.write("\n")
+            file.write(entry)
 
         return True
 
