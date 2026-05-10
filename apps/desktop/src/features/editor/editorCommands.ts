@@ -18,36 +18,7 @@ import {
 } from "@milkdown/kit/preset/commonmark";
 import { insertTableCommand, toggleStrikethroughCommand } from "@milkdown/kit/preset/gfm";
 import { redoCommand, undoCommand } from "@milkdown/kit/plugin/history";
-
-export type MarkdownEditorAction =
-  | "paragraph"
-  | "heading-1"
-  | "heading-2"
-  | "heading-3"
-  | "bold"
-  | "italic"
-  | "strike"
-  | "clear-format"
-  | "bullet-list"
-  | "ordered-list"
-  | "check-list"
-  | "table"
-  | "code"
-  | "link"
-  | "image"
-  | "quote"
-  | "horizontal-rule"
-  | "undo"
-  | "redo";
-
-export type MarkdownEditorController = {
-  run: (action: MarkdownEditorAction) => boolean;
-  getFormatState: () => MarkdownEditorFormatState;
-};
-
-export type MarkdownEditorFormatState = Partial<Record<MarkdownEditorAction, boolean>>;
-
-export const emptyMarkdownEditorFormatState: MarkdownEditorFormatState = {};
+import type { MarkdownEditorAction, MarkdownEditorController, MarkdownEditorFormatState } from "./editorTypes";
 
 export function createMarkdownEditorController(editor: Editor): MarkdownEditorController {
   return {
@@ -103,7 +74,11 @@ export function createMarkdownEditorController(editor: Editor): MarkdownEditorCo
       });
     },
     getFormatState() {
-      return editor.action((ctx) => readMarkdownEditorFormatState(ctx.get(editorViewCtx).state));
+      try {
+        return editor.action((ctx) => readMarkdownEditorFormatState(ctx.get(editorViewCtx).state));
+      } catch {
+        return {};
+      }
     },
   };
 }

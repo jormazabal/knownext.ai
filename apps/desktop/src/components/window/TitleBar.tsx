@@ -21,21 +21,21 @@ export function TitleBar() {
   };
 
   return (
-    <header className="relative flex h-[54px] select-none items-center justify-between border-b border-line bg-white">
+    <header className="relative flex h-9 select-none items-center justify-between border-b border-line bg-white px-3">
       <div aria-hidden="true" className="absolute inset-x-0 top-0 z-30 h-1.5 cursor-n-resize" onPointerDown={handleTopResizePointerDown} />
-      <div className="flex h-full min-w-0 flex-1 items-center gap-3 px-5" onPointerDown={handleTitlePointerDown}>
-        <img className="h-7 w-7 object-contain" src="/brand/knownext-logo.png" alt="" aria-hidden="true" />
-        <span className="text-[15px] font-semibold">KnowNext.ai</span>
+      <div className="flex min-w-0 flex-1 items-center gap-2" onPointerDown={handleTitlePointerDown}>
+        <img className="h-5 w-5 object-contain" src="/brand/knownext-logo.png" alt="" aria-hidden="true" />
+        <span className="text-[11px] font-semibold">KnowNext.ai</span>
       </div>
-      <div className="flex h-full items-center gap-1 px-3 text-ink-primary">
+      <div className="flex items-center gap-1 text-ink-primary">
         <button className="window-control" data-tooltip="Minimizar" data-tooltip-placement="bottom" aria-label="Minimizar" onClick={() => void minimizeWindow()}>
-          <Minus size={16} />
+          <Minus size={14} />
         </button>
         <button className="window-control" data-tooltip="Maximizar" data-tooltip-placement="bottom" aria-label="Maximizar" onClick={() => void toggleMaximizeWindow()}>
-          <Maximize2 size={14} />
+          <Maximize2 size={13} />
         </button>
         <button className="window-control window-control-close" data-tooltip="Cerrar" data-tooltip-placement="bottom" aria-label="Cerrar" onClick={() => void closeWindow()}>
-          <X size={16} />
+          <X size={14} />
         </button>
       </div>
     </header>

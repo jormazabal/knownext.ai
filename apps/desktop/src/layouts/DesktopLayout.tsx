@@ -1,22 +1,21 @@
-import { useCallback, useEffect, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { AiPromptInput } from "../features/assistant/AiPromptInput";
 import { DocumentStatusBar } from "../features/documents/DocumentStatusBar";
 import { DocumentTabs } from "../features/documents/DocumentTabs";
 import { DocumentTree, type DocumentTreeAction } from "../features/documents/DocumentTree";
-import { MarkdownEditor } from "../features/editor/MarkdownEditor";
 import { MarkdownToolbar } from "../features/editor/MarkdownToolbar";
 import {
   emptyMarkdownEditorFormatState,
   type MarkdownEditorAction,
   type MarkdownEditorController,
   type MarkdownEditorFormatState,
-} from "../features/editor/editorCommands";
+} from "../features/editor/editorTypes";
 import { ProjectActions } from "../features/projects/ProjectActions";
 import { ProjectSelector } from "../features/projects/ProjectSelector";
 import { VersionHistoryPanel } from "../features/versions/VersionHistoryPanel";
 import { TitleBar } from "../components/window/TitleBar";
-import { startWindowResize, type WindowResizeDirection } from "../lib/runtime/windowControls";
-import type { DocumentConflictStatus, DocumentRecord, DocumentTreeNode, LayoutConfig, OpenDocumentTab, Project } from "../types/domain";
+import type { AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentTreeNode, LayoutConfig, OpenDocumentTab, Project, ProjectVersioningStatus } from "../types/domain";
 
 const sidebarWidthConfig = {
   defaultWidth: 338,
@@ -30,8 +29,11 @@ const historyWidthConfig = {
   maxWidth: 460,
 };
 
+const MarkdownEditor = lazy(() => import("../features/editor/MarkdownEditor").then((module) => ({ default: module.MarkdownEditor })));
+
 type DesktopLayoutProps = {
   appVersion: string;
+  authStatus: AuthStatus;
   projects: Project[];
   activeProject: Project | null;
   tree: DocumentTreeNode[];
@@ -46,10 +48,12 @@ type DesktopLayoutProps = {
   activeDocumentHasRecoveredDraft: boolean;
   activeDocumentDiskChanged: boolean;
   dirtyDocumentIds: string[];
+  orphanDraftCount: number;
   isCheckingForUpdates: boolean;
   saveState: "idle" | "saving" | "saved";
   historyOpen: boolean;
   historyEnabled: boolean;
+  versioningStatus: ProjectVersioningStatus | null;
   layoutConfig: LayoutConfig;
   onSelectProject: (project: Project) => void;
   onCreateProject: () => void;
@@ -60,7 +64,14 @@ type DesktopLayoutProps = {
   onExpandTree: () => void;
   onCollapseTree: () => void;
   onCreateDocument: () => void;
+  onOpenRecoverableDrafts: () => void;
   onCheckForUpdates: () => void;
+  onLoginGithub: () => void;
+  onLogout: () => void;
+  onPullProject: () => void;
+  onPushProject: () => void;
+  onCreateVersion: (title: string) => Promise<CreateVersionResponse | null>;
+  isSyncingProject: boolean;
   onOpenDocument: (documentId: string, name: string) => void;
   onSelectTab: (documentId: string) => void;
   onCloseTab: (documentId: string) => void;
@@ -85,6 +96,7 @@ type EditorDocumentSession = {
 export function DesktopLayout(props: DesktopLayoutProps) {
   const [editorControllers, setEditorControllers] = useState<Record<string, MarkdownEditorController>>({});
   const [editorFormatState, setEditorFormatState] = useState<MarkdownEditorFormatState>(emptyMarkdownEditorFormatState);
+  const [navigationOpen, setNavigationOpen] = useState(false);
   const hasOpenDocument = props.tabs.length > 0 && Boolean(props.activeDocumentId);
   const activeEditorController = editorControllers[props.activeDocumentId] ?? null;
   const sidebar = useResizablePanelWidth({
@@ -104,7 +116,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
     if (!activeEditorController) return;
 
     activeEditorController.run(action);
-    setEditorFormatState(activeEditorController.getFormatState());
+    setEditorFormatState((currentFormatState) => keepStableFormatState(currentFormatState, activeEditorController.getFormatState()));
   }, [activeEditorController]);
 
   const handleEditorControllerChange = useCallback((documentId: string, controller: MarkdownEditorController | null) => {
@@ -116,40 +128,95 @@ export function DesktopLayout(props: DesktopLayoutProps) {
       return { ...currentControllers, [documentId]: controller };
     });
     if (documentId === props.activeDocumentId) {
-      setEditorFormatState(controller ? controller.getFormatState() : emptyMarkdownEditorFormatState);
+      setEditorFormatState((currentFormatState) =>
+        keepStableFormatState(currentFormatState, controller ? controller.getFormatState() : emptyMarkdownEditorFormatState),
+      );
     }
   }, [props.activeDocumentId]);
 
   useEffect(() => {
-    setEditorFormatState(activeEditorController ? activeEditorController.getFormatState() : emptyMarkdownEditorFormatState);
+    setEditorFormatState((currentFormatState) =>
+      keepStableFormatState(currentFormatState, activeEditorController ? activeEditorController.getFormatState() : emptyMarkdownEditorFormatState),
+    );
   }, [activeEditorController, props.activeDocumentId]);
+
+  useEffect(() => {
+    if (!navigationOpen) return;
+
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") setNavigationOpen(false);
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [navigationOpen]);
+
+  useEffect(() => {
+    if (!props.historyOpen || navigationOpen) return;
+
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") props.onCloseHistory();
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [navigationOpen, props.historyOpen, props.onCloseHistory]);
+
+  const handleOpenDocument = useCallback((documentId: string, name: string) => {
+    props.onOpenDocument(documentId, name);
+    setNavigationOpen(false);
+  }, [props.onOpenDocument]);
 
   const activeStatus = getDocumentStatus({
     saveState: props.saveState,
     isDirty: props.activeDocumentDirty,
     hasRecoveredDraft: props.activeDocumentHasRecoveredDraft,
+    conflictStatus: props.activeDocumentConflictStatus,
     diskChanged: props.activeDocumentDiskChanged || props.activeDocumentConflictStatus === "disk-changed",
   });
 
   return (
     <div className="h-screen overflow-hidden bg-white text-ink-primary">
-      <WindowResizeHandles />
       <TitleBar />
-      <div className="flex h-[calc(100vh-54px)]">
-        <aside className="flex shrink-0 flex-col border-r border-line bg-panel" style={{ width: sidebar.width }}>
-          <div className="px-5 pb-3 pt-4">
-            <ProjectSelector
-              projects={props.projects}
-              activeProject={props.activeProject}
-              onSelectProject={props.onSelectProject}
-              onCreateProject={props.onCreateProject}
-            />
+      <div className="relative flex h-[calc(100vh-36px)]">
+        {navigationOpen ? (
+          <button
+            className="fixed inset-x-0 bottom-0 top-9 z-40 bg-black/20 lg:hidden"
+            aria-label="Cerrar panel de documentos"
+            onClick={() => setNavigationOpen(false)}
+          />
+        ) : null}
+        <aside
+          className={[
+            "absolute inset-y-0 left-0 z-50 flex shrink-0 flex-col border-r border-line bg-panel shadow-menu transition-transform duration-200 ease-out lg:relative lg:z-auto lg:translate-x-0 lg:shadow-none",
+            navigationOpen ? "translate-x-0" : "-translate-x-full",
+          ].join(" ")}
+          style={{ width: sidebar.width, maxWidth: "calc(100vw - 48px)" }}
+        >
+          <div className="flex items-start gap-2 px-4 pb-2 pt-3">
+            <div className="min-w-0 flex-1">
+              <ProjectSelector
+                projects={props.projects}
+                activeProject={props.activeProject}
+                onSelectProject={props.onSelectProject}
+                onCreateProject={props.onCreateProject}
+              />
+            </div>
+            <button
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-line bg-white text-ink-secondary hover:bg-brand-hover hover:text-brand-orange lg:hidden"
+              data-tooltip="Ocultar documentos"
+              data-tooltip-placement="bottom"
+              aria-label="Ocultar panel de documentos"
+              onClick={() => setNavigationOpen(false)}
+            >
+              <PanelLeftClose size={16} />
+            </button>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-2">
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-1.5">
             <DocumentTree
               nodes={props.tree}
               activeDocumentId={props.activeDocumentId}
-              onOpenDocument={props.onOpenDocument}
+              onOpenDocument={handleOpenDocument}
               onRenameNode={props.onRenameNode}
               onToggleNode={props.onToggleNode}
               onContextAction={props.onTreeContextAction}
@@ -157,24 +224,31 @@ export function DesktopLayout(props: DesktopLayoutProps) {
           </div>
           <ProjectActions
             appVersion={props.appVersion}
-            isCheckingForUpdates={props.isCheckingForUpdates}
+            authStatus={props.authStatus}
+            orphanDraftCount={props.orphanDraftCount}
+            onLoginGithub={props.onLoginGithub}
+            onLogout={props.onLogout}
             onCreateFolder={props.onCreateFolder}
             onCreateDocument={props.onCreateDocument}
             onExpandTree={props.onExpandTree}
             onCollapseTree={props.onCollapseTree}
             onConfigureProject={props.onConfigureProject}
+            onOpenRecoverableDrafts={props.onOpenRecoverableDrafts}
             onCheckForUpdates={props.onCheckForUpdates}
+            isCheckingForUpdates={props.isCheckingForUpdates}
           />
         </aside>
-        <PanelResizeHandle
-          label="Cambiar anchura del árbol de documentos"
-          minWidth={sidebarWidthConfig.minWidth}
-          maxWidth={sidebarWidthConfig.maxWidth}
-          value={sidebar.width}
-          isResizing={sidebar.isResizing}
-          onPointerDown={sidebar.startResize}
-          onKeyDown={sidebar.resizeWithKeyboard}
-        />
+        <div className="hidden lg:block">
+          <PanelResizeHandle
+            label="Cambiar anchura del árbol de documentos"
+            minWidth={sidebarWidthConfig.minWidth}
+            maxWidth={sidebarWidthConfig.maxWidth}
+            value={sidebar.width}
+            isResizing={sidebar.isResizing}
+            onPointerDown={sidebar.startResize}
+            onKeyDown={sidebar.resizeWithKeyboard}
+          />
+        </div>
 
         <main className="flex min-w-0 flex-1 flex-col bg-white">
           {hasOpenDocument ? (
@@ -183,12 +257,14 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             tabs={props.tabs}
             activeDocumentId={props.activeDocumentId}
             dirtyDocumentIds={props.dirtyDocumentIds}
+            onOpenNavigation={() => setNavigationOpen(true)}
             onSelectTab={props.onSelectTab}
             onCloseTab={props.onCloseTab}
           />
               <MarkdownToolbar
                 historyOpen={props.historyOpen}
                 historyEnabled={props.historyEnabled}
+                historyDisabledReason={getHistoryDisabledReason(props.activeProject, props.authStatus, props.versioningStatus)}
                 editorReady={activeEditorController !== null}
                 activeActions={editorFormatState}
                 onRunEditorAction={handleRunEditorAction}
@@ -200,10 +276,11 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             <section className={["relative flex min-w-0 flex-1 flex-col", hasOpenDocument ? "bg-white" : "bg-[#F7F7F7]"].join(" ")}>
               {hasOpenDocument ? (
                 <>
-                  <div className="min-h-0 flex-1 overflow-y-auto px-10 pb-28 pt-5">
-                    <div className="mx-auto max-w-[930px]">
-                      {props.activeDocumentDiskChanged ? (
+                  <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-24 pt-4">
+                    <div className="mx-auto max-w-[900px]">
+                      {props.activeDocumentDiskChanged || props.activeDocumentConflictStatus === "orphaned" ? (
                         <DocumentConflictBanner
+                          conflictStatus={props.activeDocumentConflictStatus}
                           onKeepLocalVersion={props.onKeepLocalVersion}
                           onLoadDiskVersion={props.onLoadDiskVersion}
                         />
@@ -211,33 +288,48 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                       {props.editorSessions.map((session) => (
                         <div key={session.documentId} className={session.documentId === props.activeDocumentId ? "" : "hidden"}>
                           {session.document ? (
-                            <MarkdownEditor
-                              documentKey={session.editorKey}
-                              markdown={session.markdown}
-                              onChange={(markdown) => props.onMarkdownChange(session.documentId, markdown)}
-                              onControllerChange={(controller) => handleEditorControllerChange(session.documentId, controller)}
-                              onFormatStateChange={(formatState) => {
-                                if (session.documentId === props.activeDocumentId) setEditorFormatState(formatState);
-                              }}
-                            />
+                            <Suspense fallback={<div className="pt-6 text-[11px] text-ink-secondary">Cargando editor...</div>}>
+                              <MarkdownEditor
+                                documentKey={session.editorKey}
+                                markdown={session.markdown}
+                                onChange={(markdown) => props.onMarkdownChange(session.documentId, markdown)}
+                                onControllerChange={(controller) => handleEditorControllerChange(session.documentId, controller)}
+                                onFormatStateChange={(formatState) => {
+                                  if (session.documentId === props.activeDocumentId) {
+                                    setEditorFormatState((currentFormatState) => keepStableFormatState(currentFormatState, formatState));
+                                  }
+                                }}
+                              />
+                            </Suspense>
                           ) : (
-                            <div className="pt-6 text-[13px] text-ink-secondary">Cargando documento...</div>
+                            <div className="pt-6 text-[11px] text-ink-secondary">Cargando documento...</div>
                           )}
                         </div>
                       ))}
                     </div>
                   </div>
-                  <div className="pointer-events-none absolute inset-x-0 bottom-[48px] h-40 bg-gradient-to-t from-white via-white/95 to-transparent" />
+                  <div className="pointer-events-none absolute inset-x-0 bottom-9 h-28 bg-gradient-to-t from-white via-white/95 to-transparent" />
                 </>
               ) : (
-                <div className="pointer-events-none absolute inset-0 grid place-items-center">
-                  <img
-                    className="w-[min(420px,44vw)] max-w-[62%] opacity-[0.18]"
-                    src="/brand/knownext-logo-watermark.png"
-                    alt=""
-                    aria-hidden="true"
-                  />
-                </div>
+                <>
+                  <button
+                    className="absolute left-3 top-3 z-10 grid h-8 w-8 place-items-center rounded-md border border-line bg-white text-ink-secondary shadow-subtle hover:bg-brand-hover hover:text-brand-orange lg:hidden"
+                    data-tooltip="Abrir documentos"
+                    data-tooltip-placement="bottom"
+                    aria-label="Abrir panel de documentos"
+                    onClick={() => setNavigationOpen(true)}
+                  >
+                    <PanelLeftOpen size={16} />
+                  </button>
+                  <div className="pointer-events-none absolute inset-0 grid place-items-center">
+                    <img
+                      className="w-[min(420px,44vw)] max-w-[62%] opacity-[0.18]"
+                      src="/brand/knownext-logo-watermark.png"
+                      alt=""
+                      aria-hidden="true"
+                    />
+                  </div>
+                </>
               )}
               <AiPromptInput
                 documentId={hasOpenDocument ? props.activeDocumentId : undefined}
@@ -252,6 +344,9 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                   saveState={props.saveState}
                   wordCount={props.activeDocument?.wordCount ?? countWords(props.activeMarkdown)}
                   gitEnabled={props.historyEnabled}
+                  versioningLabel={props.versioningStatus?.statusLabel ?? "Sin historial"}
+                  lastVersionHash={props.versioningStatus?.lastVersionHash}
+                  lastVersionRelativeTime={props.versioningStatus?.lastVersionRelativeTime}
                   canSave={Boolean(props.activeDocument && props.activeDocumentId)}
                   onSave={props.onSave}
                 />
@@ -259,17 +354,35 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             </section>
             {props.historyOpen && hasOpenDocument ? (
               <>
-                <PanelResizeHandle
-                  label="Cambiar anchura del historial de versiones"
-                  minWidth={historyWidthConfig.minWidth}
-                  maxWidth={historyWidthConfig.maxWidth}
-                  value={history.width}
-                  isResizing={history.isResizing}
-                  onPointerDown={history.startResize}
-                  onKeyDown={history.resizeWithKeyboard}
+                <button
+                  className="fixed inset-x-0 bottom-0 top-9 z-40 bg-black/20 lg:hidden"
+                  aria-label="Cerrar historial de versiones"
+                  onClick={props.onCloseHistory}
                 />
-                <div className="flex shrink-0" style={{ width: history.width }}>
-                  <VersionHistoryPanel documentId={props.activeDocumentId} onClose={props.onCloseHistory} />
+                <div className="hidden lg:block">
+                  <PanelResizeHandle
+                    label="Cambiar anchura del historial de versiones"
+                    minWidth={historyWidthConfig.minWidth}
+                    maxWidth={historyWidthConfig.maxWidth}
+                    value={history.width}
+                    isResizing={history.isResizing}
+                    onPointerDown={history.startResize}
+                    onKeyDown={history.resizeWithKeyboard}
+                  />
+                </div>
+                <div
+                  className="fixed bottom-0 right-0 top-9 z-50 flex shrink-0 shadow-menu lg:relative lg:inset-auto lg:z-auto lg:shadow-none"
+                  style={{ width: history.width, maxWidth: "calc(100vw - 48px)" }}
+                >
+                  <VersionHistoryPanel
+                    documentId={props.activeDocumentId}
+                    syncMode={props.activeProject?.syncMode ?? "none"}
+                    isSyncing={props.isSyncingProject}
+                    onPullProject={props.onPullProject}
+                    onPushProject={props.onPushProject}
+                    onCreateVersion={props.onCreateVersion}
+                    onClose={props.onCloseHistory}
+                  />
                 </div>
               </>
             ) : null}
@@ -277,39 +390,6 @@ export function DesktopLayout(props: DesktopLayoutProps) {
         </main>
       </div>
     </div>
-  );
-}
-
-const windowResizeHandles: Array<{
-  direction: WindowResizeDirection;
-  className: string;
-}> = [
-  { direction: "North", className: "inset-x-2 top-0 h-1 cursor-n-resize" },
-  { direction: "South", className: "inset-x-2 bottom-0 h-1 cursor-s-resize" },
-  { direction: "West", className: "inset-y-2 left-0 w-1 cursor-w-resize" },
-  { direction: "East", className: "inset-y-2 right-0 w-1 cursor-e-resize" },
-  { direction: "NorthWest", className: "left-0 top-0 h-3 w-3 cursor-nw-resize" },
-  { direction: "NorthEast", className: "right-0 top-0 h-3 w-3 cursor-ne-resize" },
-  { direction: "SouthWest", className: "bottom-0 left-0 h-3 w-3 cursor-sw-resize" },
-  { direction: "SouthEast", className: "bottom-0 right-0 h-3 w-3 cursor-se-resize" },
-];
-
-function WindowResizeHandles() {
-  return (
-    <>
-      {windowResizeHandles.map((handle) => (
-        <div
-          key={handle.direction}
-          aria-hidden="true"
-          className={["fixed z-50 select-none", handle.className].join(" ")}
-          onPointerDown={(event) => {
-            if (event.button !== 0) return;
-            event.preventDefault();
-            void startWindowResize(handle.direction);
-          }}
-        />
-      ))}
-    </>
   );
 }
 
@@ -375,7 +455,23 @@ function useResizablePanelWidth({ defaultWidth, minWidth, maxWidth, width, resiz
 }
 
 function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max);
+  return Math.round(Math.min(Math.max(value, min), max));
+}
+
+function keepStableFormatState(currentFormatState: MarkdownEditorFormatState, nextFormatState: MarkdownEditorFormatState) {
+  const currentKeys = Object.keys(currentFormatState) as MarkdownEditorAction[];
+  const nextKeys = Object.keys(nextFormatState) as MarkdownEditorAction[];
+
+  if (currentKeys.length !== nextKeys.length) return nextFormatState;
+
+  const isSame = nextKeys.every((key) => currentFormatState[key] === nextFormatState[key]);
+  return isSame ? currentFormatState : nextFormatState;
+}
+
+function getHistoryDisabledReason(project: Project | null, authStatus: AuthStatus, versioningStatus: ProjectVersioningStatus | null) {
+  if (!project || project.versioningMode === "none") return "Historial no disponible en proyectos de archivos locales";
+  if (!authStatus.isAuthenticated) return "Inicia sesión con GitHub para activar el historial versionado";
+  return versioningStatus?.reason ?? "Historial no disponible";
 }
 
 function countWords(markdown: string) {
@@ -386,13 +482,16 @@ function getDocumentStatus({
   saveState,
   isDirty,
   hasRecoveredDraft,
+  conflictStatus,
   diskChanged,
 }: {
   saveState: "idle" | "saving" | "saved";
   isDirty: boolean;
   hasRecoveredDraft: boolean;
+  conflictStatus: DocumentConflictStatus;
   diskChanged: boolean;
 }) {
+  if (conflictStatus === "orphaned") return { label: "Archivo no encontrado", tone: "warning" as const };
   if (diskChanged) return { label: "Conflicto con disco", tone: "warning" as const };
   if (saveState === "saved") return { label: "Guardado", tone: "success" as const };
   if (hasRecoveredDraft) return { label: "Borrador recuperado", tone: "warning" as const };
@@ -401,25 +500,32 @@ function getDocumentStatus({
 }
 
 function DocumentConflictBanner({
+  conflictStatus,
   onKeepLocalVersion,
   onLoadDiskVersion,
 }: {
+  conflictStatus: DocumentConflictStatus;
   onKeepLocalVersion: () => void;
   onLoadDiskVersion: () => void;
 }) {
+  const orphaned = conflictStatus === "orphaned";
   return (
-    <div className="mb-4 flex items-center gap-3 rounded-md border border-orange-200 bg-brand-hover px-4 py-3 text-[13px] text-ink-primary">
+    <div className="mb-3 flex items-center gap-3 rounded-md border border-orange-200 bg-brand-hover px-3 py-2 text-[11px] text-ink-primary">
       <div className="min-w-0 flex-1">
-        <p className="font-semibold">El archivo cambió en disco</p>
-        <p className="mt-1 text-[12px] text-ink-secondary">
-          Puedes guardar tu borrador sobre el archivo actual o cargar la versión del disco y descartar el borrador.
+        <p className="font-semibold">{orphaned ? "El archivo ya no existe en disco" : "El archivo cambió en disco"}</p>
+        <p className="mt-0.5 text-[11px] text-ink-secondary">
+          {orphaned
+            ? "Puedes guardar tu borrador para recrear el archivo o cargar disco para descartar el borrador local."
+            : "Puedes guardar tu borrador sobre el archivo actual o cargar la versión del disco y descartar el borrador."}
         </p>
       </div>
-      <button className="h-8 rounded-md border border-brand-orange px-3 text-[12px] font-semibold text-brand-orange hover:bg-white" onClick={onLoadDiskVersion}>
-        Cargar disco
-      </button>
-      <button className="h-8 rounded-md bg-brand-orange px-3 text-[12px] font-semibold text-white hover:bg-brand-dark" onClick={onKeepLocalVersion}>
-        Mantener mi versión
+      {!orphaned ? (
+        <button className="h-7 rounded-md border border-brand-orange px-2.5 text-[11px] font-semibold text-brand-orange hover:bg-white" onClick={onLoadDiskVersion}>
+          Cargar disco
+        </button>
+      ) : null}
+      <button className="h-7 rounded-md bg-brand-orange px-2.5 text-[11px] font-semibold text-white hover:bg-brand-dark" onClick={onKeepLocalVersion}>
+        {orphaned ? "Recrear archivo" : "Mantener mi versión"}
       </button>
     </div>
   );

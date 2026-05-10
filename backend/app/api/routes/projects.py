@@ -6,10 +6,13 @@ from app.schemas.project import (
     FileOperationResult,
     MoveNodeRequest,
     Project,
+    ProjectCapabilities,
     ProjectPayload,
+    ProjectVersioningStatus,
     RenameNodeRequest,
     TreeNode,
 )
+from app.schemas.github import SyncResponse
 from app.services.project_service import project_service
 
 router = APIRouter()
@@ -23,6 +26,11 @@ def list_projects() -> list[Project]:
 @router.get("/projects/active", response_model=Project)
 def get_active_project() -> Project:
     return project_service.get_active_project()
+
+
+@router.get("/projects/capabilities", response_model=ProjectCapabilities)
+def get_project_capabilities() -> ProjectCapabilities:
+    return project_service.get_capabilities()
 
 
 @router.post("/projects", response_model=Project, status_code=201)
@@ -48,6 +56,21 @@ def set_active_project(project_id: str) -> Project:
 @router.get("/projects/{project_id}/tree", response_model=list[TreeNode])
 def get_project_tree(project_id: str) -> list[TreeNode]:
     return project_service.get_project_tree(project_id)
+
+
+@router.get("/projects/{project_id}/versioning/status", response_model=ProjectVersioningStatus)
+def get_project_versioning_status(project_id: str) -> ProjectVersioningStatus:
+    return project_service.get_versioning_status(project_id)
+
+
+@router.post("/projects/{project_id}/sync/pull", response_model=SyncResponse)
+def pull_project(project_id: str) -> SyncResponse:
+    return SyncResponse(**project_service.sync_pull(project_id))
+
+
+@router.post("/projects/{project_id}/sync/push", response_model=SyncResponse)
+def push_project(project_id: str) -> SyncResponse:
+    return SyncResponse(**project_service.sync_push(project_id))
 
 
 @router.post("/projects/{project_id}/folders", response_model=FileOperationResult)

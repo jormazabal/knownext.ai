@@ -23,6 +23,11 @@ const activeProject: Project = {
   folderPath: "C:\\Documentacion\\Proyecto Beta",
   icon: "folder",
   iconColor: "#F37021",
+  storageMode: "local-files",
+  versioningMode: "none",
+  syncMode: "none",
+  authRequired: false,
+  githubRepository: null,
   isGitRepository: false,
 };
 
@@ -54,6 +59,11 @@ describe("CreateProjectDialog", () => {
       icon: "folder",
       iconColor: "#F37021",
       folderPath: "C:\\Documentacion\\Proyecto Beta",
+      creationMode: "open-local",
+      storageMode: "local-files",
+      versioningMode: "none",
+      syncMode: "none",
+      githubRepository: null,
     });
   });
 
@@ -132,6 +142,30 @@ describe("CreateProjectDialog", () => {
     }));
   });
 
+  it("allows typing a new folder path when creating a project from zero", async () => {
+    const onCreate = vi.fn();
+
+    render(
+      <CreateProjectDialog
+        open
+        onClose={vi.fn()}
+        onCreate={onCreate}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /crear desde 0/i }));
+    await userEvent.type(screen.getByLabelText(/carpeta local/i), "C:\\Docs\\Nuevo proyecto");
+    await userEvent.click(screen.getByRole("button", { name: /crear proyecto/i }));
+
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+      creationMode: "new-local",
+      folderPath: "C:\\Docs\\Nuevo proyecto",
+      storageMode: "local-files",
+      versioningMode: "none",
+      syncMode: "none",
+    }));
+  });
+
   it("falls back to the browser system folder picker outside Tauri", async () => {
     const onUpdate = vi.fn();
     openDialog.mockRejectedValue(new Error("Tauri dialog unavailable"));
@@ -195,5 +229,59 @@ describe("CreateProjectDialog", () => {
     });
     expect(showDirectoryPicker).not.toHaveBeenCalled();
     expect(screen.getByDisplayValue("C:\\Dev\\knownext.ai")).toBeInTheDocument();
+  });
+
+  it("enables GitHub repository projects when authenticated and submits selected repository metadata", async () => {
+    const onCreate = vi.fn();
+
+    render(
+      <CreateProjectDialog
+        open
+        onClose={vi.fn()}
+        onCreate={onCreate}
+        authStatus={{
+          isAuthenticated: true,
+          provider: "github",
+          user: { login: "knownext-user" },
+          scopes: ["repo"],
+        }}
+        capabilities={{
+          canCreateLocalProject: true,
+          canOpenLocalFolder: true,
+          canUseLocalGit: true,
+          canConnectGithub: true,
+          canUseGithubApi: true,
+          requiresGithubLoginForVersioning: true,
+        }}
+        githubRepositories={[
+          {
+            owner: "knownext",
+            repo: "docs",
+            fullName: "knownext/docs",
+            private: true,
+            defaultRef: "main",
+            rootPath: "",
+            permissions: ["pull", "push"],
+          },
+        ]}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /repo github/i }));
+    await userEvent.selectOptions(screen.getByLabelText(/repositorio github/i), "knownext/docs");
+    await userEvent.click(screen.getByRole("button", { name: /crear proyecto/i }));
+
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+      name: "docs",
+      storageMode: "local-cache",
+      versioningMode: "github-api",
+      syncMode: "manual-github",
+      githubRepository: expect.objectContaining({
+        owner: "knownext",
+        repo: "docs",
+        defaultRef: "main",
+        permissions: ["pull", "push"],
+      }),
+    }));
   });
 });

@@ -7,9 +7,8 @@ import { useEffect, useRef } from "react";
 import {
   createMarkdownEditorController,
   readMarkdownEditorFormatState,
-  type MarkdownEditorController,
-  type MarkdownEditorFormatState,
 } from "./editorCommands";
+import type { MarkdownEditorController, MarkdownEditorFormatState } from "./editorTypes";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
 
@@ -31,6 +30,14 @@ export function MarkdownEditor(props: MarkdownEditorProps) {
 
 function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStateChange }: MarkdownEditorProps) {
   const skipInitialUpdate = useRef(true);
+  const lastMarkdownRef = useRef(markdown);
+  const lastFormatStateRef = useRef<MarkdownEditorFormatState>({});
+  const callbacksRef = useRef({ onChange, onControllerChange, onFormatStateChange });
+  const controllerReadyRef = useRef(false);
+
+  useEffect(() => {
+    callbacksRef.current = { onChange, onControllerChange, onFormatStateChange };
+  }, [onChange, onControllerChange, onFormatStateChange]);
 
   const { loading, get } = useEditor((root) => {
     const crepe = new Crepe({
@@ -54,7 +61,7 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
 
         if (!view?.state) return;
 
-        onFormatStateChange(readMarkdownEditorFormatState(getStateForFormat(view.state, selection)));
+        notifyFormatState(readMarkdownEditorFormatState(getStateForFormat(view.state, selection)));
       };
 
       listener.mounted(syncFormatState);
@@ -65,7 +72,10 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
           skipInitialUpdate.current = false;
           return;
         }
-        onChange(nextMarkdown);
+        if (nextMarkdown === lastMarkdownRef.current) return;
+
+        lastMarkdownRef.current = nextMarkdown;
+        callbacksRef.current.onChange(nextMarkdown);
       });
     });
 
@@ -73,25 +83,42 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
   }, []);
 
   useEffect(() => {
-    if (loading) return;
+    if (loading || controllerReadyRef.current) return;
 
     const editor = get();
     if (editor) {
+      controllerReadyRef.current = true;
       const controller = createMarkdownEditorController(editor);
-      onControllerChange(controller);
-      onFormatStateChange(controller.getFormatState());
+      callbacksRef.current.onControllerChange(controller);
+      notifyFormatState(controller.getFormatState());
     }
-  }, [loading, onControllerChange]);
+  }, [loading]);
 
   useEffect(() => {
-    return () => onControllerChange(null);
-  }, [onControllerChange]);
+    return () => callbacksRef.current.onControllerChange(null);
+  }, []);
 
   return (
     <div className="knownext-editor">
       <Milkdown />
     </div>
   );
+
+  function notifyFormatState(formatState: MarkdownEditorFormatState) {
+    if (formatStatesAreEqual(lastFormatStateRef.current, formatState)) return;
+
+    lastFormatStateRef.current = formatState;
+    callbacksRef.current.onFormatStateChange(formatState);
+  }
+}
+
+function formatStatesAreEqual(currentFormatState: MarkdownEditorFormatState, nextFormatState: MarkdownEditorFormatState) {
+  const currentKeys = Object.keys(currentFormatState) as Array<keyof MarkdownEditorFormatState>;
+  const nextKeys = Object.keys(nextFormatState) as Array<keyof MarkdownEditorFormatState>;
+
+  if (currentKeys.length !== nextKeys.length) return false;
+
+  return nextKeys.every((key) => currentFormatState[key] === nextFormatState[key]);
 }
 
 function getStateForFormat(

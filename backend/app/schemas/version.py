@@ -10,3 +10,11 @@ class VersionRecord(BaseModel):
     relativeTime: str
     current: bool = False
 
+
+class CreateVersionRequest(BaseModel):
+    documentId: str
+    title: str
+
+
+class CreateVersionResponse(BaseModel):
+    version: VersionRecord

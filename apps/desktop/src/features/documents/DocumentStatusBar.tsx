@@ -7,13 +7,28 @@ type DocumentStatusBarProps = {
   saveState: "idle" | "saving" | "saved";
   wordCount: number;
   gitEnabled: boolean;
+  versioningLabel: string;
+  lastVersionHash?: string | null;
+  lastVersionRelativeTime?: string | null;
   canSave: boolean;
   onSave: () => void;
 };
 
-export function DocumentStatusBar({ statusLabel, statusTone, isDirty, saveState, wordCount, gitEnabled, canSave, onSave }: DocumentStatusBarProps) {
+export function DocumentStatusBar({
+  statusLabel,
+  statusTone,
+  isDirty,
+  saveState,
+  wordCount,
+  gitEnabled,
+  versioningLabel,
+  lastVersionHash,
+  lastVersionRelativeTime,
+  canSave,
+  onSave,
+}: DocumentStatusBarProps) {
   return (
-    <footer className="z-10 flex h-12 shrink-0 items-center gap-6 border-t border-line bg-white px-5 text-[12px] text-ink-secondary">
+    <footer className="z-10 flex h-9 shrink-0 items-center gap-3 border-t border-line bg-white px-3 text-[11px] text-ink-secondary">
       <span className="flex items-center gap-2">
         <CheckCircle2 size={16} className={statusTone === "warning" || isDirty ? "text-brand-orange" : "text-green-600"} />
         {statusLabel}
@@ -21,15 +36,16 @@ export function DocumentStatusBar({ statusLabel, statusTone, isDirty, saveState,
       <span className="h-5 border-l border-line" />
       <span className="flex items-center gap-2">
         <GitCommitHorizontal size={15} />
-        Git: {gitEnabled ? "limpio" : "sin repositorio"}
+        {versioningLabel}
       </span>
       <span className="h-5 border-l border-line" />
-      {gitEnabled ? (
+      {gitEnabled && lastVersionHash ? (
         <span>
-          Último commit: <strong className="ml-2 text-ink-primary">a1b2c3d</strong> <span className="ml-3">hace 2 horas</span>
+          Última versión: <strong className="ml-2 text-ink-primary">{lastVersionHash}</strong>
+          {lastVersionRelativeTime ? <span className="ml-3">{lastVersionRelativeTime}</span> : null}
         </span>
       ) : (
-        <span>Historial no disponible</span>
+        <span>{gitEnabled ? "Sin versiones todavía" : "Historial no disponible"}</span>
       )}
       <span className="ml-auto">{wordCount} palabras</span>
       <span className="h-5 border-l border-line" />
@@ -40,7 +56,7 @@ export function DocumentStatusBar({ statusLabel, statusTone, isDirty, saveState,
         Markdown
       </span>
       <button
-        className="ml-2 h-8 rounded-md bg-brand-orange px-5 text-[12px] font-semibold text-white shadow-subtle hover:bg-brand-dark disabled:opacity-70"
+        className="ml-1 h-7 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white shadow-subtle hover:bg-brand-dark disabled:opacity-70"
         onClick={onSave}
         disabled={saveState === "saving" || !canSave}
       >

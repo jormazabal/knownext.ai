@@ -6,15 +6,21 @@ from app.schemas.project import (
     CreateDocumentRequest,
     CreateFolderRequest,
     FileOperationResult,
+    ProjectCapabilities,
     MoveNodeRequest,
     Project,
     ProjectPayload,
+    ProjectVersioningStatus,
     RenameNodeRequest,
     TreeNode,
 )
+from app.services.app_storage import get_app_data_dir
 from app.services.app_storage import JsonFileStore
+from app.services.auth_service import auth_service
 from app.services.draft_service import draft_service
 from app.services.filesystem_service import filesystem_service
+from app.services.git_service import git_service
+from app.services.github_service import github_service
 from app.services.mock_store import PROJECTS
 
 
@@ -26,6 +32,14 @@ class ProjectService:
         registry = self._read_registry()
         return [Project(**project) for project in registry["projects"]]
 
+    def get_capabilities(self) -> ProjectCapabilities:
+        authenticated = auth_service.get_status().isAuthenticated
+        return ProjectCapabilities(
+            canUseLocalGit=authenticated,
+            canConnectGithub=authenticated,
+            canUseGithubApi=authenticated,
+        )
+
     def get_active_project(self) -> Project:
         projects = self.list_projects()
         active = next((project for project in projects if project.active), projects[0])
@@ -33,15 +47,35 @@ class ProjectService:
 
     def create_project(self, payload: ProjectPayload) -> Project:
         registry = self._read_registry()
+        self._validate_project_mode(payload)
+        folder_path = payload.folderPath.strip()
+        if payload.storageMode == "local-cache" and payload.githubRepository:
+            project_id = f"project-{uuid4()}"
+            folder_path = str(get_app_data_dir() / "github-cache" / project_id)
+        else:
+            project_id = f"project-{uuid4()}"
+            self._prepare_local_project_folder(payload.creationMode, Path(folder_path))
+
         project = {
-            "id": f"project-{uuid4()}",
+            "id": project_id,
             "name": payload.name.strip() or "Nuevo proyecto",
-            "folderPath": payload.folderPath.strip(),
+            "folderPath": folder_path,
             "icon": payload.icon,
             "iconColor": payload.iconColor,
-            "isGitRepository": False,
+            "storageMode": payload.storageMode,
+            "versioningMode": payload.versioningMode,
+            "syncMode": payload.syncMode,
+            "authRequired": payload.versioningMode != "none",
+            "githubRepository": payload.githubRepository.model_dump() if payload.githubRepository else None,
+            "isGitRepository": payload.versioningMode == "local-git",
             "active": True,
         }
+
+        project_root = Path(folder_path)
+        if payload.versioningMode == "local-git":
+            git_service.ensure_repository(project_root)
+        if payload.versioningMode == "github-api" and payload.githubRepository:
+            github_service.hydrate_repository_cache(project_id, project_root, payload.githubRepository)
 
         registry["projects"] = [{**current, "active": False} for current in registry["projects"]]
         registry["projects"].append(project)
@@ -51,6 +85,7 @@ class ProjectService:
 
     def update_project(self, project_id: str, payload: ProjectPayload) -> Project:
         registry = self._read_registry()
+        self._validate_project_mode(payload)
         updated_project = None
 
         for index, project in enumerate(registry["projects"]):
@@ -63,6 +98,12 @@ class ProjectService:
                 "folderPath": payload.folderPath.strip(),
                 "icon": payload.icon,
                 "iconColor": payload.iconColor,
+                "storageMode": payload.storageMode,
+                "versioningMode": payload.versioningMode,
+                "syncMode": payload.syncMode,
+                "authRequired": payload.versioningMode != "none",
+                "githubRepository": payload.githubRepository.model_dump() if payload.githubRepository else project.get("githubRepository"),
+                "isGitRepository": payload.versioningMode == "local-git",
             }
             registry["projects"][index] = updated_project
             break
@@ -122,6 +163,67 @@ class ProjectService:
         project = self._find_project(registry, project_id)
         return filesystem_service.get_tree(project_id, Path(project["folderPath"]))
 
+    def get_versioning_status(self, project_id: str) -> ProjectVersioningStatus:
+        registry = self._read_registry()
+        project = self._find_project(registry, project_id)
+        authenticated = auth_service.get_status().isAuthenticated
+        versioning_mode = project["versioningMode"]
+        if versioning_mode == "none":
+            return ProjectVersioningStatus(
+                enabled=False,
+                available=True,
+                storageMode=project["storageMode"],
+                versioningMode=versioning_mode,
+                syncMode=project["syncMode"],
+                statusLabel="Sin historial",
+            )
+        if project["authRequired"] and not authenticated:
+            return ProjectVersioningStatus(
+                enabled=False,
+                available=False,
+                reason="github-login-required",
+                storageMode=project["storageMode"],
+                versioningMode=versioning_mode,
+                syncMode=project["syncMode"],
+                statusLabel="Historial requiere GitHub",
+            )
+        root = Path(project["folderPath"])
+        has_changes = False
+        last_hash = None
+        last_time = None
+        if versioning_mode == "local-git":
+            has_changes, last_hash, last_time = git_service.status(root)
+        return ProjectVersioningStatus(
+            enabled=True,
+            available=True,
+            storageMode=project["storageMode"],
+            versioningMode=versioning_mode,
+            syncMode=project["syncMode"],
+            statusLabel="Cambios sin versionar" if has_changes else "Sincronizado",
+            hasLocalChanges=has_changes,
+            lastVersionHash=last_hash,
+            lastVersionRelativeTime=last_time,
+        )
+
+    def sync_pull(self, project_id: str) -> dict[str, str]:
+        project = self._get_versioned_project(project_id)
+        if project["versioningMode"] == "local-git":
+            output = git_service.pull(Path(project["folderPath"]))
+            return {"status": "ok", "message": output or "Proyecto actualizado"}
+        if project["versioningMode"] == "github-api" and project.get("githubRepository"):
+            from app.schemas.project import GithubRepository
+
+            github_service.hydrate_repository_cache(project_id, Path(project["folderPath"]), GithubRepository(**project["githubRepository"]))
+            return {"status": "ok", "message": "Cache local actualizada desde GitHub"}
+        return {"status": "ok", "message": "No hay proveedor remoto configurado"}
+
+    def sync_push(self, project_id: str) -> dict[str, str]:
+        project = self._get_versioned_project(project_id)
+        if project["versioningMode"] == "local-git":
+            output = git_service.push(Path(project["folderPath"]))
+            return {"status": "ok", "message": output or "Cambios enviados"}
+        return {"status": "ok", "message": "Las versiones GitHub API se publican al crear versión"}
+
     def create_folder(self, project_id: str, payload: CreateFolderRequest) -> FileOperationResult:
         return filesystem_service.create_folder(project_id, self._get_project_root(project_id), payload.parentId, payload.name)
 
@@ -156,7 +258,7 @@ class ProjectService:
         registry = self.store.read(self._default_registry())
         projects = registry.get("projects")
 
-        if registry.get("schemaVersion") != 1 or not isinstance(projects, list) or not projects:
+        if not isinstance(projects, list) or not projects:
             registry = self._default_registry()
             self.store.write(registry)
             return registry
@@ -169,10 +271,12 @@ class ProjectService:
 
         normalized_projects = []
         for project in projects:
-            normalized_projects.append({**project, "active": project.get("id") == active_project_id})
+            normalized_projects.append(self._normalize_project({**project, "active": project.get("id") == active_project_id}))
 
         registry["projects"] = normalized_projects
         registry["activeProjectId"] = active_project_id
+        registry["schemaVersion"] = 2
+        self.store.write(registry)
         return registry
 
     def _find_project(self, registry: dict, project_id: str) -> dict:
@@ -192,10 +296,60 @@ class ProjectService:
     def _default_registry(self) -> dict:
         active_project_id = next((project["id"] for project in PROJECTS if project.get("active")), PROJECTS[0]["id"])
         return {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "activeProjectId": active_project_id,
-            "projects": [{**project, "active": project["id"] == active_project_id} for project in PROJECTS],
+            "projects": [self._normalize_project({**project, "active": project["id"] == active_project_id}) for project in PROJECTS],
         }
+
+    def _normalize_project(self, project: dict) -> dict:
+        versioning_mode = project.get("versioningMode")
+        if versioning_mode not in {"none", "local-git", "github-api"}:
+            versioning_mode = "local-git" if project.get("isGitRepository") else "none"
+        storage_mode = project.get("storageMode")
+        if storage_mode not in {"local-files", "local-cache"}:
+            storage_mode = "local-cache" if versioning_mode == "github-api" else "local-files"
+        sync_mode = project.get("syncMode")
+        if sync_mode not in {"none", "manual-github"}:
+            sync_mode = "manual-github" if versioning_mode in {"local-git", "github-api"} and project.get("githubRepository") else "none"
+        return {
+            **project,
+            "storageMode": storage_mode,
+            "versioningMode": versioning_mode,
+            "syncMode": sync_mode,
+            "authRequired": versioning_mode != "none",
+            "githubRepository": project.get("githubRepository"),
+            "isGitRepository": versioning_mode == "local-git",
+        }
+
+    def _validate_project_mode(self, payload: ProjectPayload) -> None:
+        if payload.versioningMode == "none":
+            if payload.storageMode == "local-cache":
+                raise HTTPException(status_code=400, detail="Local cache storage requires GitHub API versioning")
+            return
+        auth_service.require_github_auth()
+        if payload.versioningMode == "github-api" and payload.syncMode != "manual-github":
+            raise HTTPException(status_code=400, detail="GitHub API projects require manual GitHub sync mode")
+        if payload.versioningMode == "github-api" and payload.storageMode != "local-cache":
+            raise HTTPException(status_code=400, detail="GitHub API projects require local cache storage")
+        if payload.versioningMode == "github-api" and payload.githubRepository is None:
+            raise HTTPException(status_code=400, detail="GitHub API projects require a GitHub repository")
+
+    def _prepare_local_project_folder(self, creation_mode: str, root: Path) -> None:
+        if not str(root).strip():
+            raise HTTPException(status_code=400, detail="Project folder path is required")
+        if creation_mode == "new-local":
+            root.mkdir(parents=True, exist_ok=True)
+            return
+        if not root.exists() or not root.is_dir():
+            raise HTTPException(status_code=404, detail="Project folder not found")
+
+    def _get_versioned_project(self, project_id: str) -> dict:
+        registry = self._read_registry()
+        project = self._find_project(registry, project_id)
+        if project["versioningMode"] == "none":
+            raise HTTPException(status_code=409, detail="Project has no versioning enabled")
+        auth_service.require_github_auth()
+        return project
 
 
 project_service = ProjectService()
