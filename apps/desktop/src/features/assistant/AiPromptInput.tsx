@@ -5,13 +5,15 @@ type AiPromptInputProps = {
   documentId?: string;
   projectId?: string;
   markdown: string;
+  providerReady: boolean;
   onSubmit: (prompt: string) => void;
 };
 
-export function AiPromptInput({ documentId, projectId, onSubmit }: AiPromptInputProps) {
+export function AiPromptInput({ documentId, projectId, providerReady, onSubmit }: AiPromptInputProps) {
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
-  const canPrompt = Boolean(documentId || projectId);
+  const hasContext = Boolean(documentId || projectId);
+  const canPrompt = hasContext && providerReady;
 
   async function handleSubmit() {
     if (!prompt.trim() || !canPrompt) return;
@@ -41,8 +43,10 @@ export function AiPromptInput({ documentId, projectId, onSubmit }: AiPromptInput
             }
           }}
           placeholder={
-            !canPrompt
+            !hasContext
               ? "Crea un proyecto para activar la asistencia de documentación."
+              : !providerReady
+              ? "Configura OpenAI en Ajustes > IA para activar la asistencia."
               : documentId
               ? "Pregunta algo sobre este documento... (ej. Resúmelo, enumera los acuerdos, crea tareas, etc.)"
               : "Pregunta algo sobre la documentación del proyecto... (ej. Resume, busca acuerdos, crea tareas, etc.)"

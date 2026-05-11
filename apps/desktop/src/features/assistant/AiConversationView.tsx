@@ -1,31 +1,34 @@
 import { Bot, CheckCircle2, FileText, FolderPlus, ShieldAlert, Sparkles, Trash2, User } from "lucide-react";
-import type { AiConfigStatus, AiConversationEvent, Project } from "../../types/domain";
+import type { AiConfigStatus, AiConversationEvent, AiIndexStatusResponse, Project } from "../../types/domain";
 
 type AiConversationViewProps = {
   project: Project | null;
   config: AiConfigStatus;
+  indexStatus: AiIndexStatusResponse | null;
   events: AiConversationEvent[];
 };
 
-export function AiConversationView({ project, config, events }: AiConversationViewProps) {
+export function AiConversationView({ project, config, indexStatus, events }: AiConversationViewProps) {
   const groupedEvents = groupEventsByDay(events);
+  const ragLabel = getRagLabel(config, indexStatus);
 
   return (
     <div className="mx-auto flex min-h-[calc(100vh-170px)] max-w-[820px] flex-col pb-20">
       <header className="sticky top-0 z-10 border-b border-line bg-white/95 py-3 backdrop-blur">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <Sparkles size={16} className="text-brand-orange" />
-              <h2 className="text-[14px] font-semibold text-ink-primary">IA del proyecto</h2>
-            </div>
-            <p className="mt-1 truncate text-[11px] text-ink-secondary">{project?.name ?? "Sin proyecto activo"}</p>
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-2">
+            <Sparkles size={16} className="shrink-0 text-brand-orange" />
+            <h2 className="truncate text-[14px] font-semibold text-ink-primary">
+              Base de conocimiento del proyecto {project?.name ?? "sin proyecto activo"}
+            </h2>
           </div>
           <div className="flex shrink-0 gap-2 text-[10px]">
             <span className={["rounded px-2 py-1 font-semibold", config.openaiKeyConfigured ? "bg-brand-hover text-brand-orange" : "bg-panel text-ink-secondary"].join(" ")}>
               {config.openaiKeyConfigured ? "OpenAI configurado" : "Sin API key"}
             </span>
-            <span className="rounded bg-panel px-2 py-1 text-ink-secondary">{config.rag.enabled ? "RAG activo" : "RAG inactivo"}</span>
+            <span className={["rounded px-2 py-1", ragLabel.tone === "ready" ? "bg-brand-hover text-brand-orange" : "bg-panel text-ink-secondary"].join(" ")}>
+              {ragLabel.label}
+            </span>
           </div>
         </div>
       </header>
@@ -121,6 +124,14 @@ function getEventIcon(type: AiConversationEvent["type"]) {
   if (type === "delete_requested" || type === "node_deleted") return Trash2;
   if (type === "permission_blocked" || type === "provider_error" || type === "provider_unavailable") return ShieldAlert;
   return CheckCircle2;
+}
+
+function getRagLabel(config: AiConfigStatus, indexStatus: AiIndexStatusResponse | null) {
+  if (!config.rag.enabled) return { label: "RAG inactivo", tone: "idle" as const };
+  if (indexStatus?.status === "updated" && indexStatus.vectorStoreId) return { label: "RAG listo", tone: "ready" as const };
+  if (indexStatus?.status === "indexing") return { label: "RAG indexando", tone: "idle" as const };
+  if (indexStatus?.status === "error") return { label: "RAG con error", tone: "idle" as const };
+  return { label: "RAG pendiente", tone: "idle" as const };
 }
 
 function groupEventsByDay(events: AiConversationEvent[]) {

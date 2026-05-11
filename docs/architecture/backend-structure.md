@@ -23,8 +23,9 @@ Backend code lives in `backend/app`.
 - `git_service`: local Git operations mediated by FastAPI; React never executes Git.
 - `github_service`: GitHub REST API access for repository discovery, cache hydration, history, and commit creation.
 - `version_service`: provider abstraction for local Git and GitHub API histories. Development fakes must not be exposed as production history.
-- `ai_service`: project-scoped AI orchestration for prompts, conversation events, document edit plans, project file operations, delete confirmations, and RAG index state. If a real provider is not configured, the API returns an explicit unavailable state rather than a production-looking fake answer.
-- `openai_service`: OpenAI Responses API, structured response parsing, and vector-store index operations. It is the only backend service that should call OpenAI directly.
+- `ai_service`: project-scoped AI orchestration for prompts, conversation events, document edit plans, project file operations, delete confirmations, and RAG query context. If a real provider is not configured, the API returns an explicit unavailable state rather than a production-looking fake answer.
+- `rag_service`: project RAG indexing boundary. It owns the local manifest, incremental Markdown scanning by hash, local SQLite FTS exact search, and OpenAI vector-store synchronization state.
+- `openai_service`: OpenAI Responses API, structured response parsing, and low-level vector-store/file operations. It is the only backend service that should call OpenAI directly.
 
 ## Local Application Files
 
@@ -34,6 +35,8 @@ The local API owns application metadata files. React must access them through AP
 - `config.json`: user-level application configuration such as sidebar and history panel widths, appearance settings, diagnostics settings, plus the open document tabs per project, active document id, and tab order.
 - `ai-conversations/*.json`: project-scoped AI conversation events, including user prompts, assistant responses, and file-operation events.
 - `ai-pending-deletes.json`: short-lived AI delete requests waiting for explicit UI confirmation.
+- `ai-rag-manifests/*.json`: project-scoped RAG manifests with vector store id, last indexed time, per-document `sha256`, local path, OpenAI file ids, indexing status, and failures. Global AI settings can enable RAG, but vector store state is tracked per project.
+- `ai-rag/*.sqlite3`: project-scoped SQLite FTS indexes for local exact keyword search. These indexes complement OpenAI File Search and are rebuilt from Markdown content during indexing.
 - `logs/knownext.log`: optional JSON-lines trace file for user-visible errors and runtime failures. This folder is dedicated to logs and is only written when trace logging is enabled.
 - `credentials.json`: GitHub auth state and OpenAI API key outside `projects.json`; secrets are protected with Windows DPAPI when available and fall back to plain local JSON only on unsupported development/test environments.
 - `drafts/*.json`: internal unsaved document working copies with their base file fingerprint. These files are recoverable application state, not project documentation, and must not be written into project folders. Orphan drafts are conserved until the user restores or discards them.

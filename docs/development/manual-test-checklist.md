@@ -119,7 +119,10 @@
 - [ ] In Apariencia, adjust Zoom and confirm the interface scales immediately and persists after restart.
 - [ ] In IA, save an OpenAI API key and confirm only configured/preview status is shown, never the full key.
 - [ ] In IA, toggle Crear carpetas, Crear documentos, and Eliminar documentos y carpetas and confirm permissions persist.
-- [ ] In IA, enable project indexing, run Reindexar ahora, confirm status feedback, then delete the index.
+- [ ] In IA, enable project indexing, run Reindexar ahora, and confirm status shows indexed document counts plus local exact-search readiness.
+- [ ] Edit one Markdown file after indexing, run Reindexar ahora again, and confirm the index updates without forcing a full project reset from the user's perspective.
+- [ ] Ask an IA question using an exact term, acronym, filename, or code-like token that exists in the project and confirm the answer references the expected path.
+- [ ] Delete the IA index and confirm the vector-store status returns to not indexed and local exact-search readiness disappears.
 - [ ] In Trazas, activate Registro de trazas and confirm the log folder path appears.
 - [ ] With Registro de trazas active, trigger a recoverable API error and confirm `knownext.log` is written under the dedicated `logs` folder in the KnowNext.ai app data directory.
 - [ ] Click Abrir carpeta en el explorador and confirm Windows Explorer opens the dedicated log folder.

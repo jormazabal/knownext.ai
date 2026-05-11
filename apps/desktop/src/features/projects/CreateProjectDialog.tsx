@@ -179,6 +179,21 @@ export function CreateProjectDialog({
   }
 
   function buildProjectInput() {
+    if (isEditing && project) {
+      return {
+        name: name.trim() || project.name || "Nuevo proyecto",
+        icon,
+        iconColor,
+        folderPath: folderPath.trim(),
+        creationMode: "open-local" as const,
+        storageMode: project.storageMode,
+        versioningMode: project.versioningMode,
+        syncMode: project.syncMode,
+        githubRepository: project.githubRepository ?? null,
+        publishToGithub: null,
+      };
+    }
+
     const githubRepository = buildGithubRepository();
     return {
       name: name.trim() || githubRepo.trim() || "Nuevo proyecto",
@@ -309,6 +324,7 @@ export function CreateProjectDialog({
           <div className="min-h-0 overflow-y-auto px-5 py-5">
             {isEditing ? (
               <EditProjectForm
+                project={project}
                 name={name}
                 icon={icon}
                 iconColor={iconColor}
@@ -846,6 +862,7 @@ function ProjectIdentityStep({
 }
 
 function EditProjectForm({
+  project,
   name,
   icon,
   iconColor,
@@ -857,6 +874,7 @@ function EditProjectForm({
   onFolderPathChange,
   onSelectFolder,
 }: {
+  project?: Project | null;
   name: string;
   icon: string;
   iconColor: string;
@@ -868,23 +886,153 @@ function EditProjectForm({
   onFolderPathChange: (path: string) => void;
   onSelectFolder: () => void;
 }) {
+  const canEditFolder = project?.storageMode !== "local-cache";
+  const githubRepository = project?.githubRepository;
+
   return (
     <section className="space-y-5">
       <StepHeader
-        title="Datos del proyecto"
-        description="Ajusta la referencia que KnowNext.ai muestra y abre. Los cambios no modifican el contenido de la carpeta."
+        title="Editar proyecto"
+        description="Actualiza cómo aparece el proyecto en KnowNext.ai. El origen, el tipo de historial y la conexión GitHub se mantienen bloqueados para no convertir un proyecto existente en otro flujo distinto."
       />
-      <ProjectNameField name={name} iconColor={iconColor} SelectedIcon={SelectedIcon} onNameChange={onNameChange} autoFocus />
-      <LocalFolderField
-        creationMode="open-local"
-        folderPath={folderPath}
-        label="Carpeta local"
-        description="Selecciona la carpeta de documentación que este proyecto debe abrir."
-        onFolderPathChange={onFolderPathChange}
-        onSelectFolder={onSelectFolder}
-      />
-      <ProjectVisualPicker icon={icon} iconColor={iconColor} onIconChange={onIconChange} onIconColorChange={onIconColorChange} />
+
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
+        <div className="min-w-0 space-y-6">
+          <section className="space-y-4">
+            <SectionTitle
+              title="Identidad visible"
+              description="Solo afecta al selector y a la navegación interna. No renombra carpetas, repositorios ni archivos."
+            />
+            <ProjectNameField name={name} iconColor={iconColor} SelectedIcon={SelectedIcon} onNameChange={onNameChange} autoFocus />
+            <ProjectVisualPicker icon={icon} iconColor={iconColor} onIconChange={onIconChange} onIconColorChange={onIconColorChange} />
+          </section>
+
+          <section className="space-y-4 border-t border-line pt-5">
+            <SectionTitle
+              title="Carpeta de trabajo"
+              description={
+                canEditFolder
+                  ? "Puedes reasignar la referencia local si has movido la documentación. KnowNext.ai no moverá archivos."
+                  : "Esta carpeta es una copia local gestionada desde GitHub; cambiarla rompería la relación con el repositorio remoto."
+              }
+            />
+            {canEditFolder ? (
+              <EditableFolderField
+                folderPath={folderPath}
+                onFolderPathChange={onFolderPathChange}
+                onSelectFolder={onSelectFolder}
+              />
+            ) : (
+              <ReadOnlyField
+                icon={FolderOpen}
+                label="Carpeta local gestionada"
+                value={folderPath}
+                help="Solo lectura. Para usar otra ubicación, crea un proyecto nuevo desde ese repositorio GitHub."
+              />
+            )}
+          </section>
+        </div>
+
+        <aside className="min-w-0 space-y-3 border-t border-line pt-5 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
+          <SectionTitle
+            title="Configuración"
+            description="Estos valores describen cómo se creó el proyecto y se mantienen como referencia técnica."
+          />
+          <ReadOnlyField icon={projectStorageIcon(project)} label="Origen del proyecto" value={projectOriginLabel(project)} />
+          <ReadOnlyField icon={HardDrive} label="Modo de almacenamiento" value={storageModeLabel(project?.storageMode)} />
+          <ReadOnlyField icon={GitBranch} label="Historial" value={versioningModeLabel(project?.versioningMode ?? "none")} />
+          <ReadOnlyField icon={Cloud} label="Sincronización" value={syncModeLabel(project?.syncMode)} />
+          {githubRepository ? (
+            <ReadOnlyField
+              icon={Github}
+              label="Repositorio GitHub"
+              value={`${githubRepository.owner}/${githubRepository.repo}`}
+              help={githubRepository.defaultRef ? `Referencia interna: ${githubRepository.defaultRef}` : "Repositorio asociado al crear el proyecto."}
+            />
+          ) : (
+            <ReadOnlyField icon={Github} label="Repositorio GitHub" value="No conectado" help="Este proyecto no tiene repositorio GitHub asociado." />
+          )}
+          <GuidanceNote
+            icon={Lock}
+            title="Para cambiar origen o historial"
+            description="Crea un proyecto nuevo con el asistente. Así se evita mezclar una carpeta local, una caché GitHub o un remoto distinto dentro del mismo registro."
+          />
+        </aside>
+      </div>
     </section>
+  );
+}
+
+function SectionTitle({ title, description }: { title: string; description: string }) {
+  return (
+    <div>
+      <h4 className="text-[12px] font-semibold text-ink-primary">{title}</h4>
+      <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{description}</p>
+    </div>
+  );
+}
+
+function EditableFolderField({
+  folderPath,
+  onFolderPathChange,
+  onSelectFolder,
+}: {
+  folderPath: string;
+  onFolderPathChange: (path: string) => void;
+  onSelectFolder: () => void;
+}) {
+  return (
+    <label className="block text-[11px] font-medium text-ink-secondary">
+      Carpeta local
+      <div className="mt-2 flex gap-2">
+        <div className="min-w-0 flex-1" data-tooltip={folderPath || undefined}>
+          <input
+            className="h-10 w-full min-w-0 rounded-md border border-line bg-white px-3 font-mono text-[11px] text-ink-primary outline-none focus:border-brand-orange"
+            value={folderPath}
+            onChange={(event) => onFolderPathChange(event.target.value)}
+            placeholder="Selecciona una ruta local completa"
+          />
+        </div>
+        <button
+          className="flex h-10 shrink-0 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] text-ink-primary hover:bg-brand-hover"
+          type="button"
+          onClick={onSelectFolder}
+        >
+          <FolderOpen size={15} />
+          Seleccionar
+        </button>
+      </div>
+      <span className="mt-2 block text-[10px] leading-4 text-ink-secondary">
+        Guarda una nueva ruta solo si contiene la documentación que debe abrir este proyecto.
+      </span>
+    </label>
+  );
+}
+
+function ReadOnlyField({
+  icon: Icon,
+  label,
+  value,
+  help,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  help?: string;
+}) {
+  return (
+    <div className="rounded-md border border-line bg-panel px-3 py-2.5">
+      <div className="flex min-w-0 items-start gap-2">
+        <Icon size={14} className="mt-0.5 shrink-0 text-ink-secondary" />
+        <div className="min-w-0 flex-1">
+          <div className="text-[10px] font-medium text-ink-secondary">{label}</div>
+          <div className="mt-0.5 truncate text-[11px] font-semibold text-ink-primary" title={value}>
+            {value}
+          </div>
+          {help ? <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{help}</p> : null}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1576,6 +1724,31 @@ function historyChoiceLabel(startMode: ProjectStartMode, localHistoryChoice: Loc
   if (localHistoryChoice === "existing-github-remote") return "Git local + GitHub existente";
   if (localHistoryChoice === "publish-github") return "Publicar en GitHub";
   return "Solo archivos locales";
+}
+
+function projectOriginLabel(project?: Project | null) {
+  if (!project) return "Proyecto registrado";
+  if (project.versioningMode === "github-api") return "Repositorio GitHub existente";
+  if (project.versioningMode === "local-git" && project.githubRepository) return "Carpeta local con GitHub";
+  if (project.versioningMode === "local-git") return "Carpeta local con Git";
+  return "Carpeta local";
+}
+
+function projectStorageIcon(project?: Project | null): LucideIcon {
+  if (project?.versioningMode === "github-api") return Github;
+  if (project?.versioningMode === "local-git") return FolderGit2;
+  if (project?.storageMode === "local-cache") return Cloud;
+  return HardDrive;
+}
+
+function storageModeLabel(storageMode?: "local-files" | "local-cache") {
+  if (storageMode === "local-cache") return "Copia local gestionada";
+  return "Archivos locales";
+}
+
+function syncModeLabel(syncMode?: "none" | "manual-github") {
+  if (syncMode === "manual-github") return "Manual con GitHub";
+  return "Sin sincronización remota";
 }
 
 function versioningModeLabel(versioningMode: VersioningMode) {

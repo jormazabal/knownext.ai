@@ -375,6 +375,12 @@ export type AiIndexStatusResponse = {
   vectorStoreId?: string | null;
   lastIndexedAt?: string | null;
   error?: string | null;
+  documentCount: number;
+  indexedDocumentCount: number;
+  pendingDocumentCount: number;
+  failedDocumentCount: number;
+  deletedDocumentCount: number;
+  localExactReady: boolean;
 };
 
 export type SaveDocumentPayload = {
