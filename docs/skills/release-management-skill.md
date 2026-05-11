@@ -15,7 +15,7 @@ Use this skill for every version bump, GitHub Release, updater change, installer
 - `backend/tests/test_api.py` must expect the same version returned by `/health`.
 - The README manual installer link must use `releases/latest/download/KnowNext.ai_<version>_x64-setup.exe`.
 - GitHub Releases must include `KnowNext.ai_<version>_x64-setup.exe`, `KnowNext.ai_<version>_x64_en-US.msi`, both `.sig` files, and `latest.json`.
-- The published updater manifest must resolve to the new version and point `windows-x86_64.url` to the NSIS setup artifact so per-user installs can update without a Windows Installer elevation prompt.
+- The published updater manifest must resolve to the new version and point `windows-x86_64.url` to the MSI artifact.
 - Do not publish a release from an unclean or unrelated worktree.
 - Do not change the Tauri updater public key unless the maintainer explicitly accepts the migration impact.
 
@@ -57,7 +57,7 @@ Invoke-WebRequest -UseBasicParsing -Method Head -Uri "https://github.com/jormaza
 - GitHub Actions release workflow succeeds.
 - The release is not left as a draft.
 - `latest.json` returns the new version.
-- `latest.json` points Windows updates to `KnowNext.ai_<version>_x64-setup.exe`.
+- `latest.json` points Windows updates to `KnowNext.ai_<version>_x64_en-US.msi`.
 - The README download URL returns HTTP 200.
 - A previously installed per-user version can update without requiring administrator permissions and without deleting app data.
 
@@ -66,5 +66,5 @@ Invoke-WebRequest -UseBasicParsing -Method Head -Uri "https://github.com/jormaza
 - Linking the README to a fixed old installer version.
 - Publishing the draft before checking the assets.
 - Forgetting to publish the draft, which leaves `/latest/download/latest.json` on the previous release.
-- Pointing the updater manifest back to MSI without explicitly accepting that some users may see an administrator prompt.
+- Pointing the updater manifest back to NSIS without explicitly changing the updater distribution policy.
 - Replacing the updater key as a routine release step.

@@ -150,4 +150,4 @@ jobs:
           prerelease: false
           tauriScript: pnpm tauri
           includeUpdaterJson: true
-          updaterJsonPreferNsis: true
+          updaterJsonPreferNsis: false
