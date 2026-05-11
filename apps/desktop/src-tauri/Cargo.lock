@@ -1720,7 +1720,7 @@ dependencies = [
 
 [[package]]
 name = "knownext-ai-desktop"
-version = "0.6.15"
+version = "0.7.0"
 dependencies = [
  "serde",
  "serde_json",

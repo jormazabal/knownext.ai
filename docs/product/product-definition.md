@@ -24,7 +24,7 @@ KnowNext.ai includes a project-scoped AI assistant mediated by the local FastAPI
 - The assistant can create folders and Markdown documents only when the corresponding permissions are enabled in app settings.
 - Delete operations always require a confirmation dialog listing the affected paths, even when the delete permission is enabled.
 - OpenAI is the first supported provider. API keys are configured in app settings, stored locally through backend credential storage, and never exposed to React after save.
-- Project-wide RAG is opt-in. When enabled, Markdown documentation can be indexed through OpenAI vector stores so responses can use project-wide semantic search and cite relevant paths.
+- Project-wide RAG is opt-in. When enabled, Markdown documentation is indexed with a project manifest, incremental file hashing, OpenAI vector stores for semantic retrieval, and a local exact-search index for terms, acronyms, filenames, and code-like references. Responses should cite relevant paths when evidence comes from the project.
 - Prompts and document content must not be written to trace logs.
 
 ## Target User
@@ -137,10 +137,9 @@ The flow requirements are:
 - The same flow is opened from both `Nuevo proyecto` and `Añadir primer proyecto`.
 - Keyboard navigation must support tab controls or wizard buttons, and focus must move to the active step heading or first invalid field after navigation/validation.
 
-## Explicit Non-Goals In V1
+## Explicit Non-Goals In The First Shell Phase
 
 - Real Git execution.
-- Real AI provider integration.
 - Complex project persistence.
 - Branch management UI.
 - Raw Markdown as the primary editor.

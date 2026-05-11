@@ -24,7 +24,7 @@ def test_health() -> None:
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
-    assert response.json()["version"] == "0.6.15"
+    assert response.json()["version"] == "0.7.0"
     assert response.json()["appDataDir"]
 
 
@@ -1154,6 +1154,15 @@ def test_openai_key_status_does_not_expose_secret() -> None:
     assert client.get("/api/credentials/openai-key").json() == {"configured": False, "preview": None}
 
 
+def test_openai_key_rejects_invalid_values() -> None:
+    empty = client.put("/api/credentials/openai-key", json={"apiKey": "   "})
+    assert empty.status_code == 400
+
+    invalid = client.put("/api/credentials/openai-key", json={"apiKey": "not-a-key"})
+    assert invalid.status_code == 400
+    assert client.get("/api/credentials/openai-key").json() == {"configured": False, "preview": None}
+
+
 def test_ai_document_edit_returns_markdown_without_writing_disk(tmp_path, monkeypatch) -> None:
     from app.services.ai_service import openai_service
 
@@ -1258,6 +1267,94 @@ def test_ai_create_document_respects_permissions(tmp_path, monkeypatch) -> None:
     assert created_doc.status_code == 200
     assert created_doc.json()["operations"][0]["type"] == "document_created"
     assert (docs_root / "generated.md").read_text(encoding="utf-8") == "# Generated\n"
+
+
+def test_ai_index_status_is_project_scoped(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    first_root = tmp_path / "first-index"
+    second_root = tmp_path / "second-index"
+    first_root.mkdir()
+    second_root.mkdir()
+    (first_root / "one.md").write_text("# One\n", encoding="utf-8")
+    (second_root / "two.md").write_text("# Two\n", encoding="utf-8")
+    first = client.post("/api/projects", json={"name": "First", "folderPath": str(first_root), "icon": "folder", "iconColor": "#F37021"}).json()
+    second = client.post("/api/projects", json={"name": "Second", "folderPath": str(second_root), "icon": "folder", "iconColor": "#F37021"}).json()
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+
+    uploaded_paths: list[str] = []
+    monkeypatch.setattr(openai_service, "create_vector_store", lambda project_id: f"vs-{project_id}")
+    monkeypatch.setattr(
+        openai_service,
+        "upload_markdown_document",
+        lambda vector_store_id, project_id, relative_path, content, attributes: uploaded_paths.append(relative_path)
+        or {"openaiFileId": f"file-{relative_path}", "vectorStoreFileId": f"vsf-{relative_path}"},
+    )
+    monkeypatch.setattr(openai_service, "delete_vector_store_file", lambda vector_store_id, file_id: None)
+    monkeypatch.setattr(openai_service, "delete_file", lambda file_id: None)
+    monkeypatch.setattr(openai_service, "delete_vector_store", lambda vector_store_id: None)
+
+    rebuilt = client.post(f"/api/projects/{first['id']}/ai/index/rebuild")
+    assert rebuilt.status_code == 200
+    assert rebuilt.json()["status"] == "updated"
+    assert rebuilt.json()["vectorStoreId"] == f"vs-{first['id']}"
+    assert rebuilt.json()["documentCount"] == 1
+    assert rebuilt.json()["indexedDocumentCount"] == 1
+    assert rebuilt.json()["localExactReady"] is True
+    assert uploaded_paths == ["one.md"]
+
+    rebuilt_again = client.post(f"/api/projects/{first['id']}/ai/index/rebuild")
+    assert rebuilt_again.status_code == 200
+    assert uploaded_paths == ["one.md"]
+
+    first_status = client.get(f"/api/projects/{first['id']}/ai/index/status").json()
+    second_status = client.get(f"/api/projects/{second['id']}/ai/index/status").json()
+    assert first_status["vectorStoreId"] == f"vs-{first['id']}"
+    assert second_status["vectorStoreId"] is None
+    assert second_status["status"] == "not-indexed"
+
+
+def test_ai_interaction_includes_local_exact_rag_matches(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "rag-context"
+    docs_root.mkdir()
+    (docs_root / "adr.md").write_text("# ADR\n\nDecision keyword-zeta lives here.\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "RAG Context", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+    config = client.get("/api/config/ai").json()
+    config["rag"]["enabled"] = True
+    client.put("/api/config/ai", json=config)
+
+    monkeypatch.setattr(openai_service, "create_vector_store", lambda project_id: f"vs-{project_id}")
+    monkeypatch.setattr(
+        openai_service,
+        "upload_markdown_document",
+        lambda vector_store_id, project_id, relative_path, content, attributes: {"openaiFileId": "file-adr", "vectorStoreFileId": "vsf-adr"},
+    )
+    client.post(f"/api/projects/{project_id}/ai/index/rebuild")
+
+    captured_context = {}
+
+    def fake_plan(payload, context, rag):
+        captured_context.update(context)
+        return {"display": "bubble", "answer": "Encontrado en adr.md", "operations": []}
+
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+
+    response = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={"projectId": project_id, "prompt": "Busca keyword-zeta", "activeMarkdown": "", "mode": "project", "clientMessageId": "client-rag"},
+    )
+
+    assert response.status_code == 200
+    matches = captured_context["projectSearch"]["exactMatches"]
+    assert matches[0]["path"] == "adr.md"
+    assert "keyword-zeta" in matches[0]["snippet"]
 
 
 def test_runtime_select_folder_returns_path(monkeypatch) -> None:

@@ -149,3 +149,9 @@ class AiIndexStatusResponse(BaseModel):
     vectorStoreId: str | None = None
     lastIndexedAt: str | None = None
     error: str | None = None
+    documentCount: int = 0
+    indexedDocumentCount: int = 0
+    pendingDocumentCount: int = 0
+    failedDocumentCount: int = 0
+    deletedDocumentCount: int = 0
+    localExactReady: bool = False

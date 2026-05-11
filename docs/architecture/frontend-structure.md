@@ -75,7 +75,7 @@ Any remaining mock fixtures must be limited to tests, Storybook/demo surfaces, o
 - The modal has a left settings list and a right detail pane.
 - `Servicios` is the first section and shows local backend health, version/profile details, last error, manual refresh, and backend restart where supported by the installed desktop runtime.
 - `Apariencia` owns the persisted locale and zoom percentage.
-- `IA` owns OpenAI provider status, action permissions, and project documentation indexing controls.
+- `IA` owns OpenAI provider status, action permissions, and project documentation indexing controls. RAG status from FastAPI includes semantic index state, indexed/failed document counts, and whether the local exact-search index is ready; React only renders those values and never indexes files itself.
 - `Trazas` owns the persisted trace logging toggle and the action to open the dedicated log folder.
 - The settings component remains visual: persistence goes through root app state and FastAPI config updates, while folder opening and log writes go through runtime/API helpers.
 

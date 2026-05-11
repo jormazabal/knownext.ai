@@ -6,6 +6,8 @@ import os
 from copy import deepcopy
 from typing import Any
 
+from fastapi import HTTPException
+
 from app.services.app_storage import JsonFileStore
 
 
@@ -71,6 +73,10 @@ class CredentialService:
 
     def save_openai_key(self, api_key: str) -> None:
         normalized_key = api_key.strip()
+        if not normalized_key:
+            raise HTTPException(status_code=400, detail="OpenAI API key is required")
+        if not normalized_key.startswith("sk-"):
+            raise HTTPException(status_code=400, detail="OpenAI API key must start with sk-")
         data = self._read_credentials()
         record: dict[str, str] = {}
         protected_key = _protect_secret(normalized_key)

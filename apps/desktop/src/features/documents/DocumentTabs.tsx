@@ -31,19 +31,24 @@ export function DocumentTabs({ tabs, activeTabId, dirtyDocumentIds, onOpenNaviga
           const active = tab.id === activeTabId;
           const dirty = tab.kind === "document" && dirtyIds.has(tab.id);
           const Icon = tab.kind === "release-notes" ? ScrollText : tab.kind === "ai-conversation" ? Sparkles : FileText;
+          const isAiTab = tab.kind === "ai-conversation";
           return (
             <button
               key={tab.id}
+              aria-label={isAiTab ? "IA" : tab.name}
+              data-tooltip={isAiTab ? "IA" : undefined}
+              data-tooltip-placement={isAiTab ? "bottom" : undefined}
               className={[
-                "group relative flex h-full min-w-[150px] max-w-[210px] items-center gap-1.5 border-r border-line px-2.5 text-[11px]",
+                "group relative flex h-full items-center gap-1.5 border-r border-line text-[11px]",
+                isAiTab ? "w-12 min-w-12 max-w-12 justify-center px-0" : "min-w-[150px] max-w-[210px] px-2.5",
                 active ? "bg-white font-semibold" : "text-ink-primary hover:bg-panel",
               ].join(" ")}
               onClick={() => onSelectTab(tab.id)}
             >
               <Icon size={15} className={active ? "text-brand-orange" : "text-ink-secondary"} />
-              <span className="truncate">{tab.name}</span>
-              {tab.kind === "ai-conversation" ? (
-                <span className="ml-auto h-5 w-5" aria-hidden="true" />
+              {isAiTab ? null : <span className="truncate">{tab.name}</span>}
+              {isAiTab ? (
+                null
               ) : (
                 <span
                   className="ml-auto grid h-5 w-5 place-items-center rounded hover:bg-brand-hover"

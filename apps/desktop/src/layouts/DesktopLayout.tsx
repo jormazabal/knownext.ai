@@ -18,7 +18,7 @@ import { ProjectSelector } from "../features/projects/ProjectSelector";
 import { ReleaseNotesViewer } from "../features/releaseNotes/ReleaseNotesViewer";
 import { VersionHistoryPanel } from "../features/versions/VersionHistoryPanel";
 import { TitleBar } from "../components/window/TitleBar";
-import type { AiConfigStatus, AiConversationEvent, AppearanceConfig, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentTreeNode, LayoutConfig, Project, ProjectVersioningStatus, WorkspaceTab } from "../types/domain";
+import type { AiConfigStatus, AiConversationEvent, AiIndexStatusResponse, AppearanceConfig, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentTreeNode, LayoutConfig, Project, ProjectVersioningStatus, WorkspaceTab } from "../types/domain";
 
 const sidebarWidthConfig = {
   defaultWidth: 338,
@@ -41,6 +41,7 @@ type DesktopLayoutProps = {
   projects: Project[];
   activeProject: Project | null;
   aiConfig: AiConfigStatus;
+  aiIndexStatus: AiIndexStatusResponse | null;
   aiConversationEvents: AiConversationEvent[];
   aiBubble: { id: string; answer: string } | null;
   aiAppliedChange: { documentId: string; previousMarkdown: string; summary: string } | null;
@@ -312,6 +313,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                         <AiConversationView
                           project={props.activeProject}
                           config={props.aiConfig}
+                          indexStatus={props.aiIndexStatus}
                           events={props.aiConversationEvents}
                         />
                       ) : (
@@ -382,6 +384,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 documentId={hasOpenDocument ? props.activeDocumentId : undefined}
                 projectId={props.activeProject?.id}
                 markdown={hasOpenDocument ? props.activeMarkdown : ""}
+                providerReady={props.aiConfig.openaiKeyConfigured}
                 onSubmit={props.onSendAiPrompt}
               />
               <AiResponseBubble bubble={props.aiBubble} onClose={props.onCloseAiBubble} onOpenConversation={props.onOpenAiConversation} />
