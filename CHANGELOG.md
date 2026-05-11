@@ -2,6 +2,13 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.6.12 - 2026-05-11
+
+- Improved the project editor with a maintenance-focused UI, editable identity/local path fields, and read-only technical configuration for origin, storage, history, sync, and GitHub repository.
+- Preserved existing project storage, versioning, sync, and GitHub metadata when saving edits so the editor cannot accidentally convert the project type.
+- Added frontend coverage for editing GitHub-backed projects with read-only technical configuration.
+- Updated release metadata and installer download links for `0.6.12`.
+
 ## 0.6.11 - 2026-05-11
 
 - Fixed startup after updates by rejecting stale local API processes from older app versions or different data profiles before starting the bundled backend.
