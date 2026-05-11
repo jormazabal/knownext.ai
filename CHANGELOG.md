@@ -2,6 +2,16 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.7.0 - 2026-05-11
+
+- Added the project-scoped AI conversation tab with persisted messages, day grouping, file-operation events, and a compact icon-only tab.
+- Added OpenAI-backed AI interactions through FastAPI, including secure local API key storage, provider status, and configurable permissions for creating folders, creating documents, and requesting deletes.
+- Added direct AI document edits that update the active editor buffer as unsaved changes, with conflict blocking, an applied-change banner, and undo support.
+- Added informational AI response bubbles above the prompt with dismiss/open actions and dissolve transitions.
+- Added confirmed AI delete flow, project tree refreshes for AI-created content, and conversation records for document and filesystem actions.
+- Added opt-in project RAG with OpenAI vector stores, per-project local manifests, incremental Markdown indexing, and complementary SQLite exact search.
+- Updated AI product, frontend/backend architecture, manual checklist, backend contract tests, and release metadata for `0.7.0`.
+
 ## 0.6.15 - 2026-05-11
 
 - Added managed browser-project storage so web-created projects live inside the backend web sandbox instead of exposing or scanning arbitrary local repository folders.

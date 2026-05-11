@@ -683,14 +683,17 @@ export function App() {
 
     if (response.updatedDocument) {
       const updated = response.updatedDocument;
+      const previousMarkdown = documentSessions[updated.documentId]?.markdown;
+      if (previousMarkdown !== undefined) {
+        setAiAppliedChange({
+          documentId: updated.documentId,
+          previousMarkdown,
+          summary: updated.summary,
+        });
+      }
       setDocumentSessions((currentSessions) => {
         const session = currentSessions[updated.documentId];
         if (!session) return currentSessions;
-        setAiAppliedChange({
-          documentId: updated.documentId,
-          previousMarkdown: session.markdown,
-          summary: updated.summary,
-        });
         return {
           ...currentSessions,
           [updated.documentId]: {
@@ -1488,6 +1491,7 @@ export function App() {
         projects={projects}
         activeProject={activeProject}
         aiConfig={aiConfig}
+        aiIndexStatus={aiIndexStatus}
         aiConversationEvents={aiConversationEvents}
         aiBubble={aiBubble}
         aiAppliedChange={aiAppliedChange}

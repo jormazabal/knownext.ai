@@ -354,6 +354,9 @@ function AiSettings({
   const [apiKey, setApiKey] = useState("");
   const statusLabel = ai.openaiKeyConfigured ? text.aiConfigured : text.aiMissingKey;
   const indexStatus = aiIndexStatus?.status ?? ai.rag.status;
+  const indexedCount = aiIndexStatus?.indexedDocumentCount ?? 0;
+  const documentCount = aiIndexStatus?.documentCount ?? 0;
+  const failedCount = aiIndexStatus?.failedDocumentCount ?? 0;
 
   function updatePermissions(nextPermissions: Partial<AiConfigStatus["permissions"]>) {
     onAiChange({
@@ -444,6 +447,14 @@ function AiSettings({
             <p className="text-[11px] font-semibold text-ink-primary">{text.ragHeading}</p>
             <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.ragDescription}</p>
             <p className="mt-2 text-[10px] text-ink-secondary">{text.ragStatus}: {describeIndexStatus(indexStatus)}</p>
+            {aiIndexStatus ? (
+              <p className="mt-1 text-[10px] text-ink-secondary">
+                {text.ragDocuments}: {indexedCount}/{documentCount}
+                {failedCount > 0 ? ` · ${text.ragFailed}: ${failedCount}` : ""}
+                {aiIndexStatus.localExactReady ? ` · ${text.ragExactReady}` : ""}
+              </p>
+            ) : null}
+            {aiIndexStatus?.error ? <p className="mt-1 text-[10px] leading-4 text-red-700">{aiIndexStatus.error}</p> : null}
           </div>
           <Switch enabled={ai.rag.enabled} label={text.ragHeading} onToggle={() => updateRag(!ai.rag.enabled)} />
         </div>
@@ -642,6 +653,9 @@ const settingsCopy = {
     ragHeading: "Indexar documentación del proyecto",
     ragDescription: "Permite consultar el proyecto completo con búsqueda semántica. El contenido Markdown se enviará a OpenAI para indexación.",
     ragStatus: "Estado",
+    ragDocuments: "Documentos indexados",
+    ragFailed: "fallidos",
+    ragExactReady: "búsqueda exacta local lista",
     rebuildIndex: "Reindexar ahora",
     deleteIndex: "Eliminar índice",
     diagnosticsHeading: "Trazas",
@@ -709,6 +723,9 @@ const settingsCopy = {
     ragHeading: "Index project documentation",
     ragDescription: "Allows project-wide semantic search. Markdown content will be sent to OpenAI for indexing.",
     ragStatus: "Status",
+    ragDocuments: "Indexed documents",
+    ragFailed: "failed",
+    ragExactReady: "local exact search ready",
     rebuildIndex: "Reindex now",
     deleteIndex: "Delete index",
     diagnosticsHeading: "Traces",

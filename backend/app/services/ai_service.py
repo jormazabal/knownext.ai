@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from datetime import timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -19,7 +20,6 @@ from app.schemas.ai import (
     AiPromptResponse,
     AiUpdatedDocument,
 )
-from app.schemas.config import AppConfigUpdate
 from app.schemas.project import CreateDocumentRequest, CreateFolderRequest, TreeNode
 from app.services.app_storage import JsonFileStore
 from app.services.config_service import config_service
@@ -28,6 +28,7 @@ from app.services.document_service import document_service
 from app.services.filesystem_service import decode_document_id, decode_node_id
 from app.services.openai_service import OpenAiProviderError, OpenAiUnavailableError, openai_service
 from app.services.project_service import project_service
+from app.services.rag_service import RagIndexState, rag_service
 
 
 class AiService:
@@ -81,13 +82,14 @@ class AiService:
                 conversationEvents=[user_event, provider_event],
             )
 
-        context = self._build_context(project_id, payload)
         ai_config = config_service.get_config().ai
+        rag_context = rag_service.query_context(project_id, payload.prompt, ai_config.rag.enabled)
+        context = self._build_context(project_id, payload, rag_context)
         try:
             plan = openai_service.plan_interaction(
                 payload.model_dump(),
                 context,
-                ai_config.rag.model_dump(),
+                rag_context,
             )
         except OpenAiUnavailableError as error:
             return self._provider_error_response(project_id, interaction_id, user_event, str(error), unavailable=True)
@@ -95,7 +97,13 @@ class AiService:
             message = str(error) if isinstance(error, OpenAiProviderError) else "OpenAI no pudo completar la interacción."
             return self._provider_error_response(project_id, interaction_id, user_event, message, unavailable=False)
 
-        response = self._execute_plan(project_id, interaction_id, payload, plan)
+        try:
+            response = self._execute_plan(project_id, interaction_id, payload, plan)
+        except HTTPException as error:
+            message = _http_error_message(error)
+            return self._provider_error_response(project_id, interaction_id, user_event, message, unavailable=False)
+        except Exception:
+            return self._provider_error_response(project_id, interaction_id, user_event, "No se pudieron aplicar las acciones propuestas por la IA.", unavailable=False)
         self._append_events(project_id, [user_event, *response.conversationEvents])
         return response.model_copy(update={"conversationEvents": [user_event, *response.conversationEvents]})
 
@@ -113,6 +121,10 @@ class AiService:
         record = pending.get(payload.confirmationId)
         if not isinstance(record, dict) or record.get("projectId") != project_id:
             raise HTTPException(status_code=404, detail="Pending AI delete request not found")
+        if _is_expired(record.get("createdAt"), minutes=30):
+            pending.pop(payload.confirmationId, None)
+            self.pending_deletes.write({"schemaVersion": 1, "items": pending})
+            raise HTTPException(status_code=409, detail="Pending AI delete request expired")
 
         events: list[AiConversationEvent] = []
         operations: list[AiOperation] = []
@@ -139,49 +151,18 @@ class AiService:
 
     def get_index_status(self, project_id: str) -> AiIndexStatusResponse:
         project_service.get_project_tree(project_id)
-        rag = config_service.get_config().ai.rag
-        return self._index_status_response(project_id, rag)
+        return self._index_status_response(project_id)
 
     def rebuild_index(self, project_id: str) -> AiIndexStatusResponse:
         project_root = project_service._get_project_root(project_id)
         config = config_service.get_config()
-        rag = config.ai.rag.model_copy(update={"enabled": True, "status": "indexing", "error": None})
-        config_service.update_config(AppConfigUpdate(ai=config.ai.model_copy(update={"rag": rag})))
-        try:
-            vector_store_id = openai_service.rebuild_vector_store(project_id, project_root, rag.vectorStoreId)
-        except Exception as error:
-            next_rag = rag.model_copy(update={"status": "error", "error": str(error)})
-        else:
-            next_rag = rag.model_copy(update={
-                "status": "updated",
-                "vectorStoreId": vector_store_id,
-                "lastIndexedAt": _now_iso(),
-                "error": None,
-            })
-        updated = config_service.update_config(AppConfigUpdate(ai=config.ai.model_copy(update={"rag": next_rag})))
-        return self._index_status_response(project_id, updated.ai.rag)
+        state = rag_service.index_project(project_id, project_root)
+        return self._index_status_response(project_id, state=state, globally_enabled=config.ai.rag.enabled)
 
     def delete_index(self, project_id: str) -> AiIndexStatusResponse:
         project_service.get_project_tree(project_id)
-        config = config_service.get_config()
-        vector_store_id = config.ai.rag.vectorStoreId
-        if vector_store_id:
-            try:
-                openai_service.delete_vector_store(vector_store_id)
-            except Exception:
-                pass
-        next_rag = config.ai.rag.model_copy(update={
-            "enabled": False,
-            "vectorStoreId": None,
-            "lastIndexedAt": None,
-            "status": "not-indexed",
-            "error": None,
-        })
-        updated = config_service.update_config(AppConfigUpdate(ai=config.ai.model_copy(update={"rag": next_rag})))
-        return self._index_status_response(project_id, updated.ai.rag)
-
-    def _index_status_response(self, project_id: str, rag: Any) -> AiIndexStatusResponse:
-        return AiIndexStatusResponse(projectId=project_id, **rag.model_dump())
+        state = rag_service.delete_index(project_id)
+        return self._index_status_response(project_id, state=state)
 
     def _execute_plan(self, project_id: str, interaction_id: str, payload: AiInteractionRequest, plan: dict[str, Any]) -> AiInteractionResponse:
         ai_config = config_service.get_config().ai
@@ -303,11 +284,14 @@ class AiService:
             conversationEvents=[user_event, event],
         )
 
-    def _build_context(self, project_id: str, payload: AiInteractionRequest) -> dict[str, Any]:
+    def _build_context(self, project_id: str, payload: AiInteractionRequest, rag_context: dict[str, Any] | None = None) -> dict[str, Any]:
         tree = project_service.get_project_tree(project_id)
         context: dict[str, Any] = {
             "tree": [node.model_dump() for node in tree],
             "activeDocument": None,
+            "projectSearch": {
+                "exactMatches": (rag_context or {}).get("exactMatches", []),
+            },
         }
         if payload.documentId:
             try:
@@ -369,7 +353,34 @@ class AiService:
     def _read_pending_deletes(self) -> dict[str, Any]:
         data = self.pending_deletes.read({"schemaVersion": 1, "items": {}})
         items = data.get("items")
-        return items if isinstance(items, dict) else {}
+        if not isinstance(items, dict):
+            return {}
+        active_items = {
+            key: value
+            for key, value in items.items()
+            if isinstance(value, dict) and not _is_expired(value.get("createdAt"), minutes=30)
+        }
+        if len(active_items) != len(items):
+            self.pending_deletes.write({"schemaVersion": 1, "items": active_items})
+        return active_items
+
+    def _index_status_response(self, project_id: str, state: RagIndexState | None = None, globally_enabled: bool | None = None) -> AiIndexStatusResponse:
+        configured_rag = config_service.get_config().ai.rag
+        state = state or rag_service.get_status(project_id, configured_rag.enabled if globally_enabled is None else globally_enabled)
+        return AiIndexStatusResponse(
+            projectId=project_id,
+            enabled=state.enabled,
+            status=state.status,
+            vectorStoreId=state.vector_store_id,
+            lastIndexedAt=state.last_indexed_at,
+            error=state.error,
+            documentCount=state.document_count,
+            indexedDocumentCount=state.indexed_document_count,
+            pendingDocumentCount=state.pending_document_count,
+            failedDocumentCount=state.failed_document_count,
+            deletedDocumentCount=state.deleted_document_count,
+            localExactReady=state.local_exact_ready,
+        )
 
     def _create_pending_delete(self, project_id: str, node_ids: list[str]) -> AiPendingDelete:
         tree = project_service.get_project_tree(project_id)
@@ -462,6 +473,28 @@ def _count_documents(node: TreeNode) -> int:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _is_expired(value: object, minutes: int) -> bool:
+    if not isinstance(value, str):
+        return True
+    try:
+        created_at = datetime.fromisoformat(value)
+    except ValueError:
+        return True
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - created_at > timedelta(minutes=minutes)
+
+
+def _http_error_message(error: HTTPException) -> str:
+    detail = error.detail
+    if isinstance(detail, dict):
+        message = detail.get("message") or detail.get("code")
+        return str(message or "No se pudo aplicar la acción IA.")
+    if isinstance(detail, str):
+        return detail
+    return "No se pudo aplicar la acción IA."
 
 
 ai_service = AiService()
