@@ -1,7 +1,7 @@
 {
   "name": "knownext-ai",
   "private": true,
-  "version": "0.6.13",
+  "version": "0.6.14",
   "description": "KnowNext.ai desktop product for Markdown project documentation.",
   "license": "Apache-2.0",
   "packageManager": "pnpm@11.0.8",
@@ -11,6 +11,7 @@
     "build": "pnpm --filter @knownext/desktop build",
     "test": "pnpm --filter @knownext/desktop test",
     "backend:dev": "cd backend && python -m uvicorn app.main:app --reload --port 8765",
+    "backend:web": "node scripts/start-web-backend.mjs",
     "backend:test": "cd backend && python -m pytest",
     "version:check": "node scripts/check-version.mjs",
     "release:check": "pnpm version:check && pnpm build && pnpm test && pnpm backend:test"

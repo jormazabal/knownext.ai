@@ -21,6 +21,14 @@ pnpm dev
 
 Open `http://127.0.0.1:1420`.
 
+The browser frontend uses `http://127.0.0.1:8766` by default so it can keep a separate web profile from the installed Windows app.
+
+Start the web backend in another terminal:
+
+```bash
+pnpm backend:web
+```
+
 ## Desktop
 
 ```bash
@@ -34,19 +42,7 @@ cd backend
 python -m uvicorn app.main:app --reload --port 8765
 ```
 
-## Use Backend From Frontend
-
-Create an environment variable before running Vite:
-
-```bash
-VITE_USE_BACKEND=true
-```
-
-On PowerShell:
-
-```powershell
-$env:VITE_USE_BACKEND="true"; pnpm dev
-```
+Port `8765` is reserved for the Tauri/Windows desktop profile. Use `pnpm backend:web` for browser development unless you intentionally want to inspect the desktop profile.
 
 ## Tests
 

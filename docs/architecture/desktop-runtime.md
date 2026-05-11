@@ -5,7 +5,8 @@ KnowNext.ai uses Tauri as the desktop shell.
 ## Current Runtime
 
 - Tauri loads the Vite React app.
-- FastAPI is run manually during development.
+- The installed Tauri app starts and supervises the bundled FastAPI sidecar on `127.0.0.1:8765`.
+- Browser development runs a separate FastAPI profile on `127.0.0.1:8766` through `pnpm backend:web` so browser projects, credentials, and app settings do not overwrite the installed app profile.
 - The frontend calls FastAPI for product data and must not silently fall back to local mock data.
 - Tauri owns desktop update checks through the updater plugin. React calls only the runtime wrapper under `apps/desktop/src/lib/runtime`, and the updater downloads signed packages from GitHub Releases.
 - The Tauri window must be user-resizable from operating-system edges and corners, with a practical minimum size instead of a fixed mockup-sized viewport.
@@ -41,17 +42,19 @@ Update installation must preserve local work before restarting. The app flushes 
 
 Updater packages are signed with Tauri's updater key. This is separate from Windows Authenticode installer signing, which remains a later hardening step.
 
-## Future Sidecar Plan
+## Backend Supervision
 
-Tauri should start FastAPI as a sidecar process when the desktop app opens.
+Tauri starts FastAPI as a sidecar process when the installed desktop app opens.
 
-The sidecar plan must include:
+The sidecar integration must:
 
-- Allocate or reserve a local port.
+- Use the reserved desktop port `127.0.0.1:8765`.
 - Start FastAPI with explicit host `127.0.0.1`.
-- Pass the selected port to the frontend.
-- Health-check the backend before enabling backend-backed actions.
+- Pass the Tauri app data directory to the backend through `KNOWNEXT_APP_DATA_DIR`.
+- Health-check the backend before enabling backend-backed actions and while the app remains open.
+- Restart the backend when health checks fail or the active version/profile does not match the installed app.
 - Shut down FastAPI when the desktop app closes.
+- Record startup failures, health mismatches, and restart attempts in `knownext.log`.
 - Avoid exposing the API beyond localhost.
 
 ## Security Notes

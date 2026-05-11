@@ -299,7 +299,7 @@ describe("CreateProjectDialog", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /seleccionar/i }));
 
-    expect(fetchFolderPath).toHaveBeenCalledWith("http://127.0.0.1:8765/api/runtime/select-folder", {
+    expect(fetchFolderPath).toHaveBeenCalledWith("http://127.0.0.1:8766/api/runtime/select-folder", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

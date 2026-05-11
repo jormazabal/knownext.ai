@@ -2,6 +2,14 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.6.14 - 2026-05-11
+
+- Separated desktop and browser development API profiles so the installed Windows app uses `8765` with the desktop app-data directory while the browser build uses `8766` with its own web app-data directory.
+- Allowed local browser origins on arbitrary development ports, fixing CORS preflight failures from `127.0.0.1:1421` and similar Vite URLs.
+- Removed runtime exposure of seeded mock projects and added recovery from valid `projects.json.corrupt-*` backups before falling back to an empty project registry.
+- Hardened JSON persistence with per-file locking and unique temporary files to avoid Windows `WinError 32` failures during concurrent project, credential, and configuration writes.
+- Updated release metadata and installer download links for `0.6.14`.
+
 ## 0.6.13 - 2026-05-11
 
 - Added a Services section to application settings with local backend health, version/profile details, endpoint, sidecar path, last error, manual check, and restart action.

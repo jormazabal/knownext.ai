@@ -16,7 +16,7 @@ Backend code lives in `backend/app`.
 - `filesystem_service`: local project folder scanning and Markdown file operations for the navigation tree.
 - `config_service`: application configuration, including persisted layout widths, appearance preferences, and diagnostics settings.
 - `logging_service`: trace logging to a dedicated local log folder. Error and critical entries are always written; informational entries require diagnostics logging to be enabled.
-- `app_storage`: shared JSON file storage rooted in the KnowNext.ai application data directory.
+- `app_storage`: shared JSON file storage rooted in the KnowNext.ai application data directory, with per-file locking and atomic temporary-file replacement for concurrent API requests.
 - `document_service`: document loading and saving.
 - `draft_service`: internal recoverable document drafts, stored in the KnowNext.ai app data directory and never beside project documentation files. Draft keys are internal identifiers derived from draft files, not user paths or product document ids.
 - `auth_service` and `credential_service`: optional GitHub identity, OAuth device flow, and local credential storage. Tokens are never stored in project metadata.
@@ -38,7 +38,7 @@ The local API owns application metadata files. React must access them through AP
 - `credentials.json`: GitHub auth state and OpenAI API key outside `projects.json`; secrets are protected with Windows DPAPI when available and fall back to plain local JSON only on unsupported development/test environments.
 - `drafts/*.json`: internal unsaved document working copies with their base file fingerprint. These files are recoverable application state, not project documentation, and must not be written into project folders. Orphan drafts are conserved until the user restores or discards them.
 
-By default these files are stored in `%APPDATA%/KnowNext.ai` on Windows and `~/.knownext.ai` elsewhere. Tests and local tooling can override the directory with `KNOWNEXT_APP_DATA_DIR`.
+By default these files are stored in `%APPDATA%/KnowNext.ai` on Windows and `~/.knownext.ai` elsewhere. The installed Tauri app overrides this with its app profile, currently `%APPDATA%/ai.knownext.desktop`, and browser development should use `pnpm backend:web`, which sets a separate web profile under `%APPDATA%/ai.knownext.web`. Tests and local tooling can override the directory with `KNOWNEXT_APP_DATA_DIR`.
 
 Layout width values in `config.json` are user preferences. Services should preserve known width fields, tolerate missing legacy values, and return defaults when values are absent or invalid so the frontend can clamp and render resizable panels safely.
 
@@ -53,6 +53,7 @@ Project metadata remains in local JSON, while document tree and Markdown documen
 ## Empty And Unavailable Data Contracts
 
 - `GET /api/projects` may return an empty array. This is a valid loaded state and must not be replaced by seeded projects unless an explicit onboarding/import action creates them.
+- If an old seeded registry with `Proyecto Alpha`, `Proyecto Beta`, and `Proyecto Gamma` is found, the backend must ignore it, recover a valid non-seed registry backup when available, or return the empty-project state.
 - `GET /api/projects/active` must clearly represent no active project when no projects exist, either through a documented `null`/empty contract or an explicit not-found response consumed by the frontend as the first-project state.
 - Auth endpoints must distinguish anonymous/disconnected users from authenticated users. They must not return mock users in normal product runtime.
 - History and AI endpoints must distinguish unavailable providers, empty results, and service errors with structured responses or documented status errors so the UI can show the correct empty or disabled state.
