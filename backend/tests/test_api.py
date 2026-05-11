@@ -21,7 +21,7 @@ def test_health() -> None:
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
-    assert response.json()["version"] == "0.6.9"
+    assert response.json()["version"] == "0.6.10"
 
 
 def test_projects_and_tree() -> None:
@@ -436,6 +436,11 @@ def test_local_folder_can_create_new_github_repository(tmp_path, monkeypatch) ->
     assert project["githubRepository"]["repo"] == "publish-docs"
     assert (docs_root / ".git").exists()
     assert created_repositories[0][1] == "public"
+
+    status = client.get(f"/api/projects/{project['id']}/versioning/status")
+    assert status.status_code == 200
+    assert status.json()["statusLabel"] == "Sincronizado"
+    assert status.json()["lastVersionHash"] is None
 
 
 def test_github_api_project_uses_cache_metadata_and_blocks_remote_conflicts(tmp_path, monkeypatch) -> None:

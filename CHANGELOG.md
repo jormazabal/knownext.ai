@@ -2,6 +2,12 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.6.10 - 2026-05-11
+
+- Fixed the versioning status check for newly created local Git projects before their first commit exists.
+- Prevented empty Git repositories created during "Create GitHub repo from local" from surfacing `fatal: Needed a single revision` as an application error.
+- Updated release metadata and installer download links for `0.6.10`.
+
 ## 0.6.9 - 2026-05-11
 
 - Reworked project creation into a guided assistant with ordered scenarios, gated steps, a final review screen, and clearer explanations for local, Git, and GitHub project setup.

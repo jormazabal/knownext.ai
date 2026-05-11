@@ -1,6 +1,6 @@
 [package]
 name = "knownext-ai-desktop"
-version = "0.6.9"
+version = "0.6.10"
 description = "KnowNext.ai desktop application"
 authors = ["KnowNext.ai contributors"]
 license = "Apache-2.0"
