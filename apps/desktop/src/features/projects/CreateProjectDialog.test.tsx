@@ -64,6 +64,7 @@ describe("CreateProjectDialog", () => {
       versioningMode: "none",
       syncMode: "none",
       githubRepository: null,
+      publishToGithub: null,
     });
   });
 
@@ -105,7 +106,7 @@ describe("CreateProjectDialog", () => {
     await userEvent.click(screen.getByRole("button", { name: /eliminar proyecto/i }));
 
     expect(screen.getByRole("heading", { name: /eliminar proyecto de knownext\.ai/i })).toBeInTheDocument();
-    expect(screen.getByText(/los archivos y carpetas del disco no se borrarán ni se modificarán/i)).toBeInTheDocument();
+    expect(screen.getByText(/los archivos y carpetas del disco no se borr/i)).toBeInTheDocument();
 
     await userEvent.click(screen.getAllByRole("button", { name: /eliminar proyecto/i })[1]);
 
@@ -153,8 +154,20 @@ describe("CreateProjectDialog", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("tab", { name: /crear desde 0/i }));
-    await userEvent.type(screen.getByLabelText(/carpeta local/i), "C:\\Docs\\Nuevo proyecto");
+    await userEvent.click(screen.getByRole("tab", { name: /carpeta local nueva/i }));
+    await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
+    expect(screen.getByRole("button", { name: /siguiente/i })).toBeDisabled();
+    expect(screen.getByText(/path final/i)).toBeInTheDocument();
+
+    await userEvent.type(screen.getByLabelText(/selecciona la ubicación/i), "C:\\Docs");
+    expect(screen.getByRole("button", { name: /siguiente/i })).toBeDisabled();
+    await userEvent.type(screen.getByLabelText(/nombre de la carpeta a crear/i), "Nuevo proyecto");
+    expect(screen.getByText("C:\\Docs\\Nuevo proyecto")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
+    await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
+    await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
+    expect(screen.getByRole("heading", { name: /revisa la configuración/i })).toBeInTheDocument();
+    expect(screen.queryByText(/vista previa/i)).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /crear proyecto/i }));
 
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
@@ -267,12 +280,18 @@ describe("CreateProjectDialog", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("tab", { name: /repo github/i }));
+    await userEvent.click(screen.getByRole("tab", { name: /repo github existente/i }));
+    await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
     await userEvent.selectOptions(screen.getByLabelText(/repositorio github/i), "knownext/docs");
+    await userEvent.type(screen.getByLabelText(/carpeta local destino/i), "C:\\Docs\\knownext-docs");
+    await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
+    await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
+    await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
     await userEvent.click(screen.getByRole("button", { name: /crear proyecto/i }));
 
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
       name: "docs",
+      folderPath: "C:\\Docs\\knownext-docs",
       storageMode: "local-cache",
       versioningMode: "github-api",
       syncMode: "manual-github",
@@ -281,6 +300,156 @@ describe("CreateProjectDialog", () => {
         repo: "docs",
         defaultRef: "main",
         permissions: ["pull", "push"],
+      }),
+    }));
+  });
+
+  it("orders project start options from local creation to GitHub import", () => {
+    render(
+      <CreateProjectDialog
+        open
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+      />,
+    );
+
+    const options = screen.getAllByRole("tab");
+    expect(options[0]).toHaveTextContent(/carpeta local nueva/i);
+    expect(options[1]).toHaveTextContent(/carpeta local existente/i);
+    expect(options[2]).toHaveTextContent(/carpeta con git\/github/i);
+    expect(options[3]).toHaveTextContent(/repo github existente/i);
+  });
+
+  it("explains why publishing a local folder to a new GitHub repo requires GitHub", async () => {
+    render(
+      <CreateProjectDialog
+        open
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
+    openDialog.mockResolvedValue("C:\\Docs\\existing-docs");
+    await userEvent.click(screen.getByRole("button", { name: /seleccionar/i }));
+    await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
+
+    expect(screen.getByRole("tab", { name: /crear repo github desde local/i })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByLabelText(/conecta github para crear el repositorio remoto/i)).toBeInTheDocument();
+  });
+
+  it("configures publishing a local folder into a new GitHub repository", async () => {
+    const onCreate = vi.fn();
+
+    render(
+      <CreateProjectDialog
+        open
+        onClose={vi.fn()}
+        onCreate={onCreate}
+        authStatus={{
+          isAuthenticated: true,
+          provider: "github",
+          user: { login: "knownext-user" },
+          scopes: ["repo"],
+        }}
+        capabilities={{
+          canCreateLocalProject: true,
+          canOpenLocalFolder: true,
+          canUseLocalGit: true,
+          canConnectGithub: true,
+          canUseGithubApi: true,
+          requiresGithubLoginForVersioning: true,
+        }}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
+    openDialog.mockResolvedValue("C:\\Docs\\publish-docs");
+    await userEvent.click(screen.getByRole("button", { name: /seleccionar/i }));
+    await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
+    await userEvent.click(screen.getByRole("tab", { name: /crear repo github desde local/i }));
+
+    expect(screen.getByLabelText(/propietario github/i)).toHaveValue("knownext-user");
+    await userEvent.clear(screen.getByLabelText(/nombre del nuevo repo/i));
+    await userEvent.type(screen.getByLabelText(/nombre del nuevo repo/i), "docs-publicados");
+    await userEvent.click(screen.getByRole("tab", { name: /público/i }));
+    await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
+    await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
+    await userEvent.click(screen.getByRole("button", { name: /crear proyecto/i }));
+
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+      folderPath: "C:\\Docs\\publish-docs",
+      creationMode: "open-local",
+      storageMode: "local-files",
+      versioningMode: "local-git",
+      syncMode: "manual-github",
+      githubRepository: expect.objectContaining({
+        owner: "knownext-user",
+        repo: "docs-publicados",
+        permissions: ["pull", "push"],
+      }),
+      publishToGithub: expect.objectContaining({
+        visibility: "public",
+      }),
+    }));
+  });
+
+  it("registers an existing local Git folder with an associated GitHub remote", async () => {
+    const onCreate = vi.fn();
+
+    render(
+      <CreateProjectDialog
+        open
+        onClose={vi.fn()}
+        onCreate={onCreate}
+        authStatus={{
+          isAuthenticated: true,
+          provider: "github",
+          user: { login: "knownext-user" },
+          scopes: ["repo"],
+        }}
+        capabilities={{
+          canCreateLocalProject: true,
+          canOpenLocalFolder: true,
+          canUseLocalGit: true,
+          canConnectGithub: true,
+          canUseGithubApi: true,
+          requiresGithubLoginForVersioning: true,
+        }}
+        githubRepositories={[
+          {
+            owner: "knownext",
+            repo: "docs",
+            fullName: "knownext/docs",
+            private: false,
+            defaultRef: "main",
+            rootPath: "",
+            permissions: ["pull", "push"],
+          },
+        ]}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("tab", { name: /carpeta con git\/github/i }));
+    await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
+    openDialog.mockResolvedValue("C:\\Docs\\existing-docs");
+
+    await userEvent.click(screen.getByRole("button", { name: /seleccionar/i }));
+    await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
+    await userEvent.selectOptions(screen.getByLabelText(/repositorio github/i), "knownext/docs");
+    await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
+    await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
+    await userEvent.click(screen.getByRole("button", { name: /crear proyecto/i }));
+
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+      folderPath: "C:\\Docs\\existing-docs",
+      creationMode: "open-local",
+      storageMode: "local-files",
+      versioningMode: "local-git",
+      syncMode: "manual-github",
+      githubRepository: expect.objectContaining({
+        owner: "knownext",
+        repo: "docs",
       }),
     }));
   });

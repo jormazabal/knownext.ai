@@ -19,22 +19,30 @@
 - [ ] Restart the app and confirm the selected project is restored from `projects.json`.
 - [ ] Confirm Nuevo proyecto is inside the selector dropdown.
 - [ ] Open Nuevo proyecto and confirm project creation is organized as tabs or an assistant/wizard rather than a single dense long form.
-- [ ] Confirm Crear desde 0, Cargar carpeta, and Repo GitHub are available as clear tabs/steps.
+- [ ] Confirm Situación, Ubicación, Historial, and Detalles are available as clear assistant steps.
+- [ ] Confirm the initial Situación step orders the options as Carpeta local nueva, Carpeta local existente, Carpeta con Git/GitHub, and Repo GitHub existente, with explanatory copy.
 - [ ] Resize the app to a smaller width/height with Nuevo proyecto open and confirm the modal fits the viewport with an internal scroll area and visible footer actions.
 - [ ] In Nuevo proyecto, switch between tabs/steps after entering values and confirm the values are preserved during the same modal session.
-- [ ] In Nuevo proyecto, trigger validation errors and confirm focus moves to the active invalid field or step.
-- [ ] Without GitHub login, confirm Repo GitHub, Git local + sync, and GitHub versionado are visible but disabled with explanatory copy.
-- [ ] In Crear desde 0, type a new folder path that does not exist yet and confirm the project is created with that folder on disk.
+- [ ] In Nuevo proyecto, confirm future steps cannot be opened and Siguiente remains disabled until required data from the current step is complete.
+- [ ] In Nuevo proyecto, trigger validation errors and confirm the footer explains the missing field for the active step.
+- [ ] In Carpeta local nueva, confirm the Ubicación step separates the parent location from the folder name to create and shows the final full path before continuing.
+- [ ] Confirm the assistant ends on a Resumen screen with the complete configuration and only then allows Crear proyecto.
+- [ ] Without GitHub login, confirm Repo GitHub existente, Carpeta con Git/GitHub, and GitHub-related history choices are visible but disabled with explanatory copy.
+- [ ] With GitHub connected, choose Crear repo GitHub desde local, fill owner/repo/visibility, and confirm the final summary shows the new repository and publishing visibility.
+- [ ] Without GitHub login, hover the lock on Crear repo GitHub desde local and confirm the lock is visually black and its tooltip explains that GitHub is required.
+- [ ] In Carpeta local nueva, type a new folder path that does not exist yet and confirm the project is created with that folder on disk.
 - [ ] Create a local files project without login and confirm it is present after restarting the app.
 - [ ] Confirm the history toolbar button is disabled in a local files project and the tooltip explains that history is unavailable.
 - [ ] Open the account menu and click Conectar GitHub.
 - [ ] Confirm the GitHub device login dialog shows a verification code and an Abrir GitHub action.
 - [ ] Complete GitHub login and confirm the account menu changes to the authenticated GitHub user. If a development-only auth fake is used, confirm it is explicitly labeled and not enabled in normal product runtime.
-- [ ] Reopen Nuevo proyecto and confirm Git local + sync and GitHub versionado are enabled after login.
-- [ ] In Repo GitHub mode, refresh the repository list and confirm selecting a repository fills owner, repo, and project name.
-- [ ] Create a GitHub versionado project from a repository and confirm the local cache loads Markdown documents when network and permissions allow it.
+- [ ] Reopen Nuevo proyecto and confirm Repo GitHub existente, Carpeta con Git/GitHub, and GitHub-related history choices are enabled after login.
+- [ ] In Repo GitHub existente, refresh the repository list and confirm selecting a repository fills owner, repo, and project name.
+- [ ] In Repo GitHub existente, choose a local destination folder and confirm the created project stores that folder path instead of an opaque internal path.
+- [ ] Create a GitHub versionado project from a repository and confirm the chosen local folder loads Markdown documents when network and permissions allow it.
 - [ ] In a GitHub versionado project, change the same document on GitHub before creating a local version and confirm KnowNext.ai blocks the version with a remote conflict message.
-- [ ] Create a Git local + sync project and confirm the status bar shows a versioning state instead of Sin historial.
+- [ ] Create a local Git project and confirm the status bar shows a versioning state instead of Sin historial.
+- [ ] Create a project from a folder that already has Git/GitHub configured, associate the matching GitHub repository, and confirm the project is registered as Git local + GitHub existente without moving files.
 - [ ] Inspect the folder/document tree levels and confirm they match the active project's local folder.
 - [ ] Confirm only Markdown documents and folders are shown in the navigation tree.
 - [ ] In desktop width, drag the divider next to the folder/document tree and confirm the left panel width changes with a visible vertical orange resize line.

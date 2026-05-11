@@ -6,7 +6,9 @@ use std::net::{TcpStream, ToSocketAddrs};
 #[cfg(all(desktop, not(debug_assertions)))]
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
-use std::path::{Path, PathBuf};
+#[cfg(all(desktop, not(debug_assertions)))]
+use std::path::Path;
+use std::path::PathBuf;
 #[cfg(all(desktop, not(debug_assertions)))]
 use std::process::{Child, Stdio};
 use std::sync::Mutex;

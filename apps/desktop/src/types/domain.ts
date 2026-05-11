@@ -23,12 +23,19 @@ export type ProjectPayload = {
   versioningMode: VersioningMode;
   syncMode: SyncMode;
   githubRepository?: GithubRepository | null;
+  publishToGithub?: GithubPublishRequest | null;
 };
 
 export type StorageMode = "local-files" | "local-cache";
 export type VersioningMode = "none" | "local-git" | "github-api";
 export type SyncMode = "none" | "manual-github";
 export type ProjectCreationMode = "new-local" | "open-local" | "github-repository";
+export type GithubPublishVisibility = "private" | "public";
+
+export type GithubPublishRequest = {
+  visibility: GithubPublishVisibility;
+  description?: string | null;
+};
 
 export type GithubRepository = {
   owner: string;

@@ -2,6 +2,13 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.6.9 - 2026-05-11
+
+- Reworked project creation into a guided assistant with ordered scenarios, gated steps, a final review screen, and clearer explanations for local, Git, and GitHub project setup.
+- Added the local-folder-to-new-GitHub-repository flow with repository owner/name, visibility selection, GitHub repository creation, and local `origin` configuration.
+- Persisted desktop window size and position so the workspace restores the user's last layout after restarting.
+- Updated release metadata and installer download links for `0.6.9`.
+
 ## 0.6.8 - 2026-05-10
 
 - Fixed GitHub device login so `slow_down` responses keep the authorization pending instead of showing a raw error.
