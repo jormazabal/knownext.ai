@@ -50,9 +50,12 @@ class ProjectService:
         registry = self._read_registry()
         self._validate_project_mode(payload)
         folder_path = payload.folderPath.strip()
+        github_repository = payload.githubRepository
         if payload.storageMode == "local-cache" and payload.githubRepository:
             project_id = f"project-{uuid4()}"
-            folder_path = str(get_app_data_dir() / "github-cache" / project_id)
+            if not folder_path:
+                folder_path = str(get_app_data_dir() / "github-cache" / project_id)
+            Path(folder_path).mkdir(parents=True, exist_ok=True)
         else:
             project_id = f"project-{uuid4()}"
             self._prepare_local_project_folder(payload.creationMode, Path(folder_path))
@@ -67,7 +70,7 @@ class ProjectService:
             "versioningMode": payload.versioningMode,
             "syncMode": payload.syncMode,
             "authRequired": payload.versioningMode != "none",
-            "githubRepository": payload.githubRepository.model_dump() if payload.githubRepository else None,
+            "githubRepository": github_repository.model_dump() if github_repository else None,
             "isGitRepository": payload.versioningMode == "local-git",
             "active": True,
         }
@@ -75,6 +78,14 @@ class ProjectService:
         project_root = Path(folder_path)
         if payload.versioningMode == "local-git":
             git_service.ensure_repository(project_root)
+            if payload.publishToGithub and github_repository:
+                github_repository = github_service.create_repository(
+                    github_repository,
+                    payload.publishToGithub.visibility,
+                    payload.publishToGithub.description,
+                )
+                git_service.set_remote_origin(project_root, f"https://github.com/{github_repository.owner}/{github_repository.repo}.git")
+                project["githubRepository"] = github_repository.model_dump()
         if payload.versioningMode == "github-api" and payload.githubRepository:
             github_service.hydrate_repository_cache(project_id, project_root, payload.githubRepository)
 
@@ -328,11 +339,17 @@ class ProjectService:
         }
 
     def _validate_project_mode(self, payload: ProjectPayload) -> None:
+        if payload.publishToGithub and payload.versioningMode != "local-git":
+            raise HTTPException(status_code=400, detail="Publishing to a new GitHub repo requires local Git versioning")
+        if payload.publishToGithub and payload.githubRepository is None:
+            raise HTTPException(status_code=400, detail="Publishing to GitHub requires repository owner and name")
         if payload.versioningMode == "none":
             if payload.storageMode == "local-cache":
                 raise HTTPException(status_code=400, detail="Local cache storage requires GitHub API versioning")
             return
         auth_service.require_github_auth()
+        if payload.publishToGithub and payload.syncMode != "manual-github":
+            raise HTTPException(status_code=400, detail="Publishing to GitHub requires manual GitHub sync mode")
         if payload.versioningMode == "github-api" and payload.syncMode != "manual-github":
             raise HTTPException(status_code=400, detail="GitHub API projects require manual GitHub sync mode")
         if payload.versioningMode == "github-api" and payload.storageMode != "local-cache":

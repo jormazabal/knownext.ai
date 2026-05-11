@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 StorageMode = Literal["local-files", "local-cache"]
 VersioningMode = Literal["none", "local-git", "github-api"]
 SyncMode = Literal["none", "manual-github"]
+GithubPublishVisibility = Literal["private", "public"]
 
 
 class GithubRepository(BaseModel):
@@ -14,6 +15,11 @@ class GithubRepository(BaseModel):
     defaultRef: str | None = None
     rootPath: str = ""
     permissions: list[str] = Field(default_factory=list)
+
+
+class GithubPublishRequest(BaseModel):
+    visibility: GithubPublishVisibility = "private"
+    description: str | None = None
 
 
 class ProjectVersioningStatus(BaseModel):
@@ -64,6 +70,7 @@ class ProjectPayload(BaseModel):
     versioningMode: VersioningMode = "none"
     syncMode: SyncMode = "none"
     githubRepository: GithubRepository | None = None
+    publishToGithub: GithubPublishRequest | None = None
 
 
 class TreeNode(BaseModel):

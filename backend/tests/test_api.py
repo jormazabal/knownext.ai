@@ -21,7 +21,7 @@ def test_health() -> None:
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
-    assert response.json()["version"] == "0.6.8"
+    assert response.json()["version"] == "0.6.9"
 
 
 def test_projects_and_tree() -> None:
@@ -389,6 +389,53 @@ def test_local_git_project_versions_document(tmp_path) -> None:
     history = client.get(f"/api/documents/{document_id}/versions")
     assert history.status_code == 200
     assert history.json()[0]["title"] == "Primera versión"
+
+
+def test_local_folder_can_create_new_github_repository(tmp_path, monkeypatch) -> None:
+    from app.schemas.project import GithubRepository
+    from app.services.github_service import github_service
+
+    device = client.post("/api/auth/github/device/start")
+    client.post("/api/auth/github/device/poll", json={"deviceCode": device.json()["deviceCode"]})
+    docs_root = tmp_path / "publish-docs"
+    created_repositories = []
+
+    def fake_create_repository(repository: GithubRepository, visibility: str, description: str | None = None) -> GithubRepository:
+        created_repositories.append((repository, visibility, description))
+        return GithubRepository(
+            owner=repository.owner,
+            repo=repository.repo,
+            defaultRef="main",
+            rootPath="",
+            permissions=["pull", "push"],
+        )
+
+    monkeypatch.setattr(github_service, "create_repository", fake_create_repository)
+
+    created = client.post(
+        "/api/projects",
+        json={
+            "name": "Publish Docs",
+            "folderPath": str(docs_root),
+            "icon": "folder",
+            "iconColor": "#F37021",
+            "creationMode": "new-local",
+            "storageMode": "local-files",
+            "versioningMode": "local-git",
+            "syncMode": "manual-github",
+            "githubRepository": {"owner": "knownext-user", "repo": "publish-docs", "rootPath": "", "permissions": ["pull", "push"]},
+            "publishToGithub": {"visibility": "public", "description": "Docs"},
+        },
+    )
+
+    assert created.status_code == 201
+    project = created.json()
+    assert project["versioningMode"] == "local-git"
+    assert project["syncMode"] == "manual-github"
+    assert project["githubRepository"]["owner"] == "knownext-user"
+    assert project["githubRepository"]["repo"] == "publish-docs"
+    assert (docs_root / ".git").exists()
+    assert created_repositories[0][1] == "public"
 
 
 def test_github_api_project_uses_cache_metadata_and_blocks_remote_conflicts(tmp_path, monkeypatch) -> None:

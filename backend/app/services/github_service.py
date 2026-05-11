@@ -35,6 +35,24 @@ class GithubService:
             for item in data
         ]
 
+    def create_repository(self, repository: GithubRepository, visibility: str, description: str | None = None) -> GithubRepository:
+        body = {
+            "name": repository.repo,
+            "private": visibility != "public",
+            "auto_init": False,
+        }
+        if description:
+            body["description"] = description
+        data = self._request_json("/user/repos", method="POST", body=body)
+        owner = (data.get("owner") or {}).get("login") or repository.owner
+        return GithubRepository(
+            owner=owner,
+            repo=data.get("name") or repository.repo,
+            defaultRef=data.get("default_branch") or repository.defaultRef or "main",
+            rootPath=repository.rootPath,
+            permissions=["pull", "push"],
+        )
+
     def hydrate_repository_cache(self, project_id: str, root: Path, repository: GithubRepository) -> None:
         root.mkdir(parents=True, exist_ok=True)
         metadata = self._read_cache_metadata(root)

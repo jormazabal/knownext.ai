@@ -79,6 +79,14 @@ class GitService:
             raise HTTPException(status_code=409, detail="Project is not a Git repository")
         return self._run(root, ["git", "push"], allow_empty=True)
 
+    def set_remote_origin(self, root: Path, remote_url: str) -> None:
+        self.ensure_repository(root)
+        remotes = {remote.strip() for remote in self._run(root, ["git", "remote"], allow_empty=True).splitlines()}
+        if "origin" in remotes:
+            self._run(root, ["git", "remote", "set-url", "origin", remote_url])
+            return
+        self._run(root, ["git", "remote", "add", "origin", remote_url])
+
     def _run(self, cwd: Path, command: list[str], allow_empty: bool = False) -> str:
         try:
             result = subprocess.run(command, cwd=cwd, text=True, encoding="utf-8", capture_output=True, check=False)
