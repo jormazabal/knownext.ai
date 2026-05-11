@@ -93,10 +93,18 @@ class GitService:
         except FileNotFoundError as error:
             raise HTTPException(status_code=500, detail="Git is not installed or not available") from error
         if result.returncode != 0:
-            if allow_empty and "does not have any commits yet" in result.stderr:
+            if allow_empty and self._is_empty_revision_error(result.stderr):
                 return ""
             raise HTTPException(status_code=409, detail=(result.stderr or result.stdout or "Git command failed").strip())
         return result.stdout
+
+    def _is_empty_revision_error(self, stderr: str) -> bool:
+        normalized = stderr.lower()
+        return (
+            "does not have any commits yet" in normalized
+            or "needed a single revision" in normalized
+            or "ambiguous argument 'head'" in normalized
+        )
 
     def _initials(self, name: str) -> str:
         parts = [part for part in name.replace("@", " ").split() if part]
