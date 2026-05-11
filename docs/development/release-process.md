@@ -52,15 +52,15 @@ The password file is encrypted with Windows DPAPI for the current user. Do not c
 
 The public updater key is configured in `apps/desktop/src-tauri/tauri.conf.json`. If the production key is regenerated, update `plugins.updater.pubkey`, update the GitHub secrets, and rebuild a release from a clean commit.
 
-The Windows updater currently prefers the NSIS setup artifact when generating `latest.json`. This keeps the in-app update path aligned with the per-user installer and avoids unnecessary Windows Installer elevation prompts for normal user installs. Keep the MSI as an additional release artifact for environments that explicitly require it.
+The Windows updater currently prefers the MSI artifact when generating `latest.json`. Keep the NSIS setup executable as the manual installer linked from the README and GitHub Releases.
 
 Distribution contract:
 
 - Manual install link: `https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_<version>_x64-setup.exe`
 - Updater manifest: `https://github.com/jormazabal/knownext.ai/releases/latest/download/latest.json`
-- Windows updater artifact inside `latest.json`: `KnowNext.ai_<version>_x64-setup.exe`
+- Windows updater artifact inside `latest.json`: `KnowNext.ai_<version>_x64_en-US.msi`
 
-This is intentional. New users and installed users both use the signed NSIS setup path by default; the MSI remains available from GitHub Releases for managed Windows environments.
+This is intentional. New users use the signed NSIS setup path by default; installed users update through the signed MSI artifact.
 
 ## Windows Authenticode Signing
 
@@ -113,7 +113,7 @@ gh release edit v0.3.1 --repo jormazabal/knownext.ai --draft=false
 
 For Windows updater changes, install the previous release and update through the in-app updater. Confirm the app process is closed, the installer replaces `knownext-ai-desktop.exe`, and the updated app relaunches with the new visible version.
 
-After publishing, verify that the README download link resolves and that the updater manifest points at the published NSIS setup update artifact. Use PowerShell on Windows so redirects and JSON parsing are explicit:
+After publishing, verify that the README download link resolves and that the updater manifest points at the published MSI update artifact. Use PowerShell on Windows so redirects and JSON parsing are explicit:
 
 ```powershell
 $version = "0.3.1"
@@ -133,7 +133,7 @@ $installerResponse = Invoke-WebRequest -UseBasicParsing -Method Head -Uri $insta
 }
 ```
 
-The README should continue linking to the NSIS `.exe` for manual installs. The updater manifest should also prefer the NSIS `.exe` for in-app Windows updates unless the release policy is deliberately changed for managed MSI deployments.
+The README should continue linking to the NSIS `.exe` for manual installs. The updater manifest should prefer the MSI for in-app Windows updates unless the release policy is deliberately changed.
 
 Do not tag or publish a release if `pnpm release:check` fails or if the working tree contains unrelated changes that should not ship in the release.
 Do not announce a release if `/releases/latest/download/latest.json` still resolves to the previous version.
