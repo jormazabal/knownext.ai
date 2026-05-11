@@ -2,6 +2,14 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.6.13 - 2026-05-11
+
+- Added a Services section to application settings with local backend health, version/profile details, endpoint, sidecar path, last error, manual check, and restart action.
+- Added packaged-app backend supervision so KnowNext.ai periodically checks `/health` and attempts to restart the bundled backend if it stops or becomes incompatible.
+- Improved backend startup diagnostics with explicit supervisor, manual restart, health-check, and FastAPI startup/shutdown trace entries.
+- Added frontend coverage for the services status panel.
+- Updated release metadata and installer download links for `0.6.13`.
+
 ## 0.6.12 - 2026-05-11
 
 - Improved the project editor with a maintenance-focused UI, editable identity/local path fields, and read-only technical configuration for origin, storage, history, sync, and GitHub repository.

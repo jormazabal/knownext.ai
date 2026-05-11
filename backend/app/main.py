@@ -17,8 +17,31 @@ from app.services.logging_service import trace_logging_service
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    draft_service.run_maintenance()
-    yield
+    try:
+        trace_logging_service.record(
+            "info",
+            "backend.startup",
+            "Backend startup sequence started.",
+            f"version={APP_VERSION}\nappDataDir={get_app_data_dir()}",
+        )
+        draft_service.run_maintenance()
+        trace_logging_service.record(
+            "info",
+            "backend.startup",
+            "Backend startup sequence completed.",
+            f"version={APP_VERSION}\nappDataDir={get_app_data_dir()}",
+        )
+        yield
+    except Exception as error:
+        trace_logging_service.record_exception("backend.startup", error)
+        raise
+    finally:
+        trace_logging_service.record(
+            "info",
+            "backend.shutdown",
+            "Backend shutdown sequence completed.",
+            f"version={APP_VERSION}\nappDataDir={get_app_data_dir()}",
+        )
 
 
 app = FastAPI(title=settings.app_name, version=APP_VERSION, lifespan=lifespan)
