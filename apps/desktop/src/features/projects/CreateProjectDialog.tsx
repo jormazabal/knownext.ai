@@ -28,6 +28,7 @@ export type ProjectDialogInput = ProjectPayload;
 type CreateProjectDialogProps = {
   open: boolean;
   mode?: "create" | "edit";
+  runtimeMode?: "desktop" | "web";
   project?: Project | null;
   onClose: () => void;
   onCreate: (project: ProjectDialogInput) => void;
@@ -74,6 +75,7 @@ const wizardSteps: { id: WizardStepId; title: string; description: string }[] = 
 export function CreateProjectDialog({
   open,
   mode = "create",
+  runtimeMode,
   project,
   onClose,
   onCreate,
@@ -100,15 +102,18 @@ export function CreateProjectDialog({
   const [activeStep, setActiveStep] = useState<WizardStepId>("scenario");
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
 
+  const isWebRuntime = runtimeMode ? runtimeMode === "web" : !isTauriRuntime();
   const SelectedIcon = getProjectIcon(icon);
   const isEditing = mode === "edit";
   const selectedGithubRepository = githubRepositories.find((repository) => repository.owner === githubOwner && repository.repo === githubRepo);
   const derivedMode = deriveProjectMode(startMode, localHistoryChoice);
-  const finalFolderPath = startMode === "local-new" && newProjectParentPath.trim() && newProjectFolderName.trim()
+  const finalFolderPath = isWebRuntime && !isEditing
+    ? ""
+    : startMode === "local-new" && newProjectParentPath.trim() && newProjectFolderName.trim()
     ? joinProjectFolderPath(newProjectParentPath, newProjectFolderName)
     : folderPath;
   const hasGithubRepository = Boolean(githubOwner.trim() && githubRepo.trim());
-  const hasFolder = startMode === "local-new" ? Boolean(newProjectParentPath.trim() && newProjectFolderName.trim()) : Boolean(folderPath.trim());
+  const hasFolder = isWebRuntime && !isEditing ? true : startMode === "local-new" ? Boolean(newProjectParentPath.trim() && newProjectFolderName.trim()) : Boolean(folderPath.trim());
   const activeStepIndex = wizardSteps.findIndex((step) => step.id === activeStep);
   const canSubmit = hasFolder && (!derivedMode.requiresGithubRepository || hasGithubRepository);
   const canContinue = getStepCanContinue(activeStep, startMode, derivedMode, hasFolder, hasGithubRepository);
@@ -117,14 +122,14 @@ export function CreateProjectDialog({
   const reviewItems = useMemo(() => {
     const repository = hasGithubRepository ? `${githubOwner.trim()}/${githubRepo.trim()}` : "Pendiente";
     return [
-      { label: "Situación", value: startModeLabel(startMode) },
-      { label: "Carpeta local", value: finalFolderPath || "Pendiente" },
+      { label: "Situación", value: startModeLabel(startMode, isWebRuntime && !isEditing) },
+      { label: isWebRuntime && !isEditing ? "Almacenamiento" : "Carpeta local", value: isWebRuntime && !isEditing ? "Servidor web de KnowNext.ai" : finalFolderPath || "Pendiente" },
       { label: "Historial", value: historyChoiceLabel(startMode, localHistoryChoice) },
       { label: "Modo de trabajo", value: derivedMode.storageMode === "local-cache" ? "Copia local conectada a GitHub" : "Archivos locales" },
       ...(derivedMode.requiresGithubRepository ? [{ label: "GitHub", value: repository }] : []),
       ...(localHistoryChoice === "publish-github" ? [{ label: "Visibilidad GitHub", value: githubPublishVisibility === "private" ? "Privado" : "Público" }] : []),
     ];
-  }, [derivedMode.requiresGithubRepository, derivedMode.storageMode, finalFolderPath, githubOwner, githubPublishVisibility, githubRepo, hasGithubRepository, localHistoryChoice, startMode]);
+  }, [derivedMode.requiresGithubRepository, derivedMode.storageMode, finalFolderPath, githubOwner, githubPublishVisibility, githubRepo, hasGithubRepository, isEditing, isWebRuntime, localHistoryChoice, startMode]);
 
   useEffect(() => {
     if (!open) return;
@@ -152,13 +157,13 @@ export function CreateProjectDialog({
     setFolderPath("");
     setNewProjectParentPath("");
     setNewProjectFolderName("");
-    setStartMode("local-existing");
+    setStartMode(isWebRuntime ? "local-new" : "local-existing");
     setLocalHistoryChoice("files-only");
     setGithubOwner("");
     setGithubRepo("");
     setGithubPublishVisibility("private");
     setActiveStep("scenario");
-  }, [isEditing, open, project]);
+  }, [isEditing, isWebRuntime, open, project]);
 
   useEffect(() => {
     if (!open || isEditing || !authStatus.isAuthenticated || githubRepositories.length > 0) return;
@@ -199,7 +204,7 @@ export function CreateProjectDialog({
       name: name.trim() || githubRepo.trim() || "Nuevo proyecto",
       icon,
       iconColor,
-      folderPath: finalFolderPath.trim(),
+      folderPath: isWebRuntime ? "" : finalFolderPath.trim(),
       creationMode: derivedMode.creationMode,
       storageMode: derivedMode.storageMode,
       versioningMode: derivedMode.versioningMode,
@@ -241,6 +246,7 @@ export function CreateProjectDialog({
     if (selectedPath) {
       setFolderPath(selectedPath);
     }
+    return selectedPath;
   }
 
   function handleConfirmDelete() {
@@ -261,7 +267,12 @@ export function CreateProjectDialog({
 
   return (
     <div className="fixed inset-0 z-[80] grid place-items-center bg-black/20 p-4">
-      <section className="flex max-h-[calc(100vh-32px)] w-[min(960px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu">
+      <section
+        className={[
+          "flex max-h-[calc(100vh-32px)] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu",
+          isEditing ? "w-[min(840px,calc(100vw-32px))]" : "w-[min(960px,calc(100vw-32px))]",
+        ].join(" ")}
+      >
         <header className="flex shrink-0 items-center justify-between border-b border-line px-5 py-4">
           <div className="flex min-w-0 items-center gap-3">
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-brand-orange text-white">
@@ -272,7 +283,7 @@ export function CreateProjectDialog({
                 {isEditing ? "Editar proyecto de documentación" : "Crear proyecto de documentación"}
               </h2>
               <p className="mt-0.5 text-[11px] text-ink-secondary">
-                {isEditing ? "Actualiza la referencia local sin modificar los archivos del disco." : "Asistente para elegir origen, carpeta local, historial y conexión GitHub."}
+                {isEditing ? "Actualiza identidad y datos editables sin cambiar el tipo de proyecto." : "Asistente para elegir origen, carpeta local, historial y conexión GitHub."}
               </p>
             </div>
           </div>
@@ -280,7 +291,7 @@ export function CreateProjectDialog({
             <X size={17} />
           </button>
         </header>
-        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[260px_minmax(0,1fr)]">
+        <div className={isEditing ? "grid min-h-0 flex-1 grid-cols-1 overflow-hidden" : "grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[260px_minmax(0,1fr)]"}>
           {!isEditing ? (
             <aside className="min-h-0 overflow-y-auto border-b border-line bg-panel px-5 py-4 md:border-b-0 md:border-r">
               <div className="space-y-3">
@@ -335,12 +346,14 @@ export function CreateProjectDialog({
                 onIconColorChange={setIconColor}
                 onFolderPathChange={setFolderPath}
                 onSelectFolder={handleSelectFolder}
+                isWebRuntime={isWebRuntime}
               />
             ) : activeStep === "scenario" ? (
               <ScenarioStep
                 startMode={startMode}
                 authStatus={authStatus}
                 capabilities={capabilities}
+                isWebRuntime={isWebRuntime}
                 onLoginGithub={onLoginGithub}
                 onSelect={(nextMode) => {
                   setStartMode(nextMode);
@@ -371,6 +384,7 @@ export function CreateProjectDialog({
                   if (!name.trim()) setName(nextName);
                 }}
                 onSelectFolder={pickFolder}
+                isWebRuntime={isWebRuntime}
               />
             ) : activeStep === "versioning" ? (
               <VersioningStep
@@ -502,12 +516,14 @@ function ScenarioStep({
   startMode,
   authStatus,
   capabilities,
+  isWebRuntime,
   onLoginGithub,
   onSelect,
 }: {
   startMode: ProjectStartMode;
   authStatus: AuthStatus;
   capabilities: ProjectCapabilities | null;
+  isWebRuntime: boolean;
   onLoginGithub?: () => void;
   onSelect: (mode: ProjectStartMode) => void;
 }) {
@@ -516,39 +532,55 @@ function ScenarioStep({
     <section>
       <StepHeader
         title="Qué tipo de proyecto vas a configurar"
-        description="La decisión importante es dónde existe hoy la documentación. A partir de ahí el asistente solo pide las opciones que afectan a ese caso."
+        description={
+          isWebRuntime
+            ? "En navegador los proyectos se guardan dentro del almacenamiento gestionado del backend web. Elige si empiezas desde cero o si quieres traer un repositorio GitHub."
+            : "La decisión importante es dónde existe hoy la documentación. A partir de ahí el asistente solo pide las opciones que afectan a ese caso."
+        }
       />
       <div role="tablist" aria-label="Situación inicial del proyecto" className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <ModeTab
           active={startMode === "local-new"}
           icon={FolderPlus}
-          title="Carpeta local nueva"
-          description="Empiezas desde cero. KnowNext.ai creará o usará una ruta local vacía para guardar Markdown."
+          title={isWebRuntime ? "Proyecto web nuevo" : "Carpeta local nueva"}
+          description={
+            isWebRuntime
+              ? "Empiezas desde cero. KnowNext.ai creará los Markdown dentro de la carpeta fija del backend web."
+              : "Empiezas desde cero. KnowNext.ai creará o usará una ruta local vacía para guardar Markdown."
+          }
           onClick={() => onSelect("local-new")}
         />
-        <ModeTab
-          active={startMode === "local-existing"}
-          icon={HardDrive}
-          title="Carpeta local existente"
-          description="Ya tienes archivos Markdown en tu equipo. La app los abrirá sin moverlos ni reestructurarlos."
-          onClick={() => onSelect("local-existing")}
-        />
-        <ModeTab
-          active={startMode === "local-existing-git"}
-          disabled={!capabilities?.canUseLocalGit}
-          disabledReason="La integración de Git local todavía no está disponible en esta instalación."
-          icon={FolderGit2}
-          title="Carpeta con Git/GitHub"
-          description="La carpeta ya tiene Git local, y puede tener remoto GitHub. KnowNext.ai respetará esa configuración."
-          onClick={() => onSelect("local-existing-git")}
-        />
+        {!isWebRuntime ? (
+          <>
+            <ModeTab
+              active={startMode === "local-existing"}
+              icon={HardDrive}
+              title="Carpeta local existente"
+              description="Ya tienes archivos Markdown en tu equipo. La app los abrirá sin moverlos ni reestructurarlos."
+              onClick={() => onSelect("local-existing")}
+            />
+            <ModeTab
+              active={startMode === "local-existing-git"}
+              disabled={!capabilities?.canUseLocalGit}
+              disabledReason="La integración de Git local todavía no está disponible en esta instalación."
+              icon={FolderGit2}
+              title="Carpeta con Git/GitHub"
+              description="La carpeta ya tiene Git local, y puede tener remoto GitHub. KnowNext.ai respetará esa configuración."
+              onClick={() => onSelect("local-existing-git")}
+            />
+          </>
+        ) : null}
         <ModeTab
           active={startMode === "github-existing"}
           disabled={githubUnavailable}
-          disabledReason="Conecta GitHub para seleccionar un repositorio y crear su copia local de trabajo."
+          disabledReason={isWebRuntime ? "Conecta GitHub para seleccionar un repositorio y traerlo al almacenamiento web." : "Conecta GitHub para seleccionar un repositorio y crear su copia local de trabajo."}
           icon={Github}
           title="Repo GitHub existente"
-          description="La documentación ya vive en GitHub. Seleccionarás el repo y una carpeta local donde trabajar con su copia."
+          description={
+            isWebRuntime
+              ? "La documentación ya vive en GitHub. Seleccionarás el repo y KnowNext.ai lo descargará en el backend web."
+              : "La documentación ya vive en GitHub. Seleccionarás el repo y una carpeta local donde trabajar con su copia."
+          }
           onClick={() => onSelect("github-existing")}
         />
       </div>
@@ -588,6 +620,7 @@ function LocationStep({
   onGithubRepoChange,
   onNameSuggestion,
   onSelectFolder,
+  isWebRuntime,
 }: {
   startMode: ProjectStartMode;
   folderPath: string;
@@ -609,21 +642,29 @@ function LocationStep({
   onGithubRepoChange: (repo: string) => void;
   onNameSuggestion: (name: string) => void;
   onSelectFolder: (currentPath?: string) => Promise<string | null>;
+  isWebRuntime: boolean;
 }) {
   const isGithubSource = startMode === "github-existing";
   const isNewLocalProject = startMode === "local-new";
+  const title = isWebRuntime
+    ? isGithubSource
+      ? "Repo origen y almacenamiento web"
+      : "Almacenamiento web del proyecto"
+    : isGithubSource
+      ? "Repo origen y carpeta local"
+      : "Carpeta de documentación";
+  const description = isWebRuntime
+    ? isGithubSource
+      ? "Selecciona el repositorio GitHub. KnowNext.ai guardará la copia editable dentro de la carpeta fija del backend web."
+      : "En navegador no se selecciona carpeta del equipo. KnowNext.ai creará este proyecto dentro del almacenamiento gestionado del backend web."
+    : isGithubSource
+      ? "Un proyecto de GitHub necesita dos datos: el repositorio remoto y la carpeta local donde KnowNext.ai guardará la copia editable."
+      : isNewLocalProject
+        ? "Define la ruta final que tendrá el proyecto en disco. Si la carpeta no existe, KnowNext.ai la creará al finalizar."
+        : "Selecciona la carpeta de trabajo que ya contiene los Markdown. KnowNext.ai la abre sin moverla ni reestructurarla.";
   return (
     <section>
-      <StepHeader
-        title={isGithubSource ? "Repo origen y carpeta local" : "Carpeta de documentación"}
-        description={
-          isGithubSource
-            ? "Un proyecto de GitHub necesita dos datos: el repositorio remoto y la carpeta local donde KnowNext.ai guardará la copia editable."
-            : isNewLocalProject
-              ? "Define la ruta final que tendrá el proyecto en disco. Si la carpeta no existe, KnowNext.ai la creará al finalizar."
-              : "Selecciona la carpeta de trabajo que ya contiene los Markdown. KnowNext.ai la abre sin moverla ni reestructurarla."
-        }
-      />
+      <StepHeader title={title} description={description} />
       <div className="mt-4 space-y-4">
         {isGithubSource ? (
           <GithubRepositoryFields
@@ -640,7 +681,9 @@ function LocationStep({
             onNameSuggestion={onNameSuggestion}
           />
         ) : null}
-        {isNewLocalProject ? (
+        {isWebRuntime ? (
+          <WebStorageNotice isGithubSource={isGithubSource} />
+        ) : isNewLocalProject ? (
           <NewLocalProjectFolderFields
             parentPath={newProjectParentPath}
             folderName={newProjectFolderName}
@@ -656,10 +699,10 @@ function LocationStep({
             label={isGithubSource ? "Carpeta local destino" : "Carpeta local"}
             description={localFolderDescription(startMode)}
             onFolderPathChange={onFolderPathChange}
-            onSelectFolder={() => {
-              onSelectFolder(folderPath).then((selectedPath) => {
-                if (selectedPath) onFolderPathChange(selectedPath);
-              });
+            onSelectFolder={async () => {
+              const selectedPath = await onSelectFolder(folderPath);
+              if (selectedPath) onFolderPathChange(selectedPath);
+              return selectedPath;
             }}
           />
         )}
@@ -861,6 +904,27 @@ function ProjectIdentityStep({
   );
 }
 
+function WebStorageNotice({ isGithubSource }: { isGithubSource: boolean }) {
+  return (
+    <div className="rounded-md border border-orange-200 bg-brand-hover px-3 py-3">
+      <div className="flex items-start gap-3">
+        <HardDrive size={15} className="mt-0.5 shrink-0 text-brand-orange" />
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold text-ink-primary">Almacenamiento web gestionado</div>
+          <p className="mt-1 text-[10px] leading-4 text-ink-secondary">
+            En navegador no se elige una carpeta del equipo. KnowNext.ai creará este proyecto dentro de la carpeta fija del backend web para que puedas depurar sin depender del selector nativo de Windows.
+          </p>
+          <p className="mt-2 text-[10px] leading-4 text-ink-secondary">
+            {isGithubSource
+              ? "El repositorio se descargará en ese almacenamiento del servidor web."
+              : "Los archivos Markdown del proyecto se crearán en ese almacenamiento del servidor web."}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function EditProjectForm({
   project,
   name,
@@ -873,6 +937,7 @@ function EditProjectForm({
   onIconColorChange,
   onFolderPathChange,
   onSelectFolder,
+  isWebRuntime,
 }: {
   project?: Project | null;
   name: string;
@@ -884,74 +949,99 @@ function EditProjectForm({
   onIconChange: (icon: string) => void;
   onIconColorChange: (color: string) => void;
   onFolderPathChange: (path: string) => void;
-  onSelectFolder: () => void;
+  onSelectFolder: () => Promise<string | null>;
+  isWebRuntime: boolean;
 }) {
-  const canEditFolder = project?.storageMode !== "local-cache";
+  const canEditFolder = !isWebRuntime && project?.storageMode !== "local-cache";
   const githubRepository = project?.githubRepository;
+  const folderReadOnlyLabel = isWebRuntime ? "Almacenamiento gestionado" : "Carpeta local gestionada";
+  const folderReadOnlyHelp = isWebRuntime
+    ? "En navegador los proyectos viven en la carpeta sandbox del backend web. No se reasigna desde la interfaz."
+    : "Solo lectura. Para usar otra ubicación, crea un proyecto nuevo desde ese repositorio GitHub.";
 
   return (
     <section className="space-y-5">
       <StepHeader
         title="Editar proyecto"
-        description="Actualiza cómo aparece el proyecto en KnowNext.ai. El origen, el tipo de historial y la conexión GitHub se mantienen bloqueados para no convertir un proyecto existente en otro flujo distinto."
+        description="Modifica solo los datos seguros del proyecto. El origen, el historial y la sincronización se muestran como referencia para evitar cambiar accidentalmente el flujo con el que se creó."
       />
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
-        <div className="min-w-0 space-y-6">
-          <section className="space-y-4">
+      <div className="flex items-center gap-3 rounded-md border border-line bg-panel px-4 py-3">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-white shadow-[0_1px_2px_rgba(17,24,39,0.06)]" style={{ color: iconColor }}>
+          <SelectedIcon size={20} />
+        </span>
+        <div className="min-w-0">
+          <div className="truncate text-[14px] font-semibold text-ink-primary">{name.trim() || project?.name || "Proyecto sin nombre"}</div>
+          <div className="mt-0.5 truncate text-[11px] text-ink-secondary">
+            {isWebRuntime ? "Proyecto en almacenamiento web gestionado" : projectOriginLabel(project)}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="min-w-0 space-y-5">
+          <section className="rounded-md border border-line bg-white px-4 py-4">
             <SectionTitle
               title="Identidad visible"
               description="Solo afecta al selector y a la navegación interna. No renombra carpetas, repositorios ni archivos."
             />
-            <ProjectNameField name={name} iconColor={iconColor} SelectedIcon={SelectedIcon} onNameChange={onNameChange} autoFocus />
-            <ProjectVisualPicker icon={icon} iconColor={iconColor} onIconChange={onIconChange} onIconColorChange={onIconColorChange} />
+            <div className="mt-4 space-y-4">
+              <ProjectNameField name={name} iconColor={iconColor} SelectedIcon={SelectedIcon} onNameChange={onNameChange} autoFocus />
+              <ProjectVisualPicker icon={icon} iconColor={iconColor} onIconChange={onIconChange} onIconColorChange={onIconColorChange} />
+            </div>
           </section>
 
-          <section className="space-y-4 border-t border-line pt-5">
-            <SectionTitle
-              title="Carpeta de trabajo"
-              description={
-                canEditFolder
-                  ? "Puedes reasignar la referencia local si has movido la documentación. KnowNext.ai no moverá archivos."
-                  : "Esta carpeta es una copia local gestionada desde GitHub; cambiarla rompería la relación con el repositorio remoto."
-              }
-            />
-            {canEditFolder ? (
-              <EditableFolderField
-                folderPath={folderPath}
-                onFolderPathChange={onFolderPathChange}
-                onSelectFolder={onSelectFolder}
+          {!isWebRuntime ? (
+            <section className="rounded-md border border-line bg-white px-4 py-4">
+              <SectionTitle
+                title="Carpeta de trabajo"
+                description={
+                  canEditFolder
+                    ? "Puedes reasignar la referencia local si has movido la documentación. KnowNext.ai no moverá archivos."
+                    : "Esta carpeta es una copia local gestionada desde GitHub; cambiarla rompería la relación con el repositorio remoto."
+                }
               />
-            ) : (
-              <ReadOnlyField
-                icon={FolderOpen}
-                label="Carpeta local gestionada"
-                value={folderPath}
-                help="Solo lectura. Para usar otra ubicación, crea un proyecto nuevo desde ese repositorio GitHub."
-              />
-            )}
-          </section>
+              <div className="mt-4">
+                {canEditFolder ? (
+                  <EditableFolderField
+                    folderPath={folderPath}
+                    onFolderPathChange={onFolderPathChange}
+                    onSelectFolder={onSelectFolder}
+                  />
+                ) : (
+                  <ReadOnlyField
+                    icon={FolderOpen}
+                    label={folderReadOnlyLabel}
+                    value={folderPath}
+                    help={folderReadOnlyHelp}
+                  />
+                )}
+              </div>
+            </section>
+          ) : null}
         </div>
 
-        <aside className="min-w-0 space-y-3 border-t border-line pt-5 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
+        <aside className="min-w-0 space-y-3 rounded-md border border-line bg-white px-4 py-4">
           <SectionTitle
-            title="Configuración"
-            description="Estos valores describen cómo se creó el proyecto y se mantienen como referencia técnica."
+            title="Configuración de solo lectura"
+            description="Define el comportamiento del proyecto y no se cambia desde edición."
           />
-          <ReadOnlyField icon={projectStorageIcon(project)} label="Origen del proyecto" value={projectOriginLabel(project)} />
-          <ReadOnlyField icon={HardDrive} label="Modo de almacenamiento" value={storageModeLabel(project?.storageMode)} />
-          <ReadOnlyField icon={GitBranch} label="Historial" value={versioningModeLabel(project?.versioningMode ?? "none")} />
-          <ReadOnlyField icon={Cloud} label="Sincronización" value={syncModeLabel(project?.syncMode)} />
-          {githubRepository ? (
-            <ReadOnlyField
-              icon={Github}
-              label="Repositorio GitHub"
-              value={`${githubRepository.owner}/${githubRepository.repo}`}
-              help={githubRepository.defaultRef ? `Referencia interna: ${githubRepository.defaultRef}` : "Repositorio asociado al crear el proyecto."}
-            />
-          ) : (
-            <ReadOnlyField icon={Github} label="Repositorio GitHub" value="No conectado" help="Este proyecto no tiene repositorio GitHub asociado." />
-          )}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-1">
+            <ReadOnlyField icon={projectStorageIcon(project)} label="Origen del proyecto" value={isWebRuntime ? "Proyecto web" : projectOriginLabel(project)} />
+            <ReadOnlyField icon={HardDrive} label="Modo de almacenamiento" value={isWebRuntime ? "Backend web gestionado" : storageModeLabel(project?.storageMode)} />
+            <ReadOnlyField icon={GitBranch} label="Historial" value={versioningModeLabel(project?.versioningMode ?? "none")} />
+            <ReadOnlyField icon={Cloud} label="Sincronización" value={syncModeLabel(project?.syncMode)} />
+            {githubRepository ? (
+              <ReadOnlyField
+                icon={Github}
+                label="Repositorio GitHub"
+                value={`${githubRepository.owner}/${githubRepository.repo}`}
+                help={githubRepository.defaultRef ? `Referencia interna: ${githubRepository.defaultRef}` : "Repositorio asociado al crear el proyecto."}
+              />
+            ) : (
+              <ReadOnlyField icon={Github} label="Repositorio GitHub" value="No conectado" help="Este proyecto no tiene repositorio GitHub asociado." />
+            )}
+          </div>
           <GuidanceNote
             icon={Lock}
             title="Para cambiar origen o historial"
@@ -979,8 +1069,10 @@ function EditableFolderField({
 }: {
   folderPath: string;
   onFolderPathChange: (path: string) => void;
-  onSelectFolder: () => void;
+  onSelectFolder: () => Promise<string | null>;
 }) {
+  const [selectionHint, setSelectionHint] = useState("");
+
   return (
     <label className="block text-[11px] font-medium text-ink-secondary">
       Carpeta local
@@ -996,15 +1088,19 @@ function EditableFolderField({
         <button
           className="flex h-10 shrink-0 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] text-ink-primary hover:bg-brand-hover"
           type="button"
-          onClick={onSelectFolder}
+          onClick={async () => {
+            const selectedPath = await onSelectFolder();
+            setSelectionHint(selectedPath ? "" : folderSelectionFallbackMessage());
+          }}
         >
           <FolderOpen size={15} />
           Seleccionar
         </button>
       </div>
       <span className="mt-2 block text-[10px] leading-4 text-ink-secondary">
-        Guarda una nueva ruta solo si contiene la documentación que debe abrir este proyecto.
+        Guarda una nueva ruta solo si contiene la documentación que debe abrir este proyecto. En navegador puedes escribir o pegar la ruta completa.
       </span>
+      {selectionHint ? <span className="mt-1 block text-[10px] leading-4 text-ink-secondary">{selectionHint}</span> : null}
     </label>
   );
 }
@@ -1171,6 +1267,8 @@ function NewLocalProjectFolderFields({
   onFolderNameChange: (name: string) => void;
   onSelectParentFolder: (currentPath?: string) => Promise<string | null>;
 }) {
+  const [selectionHint, setSelectionHint] = useState("");
+
   return (
     <div className="space-y-4">
       <label className="block text-[11px] font-medium text-ink-secondary">
@@ -1188,16 +1286,21 @@ function NewLocalProjectFolderFields({
           <button
             className="flex h-10 shrink-0 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] text-ink-primary hover:bg-brand-hover"
             type="button"
-            onClick={() => {
-              onSelectParentFolder(parentPath).then((selectedPath) => {
-                if (selectedPath) onParentPathChange(selectedPath);
-              });
+            onClick={async () => {
+              const selectedPath = await onSelectParentFolder(parentPath);
+              if (selectedPath) {
+                onParentPathChange(selectedPath);
+                setSelectionHint("");
+                return;
+              }
+              setSelectionHint(folderSelectionFallbackMessage());
             }}
           >
             <FolderOpen size={15} />
             Seleccionar
           </button>
         </div>
+        {selectionHint ? <span className="mt-2 block text-[10px] leading-4 text-ink-secondary">{selectionHint}</span> : null}
       </label>
       <label className="block text-[11px] font-medium text-ink-secondary">
         Nombre de la carpeta a crear
@@ -1248,21 +1351,21 @@ function LocalFolderField({
   label: string;
   description: string;
   onFolderPathChange: (path: string) => void;
-  onSelectFolder: () => void;
+  onSelectFolder: () => Promise<string | null>;
 }) {
+  const [selectionHint, setSelectionHint] = useState("");
+
   return (
     <label className="block text-[11px] font-medium text-ink-secondary">
       {label}
-      <span className="mt-1 block text-[10px] font-normal leading-4 text-ink-secondary">{description}</span>
+      <span className="mt-1 block text-[10px] font-normal leading-4 text-ink-secondary">
+        {description} Puedes escribir o pegar una ruta absoluta si el selector no está disponible.
+      </span>
       <div className="mt-2 flex gap-2">
         <div className="min-w-0 flex-1" data-tooltip={folderPath || undefined}>
           <input
-            className={[
-              "h-10 w-full min-w-0 rounded-md border border-line bg-panel px-3 text-[11px] text-ink-primary outline-none focus:border-brand-orange",
-              creationMode === "new-local" ? "" : "cursor-default",
-            ].join(" ")}
+            className="h-10 w-full min-w-0 rounded-md border border-line bg-panel px-3 text-[11px] text-ink-primary outline-none focus:border-brand-orange"
             value={folderPath}
-            readOnly={creationMode !== "new-local"}
             onChange={(event) => onFolderPathChange(event.target.value)}
             placeholder={creationMode === "new-local" ? "C:\\Docs\\Nuevo proyecto" : "Selecciona una ruta local completa"}
           />
@@ -1270,12 +1373,16 @@ function LocalFolderField({
         <button
           className="flex h-10 shrink-0 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] text-ink-primary hover:bg-brand-hover"
           type="button"
-          onClick={onSelectFolder}
+          onClick={async () => {
+            const selectedPath = await onSelectFolder();
+            setSelectionHint(selectedPath ? "" : folderSelectionFallbackMessage());
+          }}
         >
           <FolderOpen size={15} />
           Seleccionar
         </button>
       </div>
+      {selectionHint ? <span className="mt-2 block text-[10px] leading-4 text-ink-secondary">{selectionHint}</span> : null}
     </label>
   );
 }
@@ -1488,10 +1595,10 @@ function ProjectVisualPicker({
   onIconColorChange: (color: string) => void;
 }) {
   return (
-    <div className="grid grid-cols-1 gap-5 sm:grid-cols-[minmax(0,1fr)_220px]">
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_220px]">
       <div className="text-[11px] font-medium text-ink-secondary">
         Icono
-        <div className="mt-2 grid grid-cols-6 gap-2 sm:grid-cols-8">
+        <div className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(32px,32px))] gap-2">
           {projectIconOptions.map((option) => {
             const OptionIcon = option.icon;
             const selected = option.id === icon;
@@ -1516,11 +1623,11 @@ function ProjectVisualPicker({
       </div>
       <div className="text-[11px] font-medium text-ink-secondary">
         Color
-        <div className="mt-2 grid grid-cols-6 gap-2">
+        <div className="mt-2 flex flex-wrap gap-2">
           {projectColors.map((color) => (
             <button
               key={color}
-              className="grid h-8 place-items-center rounded-full"
+              className="grid h-8 w-8 place-items-center rounded-full"
               type="button"
               onClick={() => onIconColorChange(color)}
               aria-label={`Color ${color}`}
@@ -1667,6 +1774,14 @@ function localFolderDescription(startMode: ProjectStartMode) {
   return "Selecciona la carpeta que ya contiene la documentación. La app no la mueve ni la reestructura.";
 }
 
+function folderSelectionFallbackMessage() {
+  return "No se pudo abrir el selector de carpetas. En navegador escribe o pega la ruta completa; el selector con ruta absoluta está garantizado en la app Windows.";
+}
+
+function isTauriRuntime() {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
 function joinProjectFolderPath(parentPath: string, folderName: string) {
   const cleanFolderName = folderName.trim();
   if (!cleanFolderName) return trimTrailingPathSeparators(parentPath.trim());
@@ -1711,9 +1826,9 @@ function sanitizeGithubRepoNameInput(value: string) {
     .slice(0, 100);
 }
 
-function startModeLabel(startMode: ProjectStartMode) {
+function startModeLabel(startMode: ProjectStartMode, isWebRuntime = false) {
   if (startMode === "github-existing") return "Repo GitHub existente";
-  if (startMode === "local-new") return "Carpeta local nueva";
+  if (startMode === "local-new") return isWebRuntime ? "Proyecto web nuevo" : "Carpeta local nueva";
   if (startMode === "local-existing-git") return "Carpeta con Git/GitHub";
   return "Carpeta local existente";
 }

@@ -24,7 +24,7 @@ def test_health() -> None:
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
-    assert response.json()["version"] == "0.6.14"
+    assert response.json()["version"] == "0.6.15"
     assert response.json()["appDataDir"]
 
 
@@ -281,6 +281,66 @@ def test_project_registry_writes_projects_json(tmp_path) -> None:
     registry_after_delete = json.loads(projects_file.read_text(encoding="utf-8"))
     assert all(project["id"] != project_id for project in registry_after_delete["projects"])
     assert registry_after_delete["activeProjectId"] is None
+
+
+def test_project_creation_uses_managed_storage_when_folder_path_is_empty(tmp_path) -> None:
+    created = client.post(
+        "/api/projects",
+        json={
+            "name": "Proyecto Web",
+            "folderPath": "",
+            "icon": "folder",
+            "iconColor": "#F37021",
+            "creationMode": "new-local",
+            "storageMode": "local-files",
+            "versioningMode": "none",
+            "syncMode": "none",
+        },
+    )
+
+    assert created.status_code == 201
+    project = created.json()
+    assert project["folderPath"].startswith(str(tmp_path / "projects"))
+    assert (tmp_path / "projects" / project["id"]).is_dir()
+
+
+def test_existing_project_with_empty_folder_path_is_migrated_to_managed_storage(tmp_path) -> None:
+    projects_file = tmp_path / "projects.json"
+    projects_file.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 2,
+                "activeProjectId": "project-web",
+                "projects": [
+                    {
+                        "id": "project-web",
+                        "name": "Proyecto Web",
+                        "folderPath": "",
+                        "icon": "folder",
+                        "iconColor": "#F37021",
+                        "storageMode": "local-files",
+                        "versioningMode": "none",
+                        "syncMode": "none",
+                        "authRequired": False,
+                        "githubRepository": None,
+                        "isGitRepository": False,
+                        "active": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    projects = client.get("/api/projects")
+    assert projects.status_code == 200
+    project = projects.json()[0]
+    assert project["folderPath"] == str(tmp_path / "projects" / "project-web")
+    assert (tmp_path / "projects" / "project-web").is_dir()
+
+    tree = client.get("/api/projects/project-web/tree")
+    assert tree.status_code == 200
+    assert tree.json() == []
 
 
 def test_new_local_project_creates_folder_and_open_local_requires_existing_folder(tmp_path) -> None:
@@ -1058,6 +1118,25 @@ def test_ai_interaction_without_openai_key_returns_unavailable(tmp_path) -> None
     assert payload["status"] == "blocked"
     assert payload["operations"][0]["type"] == "provider_unavailable"
     assert client.get(f"/api/projects/{project_id}/ai/conversation").json()["events"]
+
+
+def test_ai_index_status_returns_project_rag_status(tmp_path) -> None:
+    docs_root = tmp_path / "project-ai-index-status"
+    docs_root.mkdir()
+    created = client.post(
+        "/api/projects",
+        json={"name": "Project AI Index", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+
+    response = client.get(f"/api/projects/{project_id}/ai/index/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["projectId"] == project_id
+    assert payload["enabled"] is False
+    assert payload["status"] == "not-indexed"
+    assert payload["vectorStoreId"] is None
 
 
 def test_openai_key_status_does_not_expose_secret() -> None:

@@ -30,6 +30,43 @@ export class ApiError extends Error {
 }
 
 export async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method ?? "GET").toUpperCase();
+  const attempts = method === "GET" ? 6 : 1;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await requestJsonOnce<T>(path, init);
+    } catch (error) {
+      lastError = error;
+      if (!isApiConnectionError(error) || attempt === attempts - 1) break;
+      await delay(250 * (attempt + 1));
+    }
+  }
+
+  throw lastError;
+}
+
+export async function waitForApiReady(options: { attempts?: number; intervalMs?: number } = {}) {
+  const attempts = options.attempts ?? 20;
+  const intervalMs = options.intervalMs ?? 250;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const response = await fetchWithTimeout(`${API_BASE_URL}/health`, {}, 2500);
+      if (response.ok) return;
+      lastError = new ApiError(response.status, response.statusText);
+    } catch (error) {
+      lastError = error;
+    }
+    await delay(intervalMs);
+  }
+
+  throw lastError;
+}
+
+async function requestJsonOnce<T>(path: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 7000);
 
@@ -60,6 +97,19 @@ export async function requestJson<T>(path: string, init?: RequestInit): Promise<
   if (response.status === 204) return undefined as T;
 
   return response.json() as Promise<T>;
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, {
+    ...init,
+    signal: controller.signal,
+  }).finally(() => window.clearTimeout(timeout));
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 export function getApiErrorMessage(error: unknown, fallback: string) {

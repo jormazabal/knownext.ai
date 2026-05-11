@@ -54,15 +54,14 @@ class ProjectService:
     def create_project(self, payload: ProjectPayload) -> Project:
         registry = self._read_registry()
         self._validate_project_mode(payload)
+        project_id = f"project-{uuid4()}"
         folder_path = payload.folderPath.strip()
+        if not folder_path:
+            folder_path = str(self._managed_project_root(project_id))
         github_repository = payload.githubRepository
         if payload.storageMode == "local-cache" and payload.githubRepository:
-            project_id = f"project-{uuid4()}"
-            if not folder_path:
-                folder_path = str(get_app_data_dir() / "github-cache" / project_id)
             Path(folder_path).mkdir(parents=True, exist_ok=True)
         else:
-            project_id = f"project-{uuid4()}"
             self._prepare_local_project_folder(payload.creationMode, Path(folder_path))
 
         project = {
@@ -175,9 +174,7 @@ class ProjectService:
 
     def get_project_tree(self, project_id: str) -> list[TreeNode]:
         draft_service.run_maintenance()
-        registry = self._read_registry()
-        project = self._find_project(registry, project_id)
-        return filesystem_service.get_tree(project_id, Path(project["folderPath"]))
+        return filesystem_service.get_tree(project_id, self._get_project_root(project_id))
 
     def get_versioning_status(self, project_id: str) -> ProjectVersioningStatus:
         registry = self._read_registry()
@@ -326,10 +323,13 @@ class ProjectService:
     def _get_project_root(self, project_id: str) -> Path:
         registry = self._read_registry()
         project = self._find_project(registry, project_id)
-        root = Path(project["folderPath"])
+        root = Path(project["folderPath"].strip() or str(self._managed_project_root(project_id)))
         if not root.exists() or not root.is_dir():
             raise HTTPException(status_code=404, detail="Project folder not found")
         return root
+
+    def _managed_project_root(self, project_id: str) -> Path:
+        return get_app_data_dir() / "projects" / project_id
 
     def _default_registry(self) -> dict:
         return {
@@ -411,6 +411,11 @@ class ProjectService:
         return data
 
     def _normalize_project(self, project: dict) -> dict:
+        project_id = str(project.get("id") or f"project-{uuid4()}")
+        folder_path = str(project.get("folderPath") or "").strip()
+        if not folder_path:
+            folder_path = str(self._managed_project_root(project_id))
+            Path(folder_path).mkdir(parents=True, exist_ok=True)
         versioning_mode = project.get("versioningMode")
         if versioning_mode not in {"none", "local-git", "github-api"}:
             versioning_mode = "local-git" if project.get("isGitRepository") else "none"
@@ -422,6 +427,8 @@ class ProjectService:
             sync_mode = "manual-github" if versioning_mode in {"local-git", "github-api"} and project.get("githubRepository") else "none"
         return {
             **project,
+            "id": project_id,
+            "folderPath": folder_path,
             "storageMode": storage_mode,
             "versioningMode": versioning_mode,
             "syncMode": sync_mode,

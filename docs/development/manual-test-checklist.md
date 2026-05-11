@@ -22,6 +22,7 @@
 - [ ] Open Nuevo proyecto and confirm project creation is organized as tabs or an assistant/wizard rather than a single dense long form.
 - [ ] Confirm Situación, Ubicación, Historial, and Detalles are available as clear assistant steps.
 - [ ] Confirm the initial Situación step orders the options as Carpeta local nueva, Carpeta local existente, Carpeta con Git/GitHub, and Repo GitHub existente, with explanatory copy.
+- [ ] In the browser development build, confirm Nuevo proyecto only offers Proyecto web nuevo and Repo GitHub existente, and explains that projects are stored in the managed web backend folder instead of asking for a local PC folder.
 - [ ] Resize the app to a smaller width/height with Nuevo proyecto open and confirm the modal fits the viewport with an internal scroll area and visible footer actions.
 - [ ] In Nuevo proyecto, switch between tabs/steps after entering values and confirm the values are preserved during the same modal session.
 - [ ] In Nuevo proyecto, confirm future steps cannot be opened and Siguiente remains disabled until required data from the current step is complete.
@@ -57,8 +58,10 @@
 - [ ] Expand and collapse individual folder nodes.
 - [ ] Use Expandir árbol and Contraer árbol from the compact icon actions.
 - [ ] Click Configurar proyecto and confirm the edit project dialog opens with the active project name, folder, icon, and color already filled.
+- [ ] Confirm the edit project dialog uses the full modal width, separates editable identity/location from read-only technical configuration, and does not show clipped icon or color controls.
 - [ ] Click Seleccionar in Carpeta local and confirm it opens the native folder selector, not a browser upload picker.
-- [ ] In the Tauri app or local dev browser with the FastAPI backend running, select a project folder and confirm the full local path is shown and saved, for example `C:\Dev\knownext.ai`.
+- [ ] In the Tauri app, select a project folder and confirm the full local path is shown and saved, for example `C:\Dev\knownext.ai`.
+- [ ] In the browser development build, confirm project editing shows the managed backend folder as read-only and does not offer a folder selector.
 - [ ] In the installed Tauri app, confirm service health points to `http://127.0.0.1:8765` and the desktop app-data directory.
 - [ ] In the browser development build, start `pnpm backend:web`, confirm service/API calls use `http://127.0.0.1:8766`, and confirm browser projects/configuration are independent from the installed app.
 - [ ] Save a project edit and confirm the project selector shows the updated project data.

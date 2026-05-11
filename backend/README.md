@@ -16,7 +16,7 @@ Use a separate backend profile for the browser/web development surface so it doe
 pnpm backend:web
 ```
 
-The web backend listens on `127.0.0.1:8766` and stores data under `ai.knownext.web`.
+The web backend listens on `127.0.0.1:8766` and stores data under `ai.knownext.web`. Browser-created projects do not request a local PC folder; when `folderPath` is empty the backend creates the project under its managed `projects/<project-id>` storage directory.
 
 ## Test
 

@@ -1,10 +1,6 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { API_BASE_URL } from "../api/client";
 
-type DirectoryPickerWindow = Window & {
-  showDirectoryPicker?: () => Promise<{ name: string }>;
-};
-
 export async function selectProjectFolder(currentPath: string) {
   try {
     const selectedPath = await openDialog({
@@ -17,7 +13,7 @@ export async function selectProjectFolder(currentPath: string) {
     if (typeof selectedPath === "string") return selectedPath;
     return null;
   } catch {
-    return (await selectFolderThroughLocalApi(currentPath)) ?? selectBrowserDirectory();
+    return selectFolderThroughLocalApi(currentPath);
   }
 }
 
@@ -38,12 +34,4 @@ async function selectFolderThroughLocalApi(currentPath: string) {
   } catch {
     return null;
   }
-}
-
-async function selectBrowserDirectory() {
-  const browserPicker = (window as DirectoryPickerWindow).showDirectoryPicker;
-  if (!browserPicker) return null;
-
-  const directory = await browserPicker.call(window);
-  return directory.name;
 }

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -136,12 +137,24 @@ class JsonFileStore:
                     json.dump(data, file, ensure_ascii=False, indent=2)
                     file.write("\n")
 
-                temp_path.replace(path)
+                self._replace_with_retry(temp_path, path)
             finally:
                 try:
                     temp_path.unlink(missing_ok=True)
                 except OSError:
                     pass
+
+    def _replace_with_retry(self, temp_path: Path, path: Path) -> None:
+        last_error: OSError | None = None
+        for attempt in range(6):
+            try:
+                temp_path.replace(path)
+                return
+            except PermissionError as error:
+                last_error = error
+                time.sleep(0.02 * (attempt + 1))
+        if last_error is not None:
+            raise last_error
 
     def _backup_invalid_file(self, path: Path) -> None:
         with self.lock:
