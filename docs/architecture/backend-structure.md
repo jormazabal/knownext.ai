@@ -23,7 +23,8 @@ Backend code lives in `backend/app`.
 - `git_service`: local Git operations mediated by FastAPI; React never executes Git.
 - `github_service`: GitHub REST API access for repository discovery, cache hydration, history, and commit creation.
 - `version_service`: provider abstraction for local Git and GitHub API histories. Development fakes must not be exposed as production history.
-- `ai_service`: document-aware AI prompt handling. If a real provider is not configured, the API must return an explicit unavailable/placeholder state rather than a production-looking fake answer.
+- `ai_service`: project-scoped AI orchestration for prompts, conversation events, document edit plans, project file operations, delete confirmations, and RAG index state. If a real provider is not configured, the API returns an explicit unavailable state rather than a production-looking fake answer.
+- `openai_service`: OpenAI Responses API, structured response parsing, and vector-store index operations. It is the only backend service that should call OpenAI directly.
 
 ## Local Application Files
 
@@ -31,8 +32,10 @@ The local API owns application metadata files. React must access them through AP
 
 - `projects.json`: known projects, local/cache folder paths, visual metadata, per-project storage/versioning/sync modes, optional GitHub repository metadata, and the active project id.
 - `config.json`: user-level application configuration such as sidebar and history panel widths, appearance settings, diagnostics settings, plus the open document tabs per project, active document id, and tab order.
+- `ai-conversations/*.json`: project-scoped AI conversation events, including user prompts, assistant responses, and file-operation events.
+- `ai-pending-deletes.json`: short-lived AI delete requests waiting for explicit UI confirmation.
 - `logs/knownext.log`: optional JSON-lines trace file for user-visible errors and runtime failures. This folder is dedicated to logs and is only written when trace logging is enabled.
-- `credentials.json`: GitHub auth state outside `projects.json`; access tokens are protected with Windows DPAPI when available and fall back to plain local JSON only on unsupported development/test environments.
+- `credentials.json`: GitHub auth state and OpenAI API key outside `projects.json`; secrets are protected with Windows DPAPI when available and fall back to plain local JSON only on unsupported development/test environments.
 - `drafts/*.json`: internal unsaved document working copies with their base file fingerprint. These files are recoverable application state, not project documentation, and must not be written into project folders. Orphan drafts are conserved until the user restores or discards them.
 
 By default these files are stored in `%APPDATA%/KnowNext.ai` on Windows and `~/.knownext.ai` elsewhere. Tests and local tooling can override the directory with `KNOWNEXT_APP_DATA_DIR`.
@@ -53,6 +56,8 @@ Project metadata remains in local JSON, while document tree and Markdown documen
 - `GET /api/projects/active` must clearly represent no active project when no projects exist, either through a documented `null`/empty contract or an explicit not-found response consumed by the frontend as the first-project state.
 - Auth endpoints must distinguish anonymous/disconnected users from authenticated users. They must not return mock users in normal product runtime.
 - History and AI endpoints must distinguish unavailable providers, empty results, and service errors with structured responses or documented status errors so the UI can show the correct empty or disabled state.
+- AI document edits must return updated Markdown to the frontend without writing to disk. The normal draft/save flow remains responsible for persistence.
+- AI delete requests must be represented as pending confirmations. Actual deletion only occurs through the confirmation endpoint.
 
 ## Draft and Sync Contracts
 

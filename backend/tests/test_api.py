@@ -14,6 +14,7 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def isolated_app_data(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("KNOWNEXT_APP_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "isolated-appdata"))
     monkeypatch.delenv("KNOWNEXT_GITHUB_CLIENT_ID", raising=False)
 
 
@@ -21,7 +22,8 @@ def test_health() -> None:
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
-    assert response.json()["version"] == "0.6.10"
+    assert response.json()["version"] == "0.6.11"
+    assert response.json()["appDataDir"]
 
 
 def test_projects_and_tree() -> None:
@@ -204,11 +206,19 @@ def test_config_writes_config_json(tmp_path) -> None:
 def test_trace_logging_writes_only_when_enabled(tmp_path) -> None:
     disabled = client.post(
         "/api/runtime/logging",
-        json={"source": "test", "message": "disabled"},
+        json={"level": "info", "source": "test", "message": "disabled"},
     )
     assert disabled.status_code == 200
     assert disabled.json()["enabled"] is False
     assert not (tmp_path / "logs" / "knownext.log").exists()
+
+    disabled_error = client.post(
+        "/api/runtime/logging",
+        json={"level": "error", "source": "test", "message": "visible error", "detail": "important"},
+    )
+    assert disabled_error.status_code == 200
+    assert disabled_error.json()["enabled"] is False
+    assert "Message: visible error" in (tmp_path / "logs" / "knownext.log").read_text(encoding="utf-8")
 
     client.put("/api/config", json={"diagnostics": {"traceLoggingEnabled": True}})
     enabled = client.post(
@@ -225,6 +235,111 @@ def test_trace_logging_writes_only_when_enabled(tmp_path) -> None:
     assert "Message: enabled" in entry
     assert "Detail:\nstack" in entry
     assert entry.rstrip().endswith("---")
+
+    missing_root = tmp_path / "missing-project-folder"
+    controlled_error = client.post(
+        "/api/projects",
+        json={
+            "name": "Missing",
+            "folderPath": str(missing_root),
+            "icon": "folder",
+            "iconColor": "#F37021",
+            "creationMode": "open-local",
+        },
+    )
+    assert controlled_error.status_code == 404
+    controlled_entry = log_file.read_text(encoding="utf-8")
+    assert "[ERROR] POST /api/projects" in controlled_entry
+    assert "Project folder not found" in controlled_entry
+
+
+def test_empty_current_profile_recovers_legacy_projects_config_and_credentials(tmp_path, monkeypatch) -> None:
+    current_dir = tmp_path / "current-profile"
+    legacy_parent = tmp_path / "legacy-appdata"
+    legacy_dir = legacy_parent / "KnowNext.ai"
+    docs_root = tmp_path / "docs"
+    docs_root.mkdir()
+    current_dir.mkdir()
+    legacy_dir.mkdir(parents=True)
+    monkeypatch.setenv("KNOWNEXT_APP_DATA_DIR", str(current_dir))
+    monkeypatch.setenv("APPDATA", str(legacy_parent))
+
+    (current_dir / "projects.json").write_text(
+        json.dumps({"schemaVersion": 2, "activeProjectId": None, "projects": []}),
+        encoding="utf-8",
+    )
+    (current_dir / "credentials.json").write_text(
+        json.dumps({"schemaVersion": 1, "github": None}),
+        encoding="utf-8",
+    )
+    (legacy_dir / "projects.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 2,
+                "activeProjectId": "project-legacy",
+                "projects": [
+                    {
+                        "id": "project-legacy",
+                        "name": "Proyecto legado",
+                        "folderPath": str(docs_root),
+                        "icon": "folder",
+                        "iconColor": "#F37021",
+                        "storageMode": "local-files",
+                        "versioningMode": "none",
+                        "syncMode": "none",
+                        "authRequired": False,
+                        "githubRepository": None,
+                        "isGitRepository": False,
+                        "active": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (legacy_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "layout": {"sidebarWidth": 410, "historyWidth": 360},
+                "appearance": {"language": "en", "zoomPercent": 110},
+                "diagnostics": {"traceLoggingEnabled": True},
+                "tabsByProject": {},
+                "lastRunAppVersion": "0.6.8",
+                "lastSeenReleaseNotesVersion": "0.6.8",
+                "openUtilityTabs": [],
+                "activeUtilityTab": None,
+                "updatedAt": "2026-05-10T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (legacy_dir / "credentials.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "github": {
+                    "accessToken": "legacy-token",
+                    "scopes": ["read:user", "repo"],
+                    "user": {"login": "legacy-user", "name": "Legacy User", "avatarUrl": None},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    projects = client.get("/api/projects")
+    config = client.get("/api/config")
+    auth = client.get("/api/auth/status")
+
+    assert projects.status_code == 200
+    assert projects.json()[0]["name"] == "Proyecto legado"
+    assert config.json()["layout"]["sidebarWidth"] == 410
+    assert config.json()["diagnostics"]["traceLoggingEnabled"] is True
+    assert auth.json()["isAuthenticated"] is True
+    assert auth.json()["user"]["login"] == "legacy-user"
+    assert json.loads((current_dir / "projects.json").read_text(encoding="utf-8"))["activeProjectId"] == "project-legacy"
+    assert json.loads((current_dir / "credentials.json").read_text(encoding="utf-8"))["github"]["user"]["login"] == "legacy-user"
 
 
 def test_invalid_config_file_is_backed_up(tmp_path) -> None:
@@ -768,6 +883,154 @@ def test_project_ai_prompt(tmp_path) -> None:
     )
     assert response.status_code == 200
     assert "no está configurada" in response.json()["answer"]
+
+
+def test_ai_interaction_without_openai_key_returns_unavailable(tmp_path) -> None:
+    docs_root = tmp_path / "project-ai-unavailable"
+    docs_root.mkdir()
+    created = client.post(
+        "/api/projects",
+        json={"name": "Project AI", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "prompt": "Resume el proyecto",
+            "activeMarkdown": "",
+            "mode": "project",
+            "clientMessageId": "client-1",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "blocked"
+    assert payload["operations"][0]["type"] == "provider_unavailable"
+    assert client.get(f"/api/projects/{project_id}/ai/conversation").json()["events"]
+
+
+def test_openai_key_status_does_not_expose_secret() -> None:
+    saved = client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+    assert saved.status_code == 200
+    assert saved.json() == {"configured": True, "preview": "sk-...1234"}
+
+    status = client.get("/api/credentials/openai-key")
+    assert status.status_code == 200
+    assert status.json() == {"configured": True, "preview": "sk-...1234"}
+    assert "secret" not in str(status.json())
+
+    deleted = client.delete("/api/credentials/openai-key")
+    assert deleted.status_code == 204
+    assert client.get("/api/credentials/openai-key").json() == {"configured": False, "preview": None}
+
+
+def test_ai_document_edit_returns_markdown_without_writing_disk(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "ai-edit"
+    docs_root.mkdir()
+    document_path = docs_root / "doc.md"
+    document_path.write_text("# Original\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Edit", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    document_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+
+    def fake_plan(payload, context, rag):
+        return {
+            "display": "conversation",
+            "answer": None,
+            "operations": [
+                {
+                    "type": "document_modified",
+                    "name": None,
+                    "parentPath": None,
+                    "path": None,
+                    "nodeId": None,
+                    "markdown": None,
+                    "updatedMarkdown": "# Updated\n",
+                    "summary": "Título actualizado",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+
+    response = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "documentId": document_id,
+            "prompt": "Actualiza el título",
+            "activeMarkdown": "# Original\n",
+            "mode": "document",
+            "clientMessageId": "client-2",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["updatedDocument"]["markdown"] == "# Updated\n"
+    assert payload["operations"][0]["type"] == "document_modified"
+    assert document_path.read_text(encoding="utf-8") == "# Original\n"
+
+
+def test_ai_create_document_respects_permissions(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "ai-create"
+    docs_root.mkdir()
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Create", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+
+    def fake_plan(payload, context, rag):
+        return {
+            "display": "conversation",
+            "answer": None,
+            "operations": [
+                {
+                    "type": "create_document",
+                    "name": "generated.md",
+                    "parentPath": None,
+                    "path": "generated.md",
+                    "nodeId": None,
+                    "markdown": "# Generated\n",
+                    "updatedMarkdown": None,
+                    "summary": None,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+
+    blocked = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={"projectId": project_id, "prompt": "Crea un documento", "activeMarkdown": "", "mode": "project", "clientMessageId": "client-3"},
+    )
+    assert blocked.status_code == 200
+    assert blocked.json()["operations"][0]["type"] == "permission_blocked"
+    assert not (docs_root / "generated.md").exists()
+
+    config = client.get("/api/config/ai").json()
+    config["permissions"]["createDocuments"] = True
+    client.put("/api/config/ai", json=config)
+    created_doc = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={"projectId": project_id, "prompt": "Crea un documento", "activeMarkdown": "", "mode": "project", "clientMessageId": "client-4"},
+    )
+    assert created_doc.status_code == 200
+    assert created_doc.json()["operations"][0]["type"] == "document_created"
+    assert (docs_root / "generated.md").read_text(encoding="utf-8") == "# Generated\n"
 
 
 def test_runtime_select_folder_returns_path(monkeypatch) -> None:

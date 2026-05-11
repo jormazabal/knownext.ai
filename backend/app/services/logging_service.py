@@ -32,11 +32,12 @@ class TraceLoggingService:
         }
 
     def record(self, level: str, source: str, message: str, detail: str | None = None) -> bool:
-        if not self.is_enabled():
+        normalized_level = (level or "error").upper()
+        should_always_log = normalized_level in {"ERROR", "CRITICAL"}
+        if not should_always_log and not self.is_enabled():
             return False
 
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        normalized_level = (level or "error").upper()
         timestamp = datetime.now(timezone.utc).isoformat()
         entry = f"{timestamp} [{normalized_level}] {source}\nMessage: {message}\n"
         if detail and detail.strip():

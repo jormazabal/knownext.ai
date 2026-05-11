@@ -21,6 +21,22 @@ DEFAULT_DIAGNOSTICS = {
     "traceLoggingEnabled": False,
 }
 
+DEFAULT_AI = {
+    "provider": "openai",
+    "permissions": {
+        "createFolders": False,
+        "createDocuments": False,
+        "deleteDocumentsAndFolders": False,
+    },
+    "rag": {
+        "enabled": False,
+        "vectorStoreId": None,
+        "lastIndexedAt": None,
+        "status": "not-indexed",
+        "error": None,
+    },
+}
+
 DEFAULT_TABS = {}
 
 LAYOUT_LIMITS = {
@@ -41,6 +57,7 @@ def _default_config() -> dict:
         "layout": deepcopy(DEFAULT_LAYOUT),
         "appearance": deepcopy(DEFAULT_APPEARANCE),
         "diagnostics": deepcopy(DEFAULT_DIAGNOSTICS),
+        "ai": deepcopy(DEFAULT_AI),
         "tabsByProject": deepcopy(DEFAULT_TABS),
         "lastRunAppVersion": None,
         "lastSeenReleaseNotesVersion": None,
@@ -88,6 +105,39 @@ def _normalize_diagnostics(value: object) -> dict:
 
     return {
         "traceLoggingEnabled": bool(value.get("traceLoggingEnabled", DEFAULT_DIAGNOSTICS["traceLoggingEnabled"])),
+    }
+
+
+def _normalize_ai(value: object) -> dict:
+    if not isinstance(value, dict):
+        return deepcopy(DEFAULT_AI)
+
+    permissions = value.get("permissions")
+    if not isinstance(permissions, dict):
+        permissions = {}
+
+    rag = value.get("rag")
+    if not isinstance(rag, dict):
+        rag = {}
+
+    rag_status = rag.get("status")
+    if rag_status not in {"not-indexed", "indexing", "updated", "error"}:
+        rag_status = DEFAULT_AI["rag"]["status"]
+
+    return {
+        "provider": "openai",
+        "permissions": {
+            "createFolders": bool(permissions.get("createFolders", DEFAULT_AI["permissions"]["createFolders"])),
+            "createDocuments": bool(permissions.get("createDocuments", DEFAULT_AI["permissions"]["createDocuments"])),
+            "deleteDocumentsAndFolders": bool(permissions.get("deleteDocumentsAndFolders", DEFAULT_AI["permissions"]["deleteDocumentsAndFolders"])),
+        },
+        "rag": {
+            "enabled": bool(rag.get("enabled", DEFAULT_AI["rag"]["enabled"])),
+            "vectorStoreId": _normalize_optional_string(rag.get("vectorStoreId")),
+            "lastIndexedAt": _normalize_optional_string(rag.get("lastIndexedAt")),
+            "status": rag_status,
+            "error": _normalize_optional_string(rag.get("error")),
+        },
     }
 
 
@@ -175,6 +225,9 @@ class ConfigService:
         if payload.diagnostics is not None:
             data["diagnostics"] = _normalize_diagnostics(payload.diagnostics.model_dump())
 
+        if payload.ai is not None:
+            data["ai"] = _normalize_ai(payload.ai.model_dump())
+
         if payload.tabsByProject is not None:
             data["tabsByProject"] = _normalize_tabs_by_project(
                 {
@@ -217,6 +270,7 @@ class ConfigService:
         }
         data["appearance"] = _normalize_appearance(data.get("appearance"))
         data["diagnostics"] = _normalize_diagnostics(data.get("diagnostics"))
+        data["ai"] = _normalize_ai(data.get("ai"))
         data["tabsByProject"] = _normalize_tabs_by_project(data.get("tabsByProject"))
         data["lastRunAppVersion"] = "legacy" if legacy_config_without_version_state else _normalize_optional_string(data.get("lastRunAppVersion"))
         data["lastSeenReleaseNotesVersion"] = _normalize_optional_string(data.get("lastSeenReleaseNotesVersion"))

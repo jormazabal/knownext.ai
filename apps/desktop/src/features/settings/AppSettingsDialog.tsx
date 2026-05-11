@@ -1,18 +1,25 @@
 import { useEffect, useState } from "react";
-import { Eye, FolderOpen, Languages, ListChecks, X } from "lucide-react";
-import type { AppearanceConfig, DiagnosticsConfig } from "../../types/domain";
+import { Brain, Eye, FolderOpen, KeyRound, Languages, ListChecks, Trash2, X } from "lucide-react";
+import type { AiConfigStatus, AiIndexStatusResponse, AppearanceConfig, DiagnosticsConfig } from "../../types/domain";
 import type { TraceLogStatus } from "../../lib/runtime/logging";
 
-type AppSettingsSection = "appearance" | "diagnostics";
+type AppSettingsSection = "appearance" | "ai" | "diagnostics";
 
 type AppSettingsDialogProps = {
   open: boolean;
   appearance: AppearanceConfig;
   diagnostics: DiagnosticsConfig;
+  ai: AiConfigStatus;
+  aiIndexStatus: AiIndexStatusResponse | null;
   traceLogStatus: TraceLogStatus | null;
   onClose: () => void;
   onAppearanceChange: (appearance: Partial<AppearanceConfig>) => void;
   onDiagnosticsChange: (diagnostics: Partial<DiagnosticsConfig>) => void;
+  onAiChange: (ai: AiConfigStatus) => void;
+  onSaveOpenAiKey: (apiKey: string) => void;
+  onDeleteOpenAiKey: () => void;
+  onRebuildAiIndex: () => void;
+  onDeleteAiIndex: () => void;
   onOpenTraceLogFolder: () => void;
 };
 
@@ -20,16 +27,24 @@ export function AppSettingsDialog({
   open,
   appearance,
   diagnostics,
+  ai,
+  aiIndexStatus,
   traceLogStatus,
   onClose,
   onAppearanceChange,
   onDiagnosticsChange,
+  onAiChange,
+  onSaveOpenAiKey,
+  onDeleteOpenAiKey,
+  onRebuildAiIndex,
+  onDeleteAiIndex,
   onOpenTraceLogFolder,
 }: AppSettingsDialogProps) {
   const [activeSection, setActiveSection] = useStableSection(open);
   const text = settingsCopy[appearance.language];
   const sections: Array<{ id: AppSettingsSection; label: string; description: string; icon: typeof Eye }> = [
     { id: "appearance", label: text.appearanceNav, description: text.appearanceNavDescription, icon: Eye },
+    { id: "ai", label: text.aiNav, description: text.aiNavDescription, icon: Brain },
     { id: "diagnostics", label: text.diagnosticsNav, description: text.diagnosticsNavDescription, icon: ListChecks },
   ];
 
@@ -81,6 +96,17 @@ export function AppSettingsDialog({
           <div className="min-h-0 overflow-y-auto px-6 py-5">
             {activeSection === "appearance" ? (
               <AppearanceSettings appearance={appearance} text={text} onAppearanceChange={onAppearanceChange} />
+            ) : activeSection === "ai" ? (
+              <AiSettings
+                ai={ai}
+                aiIndexStatus={aiIndexStatus}
+                text={text}
+                onAiChange={onAiChange}
+                onSaveOpenAiKey={onSaveOpenAiKey}
+                onDeleteOpenAiKey={onDeleteOpenAiKey}
+                onRebuildAiIndex={onRebuildAiIndex}
+                onDeleteAiIndex={onDeleteAiIndex}
+              />
             ) : (
               <DiagnosticsSettings
                 diagnostics={diagnostics}
@@ -159,6 +185,142 @@ function AppearanceSettings({
   );
 }
 
+function AiSettings({
+  ai,
+  aiIndexStatus,
+  text,
+  onAiChange,
+  onSaveOpenAiKey,
+  onDeleteOpenAiKey,
+  onRebuildAiIndex,
+  onDeleteAiIndex,
+}: {
+  ai: AiConfigStatus;
+  aiIndexStatus: AiIndexStatusResponse | null;
+  text: SettingsCopy;
+  onAiChange: (ai: AiConfigStatus) => void;
+  onSaveOpenAiKey: (apiKey: string) => void;
+  onDeleteOpenAiKey: () => void;
+  onRebuildAiIndex: () => void;
+  onDeleteAiIndex: () => void;
+}) {
+  const [apiKey, setApiKey] = useState("");
+  const statusLabel = ai.openaiKeyConfigured ? text.aiConfigured : text.aiMissingKey;
+  const indexStatus = aiIndexStatus?.status ?? ai.rag.status;
+
+  function updatePermissions(nextPermissions: Partial<AiConfigStatus["permissions"]>) {
+    onAiChange({
+      ...ai,
+      permissions: {
+        ...ai.permissions,
+        ...nextPermissions,
+      },
+    });
+  }
+
+  function updateRag(enabled: boolean) {
+    onAiChange({
+      ...ai,
+      rag: {
+        ...ai.rag,
+        enabled,
+      },
+    });
+  }
+
+  return (
+    <div className="space-y-5">
+      <section>
+        <div className="flex items-center gap-2">
+          <Brain size={16} className="text-brand-orange" />
+          <h3 className="text-[13px] font-semibold text-ink-primary">{text.aiHeading}</h3>
+        </div>
+        <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.aiDescription}</p>
+      </section>
+
+      <div className="rounded-md border border-line px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold text-ink-primary">OpenAI</p>
+            <p className="mt-1 text-[11px] text-ink-secondary">{statusLabel}{ai.openaiKeyPreview ? ` · ${ai.openaiKeyPreview}` : ""}</p>
+          </div>
+          <span className={["rounded px-2 py-1 text-[10px] font-semibold", ai.openaiKeyConfigured ? "bg-brand-hover text-brand-orange" : "bg-panel text-ink-secondary"].join(" ")}>
+            {ai.openaiKeyConfigured ? text.enabled : text.disabled}
+          </span>
+        </div>
+        <div className="mt-3 flex gap-2">
+          <input
+            className="h-9 min-w-0 flex-1 rounded-md border border-line bg-white px-3 text-[11px] outline-none focus:border-brand-orange"
+            type="password"
+            value={apiKey}
+            placeholder={text.openAiKeyPlaceholder}
+            onChange={(event) => setApiKey(event.target.value)}
+          />
+          <button
+            className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
+            disabled={!apiKey.trim()}
+            onClick={() => {
+              onSaveOpenAiKey(apiKey);
+              setApiKey("");
+            }}
+          >
+            <KeyRound size={14} />
+            {text.saveKey}
+          </button>
+          <button
+            className="grid h-9 w-9 place-items-center rounded-md border border-line text-ink-secondary hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
+            disabled={!ai.openaiKeyConfigured}
+            data-tooltip={text.deleteKey}
+            aria-label={text.deleteKey}
+            onClick={onDeleteOpenAiKey}
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
+        <p className="mt-2 text-[10px] leading-4 text-ink-secondary">{text.aiKeyPrivacy}</p>
+      </div>
+
+      <section className="space-y-2">
+        <p className="text-[11px] font-semibold text-ink-primary">{text.aiPermissionsHeading}</p>
+        <ToggleRow label={text.createFolders} enabled={ai.permissions.createFolders} onToggle={() => updatePermissions({ createFolders: !ai.permissions.createFolders })} />
+        <ToggleRow label={text.createDocuments} enabled={ai.permissions.createDocuments} onToggle={() => updatePermissions({ createDocuments: !ai.permissions.createDocuments })} />
+        <ToggleRow
+          label={text.deleteDocuments}
+          enabled={ai.permissions.deleteDocumentsAndFolders}
+          onToggle={() => updatePermissions({ deleteDocumentsAndFolders: !ai.permissions.deleteDocumentsAndFolders })}
+        />
+      </section>
+
+      <section className="rounded-md border border-line px-4 py-3">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold text-ink-primary">{text.ragHeading}</p>
+            <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.ragDescription}</p>
+            <p className="mt-2 text-[10px] text-ink-secondary">{text.ragStatus}: {describeIndexStatus(indexStatus)}</p>
+          </div>
+          <Switch enabled={ai.rag.enabled} label={text.ragHeading} onToggle={() => updateRag(!ai.rag.enabled)} />
+        </div>
+        <div className="mt-3 flex gap-2">
+          <button
+            className="h-8 rounded-md border border-brand-orange px-3 text-[11px] font-semibold text-brand-orange hover:bg-brand-hover disabled:opacity-50"
+            disabled={!ai.rag.enabled || !ai.openaiKeyConfigured}
+            onClick={onRebuildAiIndex}
+          >
+            {text.rebuildIndex}
+          </button>
+          <button
+            className="h-8 rounded-md border border-line px-3 text-[11px] text-ink-secondary hover:bg-panel disabled:opacity-50"
+            disabled={!ai.rag.vectorStoreId && !aiIndexStatus?.vectorStoreId}
+            onClick={onDeleteAiIndex}
+          >
+            {text.deleteIndex}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function DiagnosticsSettings({
   diagnostics,
   traceLogStatus,
@@ -230,6 +392,41 @@ function DiagnosticsSettings({
   );
 }
 
+function ToggleRow({ label, enabled, onToggle }: { label: string; enabled: boolean; onToggle: () => void }) {
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-md border border-line px-4 py-3">
+      <span className="text-[11px] font-medium text-ink-primary">{label}</span>
+      <Switch enabled={enabled} label={label} onToggle={onToggle} />
+    </div>
+  );
+}
+
+function Switch({ label, enabled, onToggle }: { label: string; enabled: boolean; onToggle: () => void }) {
+  return (
+    <button
+      className={["relative h-6 w-11 shrink-0 rounded-full transition", enabled ? "bg-brand-orange" : "bg-line"].join(" ")}
+      role="switch"
+      aria-checked={enabled}
+      aria-label={label}
+      onClick={onToggle}
+    >
+      <span
+        className={[
+          "absolute top-1 h-4 w-4 rounded-full bg-white shadow-subtle transition",
+          enabled ? "left-6" : "left-1",
+        ].join(" ")}
+      />
+    </button>
+  );
+}
+
+function describeIndexStatus(status: AiIndexStatusResponse["status"]) {
+  if (status === "indexing") return "Indexando";
+  if (status === "updated") return "Actualizado";
+  if (status === "error") return "Error";
+  return "No indexado";
+}
+
 type SettingsCopy = typeof settingsCopy.es;
 
 const settingsCopy = {
@@ -241,6 +438,8 @@ const settingsCopy = {
     sectionsLabel: "Apartados de configuración",
     appearanceNav: "Apariencia",
     appearanceNavDescription: "Idioma y escala visual",
+    aiNav: "IA",
+    aiNavDescription: "OpenAI y permisos",
     diagnosticsNav: "Trazas",
     diagnosticsNavDescription: "Registro local de errores",
     appearanceHeading: "Apariencia",
@@ -250,10 +449,29 @@ const settingsCopy = {
     zoomReduce: "Reducir",
     zoomNormal: "Normal",
     zoomIncrease: "Ampliar",
+    aiHeading: "IA documental",
+    aiDescription: "Configura OpenAI, permisos de acciones y consulta semántica del proyecto.",
+    aiConfigured: "Clave configurada",
+    aiMissingKey: "Sin clave OpenAI",
+    enabled: "Activo",
+    disabled: "Inactivo",
+    openAiKeyPlaceholder: "sk-...",
+    saveKey: "Guardar",
+    deleteKey: "Eliminar clave",
+    aiKeyPrivacy: "La clave se guarda localmente y no se escribe en proyectos, logs ni trazas.",
+    aiPermissionsHeading: "Permisos de acciones",
+    createFolders: "Crear carpetas",
+    createDocuments: "Crear documentos",
+    deleteDocuments: "Eliminar documentos y carpetas",
+    ragHeading: "Indexar documentación del proyecto",
+    ragDescription: "Permite consultar el proyecto completo con búsqueda semántica. El contenido Markdown se enviará a OpenAI para indexación.",
+    ragStatus: "Estado",
+    rebuildIndex: "Reindexar ahora",
+    deleteIndex: "Eliminar índice",
     diagnosticsHeading: "Trazas",
     diagnosticsDescription: "Registra errores de la aplicación en un archivo local dedicado para revisar incidencias.",
     traceToggleLabel: "Registro de trazas",
-    traceToggleDescription: "Cuando está activo, los errores visibles y fallos no controlados se anexan a `knownext.log`.",
+    traceToggleDescription: "Los errores se registran siempre. Actívalo para conservar también trazas informativas de diagnóstico.",
     traceToggleAria: "Activar registro de trazas",
     logFolderLabel: "Carpeta de logs",
     preparingLogFolder: "Preparando carpeta de logs",
@@ -267,6 +485,8 @@ const settingsCopy = {
     sectionsLabel: "Settings sections",
     appearanceNav: "Appearance",
     appearanceNavDescription: "Language and visual scale",
+    aiNav: "AI",
+    aiNavDescription: "OpenAI and permissions",
     diagnosticsNav: "Traces",
     diagnosticsNavDescription: "Local error logging",
     appearanceHeading: "Appearance",
@@ -276,10 +496,29 @@ const settingsCopy = {
     zoomReduce: "Reduce",
     zoomNormal: "Normal",
     zoomIncrease: "Increase",
+    aiHeading: "Documentation AI",
+    aiDescription: "Configure OpenAI, action permissions, and semantic project search.",
+    aiConfigured: "Key configured",
+    aiMissingKey: "No OpenAI key",
+    enabled: "Enabled",
+    disabled: "Disabled",
+    openAiKeyPlaceholder: "sk-...",
+    saveKey: "Save",
+    deleteKey: "Delete key",
+    aiKeyPrivacy: "The key is stored locally and is not written to projects, logs, or traces.",
+    aiPermissionsHeading: "Action permissions",
+    createFolders: "Create folders",
+    createDocuments: "Create documents",
+    deleteDocuments: "Delete documents and folders",
+    ragHeading: "Index project documentation",
+    ragDescription: "Allows project-wide semantic search. Markdown content will be sent to OpenAI for indexing.",
+    ragStatus: "Status",
+    rebuildIndex: "Reindex now",
+    deleteIndex: "Delete index",
     diagnosticsHeading: "Traces",
     diagnosticsDescription: "Record application errors in a dedicated local file for troubleshooting.",
     traceToggleLabel: "Trace logging",
-    traceToggleDescription: "When enabled, visible errors and unhandled failures are appended to `knownext.log`.",
+    traceToggleDescription: "Errors are always logged. Enable this to also keep informational diagnostic traces.",
     traceToggleAria: "Enable trace logging",
     logFolderLabel: "Log folder",
     preparingLogFolder: "Preparing log folder",

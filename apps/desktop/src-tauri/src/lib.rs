@@ -28,9 +28,20 @@ const BACKEND_HOST: &str = "127.0.0.1";
 const BACKEND_PORT: u16 = 8765;
 #[cfg(all(desktop, not(debug_assertions), target_os = "windows"))]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+#[cfg(all(desktop, not(debug_assertions)))]
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[cfg(all(desktop, not(debug_assertions)))]
 struct BackendProcess(Mutex<Option<Child>>);
+
+#[cfg(all(desktop, not(debug_assertions)))]
+#[derive(serde::Deserialize)]
+struct BackendHealth {
+    status: String,
+    version: Option<String>,
+    #[serde(rename = "appDataDir")]
+    app_data_dir: Option<String>,
+}
 
 #[cfg(all(desktop, not(debug_assertions)))]
 impl Drop for BackendProcess {
@@ -174,12 +185,12 @@ fn backend_socket_addr() -> Result<std::net::SocketAddr, String> {
 }
 
 #[cfg(all(desktop, not(debug_assertions)))]
-fn is_backend_healthy() -> bool {
+fn backend_health() -> Option<BackendHealth> {
     let Ok(address) = backend_socket_addr() else {
-        return false;
+        return None;
     };
     let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(350)) else {
-        return false;
+        return None;
     };
     let _ = stream.set_read_timeout(Some(Duration::from_millis(700)));
     let _ = stream.set_write_timeout(Some(Duration::from_millis(700)));
@@ -187,18 +198,33 @@ fn is_backend_healthy() -> bool {
         .write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
         .is_err()
     {
-        return false;
+        return None;
     }
 
     let mut response = String::new();
-    stream.read_to_string(&mut response).is_ok() && response.contains("200 OK")
+    if stream.read_to_string(&mut response).is_err() || !response.contains("200 OK") {
+        return None;
+    }
+
+    let (_, body) = response.split_once("\r\n\r\n")?;
+    serde_json::from_str::<BackendHealth>(body.trim()).ok()
 }
 
 #[cfg(all(desktop, not(debug_assertions)))]
-fn wait_for_backend(max_wait: Duration) -> bool {
+fn is_expected_backend_healthy(expected_app_data_dir: &str) -> bool {
+    let Some(health) = backend_health() else {
+        return false;
+    };
+    health.status == "ok"
+        && health.version.as_deref() == Some(APP_VERSION)
+        && health.app_data_dir.as_deref() == Some(expected_app_data_dir)
+}
+
+#[cfg(all(desktop, not(debug_assertions)))]
+fn wait_for_backend(max_wait: Duration, expected_app_data_dir: &str) -> bool {
     let started_at = std::time::Instant::now();
     while started_at.elapsed() < max_wait {
-        if is_backend_healthy() {
+        if is_expected_backend_healthy(expected_app_data_dir) {
             return true;
         }
         std::thread::sleep(Duration::from_millis(250));
@@ -206,6 +232,65 @@ fn wait_for_backend(max_wait: Duration) -> bool {
 
     false
 }
+
+#[cfg(all(desktop, not(debug_assertions)))]
+fn incompatible_backend_detail(expected_app_data_dir: &str) -> String {
+    match backend_health() {
+        Some(health) => format!(
+            "expectedVersion={}\nactualVersion={}\nexpectedAppDataDir={}\nactualAppDataDir={}",
+            APP_VERSION,
+            health.version.unwrap_or_else(|| "unknown".to_string()),
+            expected_app_data_dir,
+            health.app_data_dir.unwrap_or_else(|| "unknown".to_string())
+        ),
+        None => format!(
+            "expectedVersion={}\nexpectedAppDataDir={}\nNo compatible /health response was available.",
+            APP_VERSION, expected_app_data_dir
+        ),
+    }
+}
+
+#[cfg(all(desktop, not(debug_assertions), target_os = "windows"))]
+fn stop_backend_processes_on_port(app: &tauri::AppHandle) {
+    let output = std::process::Command::new("netstat")
+        .args(["-ano", "-p", "tcp"])
+        .output();
+    let Ok(output) = output else {
+        return;
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut pids = std::collections::BTreeSet::new();
+    let local_port = format!(":{BACKEND_PORT}");
+    for line in text.lines() {
+        let normalized = line.split_whitespace().collect::<Vec<_>>();
+        if normalized.len() < 5 {
+            continue;
+        }
+        if normalized[0] != "TCP" || normalized[3] != "LISTENING" {
+            continue;
+        }
+        if normalized[1].ends_with(&local_port) {
+            pids.insert(normalized[4].to_string());
+        }
+    }
+
+    for pid in pids {
+        let _ = append_trace_log(
+            app,
+            "warning",
+            "backend.sidecar",
+            "Stopping incompatible local API process before starting the bundled backend.",
+            Some(&format!("pid={pid}")),
+        );
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid, "/F"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+    }
+}
+
+#[cfg(all(desktop, not(debug_assertions), not(target_os = "windows")))]
+fn stop_backend_processes_on_port(_app: &tauri::AppHandle) {}
 
 #[cfg(all(desktop, not(debug_assertions)))]
 fn push_sidecar_candidates_from_dir(candidates: &mut Vec<PathBuf>, directory: &Path) {
@@ -296,23 +381,36 @@ fn spawn_backend_log_reader<R>(
 
 #[cfg(all(desktop, not(debug_assertions)))]
 fn start_backend_sidecar(app: &tauri::AppHandle) -> Result<(), String> {
-    if is_backend_healthy() {
-        let _ = append_trace_log(
-            app,
-            "info",
-            "backend.sidecar",
-            "Local API is already running on 127.0.0.1:8765.",
-            None,
-        );
-        return Ok(());
-    }
-
     let app_data_dir = app
         .path()
         .app_data_dir()
         .map_err(|error| error.to_string())?
         .to_string_lossy()
         .to_string();
+    if is_expected_backend_healthy(&app_data_dir) {
+        let _ = append_trace_log(
+            app,
+            "info",
+            "backend.sidecar",
+            "Compatible local API is already running on 127.0.0.1:8765.",
+            Some(&format!("version={APP_VERSION}\nappDataDir={app_data_dir}")),
+        );
+        return Ok(());
+    }
+
+    if backend_health().is_some() {
+        let detail = incompatible_backend_detail(&app_data_dir);
+        let _ = append_trace_log(
+            app,
+            "warning",
+            "backend.sidecar",
+            "A local API is already running, but it does not match this app version or profile.",
+            Some(&detail),
+        );
+        stop_backend_processes_on_port(app);
+        std::thread::sleep(Duration::from_millis(500));
+    }
+
     let sidecar_path = resolve_backend_sidecar_path(app)?;
     let mut command = std::process::Command::new(&sidecar_path);
     #[cfg(target_os = "windows")]
@@ -342,8 +440,8 @@ fn start_backend_sidecar(app: &tauri::AppHandle) -> Result<(), String> {
     let process_state = app.state::<BackendProcess>();
     *process_state.0.lock().map_err(|error| error.to_string())? = Some(child);
 
-    if wait_for_backend(Duration::from_secs(45)) {
-        let detail = format!("path={}", sidecar_path.display());
+    if wait_for_backend(Duration::from_secs(45), &app_data_dir) {
+        let detail = format!("path={}\nversion={APP_VERSION}\nappDataDir={app_data_dir}", sidecar_path.display());
         append_trace_log(
             app,
             "info",
@@ -354,8 +452,8 @@ fn start_backend_sidecar(app: &tauri::AppHandle) -> Result<(), String> {
         Ok(())
     } else {
         let detail = format!(
-            "path={}\nThe UI can open, but API requests may fail until the backend becomes available.",
-            sidecar_path.display()
+            "path={}\nversion={APP_VERSION}\nappDataDir={app_data_dir}\nThe UI can open, but API requests may fail until the backend becomes available.",
+            sidecar_path.display(),
         );
         append_trace_log(
             app,

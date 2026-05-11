@@ -1,12 +1,16 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi import HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from starlette.requests import Request
 
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.version import APP_VERSION
+from app.services.app_storage import get_app_data_dir
 from app.services.draft_service import draft_service
 from app.services.logging_service import trace_logging_service
 
@@ -39,7 +43,35 @@ async def trace_unhandled_errors(request: Request, call_next):
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "service": settings.app_name, "version": APP_VERSION}
+    return {
+        "status": "ok",
+        "service": settings.app_name,
+        "version": APP_VERSION,
+        "appDataDir": str(get_app_data_dir()),
+    }
+
+
+@app.exception_handler(HTTPException)
+async def trace_http_exception(request: Request, error: HTTPException):
+    if error.status_code >= 400:
+        trace_logging_service.record(
+            "error",
+            f"{request.method} {request.url.path}",
+            f"HTTP {error.status_code}",
+            str(error.detail),
+        )
+    return JSONResponse(status_code=error.status_code, content={"detail": error.detail}, headers=error.headers)
+
+
+@app.exception_handler(RequestValidationError)
+async def trace_validation_exception(request: Request, error: RequestValidationError):
+    trace_logging_service.record(
+        "error",
+        f"{request.method} {request.url.path}",
+        "Request validation failed",
+        str(error),
+    )
+    return JSONResponse(status_code=422, content={"detail": error.errors()})
 
 
 app.include_router(api_router, prefix="/api")

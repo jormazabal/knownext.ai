@@ -14,6 +14,19 @@ The first version focuses on the core editing surface:
 - Mock Git commit history for the active document.
 - Contextual AI prompt input for the active document.
 
+## AI Document Assistant
+
+KnowNext.ai includes a project-scoped AI assistant mediated by the local FastAPI backend.
+
+- When a project is active, the first workspace tab is always `IA`. It shows the project conversation, including user prompts, assistant responses, and file-operation events.
+- When a document is active, prompts use that document as the primary context. AI edits are applied directly to the editor buffer and leave the document in `Cambios sin guardar`; the user still controls saving to disk and versioning.
+- Informational responses that do not modify a document appear in a compact dismissible bubble above the prompt and are also recorded in the `IA` tab.
+- The assistant can create folders and Markdown documents only when the corresponding permissions are enabled in app settings.
+- Delete operations always require a confirmation dialog listing the affected paths, even when the delete permission is enabled.
+- OpenAI is the first supported provider. API keys are configured in app settings, stored locally through backend credential storage, and never exposed to React after save.
+- Project-wide RAG is opt-in. When enabled, Markdown documentation can be indexed through OpenAI vector stores so responses can use project-wide semantic search and cite relevant paths.
+- Prompts and document content must not be written to trace logs.
+
 ## Target User
 
 Product engineers, technical leads, documentation owners, and teams that maintain project knowledge in Markdown repositories.
