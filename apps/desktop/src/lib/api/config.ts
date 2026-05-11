@@ -1,4 +1,4 @@
-import type { AppConfig, AppConfigUpdate, AppearanceConfig, DiagnosticsConfig, LayoutConfig, ProjectTabsConfig } from "../../types/domain";
+import type { AiConfig, AiConfigStatus, AppConfig, AppConfigUpdate, AppearanceConfig, DiagnosticsConfig, LayoutConfig, ProjectTabsConfig } from "../../types/domain";
 import { requestJson } from "./client";
 
 export const defaultLayoutConfig: LayoutConfig = {
@@ -15,6 +15,22 @@ export const defaultDiagnosticsConfig: DiagnosticsConfig = {
   traceLoggingEnabled: false,
 };
 
+export const defaultAiConfig: AiConfig = {
+  provider: "openai",
+  permissions: {
+    createFolders: false,
+    createDocuments: false,
+    deleteDocumentsAndFolders: false,
+  },
+  rag: {
+    enabled: false,
+    vectorStoreId: null,
+    lastIndexedAt: null,
+    status: "not-indexed",
+    error: null,
+  },
+};
+
 export const defaultProjectTabsConfig: ProjectTabsConfig = {
   openTabs: [],
   activeDocumentId: "",
@@ -25,6 +41,7 @@ export const defaultAppConfig: AppConfig = {
   layout: defaultLayoutConfig,
   appearance: defaultAppearanceConfig,
   diagnostics: defaultDiagnosticsConfig,
+  ai: defaultAiConfig,
   tabsByProject: {},
   lastRunAppVersion: null,
   lastSeenReleaseNotesVersion: null,
@@ -44,11 +61,23 @@ export async function updateAppConfig(payload: AppConfigUpdate): Promise<AppConf
   });
 }
 
+export async function getAiConfig(): Promise<AiConfigStatus> {
+  return requestJson<AiConfigStatus>("/api/config/ai");
+}
+
+export async function updateAiConfig(payload: AiConfig): Promise<AiConfigStatus> {
+  return requestJson<AiConfigStatus>("/api/config/ai", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
 const localPreferencesKey = "knownext.app.preferences";
 
 type LocalAppPreferences = {
   appearance?: AppearanceConfig;
   diagnostics?: DiagnosticsConfig;
+  ai?: AiConfig;
 };
 
 export function readLocalAppPreferences(): LocalAppPreferences {
@@ -60,6 +89,7 @@ export function readLocalAppPreferences(): LocalAppPreferences {
     return {
       appearance: normalizeAppearance(parsed.appearance),
       diagnostics: normalizeDiagnostics(parsed.diagnostics),
+      ai: normalizeAi(parsed.ai),
     };
   } catch {
     return {};
@@ -73,6 +103,7 @@ export function writeLocalAppPreferences(preferences: LocalAppPreferences) {
     ...preferences,
     appearance: preferences.appearance ? normalizeAppearance(preferences.appearance) : currentPreferences.appearance,
     diagnostics: preferences.diagnostics ? normalizeDiagnostics(preferences.diagnostics) : currentPreferences.diagnostics,
+    ai: preferences.ai ? normalizeAi(preferences.ai) : currentPreferences.ai,
   };
 
   window.localStorage.setItem(localPreferencesKey, JSON.stringify(nextPreferences));
@@ -90,5 +121,24 @@ function normalizeDiagnostics(diagnostics: DiagnosticsConfig | undefined): Diagn
   if (!diagnostics) return undefined;
   return {
     traceLoggingEnabled: Boolean(diagnostics.traceLoggingEnabled),
+  };
+}
+
+function normalizeAi(ai: AiConfig | undefined): AiConfig | undefined {
+  if (!ai) return undefined;
+  return {
+    provider: "openai",
+    permissions: {
+      createFolders: Boolean(ai.permissions?.createFolders),
+      createDocuments: Boolean(ai.permissions?.createDocuments),
+      deleteDocumentsAndFolders: Boolean(ai.permissions?.deleteDocumentsAndFolders),
+    },
+    rag: {
+      enabled: Boolean(ai.rag?.enabled),
+      vectorStoreId: ai.rag?.vectorStoreId ?? null,
+      lastIndexedAt: ai.rag?.lastIndexedAt ?? null,
+      status: ["not-indexed", "indexing", "updated", "error"].includes(ai.rag?.status ?? "") ? ai.rag.status : "not-indexed",
+      error: ai.rag?.error ?? null,
+    },
   };
 }

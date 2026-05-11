@@ -117,6 +117,36 @@ export type DiagnosticsConfig = {
   traceLoggingEnabled: boolean;
 };
 
+export type AiPermissionsConfig = {
+  createFolders: boolean;
+  createDocuments: boolean;
+  deleteDocumentsAndFolders: boolean;
+};
+
+export type AiRagConfig = {
+  enabled: boolean;
+  vectorStoreId?: string | null;
+  lastIndexedAt?: string | null;
+  status: "not-indexed" | "indexing" | "updated" | "error";
+  error?: string | null;
+};
+
+export type AiConfig = {
+  provider: "openai";
+  permissions: AiPermissionsConfig;
+  rag: AiRagConfig;
+};
+
+export type AiConfigStatus = AiConfig & {
+  openaiKeyConfigured: boolean;
+  openaiKeyPreview?: string | null;
+};
+
+export type OpenAiKeyStatus = {
+  configured: boolean;
+  preview?: string | null;
+};
+
 export type ProjectTabsConfig = {
   openTabs: OpenDocumentTab[];
   activeDocumentId: string;
@@ -129,6 +159,7 @@ export type AppConfig = {
   layout: LayoutConfig;
   appearance: AppearanceConfig;
   diagnostics: DiagnosticsConfig;
+  ai: AiConfig;
   tabsByProject: Record<string, ProjectTabsConfig>;
   lastRunAppVersion?: string | null;
   lastSeenReleaseNotesVersion?: string | null;
@@ -141,6 +172,7 @@ export type AppConfigUpdate = {
   layout?: LayoutConfig;
   appearance?: AppearanceConfig;
   diagnostics?: DiagnosticsConfig;
+  ai?: AiConfig;
   tabsByProject?: Record<string, ProjectTabsConfig>;
   lastRunAppVersion?: string | null;
   lastSeenReleaseNotesVersion?: string | null;
@@ -213,7 +245,14 @@ export type ReleaseNotesWorkspaceTab = {
   readonly: true;
 };
 
-export type WorkspaceTab = DocumentWorkspaceTab | ReleaseNotesWorkspaceTab;
+export type AiConversationWorkspaceTab = {
+  kind: "ai-conversation";
+  id: "project-ai-conversation";
+  name: "IA";
+  readonly: true;
+};
+
+export type WorkspaceTab = AiConversationWorkspaceTab | DocumentWorkspaceTab | ReleaseNotesWorkspaceTab;
 
 export type VersionRecord = {
   id: string;
@@ -239,6 +278,103 @@ export type AiPromptRequest = {
 export type AiPromptResponse = {
   answer: string;
   suggestedActions: string[];
+};
+
+export type AiInteractionMode = "document" | "project";
+export type AiInteractionStatus = "completed" | "blocked" | "error";
+export type AiInteractionDisplay = "bubble" | "conversation" | "none";
+export type AiOperationType =
+  | "document_modified"
+  | "folder_created"
+  | "document_created"
+  | "delete_requested"
+  | "node_deleted"
+  | "permission_blocked"
+  | "provider_unavailable"
+  | "provider_error";
+
+export type AiConversationEventType =
+  | "user_message"
+  | "assistant_message"
+  | "document_modified"
+  | "folder_created"
+  | "document_created"
+  | "delete_requested"
+  | "node_deleted"
+  | "permission_blocked"
+  | "provider_unavailable"
+  | "provider_error";
+
+export type AiInteractionRequest = {
+  projectId: string;
+  documentId?: string | null;
+  prompt: string;
+  activeMarkdown: string;
+  mode: AiInteractionMode;
+  clientMessageId: string;
+};
+
+export type AiUpdatedDocument = {
+  documentId: string;
+  markdown: string;
+  summary: string;
+};
+
+export type AiPendingDelete = {
+  confirmationId: string;
+  nodeIds: string[];
+  paths: string[];
+  documentCount: number;
+};
+
+export type AiOperation = {
+  type: AiOperationType;
+  status: "completed" | "blocked" | "pending" | "error";
+  message: string;
+  documentId?: string | null;
+  nodeId?: string | null;
+  path?: string | null;
+  paths: string[];
+  summary?: string | null;
+  confirmationId?: string | null;
+};
+
+export type AiConversationEvent = {
+  id: string;
+  projectId: string;
+  type: AiConversationEventType;
+  role: "user" | "assistant" | "system";
+  content: string;
+  createdAt: string;
+  documentId?: string | null;
+  path?: string | null;
+  paths: string[];
+  summary?: string | null;
+};
+
+export type AiConversationResponse = {
+  events: AiConversationEvent[];
+};
+
+export type AiInteractionResponse = {
+  interactionId: string;
+  status: AiInteractionStatus;
+  display: AiInteractionDisplay;
+  answer?: string | null;
+  conversationEvents: AiConversationEvent[];
+  operations: AiOperation[];
+  updatedDocument?: AiUpdatedDocument | null;
+  tree?: DocumentTreeNode[] | null;
+  requiresConfirmation?: AiPendingDelete | null;
+};
+
+export type AiIndexStatusResponse = {
+  projectId: string;
+  enabled: boolean;
+  status: AiRagConfig["status"];
+  vectorStoreId?: string | null;
+  lastIndexedAt?: string | null;
+  error?: string | null;
 };
 
 export type SaveDocumentPayload = {

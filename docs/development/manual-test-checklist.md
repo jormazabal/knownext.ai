@@ -105,11 +105,21 @@
 - [ ] Write text in the AI prompt input.
 - [ ] Submit the prompt.
 - [ ] Submit the AI prompt with no document open and confirm it is accepted as a project documentation prompt.
+- [ ] Confirm the fixed first tab is `IA`, uses the AI icon, and cannot be closed.
+- [ ] Open the `IA` tab and confirm conversation messages are grouped by day.
+- [ ] Submit an informational AI prompt and confirm the response appears in a right-aligned bubble above the prompt with an X close button.
+- [ ] Submit a second AI prompt and confirm the previous bubble disappears before the new response is shown.
+- [ ] Submit an AI edit for the active document and confirm Milkdown content changes, the document remains `Cambios sin guardar`, and the AI change banner offers Deshacer and Ver conversación.
+- [ ] Create a folder/document through AI with permissions enabled and confirm the tree refreshes and the created document opens when applicable.
+- [ ] Request a delete through AI and confirm the confirmation modal lists paths, Cancelar keeps files intact, and Eliminar removes the selected nodes.
 - [ ] Hover over the account area and confirm the account menu appears with GitHub login/logout, recoverable drafts, and update actions.
 - [ ] Open the account menu and click Configuración de la app.
 - [ ] Confirm the settings modal opens with a left section list and right configuration pane.
 - [ ] In Apariencia, change Idioma and confirm the selection persists after closing and reopening the modal.
 - [ ] In Apariencia, adjust Zoom and confirm the interface scales immediately and persists after restart.
+- [ ] In IA, save an OpenAI API key and confirm only configured/preview status is shown, never the full key.
+- [ ] In IA, toggle Crear carpetas, Crear documentos, and Eliminar documentos y carpetas and confirm permissions persist.
+- [ ] In IA, enable project indexing, run Reindexar ahora, confirm status feedback, then delete the index.
 - [ ] In Trazas, activate Registro de trazas and confirm the log folder path appears.
 - [ ] With Registro de trazas active, trigger a recoverable API error and confirm `knownext.log` is written under the dedicated `logs` folder in the KnowNext.ai app data directory.
 - [ ] Click Abrir carpeta en el explorador and confirm Windows Explorer opens the dedicated log folder.

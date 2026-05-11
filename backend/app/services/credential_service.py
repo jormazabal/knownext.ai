@@ -40,10 +40,61 @@ class CredentialService:
                 next_record["accessTokenProtected"] = protected_token
             else:
                 next_record["accessToken"] = token
-        self.store.write({"schemaVersion": 1, "github": next_record})
+        data = self._read_credentials()
+        data["github"] = next_record
+        self.store.write(data)
 
     def clear_github_record(self) -> None:
-        self.store.write({"schemaVersion": 1, "github": None})
+        data = self._read_credentials()
+        data["github"] = None
+        self.store.write(data)
+
+    def get_openai_key(self) -> str | None:
+        openai = self._read_credentials().get("openai")
+        if not isinstance(openai, dict):
+            return None
+        api_key = openai.get("apiKey")
+        if isinstance(api_key, str) and api_key:
+            return api_key
+        protected_key = openai.get("apiKeyProtected")
+        if isinstance(protected_key, str) and protected_key:
+            return _unprotect_secret(protected_key)
+        return None
+
+    def get_openai_key_preview(self) -> str | None:
+        api_key = self.get_openai_key()
+        if not api_key:
+            return None
+        if len(api_key) <= 8:
+            return "Configurada"
+        return f"{api_key[:3]}...{api_key[-4:]}"
+
+    def save_openai_key(self, api_key: str) -> None:
+        normalized_key = api_key.strip()
+        data = self._read_credentials()
+        record: dict[str, str] = {}
+        protected_key = _protect_secret(normalized_key)
+        if protected_key:
+            record["apiKeyProtected"] = protected_key
+        else:
+            record["apiKey"] = normalized_key
+        data["openai"] = record
+        self.store.write(data)
+
+    def clear_openai_key(self) -> None:
+        data = self._read_credentials()
+        data["openai"] = None
+        self.store.write(data)
+
+    def _read_credentials(self) -> dict[str, Any]:
+        data = self.store.read({"schemaVersion": 1, "github": None, "openai": None})
+        if not isinstance(data, dict):
+            return {"schemaVersion": 1, "github": None, "openai": None}
+        return {
+            "schemaVersion": 1,
+            "github": data.get("github"),
+            "openai": data.get("openai"),
+        }
 
 
 credential_service = CredentialService()

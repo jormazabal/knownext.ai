@@ -1,4 +1,4 @@
-import { FileText, PanelLeftOpen, ScrollText, X } from "lucide-react";
+import { FileText, PanelLeftOpen, ScrollText, Sparkles, X } from "lucide-react";
 import type { WorkspaceTab } from "../../types/domain";
 
 type DocumentTabsProps = {
@@ -30,7 +30,7 @@ export function DocumentTabs({ tabs, activeTabId, dirtyDocumentIds, onOpenNaviga
         {tabs.map((tab) => {
           const active = tab.id === activeTabId;
           const dirty = tab.kind === "document" && dirtyIds.has(tab.id);
-          const Icon = tab.kind === "release-notes" ? ScrollText : FileText;
+          const Icon = tab.kind === "release-notes" ? ScrollText : tab.kind === "ai-conversation" ? Sparkles : FileText;
           return (
             <button
               key={tab.id}
@@ -42,16 +42,20 @@ export function DocumentTabs({ tabs, activeTabId, dirtyDocumentIds, onOpenNaviga
             >
               <Icon size={15} className={active ? "text-brand-orange" : "text-ink-secondary"} />
               <span className="truncate">{tab.name}</span>
-              <span
-                className="ml-auto grid h-5 w-5 place-items-center rounded hover:bg-brand-hover"
-                aria-label={dirty ? `Cerrar ${tab.name}, con cambios sin guardar` : `Cerrar ${tab.name}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onCloseTab(tab.id);
-                }}
-              >
-                {dirty ? <span className="h-2.5 w-2.5 rounded-full bg-brand-orange" /> : <X size={13} />}
-              </span>
+              {tab.kind === "ai-conversation" ? (
+                <span className="ml-auto h-5 w-5" aria-hidden="true" />
+              ) : (
+                <span
+                  className="ml-auto grid h-5 w-5 place-items-center rounded hover:bg-brand-hover"
+                  aria-label={dirty ? `Cerrar ${tab.name}, con cambios sin guardar` : `Cerrar ${tab.name}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onCloseTab(tab.id);
+                  }}
+                >
+                  {dirty ? <span className="h-2.5 w-2.5 rounded-full bg-brand-orange" /> : <X size={13} />}
+                </span>
+              )}
               {active ? <span className="absolute inset-x-0 bottom-0 h-[2px] bg-brand-orange" /> : null}
             </button>
           );

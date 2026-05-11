@@ -2,6 +2,14 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.6.11 - 2026-05-11
+
+- Fixed startup after updates by rejecting stale local API processes from older app versions or different data profiles before starting the bundled backend.
+- Added recovery for projects, configuration, and credentials when an update creates a new empty data profile while a previous KnowNext.ai profile still exists.
+- Improved diagnostics so controlled API errors, startup failures, visible UI errors, and backend version/profile mismatches are written to `knownext.log` with useful detail.
+- Kept project loading resilient when a secondary startup request, such as versioning status, fails.
+- Updated release metadata and installer download links for `0.6.11`.
+
 ## 0.6.10 - 2026-05-11
 
 - Fixed the versioning status check for newly created local Git projects before their first commit exists.

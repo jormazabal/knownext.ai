@@ -2,6 +2,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.ai import AiConfig
+
 
 AppUtilityTabId = Literal["release-notes"]
 
@@ -35,6 +37,7 @@ class AppConfig(BaseModel):
     layout: LayoutConfig
     appearance: AppearanceConfig
     diagnostics: DiagnosticsConfig
+    ai: AiConfig = Field(default_factory=AiConfig)
     tabsByProject: dict[str, ProjectTabsConfig]
     lastRunAppVersion: str | None = None
     lastSeenReleaseNotesVersion: str | None = None
@@ -47,6 +50,7 @@ class AppConfigUpdate(BaseModel):
     layout: LayoutConfig | None = None
     appearance: AppearanceConfig | None = None
     diagnostics: DiagnosticsConfig | None = None
+    ai: AiConfig | None = None
     tabsByProject: dict[str, ProjectTabsConfig] | None = None
     lastRunAppVersion: str | None = None
     lastSeenReleaseNotesVersion: str | None = None

@@ -1,6 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { AiConversationView } from "../features/assistant/AiConversationView";
 import { AiPromptInput } from "../features/assistant/AiPromptInput";
+import { AiResponseBubble } from "../features/assistant/AiResponseBubble";
 import { DocumentStatusBar } from "../features/documents/DocumentStatusBar";
 import { DocumentTabs } from "../features/documents/DocumentTabs";
 import { DocumentTree, type DocumentTreeAction } from "../features/documents/DocumentTree";
@@ -16,7 +18,7 @@ import { ProjectSelector } from "../features/projects/ProjectSelector";
 import { ReleaseNotesViewer } from "../features/releaseNotes/ReleaseNotesViewer";
 import { VersionHistoryPanel } from "../features/versions/VersionHistoryPanel";
 import { TitleBar } from "../components/window/TitleBar";
-import type { AppearanceConfig, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentTreeNode, LayoutConfig, Project, ProjectVersioningStatus, WorkspaceTab } from "../types/domain";
+import type { AiConfigStatus, AiConversationEvent, AppearanceConfig, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentTreeNode, LayoutConfig, Project, ProjectVersioningStatus, WorkspaceTab } from "../types/domain";
 
 const sidebarWidthConfig = {
   defaultWidth: 338,
@@ -38,6 +40,10 @@ type DesktopLayoutProps = {
   authStatus: AuthStatus;
   projects: Project[];
   activeProject: Project | null;
+  aiConfig: AiConfigStatus;
+  aiConversationEvents: AiConversationEvent[];
+  aiBubble: { id: string; answer: string } | null;
+  aiAppliedChange: { documentId: string; previousMarkdown: string; summary: string } | null;
   tree: DocumentTreeNode[];
   tabs: WorkspaceTab[];
   activeTabId: string;
@@ -76,6 +82,10 @@ type DesktopLayoutProps = {
   onPullProject: () => void;
   onPushProject: () => void;
   onCreateVersion: (title: string) => Promise<CreateVersionResponse | null>;
+  onSendAiPrompt: (prompt: string) => void;
+  onCloseAiBubble: () => void;
+  onUndoAiChange: () => void;
+  onOpenAiConversation: () => void;
   isSyncingProject: boolean;
   onOpenDocument: (documentId: string, name: string) => void;
   onSelectTab: (documentId: string) => void;
@@ -105,7 +115,8 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   const activeWorkspaceTab = props.tabs.find((tab) => tab.id === props.activeTabId);
   const hasOpenDocument = activeWorkspaceTab?.kind === "document" && Boolean(props.activeDocumentId);
   const hasReleaseNotes = activeWorkspaceTab?.kind === "release-notes";
-  const hasOpenTab = hasOpenDocument || hasReleaseNotes;
+  const hasAiConversation = activeWorkspaceTab?.kind === "ai-conversation";
+  const hasOpenTab = hasOpenDocument || hasReleaseNotes || hasAiConversation;
   const activeEditorController = editorControllers[props.activeDocumentId] ?? null;
   const sidebar = useResizablePanelWidth({
     ...sidebarWidthConfig,
@@ -276,7 +287,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             onSelectTab={props.onSelectTab}
             onCloseTab={props.onCloseTab}
           />
-              {hasReleaseNotes ? null : (
+              {hasReleaseNotes || hasAiConversation ? null : (
               <MarkdownToolbar
                 historyOpen={props.historyOpen}
                 historyEnabled={props.historyEnabled}
@@ -297,6 +308,12 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                     <div className="mx-auto max-w-[900px]">
                       {hasReleaseNotes ? (
                         <ReleaseNotesViewer markdown={props.releaseNotesMarkdown} />
+                      ) : hasAiConversation ? (
+                        <AiConversationView
+                          project={props.activeProject}
+                          config={props.aiConfig}
+                          events={props.aiConversationEvents}
+                        />
                       ) : (
                         <>
                       {props.activeDocumentDiskChanged || props.activeDocumentConflictStatus === "orphaned" ? (
@@ -304,6 +321,13 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                           conflictStatus={props.activeDocumentConflictStatus}
                           onKeepLocalVersion={props.onKeepLocalVersion}
                           onLoadDiskVersion={props.onLoadDiskVersion}
+                        />
+                      ) : null}
+                      {props.aiAppliedChange?.documentId === props.activeDocumentId ? (
+                        <AiAppliedChangeBanner
+                          summary={props.aiAppliedChange.summary}
+                          onUndo={props.onUndoAiChange}
+                          onOpenConversation={props.onOpenAiConversation}
                         />
                       ) : null}
                       {props.editorSessions.map((session) => (
@@ -358,7 +382,9 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 documentId={hasOpenDocument ? props.activeDocumentId : undefined}
                 projectId={props.activeProject?.id}
                 markdown={hasOpenDocument ? props.activeMarkdown : ""}
+                onSubmit={props.onSendAiPrompt}
               />
+              <AiResponseBubble bubble={props.aiBubble} onClose={props.onCloseAiBubble} onOpenConversation={props.onOpenAiConversation} />
               {hasOpenDocument ? (
                 <DocumentStatusBar
                   statusLabel={activeStatus.label}
@@ -549,6 +575,31 @@ function DocumentConflictBanner({
       ) : null}
       <button className="h-7 rounded-md bg-brand-orange px-2.5 text-[11px] font-semibold text-white hover:bg-brand-dark" onClick={onKeepLocalVersion}>
         {orphaned ? "Recrear archivo" : "Mantener mi versión"}
+      </button>
+    </div>
+  );
+}
+
+function AiAppliedChangeBanner({
+  summary,
+  onUndo,
+  onOpenConversation,
+}: {
+  summary: string;
+  onUndo: () => void;
+  onOpenConversation: () => void;
+}) {
+  return (
+    <div className="mb-3 flex items-center gap-3 rounded-md border border-orange-200 bg-brand-hover px-3 py-2 text-[11px] text-ink-primary">
+      <div className="min-w-0 flex-1">
+        <p className="font-semibold">Cambios aplicados por IA</p>
+        <p className="mt-0.5 truncate text-[11px] text-ink-secondary">{summary}</p>
+      </div>
+      <button className="h-7 rounded-md border border-brand-orange px-2.5 text-[11px] font-semibold text-brand-orange hover:bg-white" onClick={onOpenConversation}>
+        Ver conversación
+      </button>
+      <button className="h-7 rounded-md bg-brand-orange px-2.5 text-[11px] font-semibold text-white hover:bg-brand-dark" onClick={onUndo}>
+        Deshacer
       </button>
     </div>
   );
