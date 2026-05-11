@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 
 APP_DATA_DIR_ENV = "KNOWNEXT_APP_DATA_DIR"
 APP_DATA_DIR_NAME = "KnowNext.ai"
+_STORE_LOCKS_GUARD = threading.Lock()
+_STORE_LOCKS: dict[str, threading.RLock] = {}
 
 
 def get_app_data_dir() -> Path:
@@ -62,36 +66,45 @@ class JsonFileStore:
     def path(self) -> Path:
         return get_app_data_dir() / self.filename
 
+    @property
+    def lock(self) -> threading.RLock:
+        key = str(self.path.resolve())
+        with _STORE_LOCKS_GUARD:
+            if key not in _STORE_LOCKS:
+                _STORE_LOCKS[key] = threading.RLock()
+            return _STORE_LOCKS[key]
+
     def read(self, default: dict[str, Any]) -> dict[str, Any]:
-        path = self.path
-        if not path.exists():
-            legacy_data = self._read_legacy_file(default)
-            if legacy_data is not None:
-                self.write(legacy_data)
-                return legacy_data
-            self.write(default)
-            return deepcopy(default)
+        with self.lock:
+            path = self.path
+            if not path.exists():
+                legacy_data = self._read_legacy_file(default)
+                if legacy_data is not None:
+                    self.write(legacy_data)
+                    return legacy_data
+                self.write(default)
+                return deepcopy(default)
 
-        try:
-            with path.open("r", encoding="utf-8") as file:
-                data = json.load(file)
-        except (json.JSONDecodeError, OSError):
-            self._backup_invalid_file(path)
-            self.write(default)
-            return deepcopy(default)
+            try:
+                with path.open("r", encoding="utf-8") as file:
+                    data = json.load(file)
+            except (json.JSONDecodeError, OSError):
+                self._backup_invalid_file(path)
+                self.write(default)
+                return deepcopy(default)
 
-        if not isinstance(data, dict):
-            self._backup_invalid_file(path)
-            self.write(default)
-            return deepcopy(default)
+            if not isinstance(data, dict):
+                self._backup_invalid_file(path)
+                self.write(default)
+                return deepcopy(default)
 
-        if _matches_default_data(data, default):
-            legacy_data = self._read_legacy_file(default)
-            if legacy_data is not None:
-                self.write(legacy_data)
-                return legacy_data
+            if _matches_default_data(data, default):
+                legacy_data = self._read_legacy_file(default)
+                if legacy_data is not None:
+                    self.write(legacy_data)
+                    return legacy_data
 
-        return data
+            return data
 
     def _read_legacy_file(self, default: dict[str, Any]) -> dict[str, Any] | None:
         for legacy_dir in get_legacy_app_data_dirs():
@@ -111,23 +124,33 @@ class JsonFileStore:
         return None
 
     def write(self, data: dict[str, Any]) -> None:
-        path = self.path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = path.with_suffix(f"{path.suffix}.tmp")
+        with self.lock:
+            path = self.path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temp_path = path.with_name(
+                f"{path.name}.{os.getpid()}.{threading.get_ident()}.{uuid4().hex}.tmp"
+            )
 
-        with temp_path.open("w", encoding="utf-8") as file:
-            json.dump(data, file, ensure_ascii=False, indent=2)
-            file.write("\n")
+            try:
+                with temp_path.open("w", encoding="utf-8") as file:
+                    json.dump(data, file, ensure_ascii=False, indent=2)
+                    file.write("\n")
 
-        temp_path.replace(path)
+                temp_path.replace(path)
+            finally:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def _backup_invalid_file(self, path: Path) -> None:
-        if not path.exists():
-            return
+        with self.lock:
+            if not path.exists():
+                return
 
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-        backup_path = path.with_name(f"{path.name}.corrupt-{timestamp}")
-        try:
-            path.replace(backup_path)
-        except OSError:
-            pass
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+            backup_path = path.with_name(f"{path.name}.corrupt-{timestamp}")
+            try:
+                path.replace(backup_path)
+            except OSError:
+                pass

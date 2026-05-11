@@ -1,4 +1,16 @@
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8765";
+type TauriWindow = Window & {
+  __TAURI_INTERNALS__?: unknown;
+};
+
+export const API_BASE_URL = resolveApiBaseUrl();
+
+function resolveApiBaseUrl() {
+  if (import.meta.env.VITE_API_BASE_URL) return import.meta.env.VITE_API_BASE_URL;
+  if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in (window as TauriWindow)) {
+    return "http://127.0.0.1:8765";
+  }
+  return "http://127.0.0.1:8766";
+}
 
 export function isBackendEnabled() {
   return true;
@@ -56,7 +68,7 @@ export function getApiErrorMessage(error: unknown, fallback: string) {
     return "La API local no respondió a tiempo. Comprueba que el backend esté en ejecución.";
   }
   if (error instanceof TypeError) {
-    return "No se pudo conectar con la API local. Comprueba que el backend esté en ejecución.";
+    return `No se pudo conectar con la API local (${API_BASE_URL}). Comprueba que el backend correspondiente esté en ejecución.`;
   }
   if (error instanceof Error) return error.message;
   return fallback;

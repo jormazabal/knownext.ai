@@ -9,6 +9,7 @@
 - [ ] Confirm pressing `Añadir primer proyecto` opens the same new-project flow used by `Nuevo proyecto`.
 - [ ] Restart with no projects and confirm the first-project empty state is restored instead of seeding sample projects.
 - [ ] Confirm no mock projects, mock documents, mock users, mock history, or mock AI answers appear in the normal application runtime.
+- [ ] If `projects.json` contains only legacy seed projects (`Proyecto Alpha`, `Proyecto Beta`, `Proyecto Gamma`), restart the backend and confirm the app either recovers real projects from a valid `projects.json.corrupt-*` backup or shows the first-project empty state.
 - [ ] Confirm the window top bar shows KnowNext.ai and simulated window controls.
 - [ ] In the packaged Tauri app, resize the application freely from each window edge and corner and confirm the workspace follows the window without clipping critical controls.
 - [ ] Resize the window down to the minimum practical size and confirm text, buttons, tabs, drawers, and dialogs remain usable without overlap.
@@ -58,6 +59,8 @@
 - [ ] Click Configurar proyecto and confirm the edit project dialog opens with the active project name, folder, icon, and color already filled.
 - [ ] Click Seleccionar in Carpeta local and confirm it opens the native folder selector, not a browser upload picker.
 - [ ] In the Tauri app or local dev browser with the FastAPI backend running, select a project folder and confirm the full local path is shown and saved, for example `C:\Dev\knownext.ai`.
+- [ ] In the installed Tauri app, confirm service health points to `http://127.0.0.1:8765` and the desktop app-data directory.
+- [ ] In the browser development build, start `pnpm backend:web`, confirm service/API calls use `http://127.0.0.1:8766`, and confirm browser projects/configuration are independent from the installed app.
 - [ ] Save a project edit and confirm the project selector shows the updated project data.
 - [ ] Restart the app and confirm the project edit is restored from `projects.json`.
 - [ ] Open `acta-reunion.md`.
@@ -122,6 +125,7 @@
 - [ ] In Apariencia, change Idioma and confirm the selection persists after closing and reopening the modal.
 - [ ] In Apariencia, adjust Zoom and confirm the interface scales immediately and persists after restart.
 - [ ] In IA, save an OpenAI API key and confirm only configured/preview status is shown, never the full key.
+- [ ] In the browser development build, save an OpenAI API key and confirm the request succeeds through the web backend profile without a CORS or `Failed to fetch` error.
 - [ ] In IA, toggle Crear carpetas, Crear documentos, and Eliminar documentos y carpetas and confirm permissions persist.
 - [ ] In IA, enable project indexing, run Reindexar ahora, confirm status feedback, then delete the index.
 - [ ] In Trazas, activate Registro de trazas and confirm the log folder path appears.

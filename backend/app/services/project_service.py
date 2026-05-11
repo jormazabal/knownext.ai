@@ -1,3 +1,4 @@
+import json
 from fastapi import HTTPException
 from pathlib import Path
 from uuid import uuid4
@@ -14,13 +15,17 @@ from app.schemas.project import (
     RenameNodeRequest,
     TreeNode,
 )
-from app.services.app_storage import get_app_data_dir
+from app.services.app_storage import get_app_data_dir, get_legacy_app_data_dirs
 from app.services.app_storage import JsonFileStore
 from app.services.auth_service import auth_service
 from app.services.draft_service import draft_service
 from app.services.filesystem_service import filesystem_service
 from app.services.git_service import git_service
 from app.services.github_service import github_service
+from app.services.logging_service import trace_logging_service
+
+
+KNOWN_SEED_PROJECT_IDS = {"project-alpha", "project-beta", "project-gamma"}
 
 
 class ProjectService:
@@ -267,6 +272,7 @@ class ProjectService:
 
     def _read_registry(self) -> dict:
         registry = self.store.read(self._default_registry())
+        original_registry = json.loads(json.dumps(registry))
         projects = registry.get("projects")
 
         if not isinstance(projects, list):
@@ -274,11 +280,24 @@ class ProjectService:
             self.store.write(registry)
             return registry
 
+        if self._is_known_seed_registry(registry):
+            recovered_registry = self._recover_registry_from_backups()
+            registry = recovered_registry if recovered_registry is not None else self._default_registry()
+            self.store.write(registry)
+            trace_logging_service.record(
+                "warning",
+                "project.registry",
+                "Ignored seeded mock project registry.",
+                "A projects.json file containing Proyecto Alpha/Beta/Gamma seed data was detected and replaced with recovered user projects or an empty registry.",
+            )
+            projects = registry.get("projects")
+
         if not projects:
             registry["projects"] = []
             registry["activeProjectId"] = None
             registry["schemaVersion"] = 2
-            self.store.write(registry)
+            if registry != original_registry:
+                self.store.write(registry)
             return registry
 
         active_project_id = registry.get("activeProjectId")
@@ -294,7 +313,8 @@ class ProjectService:
         registry["projects"] = normalized_projects
         registry["activeProjectId"] = active_project_id
         registry["schemaVersion"] = 2
-        self.store.write(registry)
+        if registry != original_registry:
+            self.store.write(registry)
         return registry
 
     def _find_project(self, registry: dict, project_id: str) -> dict:
@@ -317,6 +337,78 @@ class ProjectService:
             "activeProjectId": None,
             "projects": [],
         }
+
+    def _is_known_seed_registry(self, registry: dict) -> bool:
+        projects = registry.get("projects")
+        if not isinstance(projects, list) or not projects:
+            return False
+
+        project_ids = {project.get("id") for project in projects if isinstance(project, dict)}
+        if not project_ids or not project_ids.issubset(KNOWN_SEED_PROJECT_IDS):
+            return False
+
+        seed_markers = 0
+        for project in projects:
+            if not isinstance(project, dict):
+                continue
+            name = str(project.get("name", ""))
+            folder_path = str(project.get("folderPath", "")).replace("\\", "/")
+            if name in {"Proyecto Alpha", "Proyecto Beta", "Proyecto Gamma"}:
+                seed_markers += 1
+            if folder_path in {"C:/Knowledge/Mind/Personal", "C:/Documentacion/Proyecto Gamma"}:
+                seed_markers += 1
+
+        return seed_markers >= len(projects)
+
+    def _recover_registry_from_backups(self) -> dict | None:
+        for candidate in self._registry_recovery_candidates():
+            recovered = self._read_registry_candidate(candidate)
+            if recovered is not None:
+                trace_logging_service.record(
+                    "warning",
+                    "project.registry",
+                    "Recovered project registry from backup.",
+                    f"path={candidate}",
+                )
+                return recovered
+        return None
+
+    def _registry_recovery_candidates(self) -> list[Path]:
+        candidates: list[Path] = []
+        current_path = self.store.path
+        candidates.extend(sorted(current_path.parent.glob(f"{current_path.name}.corrupt-*"), key=lambda path: path.stat().st_mtime, reverse=True))
+
+        for legacy_dir in get_legacy_app_data_dirs():
+            legacy_path = legacy_dir / self.store.filename
+            candidates.append(legacy_path)
+            candidates.extend(sorted(legacy_dir.glob(f"{self.store.filename}.corrupt-*"), key=lambda path: path.stat().st_mtime, reverse=True))
+
+        unique_candidates: list[Path] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            key = str(candidate.resolve()) if candidate.exists() else str(candidate)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_candidates.append(candidate)
+
+        return unique_candidates
+
+    def _read_registry_candidate(self, path: Path) -> dict | None:
+        if not path.exists() or path == self.store.path:
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        projects = data.get("projects")
+        if not isinstance(projects, list) or not projects:
+            return None
+        if self._is_known_seed_registry(data):
+            return None
+        return data
 
     def _normalize_project(self, project: dict) -> dict:
         versioning_mode = project.get("versioningMode")

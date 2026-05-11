@@ -1,11 +1,13 @@
 import base64
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.services.app_storage import JsonFileStore
 
 
 client = TestClient(app)
@@ -22,7 +24,7 @@ def test_health() -> None:
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
-    assert response.json()["version"] == "0.6.13"
+    assert response.json()["version"] == "0.6.14"
     assert response.json()["appDataDir"]
 
 
@@ -33,6 +35,152 @@ def test_projects_and_tree() -> None:
 
     active = client.get("/api/projects/active")
     assert active.status_code == 404
+
+
+def test_dev_browser_ports_are_allowed_by_cors() -> None:
+    response = client.options(
+        "/api/config/ai",
+        headers={
+            "Origin": "http://127.0.0.1:1421",
+            "Access-Control-Request-Method": "PUT",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:1421"
+
+
+def test_json_file_store_handles_concurrent_writes(tmp_path) -> None:
+    store = JsonFileStore("concurrent.json")
+
+    def write_revision(index: int) -> None:
+        store.write({"schemaVersion": 1, "revision": index})
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(write_revision, range(40)))
+
+    persisted = json.loads((tmp_path / "concurrent.json").read_text(encoding="utf-8"))
+    assert persisted["schemaVersion"] == 1
+    assert isinstance(persisted["revision"], int)
+    assert list(tmp_path.glob("concurrent.json.*.tmp")) == []
+
+
+def test_seeded_mock_projects_are_ignored_and_recovered_from_backup(tmp_path) -> None:
+    projects_file = tmp_path / "projects.json"
+    projects_file.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 2,
+                "activeProjectId": "project-alpha",
+                "projects": [
+                    {
+                        "id": "project-alpha",
+                        "name": "Proyecto Alpha",
+                        "folderPath": "C:/Knowledge/Mind/Personal",
+                        "icon": "book",
+                        "iconColor": "#65A30D",
+                        "storageMode": "local-files",
+                        "versioningMode": "local-git",
+                        "syncMode": "none",
+                        "authRequired": True,
+                        "githubRepository": None,
+                        "isGitRepository": True,
+                        "active": True,
+                    },
+                    {
+                        "id": "project-beta",
+                        "name": "Proyecto Beta",
+                        "folderPath": "C:/Knowledge/Mind/Personal",
+                        "icon": "boxes",
+                        "iconColor": "#2563EB",
+                        "storageMode": "local-files",
+                        "versioningMode": "none",
+                        "syncMode": "none",
+                        "authRequired": False,
+                        "githubRepository": None,
+                        "isGitRepository": False,
+                        "active": False,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "projects.json.corrupt-20260511152707").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 2,
+                "activeProjectId": "project-real",
+                "projects": [
+                    {
+                        "id": "project-real",
+                        "name": "LKS Next",
+                        "folderPath": str(tmp_path / "LKS Next"),
+                        "icon": "layers",
+                        "iconColor": "#F37021",
+                        "storageMode": "local-files",
+                        "versioningMode": "local-git",
+                        "syncMode": "manual-github",
+                        "authRequired": True,
+                        "githubRepository": {
+                            "owner": "jormazabal",
+                            "repo": "knownext-lksnext",
+                            "defaultRef": None,
+                            "rootPath": "",
+                            "permissions": ["pull", "push"],
+                        },
+                        "isGitRepository": True,
+                        "active": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/projects")
+
+    assert response.status_code == 200
+    assert [project["name"] for project in response.json()] == ["LKS Next"]
+    persisted_registry = json.loads(projects_file.read_text(encoding="utf-8"))
+    assert persisted_registry["activeProjectId"] == "project-real"
+
+
+def test_seeded_mock_projects_are_removed_when_no_real_backup_exists(tmp_path) -> None:
+    projects_file = tmp_path / "projects.json"
+    projects_file.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 2,
+                "activeProjectId": "project-alpha",
+                "projects": [
+                    {
+                        "id": "project-alpha",
+                        "name": "Proyecto Alpha",
+                        "folderPath": "C:/Knowledge/Mind/Personal",
+                        "icon": "book",
+                        "iconColor": "#65A30D",
+                        "storageMode": "local-files",
+                        "versioningMode": "local-git",
+                        "syncMode": "none",
+                        "authRequired": True,
+                        "githubRepository": None,
+                        "isGitRepository": True,
+                        "active": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/projects")
+
+    assert response.status_code == 200
+    assert response.json() == []
+    persisted_registry = json.loads(projects_file.read_text(encoding="utf-8"))
+    assert persisted_registry == {"schemaVersion": 2, "activeProjectId": None, "projects": []}
 
 
 def test_project_tree_reads_local_folder_and_manages_files(tmp_path) -> None:
