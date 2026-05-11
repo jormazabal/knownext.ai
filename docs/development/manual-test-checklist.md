@@ -115,6 +115,10 @@
 - [ ] Hover over the account area and confirm the account menu appears with GitHub login/logout, recoverable drafts, and update actions.
 - [ ] Open the account menu and click Configuración de la app.
 - [ ] Confirm the settings modal opens with a left section list and right configuration pane.
+- [ ] In Servicios, confirm Backend local shows status, endpoint, active version, expected version, app data directory, and last check time.
+- [ ] In Servicios, click Comprobar and confirm the service status refreshes without closing the modal.
+- [ ] In the installed Tauri app, click Reiniciar backend and confirm the backend returns to Operativo or the last error is visible in the service card.
+- [ ] Stop the packaged backend process and confirm KnowNext.ai records the failed health check and restart attempt in `knownext.log`.
 - [ ] In Apariencia, change Idioma and confirm the selection persists after closing and reopening the modal.
 - [ ] In Apariencia, adjust Zoom and confirm the interface scales immediately and persists after restart.
 - [ ] In IA, save an OpenAI API key and confirm only configured/preview status is shown, never the full key.

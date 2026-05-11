@@ -61,6 +61,7 @@ import {
 } from "../lib/runtime/updater";
 import { getTraceLogStatus, openTraceLogFolder, recordTraceLog, type TraceLogStatus } from "../lib/runtime/logging";
 import { openExternalUrl } from "../lib/runtime/links";
+import { getRuntimeServiceStatus, restartBackendService, type RuntimeServicesStatus } from "../lib/runtime/services";
 import {
   createFolder,
   createProjectDocument,
@@ -161,6 +162,8 @@ export function App() {
   const [recoverableDraftsOpen, setRecoverableDraftsOpen] = useState(false);
   const [appSettingsOpen, setAppSettingsOpen] = useState(false);
   const [traceLogStatus, setTraceLogStatus] = useState<TraceLogStatus | null>(null);
+  const [runtimeServicesStatus, setRuntimeServicesStatus] = useState<RuntimeServicesStatus | null>(null);
+  const [runtimeServicesRefreshing, setRuntimeServicesRefreshing] = useState(false);
   const [updateState, setUpdateState] = useState<UpdateState>("idle");
   const [availableUpdate, setAvailableUpdate] = useState<AvailableUpdate | null>(null);
   const [updateProgress, setUpdateProgress] = useState<UpdateDownloadProgress | null>(null);
@@ -325,6 +328,17 @@ export function App() {
 
     return () => window.clearTimeout(timeout);
   }, [configLoaded, diagnosticsConfig.traceLoggingEnabled]);
+
+  useEffect(() => {
+    if (!configLoaded || !appSettingsOpen) return;
+
+    void refreshRuntimeServiceStatus();
+    const interval = window.setInterval(() => {
+      void refreshRuntimeServiceStatus({ silent: true });
+    }, 5000);
+
+    return () => window.clearInterval(interval);
+  }, [configLoaded, appSettingsOpen]);
 
   useEffect(() => {
     if (!configLoaded || !diagnosticsConfig.traceLoggingEnabled) return;
@@ -1289,6 +1303,29 @@ export function App() {
     }
   }
 
+  async function refreshRuntimeServiceStatus(options?: { silent?: boolean }) {
+    if (!options?.silent) setRuntimeServicesRefreshing(true);
+    try {
+      setRuntimeServicesStatus(await getRuntimeServiceStatus());
+    } catch (error) {
+      if (!options?.silent) showError(error, "No se pudo consultar el estado de los servicios.");
+    } finally {
+      if (!options?.silent) setRuntimeServicesRefreshing(false);
+    }
+  }
+
+  async function handleRestartBackendService() {
+    setRuntimeServicesRefreshing(true);
+    try {
+      setRuntimeServicesStatus(await restartBackendService());
+    } catch (error) {
+      showError(error, "No se pudo reiniciar el backend local.", { source: "app.runtimeServices" });
+      await refreshRuntimeServiceStatus({ silent: true });
+    } finally {
+      setRuntimeServicesRefreshing(false);
+    }
+  }
+
   async function handleOpenTraceLogFolder() {
     const folderPath = traceLogStatus?.folderPath;
     if (!folderPath) return;
@@ -1527,6 +1564,8 @@ export function App() {
         ai={aiConfig}
         aiIndexStatus={aiIndexStatus}
         traceLogStatus={traceLogStatus}
+        runtimeServicesStatus={runtimeServicesStatus}
+        runtimeServicesRefreshing={runtimeServicesRefreshing}
         onClose={() => setAppSettingsOpen(false)}
         onAppearanceChange={handleAppearanceConfigChange}
         onDiagnosticsChange={handleDiagnosticsConfigChange}
@@ -1536,6 +1575,8 @@ export function App() {
         onRebuildAiIndex={() => void handleRebuildAiIndex()}
         onDeleteAiIndex={() => void handleDeleteAiIndex()}
         onOpenTraceLogFolder={() => void handleOpenTraceLogFolder()}
+        onRefreshRuntimeServices={() => void refreshRuntimeServiceStatus()}
+        onRestartBackendService={() => void handleRestartBackendService()}
       />
       <AiDeleteConfirmationDialog
         pendingDelete={aiPendingDelete}

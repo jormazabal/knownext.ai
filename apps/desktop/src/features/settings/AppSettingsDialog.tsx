@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { Brain, Eye, FolderOpen, KeyRound, Languages, ListChecks, Trash2, X } from "lucide-react";
+import { Activity, Brain, Eye, FolderOpen, KeyRound, Languages, ListChecks, RefreshCw, RotateCcw, Server, Trash2, X } from "lucide-react";
 import type { AiConfigStatus, AiIndexStatusResponse, AppearanceConfig, DiagnosticsConfig } from "../../types/domain";
 import type { TraceLogStatus } from "../../lib/runtime/logging";
+import type { RuntimeServicesStatus } from "../../lib/runtime/services";
 
-type AppSettingsSection = "appearance" | "ai" | "diagnostics";
+type AppSettingsSection = "services" | "appearance" | "ai" | "diagnostics";
 
 type AppSettingsDialogProps = {
   open: boolean;
@@ -12,6 +13,8 @@ type AppSettingsDialogProps = {
   ai: AiConfigStatus;
   aiIndexStatus: AiIndexStatusResponse | null;
   traceLogStatus: TraceLogStatus | null;
+  runtimeServicesStatus: RuntimeServicesStatus | null;
+  runtimeServicesRefreshing: boolean;
   onClose: () => void;
   onAppearanceChange: (appearance: Partial<AppearanceConfig>) => void;
   onDiagnosticsChange: (diagnostics: Partial<DiagnosticsConfig>) => void;
@@ -21,6 +24,8 @@ type AppSettingsDialogProps = {
   onRebuildAiIndex: () => void;
   onDeleteAiIndex: () => void;
   onOpenTraceLogFolder: () => void;
+  onRefreshRuntimeServices: () => void;
+  onRestartBackendService: () => void;
 };
 
 export function AppSettingsDialog({
@@ -30,6 +35,8 @@ export function AppSettingsDialog({
   ai,
   aiIndexStatus,
   traceLogStatus,
+  runtimeServicesStatus,
+  runtimeServicesRefreshing,
   onClose,
   onAppearanceChange,
   onDiagnosticsChange,
@@ -39,10 +46,13 @@ export function AppSettingsDialog({
   onRebuildAiIndex,
   onDeleteAiIndex,
   onOpenTraceLogFolder,
+  onRefreshRuntimeServices,
+  onRestartBackendService,
 }: AppSettingsDialogProps) {
   const [activeSection, setActiveSection] = useStableSection(open);
   const text = settingsCopy[appearance.language];
   const sections: Array<{ id: AppSettingsSection; label: string; description: string; icon: typeof Eye }> = [
+    { id: "services", label: text.servicesNav, description: text.servicesNavDescription, icon: Activity },
     { id: "appearance", label: text.appearanceNav, description: text.appearanceNavDescription, icon: Eye },
     { id: "ai", label: text.aiNav, description: text.aiNavDescription, icon: Brain },
     { id: "diagnostics", label: text.diagnosticsNav, description: text.diagnosticsNavDescription, icon: ListChecks },
@@ -94,7 +104,15 @@ export function AppSettingsDialog({
           </nav>
 
           <div className="min-h-0 overflow-y-auto px-6 py-5">
-            {activeSection === "appearance" ? (
+            {activeSection === "services" ? (
+              <ServicesSettings
+                runtimeServicesStatus={runtimeServicesStatus}
+                refreshing={runtimeServicesRefreshing}
+                text={text}
+                onRefresh={onRefreshRuntimeServices}
+                onRestartBackendService={onRestartBackendService}
+              />
+            ) : activeSection === "appearance" ? (
               <AppearanceSettings appearance={appearance} text={text} onAppearanceChange={onAppearanceChange} />
             ) : activeSection === "ai" ? (
               <AiSettings
@@ -119,6 +137,135 @@ export function AppSettingsDialog({
           </div>
         </div>
       </section>
+    </div>
+  );
+}
+
+function ServicesSettings({
+  runtimeServicesStatus,
+  refreshing,
+  text,
+  onRefresh,
+  onRestartBackendService,
+}: {
+  runtimeServicesStatus: RuntimeServicesStatus | null;
+  refreshing: boolean;
+  text: SettingsCopy;
+  onRefresh: () => void;
+  onRestartBackendService: () => void;
+}) {
+  const services = runtimeServicesStatus?.services ?? [];
+  const backend = services.find((service) => service.id === "backend");
+
+  return (
+    <div className="space-y-5">
+      <section>
+        <div className="flex items-center gap-2">
+          <Activity size={16} className="text-brand-orange" />
+          <h3 className="text-[13px] font-semibold text-ink-primary">{text.servicesHeading}</h3>
+        </div>
+        <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.servicesDescription}</p>
+      </section>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-line bg-panel px-4 py-3">
+        <div>
+          <p className="text-[11px] font-semibold text-ink-primary">{text.servicesSummary}</p>
+          <p className="mt-1 text-[10px] text-ink-secondary">
+            {runtimeServicesStatus?.checkedAt ? `${text.lastChecked}: ${formatDateTime(runtimeServicesStatus.checkedAt)}` : text.servicesPending}
+          </p>
+        </div>
+        <button
+          className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={refreshing}
+          onClick={onRefresh}
+        >
+          <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
+          {text.refreshServices}
+        </button>
+      </div>
+
+      {backend ? (
+        <ServiceCard service={backend} text={text} refreshing={refreshing} onRestartBackendService={onRestartBackendService} />
+      ) : (
+        <div className="rounded-md border border-line px-4 py-3 text-[11px] text-ink-secondary">{text.servicesPending}</div>
+      )}
+    </div>
+  );
+}
+
+function ServiceCard({
+  service,
+  text,
+  refreshing,
+  onRestartBackendService,
+}: {
+  service: RuntimeServicesStatus["services"][number];
+  text: SettingsCopy;
+  refreshing: boolean;
+  onRestartBackendService: () => void;
+}) {
+  const stateClass =
+    service.status === "running"
+      ? "bg-emerald-50 text-emerald-700"
+      : service.status === "degraded"
+        ? "bg-amber-50 text-amber-700"
+        : "bg-red-50 text-red-700";
+  const dotClass =
+    service.status === "running" ? "bg-emerald-500" : service.status === "degraded" ? "bg-amber-500" : "bg-red-500";
+
+  return (
+    <section className="rounded-md border border-line px-4 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-brand-hover text-brand-orange">
+            <Server size={16} />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-[12px] font-semibold text-ink-primary">{service.name}</p>
+              <span className={`inline-flex items-center gap-1.5 rounded px-2 py-1 text-[10px] font-semibold ${stateClass}`}>
+                <span className={`h-1.5 w-1.5 rounded-full ${dotClass}`} />
+                {service.statusLabel}
+              </span>
+            </div>
+            <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{service.description}</p>
+          </div>
+        </div>
+        <button
+          className="inline-flex h-8 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={!service.canRestart || refreshing}
+          onClick={onRestartBackendService}
+        >
+          <RotateCcw size={14} />
+          {text.restartBackend}
+        </button>
+      </div>
+
+      <dl className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <ServiceField label={text.endpointLabel} value={service.endpoint} mono />
+        <ServiceField label={text.versionLabel} value={service.version ?? text.unavailableValue} />
+        <ServiceField label={text.expectedVersionLabel} value={service.expectedVersion} />
+        <ServiceField label={text.restartAvailableLabel} value={service.canRestart ? text.yes : text.no} />
+        <ServiceField label={text.appDataDirLabel} value={service.appDataDir ?? text.unavailableValue} mono wide />
+        <ServiceField label={text.expectedAppDataDirLabel} value={service.expectedAppDataDir || text.unavailableValue} mono wide />
+        {service.sidecarPath ? <ServiceField label={text.sidecarPathLabel} value={service.sidecarPath} mono wide /> : null}
+      </dl>
+
+      {service.lastError ? (
+        <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2">
+          <p className="text-[10px] font-semibold text-red-700">{text.lastErrorLabel}</p>
+          <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-[10px] leading-4 text-red-700">{service.lastError}</pre>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function ServiceField({ label, value, mono, wide }: { label: string; value: string; mono?: boolean; wide?: boolean }) {
+  return (
+    <div className={["rounded-md border border-line bg-panel px-3 py-2", wide ? "sm:col-span-2" : ""].join(" ")}>
+      <dt className="text-[10px] font-semibold text-ink-secondary">{label}</dt>
+      <dd className={["mt-1 break-all text-[11px] text-ink-primary", mono ? "font-mono" : ""].join(" ")}>{value}</dd>
     </div>
   );
 }
@@ -427,6 +574,15 @@ function describeIndexStatus(status: AiIndexStatusResponse["status"]) {
   return "No indexado";
 }
 
+function formatDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "short",
+    timeStyle: "medium",
+  }).format(date);
+}
+
 type SettingsCopy = typeof settingsCopy.es;
 
 const settingsCopy = {
@@ -436,12 +592,32 @@ const settingsCopy = {
     close: "Cerrar",
     closeSettings: "Cerrar configuración",
     sectionsLabel: "Apartados de configuración",
+    servicesNav: "Servicios",
+    servicesNavDescription: "Backend local y salud",
     appearanceNav: "Apariencia",
     appearanceNavDescription: "Idioma y escala visual",
     aiNav: "IA",
     aiNavDescription: "OpenAI y permisos",
     diagnosticsNav: "Trazas",
     diagnosticsNavDescription: "Registro local de errores",
+    servicesHeading: "Estado de servicios",
+    servicesDescription: "Revisa si los procesos locales necesarios para trabajar están activos. Si el backend cae, KnowNext.ai intenta recuperarlo automáticamente y deja el detalle en el log.",
+    servicesSummary: "Supervisión local",
+    servicesPending: "Consultando estado de servicios",
+    lastChecked: "Última comprobación",
+    refreshServices: "Comprobar",
+    restartBackend: "Reiniciar backend",
+    endpointLabel: "Endpoint",
+    versionLabel: "Versión activa",
+    expectedVersionLabel: "Versión esperada",
+    restartAvailableLabel: "Reinicio automático",
+    appDataDirLabel: "Datos usados por el backend",
+    expectedAppDataDirLabel: "Datos esperados por la app",
+    sidecarPathLabel: "Ejecutable sidecar",
+    lastErrorLabel: "Último problema detectado",
+    unavailableValue: "No disponible",
+    yes: "Sí",
+    no: "No",
     appearanceHeading: "Apariencia",
     appearanceDescription: "Ajusta cómo se presenta la interfaz en este equipo.",
     languageLabel: "Idioma",
@@ -483,12 +659,32 @@ const settingsCopy = {
     close: "Close",
     closeSettings: "Close settings",
     sectionsLabel: "Settings sections",
+    servicesNav: "Services",
+    servicesNavDescription: "Local backend health",
     appearanceNav: "Appearance",
     appearanceNavDescription: "Language and visual scale",
     aiNav: "AI",
     aiNavDescription: "OpenAI and permissions",
     diagnosticsNav: "Traces",
     diagnosticsNavDescription: "Local error logging",
+    servicesHeading: "Service status",
+    servicesDescription: "Check whether the local processes required by the workspace are available. If the backend stops, KnowNext.ai tries to recover it automatically and records the detail in the log.",
+    servicesSummary: "Local supervision",
+    servicesPending: "Checking service status",
+    lastChecked: "Last checked",
+    refreshServices: "Check",
+    restartBackend: "Restart backend",
+    endpointLabel: "Endpoint",
+    versionLabel: "Active version",
+    expectedVersionLabel: "Expected version",
+    restartAvailableLabel: "Automatic restart",
+    appDataDirLabel: "Data used by backend",
+    expectedAppDataDirLabel: "Data expected by app",
+    sidecarPathLabel: "Sidecar executable",
+    lastErrorLabel: "Last detected problem",
+    unavailableValue: "Unavailable",
+    yes: "Yes",
+    no: "No",
     appearanceHeading: "Appearance",
     appearanceDescription: "Adjust how the interface is presented on this computer.",
     languageLabel: "Language",
@@ -527,10 +723,10 @@ const settingsCopy = {
 };
 
 function useStableSection(open: boolean): [AppSettingsSection, (section: AppSettingsSection) => void] {
-  const [activeSection, setActiveSection] = useState<AppSettingsSection>("appearance");
+  const [activeSection, setActiveSection] = useState<AppSettingsSection>("services");
 
   useEffect(() => {
-    if (open) setActiveSection("appearance");
+    if (open) setActiveSection("services");
   }, [open]);
 
   return [activeSection, setActiveSection];

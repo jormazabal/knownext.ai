@@ -15,7 +15,7 @@ Backend code lives in `backend/app`.
 - `project_service`: project list and document tree.
 - `filesystem_service`: local project folder scanning and Markdown file operations for the navigation tree.
 - `config_service`: application configuration, including persisted layout widths, appearance preferences, and diagnostics settings.
-- `logging_service`: optional trace logging to a dedicated local log folder when diagnostics logging is enabled.
+- `logging_service`: trace logging to a dedicated local log folder. Error and critical entries are always written; informational entries require diagnostics logging to be enabled.
 - `app_storage`: shared JSON file storage rooted in the KnowNext.ai application data directory.
 - `document_service`: document loading and saving.
 - `draft_service`: internal recoverable document drafts, stored in the KnowNext.ai app data directory and never beside project documentation files. Draft keys are internal identifiers derived from draft files, not user paths or product document ids.
@@ -34,7 +34,7 @@ The local API owns application metadata files. React must access them through AP
 - `config.json`: user-level application configuration such as sidebar and history panel widths, appearance settings, diagnostics settings, plus the open document tabs per project, active document id, and tab order.
 - `ai-conversations/*.json`: project-scoped AI conversation events, including user prompts, assistant responses, and file-operation events.
 - `ai-pending-deletes.json`: short-lived AI delete requests waiting for explicit UI confirmation.
-- `logs/knownext.log`: optional JSON-lines trace file for user-visible errors and runtime failures. This folder is dedicated to logs and is only written when trace logging is enabled.
+- `logs/knownext.log`: readable trace blocks for user-visible errors, runtime failures, backend startup/shutdown, and sidecar supervision. This folder is dedicated to logs; errors are always written and informational entries depend on diagnostics settings.
 - `credentials.json`: GitHub auth state and OpenAI API key outside `projects.json`; secrets are protected with Windows DPAPI when available and fall back to plain local JSON only on unsupported development/test environments.
 - `drafts/*.json`: internal unsaved document working copies with their base file fingerprint. These files are recoverable application state, not project documentation, and must not be written into project folders. Orphan drafts are conserved until the user restores or discards them.
 

@@ -36,6 +36,7 @@ Any remaining mock fixtures must be limited to tests, Storybook/demo surfaces, o
 - Application settings for appearance and diagnostics also go through `src/lib/api/config.ts`; UI components receive these values as props and dispatch setting changes to the root app state.
 - AI settings also go through `src/lib/api/config.ts` and `src/lib/api/ai.ts`. The OpenAI key status is visible to React, but the secret value is never returned to the frontend after save.
 - Runtime trace logging helpers live under `src/lib/runtime/logging.ts`. React can request log status, record frontend errors, and ask the runtime to open the dedicated log folder, but it does not write log files directly.
+- Runtime service helpers live under `src/lib/runtime/services.ts`. React can request local service health and ask the installed Tauri runtime to restart the backend, but it does not spawn or kill processes directly.
 - The document tree goes through `src/lib/api/projects.ts` and reflects the Markdown files and folders under the active project's local folder.
 - Open documents are tracked as per-tab editing sessions in the root app state. Each session owns its own Markdown content, dirty state, draft metadata, and Milkdown instance while the tab remains open.
 - Unsaved document changes are autosaved through `src/lib/api/documents.ts` to FastAPI-managed internal drafts. React must not write draft files directly.
@@ -72,6 +73,7 @@ Any remaining mock fixtures must be limited to tests, Storybook/demo surfaces, o
 
 - `Configuración de la app` opens a modal settings surface over the current workspace.
 - The modal has a left settings list and a right detail pane.
+- `Servicios` is the first section and shows local backend health, version/profile details, last error, manual refresh, and backend restart where supported by the installed desktop runtime.
 - `Apariencia` owns the persisted locale and zoom percentage.
 - `IA` owns OpenAI provider status, action permissions, and project documentation indexing controls.
 - `Trazas` owns the persisted trace logging toggle and the action to open the dedicated log folder.

@@ -108,12 +108,15 @@ The modal requirements are:
 
 - The left side lists settings sections.
 - The right side shows the options for the selected section.
+- `Servicios` is the first section and shows the health of local runtime services, including the backend endpoint, active/expected version, app data profile, and the latest diagnostic error.
+- In the installed desktop app, `Servicios` includes a manual backend restart action. The runtime also monitors the backend and attempts to restart it automatically when the health check fails.
 - `Apariencia` includes a language selector and an interface zoom control.
 - The language selector persists the selected locale and applies it to the application document language.
 - The zoom control persists a percentage between 85% and 125% and applies it to the current interface immediately.
 - `Trazas` includes a toggle for local trace logging.
 - When trace logging is enabled, KnowNext.ai writes user-visible errors and unhandled runtime failures to `knownext.log`.
 - Logs live in a dedicated `logs` folder under the KnowNext.ai app data directory.
+- Backend startup failures, failed health checks, supervisor restart attempts, and manual restarts must be written to `knownext.log` with enough detail to identify version/profile mismatches and sidecar launch problems.
 - When trace logging is enabled, the settings panel shows an action to open that dedicated log folder in Windows Explorer.
 - Logging must not expose prompts, document contents, or provider secrets; entries are limited to timestamp, level, source, message, and technical detail.
 - If the local API is unavailable, the UI still shows the normal API error. Trace logging resumes when the backend is available and the setting remains enabled.

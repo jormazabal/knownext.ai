@@ -1,7 +1,7 @@
-use std::io::Write;
+use std::io::{Read, Write};
 #[cfg(all(desktop, not(debug_assertions)))]
-use std::io::{BufRead, BufReader, Read};
-#[cfg(all(desktop, not(debug_assertions)))]
+use std::io::{BufRead, BufReader};
+#[cfg(desktop)]
 use std::net::{TcpStream, ToSocketAddrs};
 #[cfg(all(desktop, not(debug_assertions)))]
 #[cfg(target_os = "windows")]
@@ -12,7 +12,7 @@ use std::path::PathBuf;
 #[cfg(all(desktop, not(debug_assertions)))]
 use std::process::{Child, Stdio};
 use std::sync::Mutex;
-#[cfg(all(desktop, not(debug_assertions)))]
+#[cfg(desktop)]
 use std::time::Duration;
 use tauri::Manager;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
@@ -22,25 +22,59 @@ static TRACE_LOG_LOCK: Mutex<()> = Mutex::new(());
 const BACKEND_SIDECAR_EXE: &str = "knownext-backend.exe";
 #[cfg(all(desktop, not(debug_assertions)))]
 const BACKEND_SIDECAR_TARGET_EXE: &str = "knownext-backend-x86_64-pc-windows-msvc.exe";
-#[cfg(all(desktop, not(debug_assertions)))]
 const BACKEND_HOST: &str = "127.0.0.1";
-#[cfg(all(desktop, not(debug_assertions)))]
 const BACKEND_PORT: u16 = 8765;
 #[cfg(all(desktop, not(debug_assertions), target_os = "windows"))]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
-#[cfg(all(desktop, not(debug_assertions)))]
+#[cfg(desktop)]
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[cfg(all(desktop, not(debug_assertions)))]
 struct BackendProcess(Mutex<Option<Child>>);
 
 #[cfg(all(desktop, not(debug_assertions)))]
+struct BackendStartLock(Mutex<()>);
+
+#[cfg(desktop)]
 #[derive(serde::Deserialize)]
 struct BackendHealth {
     status: String,
     version: Option<String>,
     #[serde(rename = "appDataDir")]
     app_data_dir: Option<String>,
+}
+
+#[cfg(desktop)]
+#[derive(serde::Serialize)]
+struct RuntimeServicesStatus {
+    services: Vec<RuntimeServiceStatus>,
+    #[serde(rename = "checkedAt")]
+    checked_at: String,
+}
+
+#[cfg(desktop)]
+#[derive(serde::Serialize)]
+struct RuntimeServiceStatus {
+    id: String,
+    name: String,
+    status: String,
+    #[serde(rename = "statusLabel")]
+    status_label: String,
+    description: String,
+    endpoint: String,
+    #[serde(rename = "expectedVersion")]
+    expected_version: String,
+    version: Option<String>,
+    #[serde(rename = "expectedAppDataDir")]
+    expected_app_data_dir: String,
+    #[serde(rename = "appDataDir")]
+    app_data_dir: Option<String>,
+    #[serde(rename = "sidecarPath")]
+    sidecar_path: Option<String>,
+    #[serde(rename = "lastError")]
+    last_error: Option<String>,
+    #[serde(rename = "canRestart")]
+    can_restart: bool,
 }
 
 #[cfg(all(desktop, not(debug_assertions)))]
@@ -175,7 +209,7 @@ fn open_folder(folder_path: String) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(all(desktop, not(debug_assertions)))]
+#[cfg(desktop)]
 fn backend_socket_addr() -> Result<std::net::SocketAddr, String> {
     (BACKEND_HOST, BACKEND_PORT)
         .to_socket_addrs()
@@ -184,30 +218,36 @@ fn backend_socket_addr() -> Result<std::net::SocketAddr, String> {
         .ok_or_else(|| "No backend socket address resolved.".to_string())
 }
 
-#[cfg(all(desktop, not(debug_assertions)))]
-fn backend_health() -> Option<BackendHealth> {
-    let Ok(address) = backend_socket_addr() else {
-        return None;
-    };
-    let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(350)) else {
-        return None;
-    };
+#[cfg(desktop)]
+fn backend_health_result() -> Result<BackendHealth, String> {
+    let address = backend_socket_addr()?;
+    let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(350))
+        .map_err(|error| format!("Could not connect to {BACKEND_HOST}:{BACKEND_PORT}: {error}"))?;
     let _ = stream.set_read_timeout(Some(Duration::from_millis(700)));
     let _ = stream.set_write_timeout(Some(Duration::from_millis(700)));
-    if stream
+    stream
         .write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
-        .is_err()
-    {
-        return None;
-    }
+        .map_err(|error| format!("Could not write /health request: {error}"))?;
 
     let mut response = String::new();
-    if stream.read_to_string(&mut response).is_err() || !response.contains("200 OK") {
-        return None;
+    stream
+        .read_to_string(&mut response)
+        .map_err(|error| format!("Could not read /health response: {error}"))?;
+    if !response.contains("200 OK") {
+        let status_line = response.lines().next().unwrap_or("empty response");
+        return Err(format!("/health returned {status_line}"));
     }
 
-    let (_, body) = response.split_once("\r\n\r\n")?;
-    serde_json::from_str::<BackendHealth>(body.trim()).ok()
+    let (_, body) = response
+        .split_once("\r\n\r\n")
+        .ok_or_else(|| "/health response did not contain an HTTP body.".to_string())?;
+    serde_json::from_str::<BackendHealth>(body.trim())
+        .map_err(|error| format!("Could not parse /health response: {error}"))
+}
+
+#[cfg(all(desktop, not(debug_assertions)))]
+fn backend_health() -> Option<BackendHealth> {
+    backend_health_result().ok()
 }
 
 #[cfg(all(desktop, not(debug_assertions)))]
@@ -248,6 +288,162 @@ fn incompatible_backend_detail(expected_app_data_dir: &str) -> String {
             APP_VERSION, expected_app_data_dir
         ),
     }
+}
+
+#[cfg(desktop)]
+fn expected_app_data_dir(app: &tauri::AppHandle) -> Result<String, String> {
+    app.path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())
+        .map(|path| path.to_string_lossy().to_string())
+}
+
+#[cfg(all(desktop, not(debug_assertions)))]
+fn backend_child_health_note(app: &tauri::AppHandle) -> Option<String> {
+    let process_state = app.state::<BackendProcess>();
+    let Ok(mut child_slot) = process_state.0.lock() else {
+        return Some("Could not inspect the backend process state.".to_string());
+    };
+    let child = child_slot.as_mut()?;
+    match child.try_wait() {
+        Ok(Some(status)) => {
+            *child_slot = None;
+            Some(format!("Bundled backend process exited: {status}"))
+        }
+        Ok(None) => Some("Bundled backend process is running, but /health is not available.".to_string()),
+        Err(error) => Some(format!("Could not inspect backend process: {error}")),
+    }
+}
+
+#[cfg(any(not(desktop), debug_assertions))]
+fn backend_child_health_note(_app: &tauri::AppHandle) -> Option<String> {
+    None
+}
+
+#[cfg(all(desktop, not(debug_assertions)))]
+fn resolved_sidecar_path_for_status(app: &tauri::AppHandle) -> Option<String> {
+    resolve_backend_sidecar_path(app)
+        .ok()
+        .map(|path| path.to_string_lossy().to_string())
+}
+
+#[cfg(any(not(desktop), debug_assertions))]
+fn resolved_sidecar_path_for_status(_app: &tauri::AppHandle) -> Option<String> {
+    None
+}
+
+#[cfg(desktop)]
+fn backend_service_status(app: &tauri::AppHandle) -> Result<RuntimeServiceStatus, String> {
+    let expected_app_data_dir = expected_app_data_dir(app)?;
+    let health_result = backend_health_result();
+    let sidecar_path = resolved_sidecar_path_for_status(app);
+    let mut version = None;
+    let mut app_data_dir = None;
+    let mut last_error = None;
+
+    let (status, status_label, description) = match health_result {
+        Ok(health) => {
+            version = health.version.clone();
+            app_data_dir = health.app_data_dir.clone();
+            if health.status == "ok"
+                && health.version.as_deref() == Some(APP_VERSION)
+                && health.app_data_dir.as_deref() == Some(expected_app_data_dir.as_str())
+            {
+                (
+                    "running".to_string(),
+                    "Operativo".to_string(),
+                    "La API local responde y coincide con esta instalación.".to_string(),
+                )
+            } else {
+                last_error = Some(format!(
+                    "expectedVersion={}\nactualVersion={}\nexpectedAppDataDir={}\nactualAppDataDir={}",
+                    APP_VERSION,
+                    health.version.unwrap_or_else(|| "unknown".to_string()),
+                    expected_app_data_dir,
+                    health.app_data_dir.unwrap_or_else(|| "unknown".to_string())
+                ));
+                (
+                    "degraded".to_string(),
+                    "Incompatible".to_string(),
+                    "Hay una API local en el puerto esperado, pero no corresponde con esta versión o perfil.".to_string(),
+                )
+            }
+        }
+        Err(error) => {
+            let process_note = backend_child_health_note(app);
+            last_error = Some(match process_note {
+                Some(note) => format!("{error}\n{note}"),
+                None => error,
+            });
+            (
+                "unavailable".to_string(),
+                "No disponible".to_string(),
+                "La API local no responde al chequeo de salud.".to_string(),
+            )
+        }
+    };
+
+    Ok(RuntimeServiceStatus {
+        id: "backend".to_string(),
+        name: "Backend local".to_string(),
+        status,
+        status_label,
+        description,
+        endpoint: format!("http://{BACKEND_HOST}:{BACKEND_PORT}/health"),
+        expected_version: APP_VERSION.to_string(),
+        version,
+        expected_app_data_dir,
+        app_data_dir,
+        sidecar_path,
+        last_error,
+        can_restart: cfg!(all(desktop, not(debug_assertions))),
+    })
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+fn get_runtime_service_status(app: tauri::AppHandle) -> Result<RuntimeServicesStatus, String> {
+    Ok(RuntimeServicesStatus {
+        services: vec![backend_service_status(&app)?],
+        checked_at: trace_timestamp(),
+    })
+}
+
+#[cfg(all(desktop, not(debug_assertions)))]
+#[tauri::command]
+fn restart_backend_service(app: tauri::AppHandle) -> Result<RuntimeServicesStatus, String> {
+    append_trace_log(
+        &app,
+        "warning",
+        "backend.sidecar",
+        "Manual backend restart requested from application settings.",
+        None,
+    )?;
+
+    {
+        let process_state = app.state::<BackendProcess>();
+        let mut child_slot = process_state.0.lock().map_err(|error| error.to_string())?;
+        if let Some(mut child) = child_slot.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+    stop_backend_processes_on_port(&app);
+    start_backend_sidecar(&app)?;
+    get_runtime_service_status(app)
+}
+
+#[cfg(all(desktop, debug_assertions))]
+#[tauri::command]
+fn restart_backend_service(app: tauri::AppHandle) -> Result<RuntimeServicesStatus, String> {
+    let _ = append_trace_log(
+        &app,
+        "warning",
+        "backend.sidecar",
+        "Manual backend restart requested, but sidecar supervision is only active in packaged desktop builds.",
+        None,
+    );
+    Err("El reinicio automático del backend solo está disponible en la aplicación instalada.".to_string())
 }
 
 #[cfg(all(desktop, not(debug_assertions), target_os = "windows"))]
@@ -381,6 +577,8 @@ fn spawn_backend_log_reader<R>(
 
 #[cfg(all(desktop, not(debug_assertions)))]
 fn start_backend_sidecar(app: &tauri::AppHandle) -> Result<(), String> {
+    let start_lock = app.state::<BackendStartLock>();
+    let _guard = start_lock.0.lock().map_err(|error| error.to_string())?;
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -466,11 +664,44 @@ fn start_backend_sidecar(app: &tauri::AppHandle) -> Result<(), String> {
     }
 }
 
+#[cfg(all(desktop, not(debug_assertions)))]
+fn spawn_backend_monitor(app: tauri::AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(15));
+        let Ok(app_data_dir) = expected_app_data_dir(&app) else {
+            continue;
+        };
+        if is_expected_backend_healthy(&app_data_dir) {
+            continue;
+        }
+
+        let detail = incompatible_backend_detail(&app_data_dir);
+        let _ = append_trace_log(
+            &app,
+            "error",
+            "backend.sidecar",
+            "Backend health check failed. The supervisor will try to restart the local API.",
+            Some(&detail),
+        );
+        if let Err(error) = start_backend_sidecar(&app) {
+            let _ = append_trace_log(
+                &app,
+                "error",
+                "backend.sidecar",
+                "Backend supervisor could not restart the local API.",
+                Some(&error),
+            );
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
     #[cfg(all(desktop, not(debug_assertions)))]
-    let builder = builder.manage(BackendProcess(Mutex::new(None)));
+    let builder = builder
+        .manage(BackendProcess(Mutex::new(None)))
+        .manage(BackendStartLock(Mutex::new(())));
 
     builder
         .plugin(tauri_plugin_dialog::init())
@@ -491,13 +722,17 @@ pub fn run() {
                     Some(&error),
                 );
             }
+            #[cfg(all(desktop, not(debug_assertions)))]
+            spawn_backend_monitor(app.handle().clone());
 
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_trace_log_status,
             record_trace_log,
-            open_folder
+            open_folder,
+            get_runtime_service_status,
+            restart_backend_service
         ])
         .run(tauri::generate_context!())
         .expect("error while running KnowNext.ai");
