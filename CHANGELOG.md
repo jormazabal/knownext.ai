@@ -2,6 +2,15 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.6.15 - 2026-05-11
+
+- Added managed browser-project storage so web-created projects live inside the backend web sandbox instead of exposing or scanning arbitrary local repository folders.
+- Improved the project creation and editing experience for browser and desktop modes, including clearer web-mode restrictions, safer editable fields, a more compact project editor, and hidden backend paths in the browser UI.
+- Hardened startup API readiness and transient GET requests so browser refreshes do not surface local API connection toasts while the backend is still becoming ready.
+- Fixed RAG index status checks so the UI does not call the index endpoint when document indexing is disabled, and corrected the backend index-status response for enabled RAG flows.
+- Added tests and documentation for managed project storage, web-mode project creation, editor behavior, and AI index-status handling.
+- Updated release metadata and installer download links for `0.6.15`.
+
 ## 0.6.14 - 2026-05-11
 
 - Separated desktop and browser development API profiles so the installed Windows app uses `8765` with the desktop app-data directory while the browser build uses `8766` with its own web app-data directory.

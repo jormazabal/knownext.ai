@@ -140,7 +140,7 @@ class AiService:
     def get_index_status(self, project_id: str) -> AiIndexStatusResponse:
         project_service.get_project_tree(project_id)
         rag = config_service.get_config().ai.rag
-        return AiIndexStatusResponse(projectId=project_id, enabled=rag.enabled, **rag.model_dump())
+        return self._index_status_response(project_id, rag)
 
     def rebuild_index(self, project_id: str) -> AiIndexStatusResponse:
         project_root = project_service._get_project_root(project_id)
@@ -159,7 +159,7 @@ class AiService:
                 "error": None,
             })
         updated = config_service.update_config(AppConfigUpdate(ai=config.ai.model_copy(update={"rag": next_rag})))
-        return AiIndexStatusResponse(projectId=project_id, enabled=updated.ai.rag.enabled, **updated.ai.rag.model_dump())
+        return self._index_status_response(project_id, updated.ai.rag)
 
     def delete_index(self, project_id: str) -> AiIndexStatusResponse:
         project_service.get_project_tree(project_id)
@@ -178,7 +178,10 @@ class AiService:
             "error": None,
         })
         updated = config_service.update_config(AppConfigUpdate(ai=config.ai.model_copy(update={"rag": next_rag})))
-        return AiIndexStatusResponse(projectId=project_id, enabled=updated.ai.rag.enabled, **updated.ai.rag.model_dump())
+        return self._index_status_response(project_id, updated.ai.rag)
+
+    def _index_status_response(self, project_id: str, rag: Any) -> AiIndexStatusResponse:
+        return AiIndexStatusResponse(projectId=project_id, **rag.model_dump())
 
     def _execute_plan(self, project_id: str, interaction_id: str, payload: AiInteractionRequest, plan: dict[str, Any]) -> AiInteractionResponse:
         ai_config = config_service.get_config().ai

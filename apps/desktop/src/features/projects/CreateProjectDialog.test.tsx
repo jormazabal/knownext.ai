@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CreateProjectDialog } from "./CreateProjectDialog";
 import type { Project } from "../../types/domain";
 
@@ -10,9 +10,17 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: openDialog,
 }));
 
+beforeEach(() => {
+  Object.defineProperty(window, "__TAURI_INTERNALS__", {
+    configurable: true,
+    value: {},
+  });
+});
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
   openDialog.mockReset();
   Reflect.deleteProperty(window, "showDirectoryPicker");
 });
@@ -103,11 +111,11 @@ describe("CreateProjectDialog", () => {
       />,
     );
 
-    expect(screen.getByText(/repositorio github existente/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/repositorio github existente/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/copia local gestionada/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/manual con github/i)).toBeInTheDocument();
     expect(screen.getByText("knownext/docs")).toBeInTheDocument();
-    expect(screen.getByText(/solo lectura/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/solo lectura/i).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: /seleccionar/i })).not.toBeInTheDocument();
 
     await userEvent.clear(screen.getByLabelText(/nombre del proyecto/i));
@@ -245,10 +253,38 @@ describe("CreateProjectDialog", () => {
     }));
   });
 
-  it("falls back to the browser system folder picker outside Tauri", async () => {
+  it("uses fixed backend storage for browser-oriented creation", async () => {
+    const onCreate = vi.fn();
+
+    render(
+      <CreateProjectDialog
+        open
+        runtimeMode="web"
+        onClose={vi.fn()}
+        onCreate={onCreate}
+      />,
+    );
+
+    expect(screen.getByRole("tab", { name: /proyecto web nuevo/i })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /carpeta local existente/i })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
+    expect(screen.getByText(/almacenamiento web gestionado/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^carpeta local/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /siguiente/i })).toBeEnabled();
+
+    await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
+    await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
+    await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
+    await userEvent.click(screen.getByRole("button", { name: /crear proyecto/i }));
+
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+      folderPath: "",
+      creationMode: "new-local",
+    }));
+  });
+
+  it("keeps the project folder read-only in browser edit mode", async () => {
     const onUpdate = vi.fn();
-    openDialog.mockRejectedValue(new Error("Tauri dialog unavailable"));
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Runtime API unavailable")));
     const showDirectoryPicker = vi.fn().mockResolvedValue({ name: "knownext.ai" });
     Object.defineProperty(window, "showDirectoryPicker", {
       configurable: true,
@@ -258,6 +294,7 @@ describe("CreateProjectDialog", () => {
     render(
       <CreateProjectDialog
         open
+        runtimeMode="web"
         mode="edit"
         project={activeProject}
         onClose={vi.fn()}
@@ -266,10 +303,12 @@ describe("CreateProjectDialog", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: /seleccionar/i }));
-
-    expect(showDirectoryPicker).toHaveBeenCalled();
-    expect(screen.getByDisplayValue("knownext.ai")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /seleccionar/i })).not.toBeInTheDocument();
+    expect(showDirectoryPicker).not.toHaveBeenCalled();
+    expect(screen.queryByText("C:\\Documentacion\\Proyecto Beta")).not.toBeInTheDocument();
+    expect(screen.queryByText(/sandbox del backend web/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/carpeta de trabajo/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/backend web gestionado/i)).toBeInTheDocument();
   });
 
   it("uses the local runtime API outside Tauri to keep the full selected path", async () => {

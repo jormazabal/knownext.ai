@@ -36,7 +36,7 @@ import {
   saveOpenAiKey,
   sendAiInteraction,
 } from "../lib/api/ai";
-import { API_BASE_URL, ApiError, getApiErrorMessage, isApiConnectionError, isBackendEnabled } from "../lib/api/client";
+import { API_BASE_URL, ApiError, getApiErrorMessage, isApiConnectionError, isBackendEnabled, waitForApiReady } from "../lib/api/client";
 import {
   discardDocumentDraft,
   discardOrphanDraft,
@@ -183,6 +183,7 @@ export function App() {
     void (async () => {
       const localPreferences = readLocalAppPreferences();
       try {
+        await waitForApiReady();
         const [projectList, appConfig, auth, capabilities, loadedAiConfig] = await Promise.all([
           listProjects(),
           getAppConfig(),
@@ -1233,10 +1234,10 @@ export function App() {
 
   async function refreshAiState(projectId = activeProject?.id) {
     try {
-      const [nextAiConfig, conversation, indexStatus] = await Promise.all([
-        getAiConfig(),
+      const nextAiConfig = await getAiConfig();
+      const [conversation, indexStatus] = await Promise.all([
         projectId ? getAiConversation(projectId) : Promise.resolve({ events: [] }),
-        projectId ? getAiIndexStatus(projectId) : Promise.resolve(null),
+        projectId && nextAiConfig.rag.enabled ? getAiIndexStatus(projectId) : Promise.resolve(null),
       ]);
       setAiConfig(nextAiConfig);
       setAiConversationEvents(conversation.events);
