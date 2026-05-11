@@ -49,6 +49,10 @@ describe("CreateProjectDialog", () => {
     expect(screen.getByRole("heading", { name: /editar proyecto de documentación/i })).toBeInTheDocument();
     expect(screen.getByDisplayValue("Proyecto Beta")).toBeInTheDocument();
     expect(screen.getByDisplayValue("C:\\Documentacion\\Proyecto Beta")).toBeInTheDocument();
+    expect(screen.getByText(/configuración/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/carpeta local/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/archivos locales/i)).toBeInTheDocument();
+    expect(screen.getByText(/sin sincronización remota/i)).toBeInTheDocument();
 
     await userEvent.clear(screen.getByLabelText(/nombre del proyecto/i));
     await userEvent.type(screen.getByLabelText(/nombre del proyecto/i), "Proyecto Beta actualizado");
@@ -64,6 +68,68 @@ describe("CreateProjectDialog", () => {
       versioningMode: "none",
       syncMode: "none",
       githubRepository: null,
+      publishToGithub: null,
+    });
+  });
+
+  it("keeps GitHub project technical configuration read-only while editing identity", async () => {
+    const onUpdate = vi.fn();
+    const githubProject: Project = {
+      ...activeProject,
+      id: "project-github",
+      name: "Docs GitHub",
+      folderPath: "C:\\Users\\Joseba\\AppData\\Roaming\\Knownext\\github-cache\\project-github",
+      storageMode: "local-cache",
+      versioningMode: "github-api",
+      syncMode: "manual-github",
+      authRequired: true,
+      githubRepository: {
+        owner: "knownext",
+        repo: "docs",
+        defaultRef: "main",
+        rootPath: "",
+        permissions: ["pull", "push"],
+      },
+    };
+
+    render(
+      <CreateProjectDialog
+        open
+        mode="edit"
+        project={githubProject}
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onUpdate={onUpdate}
+      />,
+    );
+
+    expect(screen.getByText(/repositorio github existente/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/copia local gestionada/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/manual con github/i)).toBeInTheDocument();
+    expect(screen.getByText("knownext/docs")).toBeInTheDocument();
+    expect(screen.getByText(/solo lectura/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /seleccionar/i })).not.toBeInTheDocument();
+
+    await userEvent.clear(screen.getByLabelText(/nombre del proyecto/i));
+    await userEvent.type(screen.getByLabelText(/nombre del proyecto/i), "Docs GitHub editado");
+    await userEvent.click(screen.getByRole("button", { name: /guardar cambios/i }));
+
+    expect(onUpdate).toHaveBeenCalledWith("project-github", {
+      name: "Docs GitHub editado",
+      icon: "folder",
+      iconColor: "#F37021",
+      folderPath: "C:\\Users\\Joseba\\AppData\\Roaming\\Knownext\\github-cache\\project-github",
+      creationMode: "open-local",
+      storageMode: "local-cache",
+      versioningMode: "github-api",
+      syncMode: "manual-github",
+      githubRepository: {
+        owner: "knownext",
+        repo: "docs",
+        defaultRef: "main",
+        rootPath: "",
+        permissions: ["pull", "push"],
+      },
       publishToGithub: null,
     });
   });
