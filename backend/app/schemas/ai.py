@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 AiInteractionMode = Literal["document", "project"]
 AiInteractionStatus = Literal["completed", "blocked", "error"]
 AiInteractionDisplay = Literal["bubble", "conversation", "none"]
+AiModelId = Literal["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"]
 AiOperationType = Literal[
     "document_modified",
     "folder_created",
@@ -47,6 +48,7 @@ class AiRagConfig(BaseModel):
 
 class AiConfig(BaseModel):
     provider: Literal["openai"] = "openai"
+    model: AiModelId = "gpt-5.4-mini"
     permissions: AiPermissions = Field(default_factory=AiPermissions)
     rag: AiRagConfig = Field(default_factory=AiRagConfig)
 

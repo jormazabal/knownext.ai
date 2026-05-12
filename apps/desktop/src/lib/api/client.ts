@@ -74,6 +74,8 @@ export type ApiRequestInit = RequestInit & {
 };
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 7000;
+const BROWSER_BACKEND_DISCOVERY_PORTS = [8766, 8767, 8768, 8769, 8770];
+const BROWSER_BACKEND_DISCOVERY_TIMEOUT_MS = 450;
 
 export async function requestJson<T>(path: string, init?: ApiRequestInit): Promise<T> {
   await initializeApiBaseUrl();
@@ -96,6 +98,9 @@ export async function requestJson<T>(path: string, init?: ApiRequestInit): Promi
 
 export async function waitForApiReady(options: { attempts?: number; intervalMs?: number } = {}) {
   await initializeApiBaseUrl();
+  if (!isTauriRuntime()) {
+    await discoverCompatibleBrowserBackend();
+  }
   const attempts = options.attempts ?? 20;
   const intervalMs = options.intervalMs ?? 250;
   let lastError: unknown;
@@ -116,6 +121,36 @@ export async function waitForApiReady(options: { attempts?: number; intervalMs?:
   }
 
   throw lastError;
+}
+
+async function discoverCompatibleBrowserBackend() {
+  const candidates = buildBrowserBackendCandidates();
+  for (const baseUrl of candidates) {
+    try {
+      const response = await fetchWithTimeout(`${baseUrl}/health`, {}, BROWSER_BACKEND_DISCOVERY_TIMEOUT_MS);
+      if (!response.ok) continue;
+      const health = (await response.json()) as BackendHealth;
+      if (isCompatibleBackendHealth(health)) {
+        setApiBaseUrl(baseUrl);
+        return;
+      }
+    } catch {
+      // Try the next development port.
+    }
+  }
+}
+
+function buildBrowserBackendCandidates() {
+  const current = API_BASE_URL.replace(/\/+$/, "");
+  const candidates = new Set<string>([current]);
+  for (const port of BROWSER_BACKEND_DISCOVERY_PORTS) {
+    candidates.add(`http://127.0.0.1:${port}`);
+  }
+  return Array.from(candidates);
+}
+
+function isCompatibleBackendHealth(health: BackendHealth) {
+  return health.app === "knownext" && health.status === "ok" && health.profile === expectedBackendProfile();
 }
 
 async function requestJsonOnce<T>(path: string, init?: ApiRequestInit): Promise<T> {

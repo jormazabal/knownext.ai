@@ -131,8 +131,11 @@ export type AiRagConfig = {
   error?: string | null;
 };
 
+export type AiModelId = "gpt-5.5" | "gpt-5.4" | "gpt-5.4-mini" | "gpt-5.4-nano";
+
 export type AiConfig = {
   provider: "openai";
+  model: AiModelId;
   permissions: AiPermissionsConfig;
   rag: AiRagConfig;
 };

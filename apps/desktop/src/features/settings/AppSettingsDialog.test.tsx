@@ -5,6 +5,7 @@ import { AppSettingsDialog } from "./AppSettingsDialog";
 
 afterEach(() => {
   cleanup();
+  vi.clearAllMocks();
 });
 
 const baseProps = {
@@ -157,5 +158,73 @@ describe("AppSettingsDialog", () => {
 
     expect(screen.getByRole("button", { name: /reiniciar backend/i })).toBeDisabled();
     expect(screen.getByText(/modo web\/desarrollo/i)).toBeInTheDocument();
+  });
+
+  it("copies the backend diagnostic and shows feedback", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    render(
+      <AppSettingsDialog
+        {...baseProps}
+        runtimeServicesStatus={{
+          checkedAt: "2026-05-11T17:30:00.000Z",
+          services: [
+            {
+              id: "backend",
+              name: "Backend local",
+              status: "degraded",
+              statusLabel: "Incompatible",
+              description: "Hay una API local respondiendo, pero no coincide.",
+              endpoint: "http://127.0.0.1:8766/health",
+              expectedVersion: "0.7.1",
+              version: "0.6.14",
+              expectedProfile: "web-dev",
+              profile: null,
+              expectedAppDataDir: "",
+              appDataDir: "C:\\Users\\user\\AppData\\Roaming\\ai.knownext.web",
+              port: null,
+              managedBy: null,
+              instanceId: null,
+              startedAt: null,
+              sidecarPath: null,
+              lastError: "expectedProfile=web-dev\nactualProfile=unknown",
+              canRestart: false,
+              canConfigurePort: false,
+              portConfig: null,
+            },
+          ],
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /copiar diagnóstico/i }));
+
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("expectedProfile=web-dev"));
+    expect(await screen.findByRole("button", { name: /diagnóstico copiado/i })).toBeInTheDocument();
+  });
+
+  it("shows AI model choices and saves the selected model", () => {
+    const onAiChange = vi.fn();
+
+    render(
+      <AppSettingsDialog
+        {...baseProps}
+        runtimeServicesStatus={null}
+        onAiChange={onAiChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("IA"));
+    expect(screen.getByText("Modelo de respuesta")).toBeInTheDocument();
+    expect(screen.getAllByText("Coste").length).toBeGreaterThanOrEqual(4);
+    expect(screen.getByRole("radio", { name: /equilibrado/i })).toHaveAttribute("aria-checked", "true");
+
+    fireEvent.click(screen.getByRole("radio", { name: /máxima inteligencia/i }));
+
+    expect(onAiChange).toHaveBeenCalledWith(expect.objectContaining({ model: "gpt-5.5" }));
   });
 });

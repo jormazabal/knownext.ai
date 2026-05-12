@@ -23,6 +23,7 @@ DEFAULT_DIAGNOSTICS = {
 
 DEFAULT_AI = {
     "provider": "openai",
+    "model": "gpt-5.4-mini",
     "permissions": {
         "createFolders": False,
         "createDocuments": False,
@@ -112,6 +113,10 @@ def _normalize_ai(value: object) -> dict:
     if not isinstance(value, dict):
         return deepcopy(DEFAULT_AI)
 
+    model = value.get("model")
+    if model not in {"gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"}:
+        model = DEFAULT_AI["model"]
+
     permissions = value.get("permissions")
     if not isinstance(permissions, dict):
         permissions = {}
@@ -126,6 +131,7 @@ def _normalize_ai(value: object) -> dict:
 
     return {
         "provider": "openai",
+        "model": model,
         "permissions": {
             "createFolders": bool(permissions.get("createFolders", DEFAULT_AI["permissions"]["createFolders"])),
             "createDocuments": bool(permissions.get("createDocuments", DEFAULT_AI["permissions"]["createDocuments"])),

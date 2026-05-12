@@ -7,14 +7,14 @@ from typing import Any
 from app.services.credential_service import credential_service
 
 
-DEFAULT_OPENAI_MODEL = "gpt-5"
+DEFAULT_OPENAI_MODEL = "gpt-5.4-mini"
 
 
 class OpenAiService:
     def has_api_key(self) -> bool:
         return credential_service.get_openai_key() is not None
 
-    def plan_interaction(self, payload: dict[str, Any], context: dict[str, Any], rag: dict[str, Any]) -> dict[str, Any]:
+    def plan_interaction(self, payload: dict[str, Any], context: dict[str, Any], rag: dict[str, Any], model: str = DEFAULT_OPENAI_MODEL) -> dict[str, Any]:
         api_key = credential_service.get_openai_key()
         if not api_key:
             raise OpenAiUnavailableError("OpenAI API key is not configured")
@@ -34,7 +34,7 @@ class OpenAiService:
             })
 
         response = client.responses.create(
-            model=DEFAULT_OPENAI_MODEL,
+            model=model or DEFAULT_OPENAI_MODEL,
             input=[
                 {
                     "role": "system",

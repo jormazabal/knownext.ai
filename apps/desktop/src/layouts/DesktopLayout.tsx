@@ -44,7 +44,7 @@ type DesktopLayoutProps = {
   aiIndexStatus: AiIndexStatusResponse | null;
   aiConversationEvents: AiConversationEvent[];
   aiBubble: { id: string; answer: string } | null;
-  aiAppliedChange: { documentId: string; previousMarkdown: string; summary: string } | null;
+  aiAppliedChange: { documentId: string; summary: string } | null;
   tree: DocumentTreeNode[];
   tabs: WorkspaceTab[];
   activeTabId: string;
@@ -83,9 +83,9 @@ type DesktopLayoutProps = {
   onPullProject: () => void;
   onPushProject: () => void;
   onCreateVersion: (title: string) => Promise<CreateVersionResponse | null>;
-  onSendAiPrompt: (prompt: string) => void;
+  onSendAiPrompt: (prompt: string) => void | Promise<void>;
   onCloseAiBubble: () => void;
-  onUndoAiChange: () => void;
+  onDismissAiAppliedChange: () => void;
   onOpenAiConversation: () => void;
   isSyncingProject: boolean;
   onOpenDocument: (documentId: string, name: string) => void;
@@ -325,13 +325,6 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                           onLoadDiskVersion={props.onLoadDiskVersion}
                         />
                       ) : null}
-                      {props.aiAppliedChange?.documentId === props.activeDocumentId ? (
-                        <AiAppliedChangeBanner
-                          summary={props.aiAppliedChange.summary}
-                          onUndo={props.onUndoAiChange}
-                          onOpenConversation={props.onOpenAiConversation}
-                        />
-                      ) : null}
                       {props.editorSessions.map((session) => (
                         <div key={session.documentId} className={session.documentId === props.activeDocumentId ? "" : "hidden"}>
                           {session.document ? (
@@ -386,7 +379,9 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 projectId={props.activeProject?.id}
                 markdown={hasOpenDocument ? props.activeMarkdown : ""}
                 providerReady={props.aiConfig.openaiKeyConfigured}
+                appliedChangeSummary={props.aiAppliedChange?.documentId === props.activeDocumentId ? props.aiAppliedChange.summary : null}
                 onSubmit={props.onSendAiPrompt}
+                onDismissAppliedChange={props.onDismissAiAppliedChange}
               />
               <AiResponseBubble bubble={props.aiBubble} onClose={props.onCloseAiBubble} onOpenConversation={props.onOpenAiConversation} />
               {hasOpenDocument ? (
@@ -579,31 +574,6 @@ function DocumentConflictBanner({
       ) : null}
       <button className="h-7 rounded-md bg-brand-orange px-2.5 text-[11px] font-semibold text-white hover:bg-brand-dark" onClick={onKeepLocalVersion}>
         {orphaned ? "Recrear archivo" : "Mantener mi versión"}
-      </button>
-    </div>
-  );
-}
-
-function AiAppliedChangeBanner({
-  summary,
-  onUndo,
-  onOpenConversation,
-}: {
-  summary: string;
-  onUndo: () => void;
-  onOpenConversation: () => void;
-}) {
-  return (
-    <div className="mb-3 flex items-center gap-3 rounded-md border border-orange-200 bg-brand-hover px-3 py-2 text-[11px] text-ink-primary">
-      <div className="min-w-0 flex-1">
-        <p className="font-semibold">Cambios aplicados por IA</p>
-        <p className="mt-0.5 truncate text-[11px] text-ink-secondary">{summary}</p>
-      </div>
-      <button className="h-7 rounded-md border border-brand-orange px-2.5 text-[11px] font-semibold text-brand-orange hover:bg-white" onClick={onOpenConversation}>
-        Ver conversación
-      </button>
-      <button className="h-7 rounded-md bg-brand-orange px-2.5 text-[11px] font-semibold text-white hover:bg-brand-dark" onClick={onUndo}>
-        Deshacer
       </button>
     </div>
   );

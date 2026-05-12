@@ -11,6 +11,7 @@ import {
   Settings,
   UserPlus,
 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { AppearanceConfig, AuthStatus } from "../../types/domain";
 
 const actions = [
@@ -62,6 +63,8 @@ export function ProjectActions({
   onOpenReleaseNotes,
 }: ProjectActionsProps) {
   const text = projectActionsCopy[language];
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement | null>(null);
 
   function handleAction(actionId: string) {
     if (actionId === "folder") onCreateFolder();
@@ -73,6 +76,31 @@ export function ProjectActions({
 
   const accountName = authStatus.user?.name || authStatus.user?.login || text.noGithubAccount;
   const accountInitials = getInitials(accountName);
+
+  useEffect(() => {
+    if (!accountMenuOpen) return;
+
+    function closeAccountMenu(event: MouseEvent) {
+      if (accountMenuRef.current?.contains(event.target as Node)) return;
+      setAccountMenuOpen(false);
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setAccountMenuOpen(false);
+    }
+
+    window.addEventListener("mousedown", closeAccountMenu);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("mousedown", closeAccountMenu);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [accountMenuOpen]);
+
+  function runAccountAction(action: () => void) {
+    setAccountMenuOpen(false);
+    action();
+  }
 
   return (
     <div className="mt-auto border-t border-line">
@@ -90,14 +118,18 @@ export function ProjectActions({
           </button>
         ))}
       </div>
-      <div className="group relative border-t border-line px-3 py-1">
-        <button className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-1 text-left hover:bg-brand-hover">
+      <div ref={accountMenuRef} className="relative border-t border-line px-3 py-1">
+        <button
+          className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-1 text-left hover:bg-brand-hover"
+          aria-expanded={accountMenuOpen}
+          onClick={() => setAccountMenuOpen((isOpen) => !isOpen)}
+        >
           <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-brand-hover text-[11px] font-semibold text-brand-orange">
             {accountInitials}
           </span>
           <span className="truncate text-[11px] font-medium">{accountName}</span>
         </button>
-        <div className="pointer-events-none absolute bottom-[38px] left-0 z-40 w-[228px] opacity-0 transition group-hover:pointer-events-auto group-hover:opacity-100">
+        <div className={["absolute bottom-[38px] left-0 z-40 w-[228px] transition", accountMenuOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"].join(" ")}>
           <div className="rounded-md border border-line bg-white p-1 shadow-menu">
             <div className="px-2 py-1.5">
               <div className="flex items-start justify-between gap-3">
@@ -114,7 +146,7 @@ export function ProjectActions({
             </div>
             <button
               className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={onLoginGithub}
+              onClick={() => runAccountAction(onLoginGithub)}
               disabled={authStatus.isAuthenticated}
             >
               <UserPlus size={14} />
@@ -122,14 +154,14 @@ export function ProjectActions({
             </button>
             <button
               className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
-              onClick={onOpenAppSettings}
+              onClick={() => runAccountAction(onOpenAppSettings)}
             >
               <Settings size={14} />
               <span>{text.appSettings}</span>
             </button>
             <button
               className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={onLogout}
+              onClick={() => runAccountAction(onLogout)}
               disabled={!authStatus.isAuthenticated}
             >
               <LogOut size={14} />
@@ -138,21 +170,21 @@ export function ProjectActions({
             <button
               className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
               disabled={isCheckingForUpdates}
-              onClick={onCheckForUpdates}
+              onClick={() => runAccountAction(onCheckForUpdates)}
             >
               <RefreshCw size={14} className={isCheckingForUpdates ? "animate-spin" : ""} />
               <span>{isCheckingForUpdates ? text.checkingUpdates : text.checkUpdates}</span>
             </button>
             <button
               className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
-              onClick={onOpenReleaseNotes}
+              onClick={() => runAccountAction(onOpenReleaseNotes)}
             >
               <ScrollText size={14} />
               <span>{text.releaseNotes}</span>
             </button>
             <button
               className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
-              onClick={onOpenRecoverableDrafts}
+              onClick={() => runAccountAction(onOpenRecoverableDrafts)}
             >
               <FileClock size={14} />
               <span className="min-w-0 flex-1 truncate">{text.recoverableDrafts}</span>

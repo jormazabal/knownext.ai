@@ -1,4 +1,4 @@
-import type { AiConfig, AiConfigStatus, AppConfig, AppConfigUpdate, AppearanceConfig, DiagnosticsConfig, LayoutConfig, ProjectTabsConfig } from "../../types/domain";
+import type { AiConfig, AiConfigStatus, AiModelId, AppConfig, AppConfigUpdate, AppearanceConfig, DiagnosticsConfig, LayoutConfig, ProjectTabsConfig } from "../../types/domain";
 import { requestJson } from "./client";
 
 export const defaultLayoutConfig: LayoutConfig = {
@@ -17,6 +17,7 @@ export const defaultDiagnosticsConfig: DiagnosticsConfig = {
 
 export const defaultAiConfig: AiConfig = {
   provider: "openai",
+  model: "gpt-5.4-mini",
   permissions: {
     createFolders: false,
     createDocuments: false,
@@ -128,6 +129,7 @@ function normalizeAi(ai: AiConfig | undefined): AiConfig | undefined {
   if (!ai) return undefined;
   return {
     provider: "openai",
+    model: normalizeAiModel(ai.model),
     permissions: {
       createFolders: Boolean(ai.permissions?.createFolders),
       createDocuments: Boolean(ai.permissions?.createDocuments),
@@ -141,4 +143,10 @@ function normalizeAi(ai: AiConfig | undefined): AiConfig | undefined {
       error: ai.rag?.error ?? null,
     },
   };
+}
+
+function normalizeAiModel(model: unknown): AiModelId {
+  return ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"].includes(String(model))
+    ? model as AiModelId
+    : defaultAiConfig.model;
 }
