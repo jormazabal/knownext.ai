@@ -9,11 +9,16 @@ import type {
   OpenAiKeyStatus,
 } from "../../types/domain";
 
+const AI_PROMPT_TIMEOUT_MS = 60_000;
+const AI_INTERACTION_TIMEOUT_MS = 120_000;
+const AI_INDEX_TIMEOUT_MS = 120_000;
+
 export async function promptAssistant(request: AiPromptRequest): Promise<AiPromptResponse> {
   if (request.documentId) {
     return requestJson<AiPromptResponse>(`/api/documents/${request.documentId}/ai/prompt`, {
       method: "POST",
       body: JSON.stringify({ prompt: request.prompt, markdown: request.markdown ?? "" }),
+      timeoutMs: AI_PROMPT_TIMEOUT_MS,
     });
   }
 
@@ -21,6 +26,7 @@ export async function promptAssistant(request: AiPromptRequest): Promise<AiPromp
     return requestJson<AiPromptResponse>(`/api/projects/${request.projectId}/ai/prompt`, {
       method: "POST",
       body: JSON.stringify({ prompt: request.prompt }),
+      timeoutMs: AI_PROMPT_TIMEOUT_MS,
     });
   }
 
@@ -31,6 +37,7 @@ export async function sendAiInteraction(request: AiInteractionRequest): Promise<
   return requestJson<AiInteractionResponse>(`/api/projects/${request.projectId}/ai/interactions`, {
     method: "POST",
     body: JSON.stringify(request),
+    timeoutMs: AI_INTERACTION_TIMEOUT_MS,
   });
 }
 
@@ -79,6 +86,7 @@ export async function getAiIndexStatus(projectId: string): Promise<AiIndexStatus
 export async function rebuildAiIndex(projectId: string): Promise<AiIndexStatusResponse> {
   return requestJson<AiIndexStatusResponse>(`/api/projects/${projectId}/ai/index/rebuild`, {
     method: "POST",
+    timeoutMs: AI_INDEX_TIMEOUT_MS,
   });
 }
 

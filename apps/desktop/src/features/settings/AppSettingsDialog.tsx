@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { Activity, Brain, Eye, FolderOpen, KeyRound, Languages, ListChecks, RefreshCw, RotateCcw, Server, Trash2, X } from "lucide-react";
+import { Activity, Brain, ChevronDown, Copy, Eye, FolderOpen, KeyRound, Languages, ListChecks, RefreshCw, RotateCcw, Server, Trash2, X } from "lucide-react";
 import type { AiConfigStatus, AiIndexStatusResponse, AppearanceConfig, DiagnosticsConfig } from "../../types/domain";
 import type { TraceLogStatus } from "../../lib/runtime/logging";
-import type { RuntimeServicesStatus } from "../../lib/runtime/services";
+import type { BackendPortConfig, RuntimeServicesStatus } from "../../lib/runtime/services";
 
 type AppSettingsSection = "services" | "appearance" | "ai" | "diagnostics";
 
@@ -26,6 +26,7 @@ type AppSettingsDialogProps = {
   onOpenTraceLogFolder: () => void;
   onRefreshRuntimeServices: () => void;
   onRestartBackendService: () => void;
+  onUpdateBackendPortConfig: (config: BackendPortConfig) => void;
 };
 
 export function AppSettingsDialog({
@@ -48,6 +49,7 @@ export function AppSettingsDialog({
   onOpenTraceLogFolder,
   onRefreshRuntimeServices,
   onRestartBackendService,
+  onUpdateBackendPortConfig,
 }: AppSettingsDialogProps) {
   const [activeSection, setActiveSection] = useStableSection(open);
   const text = settingsCopy[appearance.language];
@@ -111,6 +113,7 @@ export function AppSettingsDialog({
                 text={text}
                 onRefresh={onRefreshRuntimeServices}
                 onRestartBackendService={onRestartBackendService}
+                onUpdateBackendPortConfig={onUpdateBackendPortConfig}
               />
             ) : activeSection === "appearance" ? (
               <AppearanceSettings appearance={appearance} text={text} onAppearanceChange={onAppearanceChange} />
@@ -147,12 +150,14 @@ function ServicesSettings({
   text,
   onRefresh,
   onRestartBackendService,
+  onUpdateBackendPortConfig,
 }: {
   runtimeServicesStatus: RuntimeServicesStatus | null;
   refreshing: boolean;
   text: SettingsCopy;
   onRefresh: () => void;
   onRestartBackendService: () => void;
+  onUpdateBackendPortConfig: (config: BackendPortConfig) => void;
 }) {
   const services = runtimeServicesStatus?.services ?? [];
   const backend = services.find((service) => service.id === "backend");
@@ -185,7 +190,13 @@ function ServicesSettings({
       </div>
 
       {backend ? (
-        <ServiceCard service={backend} text={text} refreshing={refreshing} onRestartBackendService={onRestartBackendService} />
+        <ServiceCard
+          service={backend}
+          text={text}
+          refreshing={refreshing}
+          onRestartBackendService={onRestartBackendService}
+          onUpdateBackendPortConfig={onUpdateBackendPortConfig}
+        />
       ) : (
         <div className="rounded-md border border-line px-4 py-3 text-[11px] text-ink-secondary">{text.servicesPending}</div>
       )}
@@ -198,12 +209,27 @@ function ServiceCard({
   text,
   refreshing,
   onRestartBackendService,
+  onUpdateBackendPortConfig,
 }: {
   service: RuntimeServicesStatus["services"][number];
   text: SettingsCopy;
   refreshing: boolean;
   onRestartBackendService: () => void;
+  onUpdateBackendPortConfig: (config: BackendPortConfig) => void;
 }) {
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [portMode, setPortMode] = useState<BackendPortConfig["mode"]>(service.portConfig?.mode ?? "automatic");
+  const [fixedPort, setFixedPort] = useState(service.portConfig?.port ?? service.port ?? 8765);
+  const [autoStart, setAutoStart] = useState(service.portConfig?.autoPortStart ?? 8765);
+  const [autoEnd, setAutoEnd] = useState(service.portConfig?.autoPortEnd ?? 8799);
+  const diagnostic = buildServiceDiagnostic(service);
+
+  useEffect(() => {
+    setPortMode(service.portConfig?.mode ?? "automatic");
+    setFixedPort(service.portConfig?.port ?? service.port ?? 8765);
+    setAutoStart(service.portConfig?.autoPortStart ?? 8765);
+    setAutoEnd(service.portConfig?.autoPortEnd ?? 8799);
+  }, [service.portConfig, service.port]);
   const stateClass =
     service.status === "running"
       ? "bg-emerald-50 text-emerald-700"
@@ -240,12 +266,21 @@ function ServiceCard({
           {text.restartBackend}
         </button>
       </div>
+      {!service.canRestart ? (
+        <p className="mt-2 text-[10px] leading-4 text-ink-secondary">{text.restartUnavailable}</p>
+      ) : null}
 
       <dl className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
         <ServiceField label={text.endpointLabel} value={service.endpoint} mono />
+        <ServiceField label={text.profileLabel} value={service.profile ?? text.unavailableValue} />
+        <ServiceField label={text.expectedProfileLabel} value={service.expectedProfile} />
+        <ServiceField label={text.portLabel} value={String(service.port ?? text.unavailableValue)} />
+        <ServiceField label={text.managedByLabel} value={service.managedBy ?? text.unavailableValue} />
         <ServiceField label={text.versionLabel} value={service.version ?? text.unavailableValue} />
         <ServiceField label={text.expectedVersionLabel} value={service.expectedVersion} />
         <ServiceField label={text.restartAvailableLabel} value={service.canRestart ? text.yes : text.no} />
+        {service.instanceId ? <ServiceField label={text.instanceLabel} value={service.instanceId} mono /> : null}
+        {service.startedAt ? <ServiceField label={text.startedAtLabel} value={formatDateTime(service.startedAt)} /> : null}
         <ServiceField label={text.appDataDirLabel} value={service.appDataDir ?? text.unavailableValue} mono wide />
         <ServiceField label={text.expectedAppDataDirLabel} value={service.expectedAppDataDir || text.unavailableValue} mono wide />
         {service.sidecarPath ? <ServiceField label={text.sidecarPathLabel} value={service.sidecarPath} mono wide /> : null}
@@ -257,8 +292,101 @@ function ServiceCard({
           <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-[10px] leading-4 text-red-700">{service.lastError}</pre>
         </div>
       ) : null}
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange"
+          onClick={() => void navigator.clipboard?.writeText(diagnostic)}
+        >
+          <Copy size={14} />
+          {text.copyDiagnostic}
+        </button>
+        <button
+          className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange"
+          onClick={() => setAdvancedOpen((isOpen) => !isOpen)}
+        >
+          <ChevronDown size={14} className={advancedOpen ? "rotate-180 transition" : "transition"} />
+          {text.advancedBackend}
+        </button>
+      </div>
+
+      {advancedOpen ? (
+        <div className="mt-3 rounded-md border border-line bg-panel px-3 py-3">
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="min-w-[150px] flex-1">
+              <span className="text-[10px] font-semibold text-ink-secondary">{text.portModeLabel}</span>
+              <select
+                className="mt-1 h-8 w-full rounded-md border border-line bg-white px-2 text-[11px] text-ink-primary outline-none focus:border-brand-orange"
+                value={portMode}
+                disabled={!service.canConfigurePort || refreshing}
+                onChange={(event) => setPortMode(event.target.value as BackendPortConfig["mode"])}
+              >
+                <option value="automatic">{text.portModeAutomatic}</option>
+                <option value="fixed">{text.portModeFixed}</option>
+              </select>
+            </label>
+            <NumberField label={text.fixedPortLabel} value={fixedPort} disabled={!service.canConfigurePort || refreshing} onChange={setFixedPort} />
+            <NumberField label={text.autoStartLabel} value={autoStart} disabled={!service.canConfigurePort || refreshing || portMode !== "automatic"} onChange={setAutoStart} />
+            <NumberField label={text.autoEndLabel} value={autoEnd} disabled={!service.canConfigurePort || refreshing || portMode !== "automatic"} onChange={setAutoEnd} />
+            <button
+              className="h-8 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={!service.canConfigurePort || refreshing || !isValidPortConfig(portMode, fixedPort, autoStart, autoEnd)}
+              onClick={() => onUpdateBackendPortConfig({
+                mode: portMode,
+                port: fixedPort,
+                autoPortStart: autoStart,
+                autoPortEnd: autoEnd,
+              })}
+            >
+              {text.applyAndRestart}
+            </button>
+          </div>
+          <p className="mt-2 text-[10px] leading-4 text-ink-secondary">
+            {service.canConfigurePort ? text.portAdvancedDescription : text.portAdvancedUnavailable}
+          </p>
+        </div>
+      ) : null}
     </section>
   );
+}
+
+function NumberField({ label, value, disabled, onChange }: { label: string; value: number; disabled: boolean; onChange: (value: number) => void }) {
+  return (
+    <label className="w-[112px]">
+      <span className="text-[10px] font-semibold text-ink-secondary">{label}</span>
+      <input
+        className="mt-1 h-8 w-full rounded-md border border-line bg-white px-2 font-mono text-[11px] text-ink-primary outline-none focus:border-brand-orange disabled:bg-line/40"
+        type="number"
+        min={1024}
+        max={65535}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(Number(event.target.value))}
+      />
+    </label>
+  );
+}
+
+function isValidPortConfig(mode: BackendPortConfig["mode"], port: number, autoStart: number, autoEnd: number) {
+  const validPort = Number.isInteger(port) && port >= 1024 && port <= 65535;
+  const validRange = Number.isInteger(autoStart) && Number.isInteger(autoEnd) && autoStart >= 1024 && autoEnd <= 65535 && autoStart <= autoEnd;
+  return mode === "fixed" ? validPort : validPort && validRange;
+}
+
+function buildServiceDiagnostic(service: RuntimeServicesStatus["services"][number]) {
+  return [
+    `status=${service.status}`,
+    `endpoint=${service.endpoint}`,
+    `expectedProfile=${service.expectedProfile}`,
+    `profile=${service.profile ?? "unknown"}`,
+    `expectedVersion=${service.expectedVersion}`,
+    `version=${service.version ?? "unknown"}`,
+    `port=${service.port ?? "unknown"}`,
+    `managedBy=${service.managedBy ?? "unknown"}`,
+    `appDataDir=${service.appDataDir ?? "unknown"}`,
+    `expectedAppDataDir=${service.expectedAppDataDir}`,
+    service.lastError ? `lastError=${service.lastError}` : null,
+  ].filter(Boolean).join("\n");
 }
 
 function ServiceField({ label, value, mono, wide }: { label: string; value: string; mono?: boolean; wide?: boolean }) {
@@ -618,7 +746,14 @@ const settingsCopy = {
     lastChecked: "Última comprobación",
     refreshServices: "Comprobar",
     restartBackend: "Reiniciar backend",
+    restartUnavailable: "El reinicio desde la interfaz solo está disponible en la aplicación instalada. En modo web/desarrollo, arranca o reinicia el backend local fuera de la interfaz y vuelve a comprobar.",
     endpointLabel: "Endpoint",
+    profileLabel: "Perfil activo",
+    expectedProfileLabel: "Perfil esperado",
+    portLabel: "Puerto activo",
+    managedByLabel: "Gestionado por",
+    instanceLabel: "Instancia",
+    startedAtLabel: "Arrancado",
     versionLabel: "Versión activa",
     expectedVersionLabel: "Versión esperada",
     restartAvailableLabel: "Reinicio automático",
@@ -626,6 +761,17 @@ const settingsCopy = {
     expectedAppDataDirLabel: "Datos esperados por la app",
     sidecarPathLabel: "Ejecutable sidecar",
     lastErrorLabel: "Último problema detectado",
+    copyDiagnostic: "Copiar diagnóstico",
+    advancedBackend: "Avanzado",
+    portModeLabel: "Modo de puerto",
+    portModeAutomatic: "Automático",
+    portModeFixed: "Fijo",
+    fixedPortLabel: "Puerto",
+    autoStartLabel: "Rango inicio",
+    autoEndLabel: "Rango fin",
+    applyAndRestart: "Aplicar y reiniciar",
+    portAdvancedDescription: "En automático, la app usa el puerto preferido si está libre y cambia a otro del rango si detecta conflicto. Usa fijo solo cuando necesites reservar un puerto concreto.",
+    portAdvancedUnavailable: "En modo web/desarrollo la interfaz puede diagnosticar el endpoint, pero no puede cambiar ni reiniciar el backend local.",
     unavailableValue: "No disponible",
     yes: "Sí",
     no: "No",
@@ -688,7 +834,14 @@ const settingsCopy = {
     lastChecked: "Last checked",
     refreshServices: "Check",
     restartBackend: "Restart backend",
+    restartUnavailable: "Restart from the interface is only available in the installed desktop app. In web/development mode, start or restart the local backend outside the interface and check again.",
     endpointLabel: "Endpoint",
+    profileLabel: "Active profile",
+    expectedProfileLabel: "Expected profile",
+    portLabel: "Active port",
+    managedByLabel: "Managed by",
+    instanceLabel: "Instance",
+    startedAtLabel: "Started",
     versionLabel: "Active version",
     expectedVersionLabel: "Expected version",
     restartAvailableLabel: "Automatic restart",
@@ -696,6 +849,17 @@ const settingsCopy = {
     expectedAppDataDirLabel: "Data expected by app",
     sidecarPathLabel: "Sidecar executable",
     lastErrorLabel: "Last detected problem",
+    copyDiagnostic: "Copy diagnostic",
+    advancedBackend: "Advanced",
+    portModeLabel: "Port mode",
+    portModeAutomatic: "Automatic",
+    portModeFixed: "Fixed",
+    fixedPortLabel: "Port",
+    autoStartLabel: "Range start",
+    autoEndLabel: "Range end",
+    applyAndRestart: "Apply and restart",
+    portAdvancedDescription: "In automatic mode, the app uses the preferred port when available and moves to another port in the range when it detects a conflict. Use fixed only when you need a specific reserved port.",
+    portAdvancedUnavailable: "In web/development mode the interface can diagnose the endpoint, but it cannot change or restart the local backend.",
     unavailableValue: "Unavailable",
     yes: "Yes",
     no: "No",

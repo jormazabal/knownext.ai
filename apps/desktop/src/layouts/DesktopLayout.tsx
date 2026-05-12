@@ -337,6 +337,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                           {session.document ? (
                             <Suspense fallback={<div className="pt-6 text-[11px] text-ink-secondary">Cargando editor...</div>}>
                               <MarkdownEditor
+                                key={session.editorKey}
                                 documentKey={session.editorKey}
                                 markdown={session.markdown}
                                 onChange={(markdown) => props.onMarkdownChange(session.documentId, markdown)}

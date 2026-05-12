@@ -2,6 +2,15 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.7.1 - 2026-05-12
+
+- Added profile-aware local API identity so browser development, installed desktop builds, and older versions no longer reuse an incompatible backend silently.
+- Added automatic packaged-desktop backend port selection across `8765-8799`, fixed-port configuration, and transactional restart/rollback from the Services settings panel.
+- Improved the Services diagnostics panel with active/expected profile, endpoint, port, manager, instance, app-data path, restart availability, and copyable diagnostics.
+- Fixed document AI edit prompts so requests such as `Redacta una receta de cocina` update the active Milkdown document buffer without surfacing local API timeout errors.
+- Hardened frontend API readiness, request timeouts, backend profile validation, and manual recovery messaging.
+- Updated runtime architecture docs, backend contract docs, manual acceptance checks, and release metadata for `0.7.1`.
+
 ## 0.7.0 - 2026-05-11
 
 - Added the project-scoped AI conversation tab with persisted messages, day grouping, file-operation events, and a compact icon-only tab.

@@ -23,9 +23,16 @@ def isolated_app_data(tmp_path, monkeypatch) -> None:
 def test_health() -> None:
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json()["status"] == "ok"
-    assert response.json()["version"] == "0.7.0"
-    assert response.json()["appDataDir"]
+    payload = response.json()
+    assert payload["app"] == "knownext"
+    assert payload["schemaVersion"] == 2
+    assert payload["status"] == "ok"
+    assert payload["version"] == "0.7.1"
+    assert payload["profile"] == "desktop"
+    assert payload["port"] == 8765
+    assert payload["managedBy"] == "manual"
+    assert payload["instanceId"].startswith("backend-")
+    assert payload["appDataDir"]
 
 
 def test_projects_and_tree() -> None:
@@ -1215,6 +1222,51 @@ def test_ai_document_edit_returns_markdown_without_writing_disk(tmp_path, monkey
     assert payload["updatedDocument"]["markdown"] == "# Updated\n"
     assert payload["operations"][0]["type"] == "document_modified"
     assert document_path.read_text(encoding="utf-8") == "# Original\n"
+
+
+def test_ai_writing_prompt_updates_active_document_when_provider_answers_only(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "ai-writing-fallback"
+    docs_root.mkdir()
+    document_path = docs_root / "recipe.md"
+    document_path.write_text("# Borrador\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Writing", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    document_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+
+    def fake_plan(payload, context, rag):
+        return {
+            "display": "bubble",
+            "answer": "# Receta de cocina\n\n## Ingredientes\n\n- Tomate\n- Aceite\n",
+            "operations": [],
+        }
+
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+
+    response = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "documentId": document_id,
+            "prompt": "Redacta una receta de cocina",
+            "activeMarkdown": "# Borrador\n",
+            "mode": "document",
+            "clientMessageId": "client-writing",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["updatedDocument"]["markdown"].startswith("# Receta de cocina")
+    assert payload["updatedDocument"]["summary"] == "Contenido redactado por IA."
+    assert payload["operations"][0]["type"] == "document_modified"
+    assert payload["answer"] is None
+    assert document_path.read_text(encoding="utf-8") == "# Borrador\n"
 
 
 def test_ai_create_document_respects_permissions(tmp_path, monkeypatch) -> None:

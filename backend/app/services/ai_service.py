@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import unicodedata
 from datetime import datetime, timezone
 from datetime import timedelta
 from typing import Any
@@ -91,6 +93,7 @@ class AiService:
                 context,
                 rag_context,
             )
+            plan = self._coerce_document_writing_plan(payload, plan)
         except OpenAiUnavailableError as error:
             return self._provider_error_response(project_id, interaction_id, user_event, str(error), unavailable=True)
         except Exception as error:
@@ -269,6 +272,42 @@ class AiService:
             tree=tree,
             requiresConfirmation=pending_delete,
         )
+
+    def _coerce_document_writing_plan(self, payload: AiInteractionRequest, plan: dict[str, Any]) -> dict[str, Any]:
+        if payload.mode != "document" or not payload.documentId:
+            return plan
+        if not _is_document_writing_request(payload.prompt):
+            return plan
+        if not isinstance(plan, dict):
+            return plan
+
+        operations = plan.get("operations")
+        if not isinstance(operations, list):
+            operations = []
+        if any(isinstance(operation, dict) and operation.get("type") == "document_modified" for operation in operations):
+            return plan
+
+        answer = plan.get("answer")
+        if not isinstance(answer, str) or not answer.strip():
+            return plan
+
+        coerced = dict(plan)
+        coerced["display"] = "conversation"
+        coerced["answer"] = None
+        coerced["operations"] = [
+            {
+                "type": "document_modified",
+                "name": None,
+                "parentPath": None,
+                "path": None,
+                "nodeId": None,
+                "markdown": None,
+                "updatedMarkdown": answer.strip(),
+                "summary": "Contenido redactado por IA.",
+            },
+            *operations,
+        ]
+        return coerced
 
     def _provider_error_response(self, project_id: str, interaction_id: str, user_event: AiConversationEvent, message: str, unavailable: bool) -> AiInteractionResponse:
         operation_type = "provider_unavailable" if unavailable else "provider_error"
@@ -495,6 +534,47 @@ def _http_error_message(error: HTTPException) -> str:
     if isinstance(detail, str):
         return detail
     return "No se pudo aplicar la acción IA."
+
+
+def _is_document_writing_request(prompt: str) -> bool:
+    normalized = _normalize_intent_text(prompt)
+    writing_terms = (
+        "redacta",
+        "redactame",
+        "escribe",
+        "genera",
+        "crea",
+        "elabora",
+        "prepara",
+        "compon",
+        "anade",
+        "agrega",
+        "inserta",
+        "modifica",
+        "actualiza",
+        "reescribe",
+        "corrige",
+        "transforma",
+        "convierte",
+        "write",
+        "draft",
+        "generate",
+        "create",
+        "add",
+        "insert",
+        "rewrite",
+        "update",
+    )
+    return any(re.search(rf"\b{re.escape(term)}\b", normalized) for term in writing_terms)
+
+
+def _normalize_intent_text(value: str) -> str:
+    without_accents = "".join(
+        character
+        for character in unicodedata.normalize("NFD", value.lower())
+        if unicodedata.category(character) != "Mn"
+    )
+    return re.sub(r"\s+", " ", without_accents).strip()
 
 
 ai_service = AiService()

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyExternalMarkdownUpdate,
   createLoadedDocumentSession,
   shouldPersistDraft,
   updateSession,
@@ -42,5 +43,15 @@ describe("documentSessions", () => {
     });
 
     expect(shouldPersistDraft(nextSessions["doc-a"])).toBe(true);
+  });
+
+  it("bumps the load version when markdown is replaced by an external source", () => {
+    const session = createLoadedDocumentSession({ ...baseDocument, hasDraft: false, isDirty: false, diskMarkdown: null });
+    const updated = applyExternalMarkdownUpdate(session, "# AI update\n\nVisible in editor");
+
+    expect(updated.markdown).toBe("# AI update\n\nVisible in editor");
+    expect(updated.loadVersion).toBe(session.loadVersion + 1);
+    expect(updated.isDirty).toBe(true);
+    expect(updated.document?.wordCount).toBe(6);
   });
 });

@@ -2,7 +2,24 @@ type TauriWindow = Window & {
   __TAURI_INTERNALS__?: unknown;
 };
 
-export const API_BASE_URL = resolveApiBaseUrl();
+export type BackendHealth = {
+  app?: string;
+  schemaVersion?: number;
+  status?: string;
+  service?: string;
+  version?: string;
+  profile?: "desktop" | "web-dev" | string;
+  host?: string;
+  port?: number;
+  endpoint?: string;
+  instanceId?: string;
+  startedAt?: string;
+  managedBy?: "tauri" | "manual" | string;
+  appDataDir?: string;
+};
+
+export let API_BASE_URL = resolveApiBaseUrl();
+let apiBaseUrlInitialized = false;
 
 function resolveApiBaseUrl() {
   if (import.meta.env.VITE_API_BASE_URL) return import.meta.env.VITE_API_BASE_URL;
@@ -10,6 +27,29 @@ function resolveApiBaseUrl() {
     return "http://127.0.0.1:8765";
   }
   return "http://127.0.0.1:8766";
+}
+
+export function setApiBaseUrl(url: string) {
+  const normalized = url.replace(/\/+$/, "");
+  if (normalized) {
+    API_BASE_URL = normalized;
+    apiBaseUrlInitialized = true;
+  }
+}
+
+export async function initializeApiBaseUrl() {
+  if (apiBaseUrlInitialized) return API_BASE_URL;
+  if (isTauriRuntime()) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      setApiBaseUrl(await invoke<string>("get_runtime_api_base_url"));
+    } catch {
+      apiBaseUrlInitialized = true;
+    }
+    return API_BASE_URL;
+  }
+  apiBaseUrlInitialized = true;
+  return API_BASE_URL;
 }
 
 export function isBackendEnabled() {
@@ -29,7 +69,14 @@ export class ApiError extends Error {
   }
 }
 
-export async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+export type ApiRequestInit = RequestInit & {
+  timeoutMs?: number;
+};
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 7000;
+
+export async function requestJson<T>(path: string, init?: ApiRequestInit): Promise<T> {
+  await initializeApiBaseUrl();
   const method = (init?.method ?? "GET").toUpperCase();
   const attempts = method === "GET" ? 6 : 1;
   let lastError: unknown;
@@ -48,6 +95,7 @@ export async function requestJson<T>(path: string, init?: RequestInit): Promise<
 }
 
 export async function waitForApiReady(options: { attempts?: number; intervalMs?: number } = {}) {
+  await initializeApiBaseUrl();
   const attempts = options.attempts ?? 20;
   const intervalMs = options.intervalMs ?? 250;
   let lastError: unknown;
@@ -55,7 +103,11 @@ export async function waitForApiReady(options: { attempts?: number; intervalMs?:
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
       const response = await fetchWithTimeout(`${API_BASE_URL}/health`, {}, 2500);
-      if (response.ok) return;
+      if (response.ok) {
+        const health = (await response.json()) as BackendHealth;
+        validateBackendHealth(health);
+        return;
+      }
       lastError = new ApiError(response.status, response.statusText);
     } catch (error) {
       lastError = error;
@@ -66,17 +118,18 @@ export async function waitForApiReady(options: { attempts?: number; intervalMs?:
   throw lastError;
 }
 
-async function requestJsonOnce<T>(path: string, init?: RequestInit): Promise<T> {
+async function requestJsonOnce<T>(path: string, init?: ApiRequestInit): Promise<T> {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 7000);
+  const timeout = window.setTimeout(() => controller.abort(), init?.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
+  const { timeoutMs: _timeoutMs, ...requestInit } = init ?? {};
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
       "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
+      ...(requestInit.headers ?? {}),
     },
     signal: controller.signal,
-    ...init,
+    ...requestInit,
   }).finally(() => window.clearTimeout(timeout));
 
   if (!response.ok) {
@@ -126,5 +179,28 @@ export function getApiErrorMessage(error: unknown, fallback: string) {
 
 export function isApiConnectionError(error: unknown) {
   return error instanceof TypeError || (error instanceof DOMException && error.name === "AbortError");
+}
+
+export function expectedBackendProfile() {
+  return isTauriRuntime() ? "desktop" : "web-dev";
+}
+
+export function validateBackendHealth(health: BackendHealth) {
+  const expectedProfile = expectedBackendProfile();
+  const problems: string[] = [];
+  if (health.app !== "knownext") problems.push(`app=${health.app ?? "unknown"}`);
+  if (health.status !== "ok") problems.push(`status=${health.status ?? "unknown"}`);
+  if (health.profile !== expectedProfile) problems.push(`profile=${health.profile ?? "unknown"}`);
+  if (problems.length > 0) {
+    throw new ApiError(
+      409,
+      "Backend incompatible",
+      `Backend local incompatible. Esperado profile=${expectedProfile}; detectado ${problems.join(", ")}.`,
+    );
+  }
+}
+
+function isTauriRuntime() {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in (window as TauriWindow);
 }
 

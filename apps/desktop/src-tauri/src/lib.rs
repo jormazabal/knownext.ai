@@ -23,7 +23,8 @@ const BACKEND_SIDECAR_EXE: &str = "knownext-backend.exe";
 #[cfg(all(desktop, not(debug_assertions)))]
 const BACKEND_SIDECAR_TARGET_EXE: &str = "knownext-backend-x86_64-pc-windows-msvc.exe";
 const BACKEND_HOST: &str = "127.0.0.1";
-const BACKEND_PORT: u16 = 8765;
+const DEFAULT_BACKEND_PORT: u16 = 8765;
+const AUTO_BACKEND_PORT_END: u16 = 8799;
 #[cfg(all(desktop, not(debug_assertions), target_os = "windows"))]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 #[cfg(desktop)]
@@ -40,9 +41,60 @@ struct BackendStartLock(Mutex<()>);
 struct BackendHealth {
     status: String,
     version: Option<String>,
+    app: Option<String>,
+    profile: Option<String>,
+    port: Option<u16>,
+    #[serde(rename = "managedBy")]
+    managed_by: Option<String>,
+    #[serde(rename = "instanceId")]
+    instance_id: Option<String>,
+    #[serde(rename = "startedAt")]
+    started_at: Option<String>,
     #[serde(rename = "appDataDir")]
     app_data_dir: Option<String>,
 }
+
+#[cfg(desktop)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackendPortConfig {
+    mode: String,
+    port: u16,
+    auto_port_start: u16,
+    auto_port_end: u16,
+}
+
+#[cfg(desktop)]
+impl Default for BackendPortConfig {
+    fn default() -> Self {
+        Self {
+            mode: "automatic".to_string(),
+            port: DEFAULT_BACKEND_PORT,
+            auto_port_start: DEFAULT_BACKEND_PORT,
+            auto_port_end: AUTO_BACKEND_PORT_END,
+        }
+    }
+}
+
+#[cfg(desktop)]
+struct BackendRuntime {
+    port_config: BackendPortConfig,
+    active_port: u16,
+}
+
+#[cfg(desktop)]
+impl Default for BackendRuntime {
+    fn default() -> Self {
+        let port_config = BackendPortConfig::default();
+        Self {
+            active_port: port_config.port,
+            port_config,
+        }
+    }
+}
+
+#[cfg(desktop)]
+struct BackendRuntimeState(Mutex<BackendRuntime>);
 
 #[cfg(desktop)]
 #[derive(serde::Serialize)]
@@ -65,16 +117,30 @@ struct RuntimeServiceStatus {
     #[serde(rename = "expectedVersion")]
     expected_version: String,
     version: Option<String>,
+    #[serde(rename = "expectedProfile")]
+    expected_profile: String,
+    profile: Option<String>,
     #[serde(rename = "expectedAppDataDir")]
     expected_app_data_dir: String,
     #[serde(rename = "appDataDir")]
     app_data_dir: Option<String>,
+    port: Option<u16>,
+    #[serde(rename = "managedBy")]
+    managed_by: Option<String>,
+    #[serde(rename = "instanceId")]
+    instance_id: Option<String>,
+    #[serde(rename = "startedAt")]
+    started_at: Option<String>,
     #[serde(rename = "sidecarPath")]
     sidecar_path: Option<String>,
     #[serde(rename = "lastError")]
     last_error: Option<String>,
     #[serde(rename = "canRestart")]
     can_restart: bool,
+    #[serde(rename = "canConfigurePort")]
+    can_configure_port: bool,
+    #[serde(rename = "portConfig")]
+    port_config: Option<BackendPortConfig>,
 }
 
 #[cfg(all(desktop, not(debug_assertions)))]
@@ -210,8 +276,8 @@ fn open_folder(folder_path: String) -> Result<(), String> {
 }
 
 #[cfg(desktop)]
-fn backend_socket_addr() -> Result<std::net::SocketAddr, String> {
-    (BACKEND_HOST, BACKEND_PORT)
+fn backend_socket_addr(port: u16) -> Result<std::net::SocketAddr, String> {
+    (BACKEND_HOST, port)
         .to_socket_addrs()
         .map_err(|error| error.to_string())?
         .next()
@@ -219,10 +285,10 @@ fn backend_socket_addr() -> Result<std::net::SocketAddr, String> {
 }
 
 #[cfg(desktop)]
-fn backend_health_result() -> Result<BackendHealth, String> {
-    let address = backend_socket_addr()?;
+fn backend_health_result(port: u16) -> Result<BackendHealth, String> {
+    let address = backend_socket_addr(port)?;
     let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(350))
-        .map_err(|error| format!("Could not connect to {BACKEND_HOST}:{BACKEND_PORT}: {error}"))?;
+        .map_err(|error| format!("Could not connect to {BACKEND_HOST}:{port}: {error}"))?;
     let _ = stream.set_read_timeout(Some(Duration::from_millis(700)));
     let _ = stream.set_write_timeout(Some(Duration::from_millis(700)));
     stream
@@ -246,25 +312,35 @@ fn backend_health_result() -> Result<BackendHealth, String> {
 }
 
 #[cfg(all(desktop, not(debug_assertions)))]
-fn backend_health() -> Option<BackendHealth> {
-    backend_health_result().ok()
+fn backend_health(port: u16) -> Option<BackendHealth> {
+    backend_health_result(port).ok()
 }
 
 #[cfg(all(desktop, not(debug_assertions)))]
-fn is_expected_backend_healthy(expected_app_data_dir: &str) -> bool {
-    let Some(health) = backend_health() else {
+fn backend_port_accepts_connections(port: u16) -> bool {
+    match backend_socket_addr(port) {
+        Ok(address) => TcpStream::connect_timeout(&address, Duration::from_millis(250)).is_ok(),
+        Err(_) => false,
+    }
+}
+
+#[cfg(all(desktop, not(debug_assertions)))]
+fn is_expected_backend_healthy(port: u16, expected_app_data_dir: &str) -> bool {
+    let Some(health) = backend_health(port) else {
         return false;
     };
     health.status == "ok"
+        && health.app.as_deref() == Some("knownext")
+        && health.profile.as_deref() == Some("desktop")
         && health.version.as_deref() == Some(APP_VERSION)
         && health.app_data_dir.as_deref() == Some(expected_app_data_dir)
 }
 
 #[cfg(all(desktop, not(debug_assertions)))]
-fn wait_for_backend(max_wait: Duration, expected_app_data_dir: &str) -> bool {
+fn wait_for_backend(port: u16, max_wait: Duration, expected_app_data_dir: &str) -> bool {
     let started_at = std::time::Instant::now();
     while started_at.elapsed() < max_wait {
-        if is_expected_backend_healthy(expected_app_data_dir) {
+        if is_expected_backend_healthy(port, expected_app_data_dir) {
             return true;
         }
         std::thread::sleep(Duration::from_millis(250));
@@ -274,18 +350,20 @@ fn wait_for_backend(max_wait: Duration, expected_app_data_dir: &str) -> bool {
 }
 
 #[cfg(all(desktop, not(debug_assertions)))]
-fn incompatible_backend_detail(expected_app_data_dir: &str) -> String {
-    match backend_health() {
+fn incompatible_backend_detail(port: u16, expected_app_data_dir: &str) -> String {
+    match backend_health(port) {
         Some(health) => format!(
-            "expectedVersion={}\nactualVersion={}\nexpectedAppDataDir={}\nactualAppDataDir={}",
+            "expectedVersion={}\nactualVersion={}\nexpectedProfile=desktop\nactualProfile={}\nexpectedAppDataDir={}\nactualAppDataDir={}\nport={}",
             APP_VERSION,
             health.version.unwrap_or_else(|| "unknown".to_string()),
+            health.profile.unwrap_or_else(|| "unknown".to_string()),
             expected_app_data_dir,
-            health.app_data_dir.unwrap_or_else(|| "unknown".to_string())
+            health.app_data_dir.unwrap_or_else(|| "unknown".to_string()),
+            port
         ),
         None => format!(
-            "expectedVersion={}\nexpectedAppDataDir={}\nNo compatible /health response was available.",
-            APP_VERSION, expected_app_data_dir
+            "expectedVersion={}\nexpectedProfile=desktop\nexpectedAppDataDir={}\nport={}\nNo compatible /health response was available.",
+            APP_VERSION, expected_app_data_dir, port
         ),
     }
 }
@@ -296,6 +374,154 @@ fn expected_app_data_dir(app: &tauri::AppHandle) -> Result<String, String> {
         .app_data_dir()
         .map_err(|error| error.to_string())
         .map(|path| path.to_string_lossy().to_string())
+}
+
+#[cfg(desktop)]
+fn runtime_config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("runtime.json"))
+}
+
+#[cfg(desktop)]
+fn normalize_backend_port_config(config: BackendPortConfig) -> BackendPortConfig {
+    let default = BackendPortConfig::default();
+    let mode = if config.mode == "fixed" { "fixed" } else { "automatic" }.to_string();
+    let port = if (1024..=65535).contains(&config.port) {
+        config.port
+    } else {
+        default.port
+    };
+    let auto_port_start = if (1024..=65535).contains(&config.auto_port_start) {
+        config.auto_port_start
+    } else {
+        default.auto_port_start
+    };
+    let auto_port_end = if (1024..=65535).contains(&config.auto_port_end) && config.auto_port_end >= auto_port_start {
+        config.auto_port_end
+    } else {
+        default.auto_port_end
+    };
+
+    BackendPortConfig {
+        mode,
+        port,
+        auto_port_start,
+        auto_port_end,
+    }
+}
+
+#[cfg(desktop)]
+fn read_backend_port_config(app: &tauri::AppHandle) -> BackendPortConfig {
+    let Ok(path) = runtime_config_path(app) else {
+        return BackendPortConfig::default();
+    };
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return BackendPortConfig::default();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return BackendPortConfig::default();
+    };
+    let port_config = value
+        .get("backend")
+        .and_then(|backend| backend.get("port"))
+        .cloned()
+        .or_else(|| value.get("backendPort").cloned());
+    match port_config.and_then(|config| serde_json::from_value::<BackendPortConfig>(config).ok()) {
+        Some(config) => normalize_backend_port_config(config),
+        None => BackendPortConfig::default(),
+    }
+}
+
+#[cfg(desktop)]
+fn write_backend_port_config(app: &tauri::AppHandle, config: &BackendPortConfig) -> Result<(), String> {
+    let path = runtime_config_path(app)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let data = serde_json::json!({
+        "schemaVersion": 1,
+        "backend": {
+            "port": config,
+        },
+    });
+    std::fs::write(path, serde_json::to_string_pretty(&data).map_err(|error| error.to_string())?)
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(desktop)]
+fn runtime_active_port(app: &tauri::AppHandle) -> u16 {
+    let runtime_state = app.state::<BackendRuntimeState>();
+    runtime_state
+        .0
+        .lock()
+        .map(|runtime| runtime.active_port)
+        .unwrap_or(DEFAULT_BACKEND_PORT)
+}
+
+#[cfg(desktop)]
+fn set_runtime_port(app: &tauri::AppHandle, config: BackendPortConfig, active_port: u16) -> Result<(), String> {
+    let runtime_state = app.state::<BackendRuntimeState>();
+    let mut runtime = runtime_state.0.lock().map_err(|error| error.to_string())?;
+    runtime.port_config = config;
+    runtime.active_port = active_port;
+    Ok(())
+}
+
+#[cfg(desktop)]
+fn get_runtime_port_config(app: &tauri::AppHandle) -> BackendPortConfig {
+    let runtime_state = app.state::<BackendRuntimeState>();
+    runtime_state
+        .0
+        .lock()
+        .map(|runtime| runtime.port_config.clone())
+        .unwrap_or_else(|_| BackendPortConfig::default())
+}
+
+#[cfg(all(desktop, not(debug_assertions)))]
+fn choose_backend_port(app: &tauri::AppHandle, expected_app_data_dir: &str) -> Result<(BackendPortConfig, u16), String> {
+    let config = normalize_backend_port_config(read_backend_port_config(app));
+    if config.mode == "fixed" {
+        if let Some(health) = backend_health(config.port) {
+            if is_expected_backend_healthy(config.port, expected_app_data_dir) {
+                return Ok((config.clone(), config.port));
+            }
+            return Err(format!(
+                "El puerto fijo {} está ocupado por un backend incompatible. expectedProfile=desktop actualProfile={} expectedVersion={} actualVersion={}",
+                config.port,
+                health.profile.unwrap_or_else(|| "unknown".to_string()),
+                APP_VERSION,
+                health.version.unwrap_or_else(|| "unknown".to_string())
+            ));
+        }
+        if backend_port_accepts_connections(config.port) {
+            return Err(format!("El puerto fijo {} está ocupado por otro servicio.", config.port));
+        }
+        return Ok((config.clone(), config.port));
+    }
+
+    let mut candidates = vec![config.port, DEFAULT_BACKEND_PORT];
+    for port in config.auto_port_start..=config.auto_port_end {
+        if !candidates.contains(&port) {
+            candidates.push(port);
+        }
+    }
+
+    for port in candidates {
+        if is_expected_backend_healthy(port, expected_app_data_dir) {
+            return Ok((config.clone(), port));
+        }
+        if backend_health(port).is_none() && !backend_port_accepts_connections(port) {
+            return Ok((config.clone(), port));
+        }
+    }
+
+    Err(format!(
+        "No hay puertos disponibles en el rango automático {}-{}.",
+        config.auto_port_start, config.auto_port_end
+    ))
 }
 
 #[cfg(all(desktop, not(debug_assertions)))]
@@ -335,17 +561,31 @@ fn resolved_sidecar_path_for_status(_app: &tauri::AppHandle) -> Option<String> {
 #[cfg(desktop)]
 fn backend_service_status(app: &tauri::AppHandle) -> Result<RuntimeServiceStatus, String> {
     let expected_app_data_dir = expected_app_data_dir(app)?;
-    let health_result = backend_health_result();
+    let port = runtime_active_port(app);
+    let port_config = get_runtime_port_config(app);
+    let health_result = backend_health_result(port);
     let sidecar_path = resolved_sidecar_path_for_status(app);
     let mut version = None;
+    let mut profile = None;
     let mut app_data_dir = None;
+    let mut managed_by = None;
+    let mut instance_id = None;
+    let mut started_at = None;
+    let mut health_port = None;
     let mut last_error = None;
 
     let (status, status_label, description) = match health_result {
         Ok(health) => {
             version = health.version.clone();
+            profile = health.profile.clone();
             app_data_dir = health.app_data_dir.clone();
+            managed_by = health.managed_by.clone();
+            instance_id = health.instance_id.clone();
+            started_at = health.started_at.clone();
+            health_port = health.port;
             if health.status == "ok"
+                && health.app.as_deref() == Some("knownext")
+                && health.profile.as_deref() == Some("desktop")
                 && health.version.as_deref() == Some(APP_VERSION)
                 && health.app_data_dir.as_deref() == Some(expected_app_data_dir.as_str())
             {
@@ -356,11 +596,13 @@ fn backend_service_status(app: &tauri::AppHandle) -> Result<RuntimeServiceStatus
                 )
             } else {
                 last_error = Some(format!(
-                    "expectedVersion={}\nactualVersion={}\nexpectedAppDataDir={}\nactualAppDataDir={}",
+                    "expectedVersion={}\nactualVersion={}\nexpectedProfile=desktop\nactualProfile={}\nexpectedAppDataDir={}\nactualAppDataDir={}\nport={}",
                     APP_VERSION,
                     health.version.unwrap_or_else(|| "unknown".to_string()),
+                    health.profile.unwrap_or_else(|| "unknown".to_string()),
                     expected_app_data_dir,
-                    health.app_data_dir.unwrap_or_else(|| "unknown".to_string())
+                    health.app_data_dir.unwrap_or_else(|| "unknown".to_string()),
+                    port
                 ));
                 (
                     "degraded".to_string(),
@@ -389,14 +631,22 @@ fn backend_service_status(app: &tauri::AppHandle) -> Result<RuntimeServiceStatus
         status,
         status_label,
         description,
-        endpoint: format!("http://{BACKEND_HOST}:{BACKEND_PORT}/health"),
+        endpoint: format!("http://{BACKEND_HOST}:{port}/health"),
         expected_version: APP_VERSION.to_string(),
         version,
+        expected_profile: "desktop".to_string(),
+        profile,
         expected_app_data_dir,
         app_data_dir,
+        port: health_port.or(Some(port)),
+        managed_by,
+        instance_id,
+        started_at,
         sidecar_path,
         last_error,
         can_restart: cfg!(all(desktop, not(debug_assertions))),
+        can_configure_port: cfg!(all(desktop, not(debug_assertions))),
+        port_config: Some(port_config),
     })
 }
 
@@ -407,6 +657,64 @@ fn get_runtime_service_status(app: tauri::AppHandle) -> Result<RuntimeServicesSt
         services: vec![backend_service_status(&app)?],
         checked_at: trace_timestamp(),
     })
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+fn get_runtime_api_base_url(app: tauri::AppHandle) -> Result<String, String> {
+    Ok(format!("http://{BACKEND_HOST}:{}", runtime_active_port(&app)))
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+fn update_backend_port_config(app: tauri::AppHandle, config: BackendPortConfig) -> Result<RuntimeServicesStatus, String> {
+    let config = normalize_backend_port_config(config);
+    #[cfg(all(desktop, not(debug_assertions)))]
+    let previous_config = get_runtime_port_config(&app);
+    #[cfg(all(desktop, not(debug_assertions)))]
+    let previous_port = runtime_active_port(&app);
+    write_backend_port_config(&app, &config)?;
+    append_trace_log(
+        &app,
+        "warning",
+        "backend.sidecar",
+        "Backend port configuration changed from application settings.",
+        Some(&format!(
+            "mode={}\nport={}\nautoPortStart={}\nautoPortEnd={}",
+            config.mode, config.port, config.auto_port_start, config.auto_port_end
+        )),
+    )?;
+
+    #[cfg(all(desktop, not(debug_assertions)))]
+    {
+        let process_state = app.state::<BackendProcess>();
+        let mut child_slot = process_state.0.lock().map_err(|error| error.to_string())?;
+        if let Some(mut child) = child_slot.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        drop(child_slot);
+        if let Err(error) = start_backend_sidecar(&app) {
+            let _ = write_backend_port_config(&app, &previous_config);
+            let _ = set_runtime_port(&app, previous_config, previous_port);
+            let _ = append_trace_log(
+                &app,
+                "error",
+                "backend.sidecar",
+                "Backend port configuration failed. Restoring previous runtime configuration.",
+                Some(&error),
+            );
+            let _ = start_backend_sidecar(&app);
+            return Err(error);
+        }
+    }
+
+    #[cfg(any(not(desktop), debug_assertions))]
+    {
+        set_runtime_port(&app, config.clone(), config.port)?;
+    }
+
+    get_runtime_service_status(app)
 }
 
 #[cfg(all(desktop, not(debug_assertions)))]
@@ -428,7 +736,6 @@ fn restart_backend_service(app: tauri::AppHandle) -> Result<RuntimeServicesStatu
             let _ = child.wait();
         }
     }
-    stop_backend_processes_on_port(&app);
     start_backend_sidecar(&app)?;
     get_runtime_service_status(app)
 }
@@ -447,7 +754,7 @@ fn restart_backend_service(app: tauri::AppHandle) -> Result<RuntimeServicesStatu
 }
 
 #[cfg(all(desktop, not(debug_assertions), target_os = "windows"))]
-fn stop_backend_processes_on_port(app: &tauri::AppHandle) {
+fn stop_backend_processes_on_port(app: &tauri::AppHandle, port: u16) {
     let output = std::process::Command::new("netstat")
         .args(["-ano", "-p", "tcp"])
         .output();
@@ -456,7 +763,7 @@ fn stop_backend_processes_on_port(app: &tauri::AppHandle) {
     };
     let text = String::from_utf8_lossy(&output.stdout);
     let mut pids = std::collections::BTreeSet::new();
-    let local_port = format!(":{BACKEND_PORT}");
+    let local_port = format!(":{port}");
     for line in text.lines() {
         let normalized = line.split_whitespace().collect::<Vec<_>>();
         if normalized.len() < 5 {
@@ -486,7 +793,7 @@ fn stop_backend_processes_on_port(app: &tauri::AppHandle) {
 }
 
 #[cfg(all(desktop, not(debug_assertions), not(target_os = "windows")))]
-fn stop_backend_processes_on_port(_app: &tauri::AppHandle) {}
+fn stop_backend_processes_on_port(_app: &tauri::AppHandle, _port: u16) {}
 
 #[cfg(all(desktop, not(debug_assertions)))]
 fn push_sidecar_candidates_from_dir(candidates: &mut Vec<PathBuf>, directory: &Path) {
@@ -585,27 +892,33 @@ fn start_backend_sidecar(app: &tauri::AppHandle) -> Result<(), String> {
         .map_err(|error| error.to_string())?
         .to_string_lossy()
         .to_string();
-    if is_expected_backend_healthy(&app_data_dir) {
+    let (port_config, active_port) = choose_backend_port(app, &app_data_dir)?;
+    set_runtime_port(app, port_config.clone(), active_port)?;
+
+    if is_expected_backend_healthy(active_port, &app_data_dir) {
         let _ = append_trace_log(
             app,
             "info",
             "backend.sidecar",
-            "Compatible local API is already running on 127.0.0.1:8765.",
-            Some(&format!("version={APP_VERSION}\nappDataDir={app_data_dir}")),
+            "Compatible local API is already running.",
+            Some(&format!("version={APP_VERSION}\nappDataDir={app_data_dir}\nport={active_port}")),
         );
         return Ok(());
     }
 
-    if backend_health().is_some() {
-        let detail = incompatible_backend_detail(&app_data_dir);
+    if backend_health(active_port).is_some() {
+        let detail = incompatible_backend_detail(active_port, &app_data_dir);
         let _ = append_trace_log(
             app,
             "warning",
             "backend.sidecar",
-            "A local API is already running, but it does not match this app version or profile.",
+            "A local API is already running on the selected port, but it does not match this app version or profile.",
             Some(&detail),
         );
-        stop_backend_processes_on_port(app);
+        if port_config.mode == "fixed" {
+            return Err(detail);
+        }
+        stop_backend_processes_on_port(app, active_port);
         std::thread::sleep(Duration::from_millis(500));
     }
 
@@ -616,7 +929,9 @@ fn start_backend_sidecar(app: &tauri::AppHandle) -> Result<(), String> {
     let mut child = command
         .env("KNOWNEXT_APP_DATA_DIR", &app_data_dir)
         .env("KNOWNEXT_API_HOST", BACKEND_HOST)
-        .env("KNOWNEXT_API_PORT", BACKEND_PORT.to_string())
+        .env("KNOWNEXT_API_PORT", active_port.to_string())
+        .env("KNOWNEXT_RUNTIME_PROFILE", "desktop")
+        .env("KNOWNEXT_MANAGED_BY", "tauri")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -638,8 +953,8 @@ fn start_backend_sidecar(app: &tauri::AppHandle) -> Result<(), String> {
     let process_state = app.state::<BackendProcess>();
     *process_state.0.lock().map_err(|error| error.to_string())? = Some(child);
 
-    if wait_for_backend(Duration::from_secs(45), &app_data_dir) {
-        let detail = format!("path={}\nversion={APP_VERSION}\nappDataDir={app_data_dir}", sidecar_path.display());
+    if wait_for_backend(active_port, Duration::from_secs(45), &app_data_dir) {
+        let detail = format!("path={}\nversion={APP_VERSION}\nappDataDir={app_data_dir}\nport={active_port}", sidecar_path.display());
         append_trace_log(
             app,
             "info",
@@ -650,7 +965,7 @@ fn start_backend_sidecar(app: &tauri::AppHandle) -> Result<(), String> {
         Ok(())
     } else {
         let detail = format!(
-            "path={}\nversion={APP_VERSION}\nappDataDir={app_data_dir}\nThe UI can open, but API requests may fail until the backend becomes available.",
+            "path={}\nversion={APP_VERSION}\nappDataDir={app_data_dir}\nport={active_port}\nThe UI can open, but API requests may fail until the backend becomes available.",
             sidecar_path.display(),
         );
         append_trace_log(
@@ -671,11 +986,12 @@ fn spawn_backend_monitor(app: tauri::AppHandle) {
         let Ok(app_data_dir) = expected_app_data_dir(&app) else {
             continue;
         };
-        if is_expected_backend_healthy(&app_data_dir) {
+        let active_port = runtime_active_port(&app);
+        if is_expected_backend_healthy(active_port, &app_data_dir) {
             continue;
         }
 
-        let detail = incompatible_backend_detail(&app_data_dir);
+        let detail = incompatible_backend_detail(active_port, &app_data_dir);
         let _ = append_trace_log(
             &app,
             "error",
@@ -698,6 +1014,8 @@ fn spawn_backend_monitor(app: tauri::AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    let builder = builder.manage(BackendRuntimeState(Mutex::new(BackendRuntime::default())));
     #[cfg(all(desktop, not(debug_assertions)))]
     let builder = builder
         .manage(BackendProcess(Mutex::new(None)))
@@ -711,6 +1029,12 @@ pub fn run() {
             #[cfg(desktop)]
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
+
+            #[cfg(desktop)]
+            {
+                let config = normalize_backend_port_config(read_backend_port_config(app.handle()));
+                let _ = set_runtime_port(app.handle(), config.clone(), config.port);
+            }
 
             #[cfg(all(desktop, not(debug_assertions)))]
             if let Err(error) = start_backend_sidecar(app.handle()) {
@@ -732,7 +1056,9 @@ pub fn run() {
             record_trace_log,
             open_folder,
             get_runtime_service_status,
-            restart_backend_service
+            get_runtime_api_base_url,
+            restart_backend_service,
+            update_backend_port_config
         ])
         .run(tauri::generate_context!())
         .expect("error while running KnowNext.ai");

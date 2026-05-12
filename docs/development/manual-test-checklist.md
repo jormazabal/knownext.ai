@@ -63,7 +63,11 @@
 - [ ] In the Tauri app, select a project folder and confirm the full local path is shown and saved, for example `C:\Dev\knownext.ai`.
 - [ ] In the browser development build, confirm project editing shows the managed backend folder as read-only and does not offer a folder selector.
 - [ ] In the installed Tauri app, confirm service health points to `http://127.0.0.1:8765` and the desktop app-data directory.
-- [ ] In the browser development build, start `pnpm backend:web`, confirm service/API calls use `http://127.0.0.1:8766`, and confirm browser projects/configuration are independent from the installed app.
+- [ ] In the installed Tauri app, occupy `127.0.0.1:8765` with a non-KnowNext service, restart KnowNext.ai, and confirm the backend automatically moves to another port in `8765-8799` without using the web profile.
+- [ ] In Servicios > Avanzado in the installed Tauri app, switch to a fixed free port, apply and restart, and confirm the endpoint, service health, and API calls use the new port.
+- [ ] In Servicios > Avanzado in the installed Tauri app, try a fixed occupied port and confirm KnowNext.ai shows a clear conflict instead of killing unrelated processes.
+- [ ] In the browser development build, start `pnpm backend:web`, confirm service/API calls use `http://127.0.0.1:8766`, confirm `/health` reports `profile=web-dev`, and confirm browser projects/configuration are independent from the installed app.
+- [ ] Point the browser build at a desktop backend and confirm the app reports an incompatible backend profile instead of operating on the desktop profile.
 - [ ] Save a project edit and confirm the project selector shows the updated project data.
 - [ ] Restart the app and confirm the project edit is restored from `projects.json`.
 - [ ] Open `acta-reunion.md`.
@@ -122,6 +126,7 @@
 - [ ] Open the account menu and click Configuración de la app.
 - [ ] Confirm the settings modal opens with a left section list and right configuration pane.
 - [ ] In Servicios, confirm Backend local shows status, endpoint, active version, expected version, app data directory, and last check time.
+- [ ] In Servicios, confirm Backend local shows active profile, expected profile, active port, manager, instance id when available, and copied diagnostics include endpoint/profile/version/appDataDir.
 - [ ] In Servicios, click Comprobar and confirm the service status refreshes without closing the modal.
 - [ ] In the installed Tauri app, click Reiniciar backend and confirm the backend returns to Operativo or the last error is visible in the service card.
 - [ ] Stop the packaged backend process and confirm KnowNext.ai records the failed health check and restart attempt in `knownext.log`.

@@ -5,6 +5,7 @@ import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
 import { AppSettingsDialog } from "../features/settings/AppSettingsDialog";
 import { DesktopLayout } from "../layouts/DesktopLayout";
 import {
+  applyExternalMarkdownUpdate,
   countWords,
   createEmptyDocumentSession,
   createLoadedDocumentSession,
@@ -61,7 +62,7 @@ import {
 } from "../lib/runtime/updater";
 import { getTraceLogStatus, openTraceLogFolder, recordTraceLog, type TraceLogStatus } from "../lib/runtime/logging";
 import { openExternalUrl } from "../lib/runtime/links";
-import { getRuntimeServiceStatus, restartBackendService, type RuntimeServicesStatus } from "../lib/runtime/services";
+import { getRuntimeServiceStatus, restartBackendService, updateBackendPortConfig, type BackendPortConfig, type RuntimeServicesStatus } from "../lib/runtime/services";
 import {
   createFolder,
   createProjectDocument,
@@ -680,6 +681,32 @@ export function App() {
     }
     if (response.tree) setTree(response.tree);
     if (response.requiresConfirmation) setAiPendingDelete(response.requiresConfirmation);
+    const deletedPaths = getDeletedOperationPaths(response);
+    if (deletedPaths.length > 0) {
+      setTabs((currentTabs) => {
+        const nextTabs = currentTabs.filter((tab) => {
+          const documentPath = documentSessions[tab.id]?.document?.path;
+          return !documentPath || !isPathInDeletedScope(documentPath, deletedPaths);
+        });
+        setActiveDocumentId((currentDocumentId) => (
+          nextTabs.some((tab) => tab.id === currentDocumentId) ? currentDocumentId : nextTabs[0]?.id ?? ""
+        ));
+        return nextTabs;
+      });
+      setDocumentSessions((currentSessions) => {
+        const nextSessions = Object.fromEntries(
+          Object.entries(currentSessions).filter(([, session]) => {
+            const documentPath = session.document?.path;
+            return !documentPath || !isPathInDeletedScope(documentPath, deletedPaths);
+          }),
+        );
+        return nextSessions;
+      });
+      const aiChangedDocumentPath = aiAppliedChange ? documentSessions[aiAppliedChange.documentId]?.document?.path : null;
+      if (aiChangedDocumentPath && isPathInDeletedScope(aiChangedDocumentPath, deletedPaths)) {
+        setAiAppliedChange(null);
+      }
+    }
 
     if (response.updatedDocument) {
       const updated = response.updatedDocument;
@@ -696,13 +723,7 @@ export function App() {
         if (!session) return currentSessions;
         return {
           ...currentSessions,
-          [updated.documentId]: {
-            ...session,
-            markdown: updated.markdown,
-            isDirty: updated.markdown !== session.savedMarkdown,
-            saveState: "idle",
-            document: session.document ? { ...session.document, wordCount: countWords(updated.markdown) } : session.document,
-          },
+          [updated.documentId]: applyExternalMarkdownUpdate(session, updated.markdown),
         };
       });
     }
@@ -725,13 +746,7 @@ export function App() {
       if (!session) return currentSessions;
       return {
         ...currentSessions,
-        [change.documentId]: {
-          ...session,
-          markdown: change.previousMarkdown,
-          isDirty: change.previousMarkdown !== session.savedMarkdown,
-          saveState: "idle",
-          document: session.document ? { ...session.document, wordCount: countWords(change.previousMarkdown) } : session.document,
-        },
+        [change.documentId]: applyExternalMarkdownUpdate(session, change.previousMarkdown),
       };
     });
     setAiAppliedChange(null);
@@ -1330,6 +1345,30 @@ export function App() {
     }
   }
 
+  async function handleUpdateBackendPortConfig(config: BackendPortConfig) {
+    setRuntimeServicesRefreshing(true);
+    try {
+      const status = await updateBackendPortConfig(config);
+      setRuntimeServicesStatus(status);
+      await waitForApiReady({ attempts: 8, intervalMs: 250 });
+    } catch (error) {
+      const message = describeError(error);
+      setNotice({
+        title: "No se pudo aplicar la configuración del backend",
+        message,
+        tone: "error",
+      });
+      await refreshRuntimeServiceStatus();
+      void recordTraceLog({
+        source: "app.runtime.updateBackendPortConfig",
+        message: "No se pudo aplicar la configuración de puerto del backend.",
+        detail: message,
+      });
+    } finally {
+      setRuntimeServicesRefreshing(false);
+    }
+  }
+
   async function handleOpenTraceLogFolder() {
     const folderPath = traceLogStatus?.folderPath;
     if (!folderPath) return;
@@ -1582,6 +1621,7 @@ export function App() {
         onOpenTraceLogFolder={() => void handleOpenTraceLogFolder()}
         onRefreshRuntimeServices={() => void refreshRuntimeServiceStatus()}
         onRestartBackendService={() => void handleRestartBackendService()}
+        onUpdateBackendPortConfig={(config) => void handleUpdateBackendPortConfig(config)}
       />
       <AiDeleteConfirmationDialog
         pendingDelete={aiPendingDelete}
@@ -1874,6 +1914,21 @@ function getUniqueFolderName(nodes: DocumentTreeNode[]) {
   let counter = 2;
   while (names.has(`Nueva carpeta ${counter}`)) counter += 1;
   return `Nueva carpeta ${counter}`;
+}
+
+function getDeletedOperationPaths(response: AiInteractionResponse) {
+  return response.operations
+    .filter((operation) => operation.type === "node_deleted" && operation.path)
+    .map((operation) => normalizeDocumentPath(operation.path ?? ""));
+}
+
+function isPathInDeletedScope(documentPath: string, deletedPaths: string[]) {
+  const normalizedDocumentPath = normalizeDocumentPath(documentPath);
+  return deletedPaths.some((deletedPath) => normalizedDocumentPath === deletedPath || normalizedDocumentPath.startsWith(`${deletedPath}/`));
+}
+
+function normalizeDocumentPath(path: string) {
+  return path.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
 }
 
 function renameNode(nodes: DocumentTreeNode[], nodeId: string, name: string): DocumentTreeNode[] {
