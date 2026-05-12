@@ -149,7 +149,7 @@ export function App() {
   const [aiIndexStatus, setAiIndexStatus] = useState<AiIndexStatusResponse | null>(null);
   const [aiPendingDelete, setAiPendingDelete] = useState<AiPendingDelete | null>(null);
   const [aiBubble, setAiBubble] = useState<{ id: string; answer: string } | null>(null);
-  const [aiAppliedChange, setAiAppliedChange] = useState<{ documentId: string; previousMarkdown: string; summary: string } | null>(null);
+  const [aiAppliedChange, setAiAppliedChange] = useState<{ documentId: string; summary: string } | null>(null);
   const [tabsByProject, setTabsByProject] = useState<Record<string, ProjectTabsConfig>>({});
   const [openUtilityTabs, setOpenUtilityTabs] = useState<AppUtilityTabId[]>([]);
   const [activeUtilityTab, setActiveUtilityTab] = useState<AppUtilityTabId | null>(null);
@@ -710,11 +710,9 @@ export function App() {
 
     if (response.updatedDocument) {
       const updated = response.updatedDocument;
-      const previousMarkdown = documentSessions[updated.documentId]?.markdown;
-      if (previousMarkdown !== undefined) {
+      if (documentSessions[updated.documentId]) {
         setAiAppliedChange({
           documentId: updated.documentId,
-          previousMarkdown,
           summary: updated.summary,
         });
       }
@@ -738,17 +736,7 @@ export function App() {
     }
   }
 
-  function handleUndoAiChange() {
-    if (!aiAppliedChange) return;
-    const change = aiAppliedChange;
-    setDocumentSessions((currentSessions) => {
-      const session = currentSessions[change.documentId];
-      if (!session) return currentSessions;
-      return {
-        ...currentSessions,
-        [change.documentId]: applyExternalMarkdownUpdate(session, change.previousMarkdown),
-      };
-    });
+  function handleDismissAiAppliedChange() {
     setAiAppliedChange(null);
   }
 
@@ -1269,6 +1257,7 @@ export function App() {
     setAiConfig(nextAiConfig);
     void updateAiConfig({
       provider: nextAiConfig.provider,
+      model: nextAiConfig.model,
       permissions: nextAiConfig.permissions,
       rag: nextAiConfig.rag,
     })
@@ -1580,9 +1569,9 @@ export function App() {
         onPullProject={() => void handlePullProject()}
         onPushProject={() => void handlePushProject()}
         onCreateVersion={handleCreateActiveVersion}
-        onSendAiPrompt={(prompt) => void handleSendAiPrompt(prompt)}
+        onSendAiPrompt={handleSendAiPrompt}
         onCloseAiBubble={() => setAiBubble(null)}
-        onUndoAiChange={handleUndoAiChange}
+        onDismissAiAppliedChange={handleDismissAiAppliedChange}
         onOpenAiConversation={() => handleSelectTab(AI_CONVERSATION_TAB_ID)}
         isSyncingProject={syncState !== "idle"}
         onOpenDocument={handleOpenDocument}

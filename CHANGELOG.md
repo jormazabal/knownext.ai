@@ -2,6 +2,17 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.7.2 - 2026-05-12
+
+- Moved AI system response notices out of the document body into compact floating bubbles above the prompt, with right alignment, large rounded corners, and a close action.
+- Added a right-aligned waiting bubble while an AI prompt is processing.
+- Simplified the applied-change notice so it only shows the change summary; document undo remains handled by the editor-level controls.
+- Added an AI model selector in Settings with clear intelligence and cost indicators for `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, and `gpt-5.4-nano`.
+- Persisted the selected AI model through the frontend/backend configuration contract and used it for OpenAI Responses API interactions.
+- Fixed browser-development backend discovery so the web app can recover from incompatible local backend instances and use a compatible `web-dev` backend.
+- Fixed the account menu and service diagnostic copy interaction in the settings panel.
+- Updated release metadata, backend contract coverage, frontend tests, and manual acceptance checks for `0.7.2`.
+
 ## 0.7.1 - 2026-05-12
 
 - Added profile-aware local API identity so browser development, installed desktop builds, and older versions no longer reuse an incompatible backend silently.

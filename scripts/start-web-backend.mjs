@@ -8,11 +8,11 @@ mkdirSync(appDataRoot, { recursive: true });
 
 const env = {
   ...process.env,
-  KNOWNEXT_APP_DATA_DIR: process.env.KNOWNEXT_APP_DATA_DIR ?? appDataRoot,
+  KNOWNEXT_APP_DATA_DIR: appDataRoot,
   KNOWNEXT_API_HOST: process.env.KNOWNEXT_API_HOST ?? "127.0.0.1",
   KNOWNEXT_API_PORT: process.env.KNOWNEXT_API_PORT ?? "8766",
-  KNOWNEXT_RUNTIME_PROFILE: process.env.KNOWNEXT_RUNTIME_PROFILE ?? "web-dev",
-  KNOWNEXT_MANAGED_BY: process.env.KNOWNEXT_MANAGED_BY ?? "manual",
+  KNOWNEXT_RUNTIME_PROFILE: "web-dev",
+  KNOWNEXT_MANAGED_BY: "manual",
 };
 
 const args = [

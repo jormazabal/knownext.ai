@@ -23,10 +23,10 @@ export function AiConversationView({ project, config, indexStatus, events }: AiC
             </h2>
           </div>
           <div className="flex shrink-0 gap-2 text-[10px]">
-            <span className={["rounded px-2 py-1 font-semibold", config.openaiKeyConfigured ? "bg-brand-hover text-brand-orange" : "bg-panel text-ink-secondary"].join(" ")}>
+            <span className={["rounded-full px-2.5 py-1 font-semibold", config.openaiKeyConfigured ? "bg-brand-hover text-brand-orange" : "bg-panel text-ink-secondary"].join(" ")}>
               {config.openaiKeyConfigured ? "OpenAI configurado" : "Sin API key"}
             </span>
-            <span className={["rounded px-2 py-1", ragLabel.tone === "ready" ? "bg-brand-hover text-brand-orange" : "bg-panel text-ink-secondary"].join(" ")}>
+            <span className={["rounded-full px-2.5 py-1", ragLabel.tone === "ready" ? "bg-brand-hover text-brand-orange" : "bg-panel text-ink-secondary"].join(" ")}>
               {ragLabel.label}
             </span>
           </div>
@@ -69,7 +69,7 @@ function AiEventBubble({ event }: { event: AiConversationEvent }) {
   if (event.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[72%] rounded-md bg-brand-orange px-3 py-2 text-[11px] leading-5 text-white">
+        <div className="max-w-[72%] rounded-2xl rounded-br-md bg-brand-orange px-3.5 py-2.5 text-[11px] leading-5 text-white">
           <div className="mb-1 flex items-center justify-end gap-1.5 text-[10px] font-semibold text-white/85">
             <User size={12} />
             Tú
@@ -83,7 +83,7 @@ function AiEventBubble({ event }: { event: AiConversationEvent }) {
   if (event.role === "assistant") {
     return (
       <div className="flex justify-start">
-        <div className="max-w-[76%] rounded-md border border-line bg-white px-3 py-2 text-[11px] leading-5 text-ink-primary shadow-subtle">
+        <div className="max-w-[76%] rounded-2xl rounded-bl-md border border-line bg-white px-3.5 py-2.5 text-[11px] leading-5 text-ink-primary shadow-subtle">
           <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold text-brand-orange">
             <Bot size={12} />
             IA
@@ -97,7 +97,7 @@ function AiEventBubble({ event }: { event: AiConversationEvent }) {
   const Icon = getEventIcon(event.type);
   return (
     <div className="flex justify-center">
-      <div className="w-[min(560px,100%)] rounded-md border border-line bg-panel px-3 py-2 text-[11px] leading-5 text-ink-primary">
+      <div className="w-[min(560px,100%)] rounded-2xl border border-line bg-panel px-3.5 py-2.5 text-[11px] leading-5 text-ink-primary">
         <div className="flex items-start gap-2">
           <Icon size={14} className="mt-0.5 shrink-0 text-brand-orange" />
           <div className="min-w-0">

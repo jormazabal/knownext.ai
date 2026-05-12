@@ -92,6 +92,7 @@ class AiService:
                 payload.model_dump(),
                 context,
                 rag_context,
+                ai_config.model,
             )
             plan = self._coerce_document_writing_plan(payload, plan)
         except OpenAiUnavailableError as error:

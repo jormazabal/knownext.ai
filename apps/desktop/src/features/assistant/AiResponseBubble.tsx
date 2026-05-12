@@ -35,7 +35,7 @@ export function AiResponseBubble({ bubble, onClose, onOpenConversation }: AiResp
   return (
     <div
       className={[
-        "pointer-events-auto absolute bottom-[92px] right-8 z-30 w-[min(460px,calc(100%-56px))] rounded-md border border-line bg-white p-3 shadow-menu transition duration-180 ease-out",
+        "pointer-events-auto absolute bottom-[92px] right-8 z-30 w-[min(460px,calc(100%-56px))] rounded-2xl border border-line bg-white p-3 shadow-menu transition duration-180 ease-out",
         closing ? "translate-y-2 opacity-0" : "animate-[ai-bubble-in_160ms_ease-out] translate-y-0 opacity-100",
       ].join(" ")}
     >
@@ -43,13 +43,13 @@ export function AiResponseBubble({ bubble, onClose, onOpenConversation }: AiResp
         <div className="min-w-0 flex-1">
           <p className="whitespace-pre-wrap text-[11px] leading-5 text-ink-primary">{answer}</p>
           {longAnswer ? (
-            <button className="mt-2 text-[11px] font-semibold text-brand-orange hover:text-brand-dark" onClick={onOpenConversation}>
+            <button className="mt-2 rounded-full px-2 py-1 text-[11px] font-semibold text-brand-orange hover:bg-brand-hover hover:text-brand-dark" onClick={onOpenConversation}>
               Abrir en IA
             </button>
           ) : null}
         </div>
         <button
-          className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
+          className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
           aria-label="Cerrar respuesta IA"
           onClick={onClose}
         >

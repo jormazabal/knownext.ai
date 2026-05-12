@@ -27,7 +27,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.7.1"
+    assert payload["version"] == "0.7.2"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -56,6 +56,20 @@ def test_dev_browser_ports_are_allowed_by_cors() -> None:
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:1421"
+
+
+def test_ai_config_persists_selected_model() -> None:
+    current = client.get("/api/config/ai")
+    assert current.status_code == 200
+    payload = current.json()
+    assert payload["model"] == "gpt-5.4-mini"
+
+    payload["model"] = "gpt-5.5"
+    updated = client.put("/api/config/ai", json=payload)
+
+    assert updated.status_code == 200
+    assert updated.json()["model"] == "gpt-5.5"
+    assert client.get("/api/config/ai").json()["model"] == "gpt-5.5"
 
 
 def test_json_file_store_handles_concurrent_writes(tmp_path) -> None:
@@ -1184,8 +1198,14 @@ def test_ai_document_edit_returns_markdown_without_writing_disk(tmp_path, monkey
     project_id = created.json()["id"]
     document_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
     client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+    config = client.get("/api/config/ai").json()
+    config["model"] = "gpt-5.5"
+    client.put("/api/config/ai", json=config)
+    captured_model = None
 
-    def fake_plan(payload, context, rag):
+    def fake_plan(payload, context, rag, model=None):
+        nonlocal captured_model
+        captured_model = model
         return {
             "display": "conversation",
             "answer": None,
@@ -1221,6 +1241,7 @@ def test_ai_document_edit_returns_markdown_without_writing_disk(tmp_path, monkey
     payload = response.json()
     assert payload["updatedDocument"]["markdown"] == "# Updated\n"
     assert payload["operations"][0]["type"] == "document_modified"
+    assert captured_model == "gpt-5.5"
     assert document_path.read_text(encoding="utf-8") == "# Original\n"
 
 
@@ -1239,7 +1260,7 @@ def test_ai_writing_prompt_updates_active_document_when_provider_answers_only(tm
     document_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
     client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
 
-    def fake_plan(payload, context, rag):
+    def fake_plan(payload, context, rag, model=None):
         return {
             "display": "bubble",
             "answer": "# Receta de cocina\n\n## Ingredientes\n\n- Tomate\n- Aceite\n",
@@ -1281,7 +1302,7 @@ def test_ai_create_document_respects_permissions(tmp_path, monkeypatch) -> None:
     project_id = created.json()["id"]
     client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
 
-    def fake_plan(payload, context, rag):
+    def fake_plan(payload, context, rag, model=None):
         return {
             "display": "conversation",
             "answer": None,
@@ -1392,7 +1413,7 @@ def test_ai_interaction_includes_local_exact_rag_matches(tmp_path, monkeypatch) 
 
     captured_context = {}
 
-    def fake_plan(payload, context, rag):
+    def fake_plan(payload, context, rag, model=None):
         captured_context.update(context)
         return {"display": "bubble", "answer": "Encontrado en adr.md", "operations": []}
 

@@ -119,7 +119,8 @@
 - [ ] Open the `IA` tab and confirm conversation messages are grouped by day.
 - [ ] Submit an informational AI prompt and confirm the response appears in a right-aligned bubble above the prompt with an X close button.
 - [ ] Submit a second AI prompt and confirm the previous bubble disappears before the new response is shown.
-- [ ] Submit an AI edit for the active document and confirm Milkdown content changes, the document remains `Cambios sin guardar`, and the AI change banner offers Deshacer and Ver conversación.
+- [ ] Submit an AI prompt and confirm a right-aligned waiting bubble appears above the prompt while the request is processing.
+- [ ] Submit an AI edit for the active document and confirm Milkdown content changes, the document remains `Cambios sin guardar`, and the AI change notice appears as a floating prompt-area bubble with only the summary and an X close button.
 - [ ] Create a folder/document through AI with permissions enabled and confirm the tree refreshes and the created document opens when applicable.
 - [ ] Request a delete through AI and confirm the confirmation modal lists paths, Cancelar keeps files intact, and Eliminar removes the selected nodes.
 - [ ] Hover over the account area and confirm the account menu appears with GitHub login/logout, recoverable drafts, and update actions.
@@ -134,6 +135,7 @@
 - [ ] In Apariencia, adjust Zoom and confirm the interface scales immediately and persists after restart.
 - [ ] In IA, save an OpenAI API key and confirm only configured/preview status is shown, never the full key.
 - [ ] In the browser development build, save an OpenAI API key and confirm the request succeeds through the web backend profile without a CORS or `Failed to fetch` error.
+- [ ] In IA, confirm the model selector shows intelligence and cost indicators, select a different model, close/reopen settings, and confirm the selected model persists.
 - [ ] In IA, toggle Crear carpetas, Crear documentos, and Eliminar documentos y carpetas and confirm permissions persist.
 - [ ] In IA, enable project indexing, run Reindexar ahora, and confirm status shows indexed document counts plus local exact-search readiness.
 - [ ] Edit one Markdown file after indexing, run Reindexar ahora again, and confirm the index updates without forcing a full project reset from the user's perspective.

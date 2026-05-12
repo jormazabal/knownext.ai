@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Activity, Brain, ChevronDown, Copy, Eye, FolderOpen, KeyRound, Languages, ListChecks, RefreshCw, RotateCcw, Server, Trash2, X } from "lucide-react";
-import type { AiConfigStatus, AiIndexStatusResponse, AppearanceConfig, DiagnosticsConfig } from "../../types/domain";
+import type { AiConfigStatus, AiIndexStatusResponse, AiModelId, AppearanceConfig, DiagnosticsConfig } from "../../types/domain";
 import type { TraceLogStatus } from "../../lib/runtime/logging";
 import type { BackendPortConfig, RuntimeServicesStatus } from "../../lib/runtime/services";
 
@@ -27,6 +27,15 @@ type AppSettingsDialogProps = {
   onRefreshRuntimeServices: () => void;
   onRestartBackendService: () => void;
   onUpdateBackendPortConfig: (config: BackendPortConfig) => void;
+};
+
+const aiModelIds: AiModelId[] = ["gpt-5.4-mini", "gpt-5.4", "gpt-5.5", "gpt-5.4-nano"];
+
+const aiModelMeter: Record<AiModelId, { intelligence: number; cost: number }> = {
+  "gpt-5.5": { intelligence: 4, cost: 4 },
+  "gpt-5.4": { intelligence: 3, cost: 3 },
+  "gpt-5.4-mini": { intelligence: 3, cost: 2 },
+  "gpt-5.4-nano": { intelligence: 2, cost: 1 },
 };
 
 export function AppSettingsDialog({
@@ -222,6 +231,7 @@ function ServiceCard({
   const [fixedPort, setFixedPort] = useState(service.portConfig?.port ?? service.port ?? 8765);
   const [autoStart, setAutoStart] = useState(service.portConfig?.autoPortStart ?? 8765);
   const [autoEnd, setAutoEnd] = useState(service.portConfig?.autoPortEnd ?? 8799);
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   const diagnostic = buildServiceDiagnostic(service);
 
   useEffect(() => {
@@ -229,7 +239,14 @@ function ServiceCard({
     setFixedPort(service.portConfig?.port ?? service.port ?? 8765);
     setAutoStart(service.portConfig?.autoPortStart ?? 8765);
     setAutoEnd(service.portConfig?.autoPortEnd ?? 8799);
+    setCopyStatus("idle");
   }, [service.portConfig, service.port]);
+
+  async function handleCopyDiagnostic() {
+    const copied = await copyText(diagnostic);
+    setCopyStatus(copied ? "copied" : "failed");
+    window.setTimeout(() => setCopyStatus("idle"), 1800);
+  }
   const stateClass =
     service.status === "running"
       ? "bg-emerald-50 text-emerald-700"
@@ -296,10 +313,10 @@ function ServiceCard({
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
           className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange"
-          onClick={() => void navigator.clipboard?.writeText(diagnostic)}
+          onClick={() => void handleCopyDiagnostic()}
         >
           <Copy size={14} />
-          {text.copyDiagnostic}
+          {copyStatus === "copied" ? text.copyDiagnosticCopied : copyStatus === "failed" ? text.copyDiagnosticFailed : text.copyDiagnostic}
         </button>
         <button
           className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange"
@@ -346,8 +363,37 @@ function ServiceCard({
           </p>
         </div>
       ) : null}
+      <p className="sr-only" aria-live="polite">
+        {copyStatus === "copied" ? text.copyDiagnosticCopied : copyStatus === "failed" ? text.copyDiagnosticFailed : ""}
+      </p>
     </section>
   );
+}
+
+async function copyText(text: string) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Fall through to the legacy copy path.
+  }
+
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const copied = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    return copied;
+  } catch {
+    return false;
+  }
 }
 
 function NumberField({ label, value, disabled, onChange }: { label: string; value: number; disabled: boolean; onChange: (value: number) => void }) {
@@ -496,6 +542,13 @@ function AiSettings({
     });
   }
 
+  function updateModel(model: AiModelId) {
+    onAiChange({
+      ...ai,
+      model,
+    });
+  }
+
   function updateRag(enabled: boolean) {
     onAiChange({
       ...ai,
@@ -557,6 +610,53 @@ function AiSettings({
         </div>
         <p className="mt-2 text-[10px] leading-4 text-ink-secondary">{text.aiKeyPrivacy}</p>
       </div>
+
+      <section className="rounded-md border border-line px-4 py-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold text-ink-primary">{text.aiModelHeading}</p>
+            <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.aiModelDescription}</p>
+          </div>
+          <span className="rounded bg-panel px-2 py-1 font-mono text-[10px] font-semibold text-ink-secondary">{ai.model}</span>
+        </div>
+
+        <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2" role="radiogroup" aria-label={text.aiModelHeading}>
+          {aiModelIds.map((modelId) => {
+            const model = text.aiModels[modelId];
+            const meter = aiModelMeter[modelId];
+            const selected = ai.model === modelId;
+            return (
+              <button
+                key={modelId}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                className={[
+                  "min-w-0 rounded-lg border px-3 py-3 text-left transition",
+                  selected ? "border-brand-orange bg-brand-hover shadow-subtle" : "border-line bg-white hover:border-orange-200 hover:bg-panel",
+                ].join(" ")}
+                onClick={() => updateModel(modelId)}
+              >
+                <span className="flex items-start justify-between gap-2">
+                  <span className="min-w-0">
+                    <span className="block text-[11px] font-semibold text-ink-primary">{model.name}</span>
+                    <span className="mt-0.5 block break-words font-mono text-[9px] text-ink-secondary">{modelId}</span>
+                  </span>
+                  {model.recommended ? (
+                    <span className="shrink-0 rounded bg-white px-2 py-1 text-[9px] font-semibold text-brand-orange">{text.recommendedModel}</span>
+                  ) : null}
+                </span>
+                <span className="mt-2 block text-[10px] leading-4 text-ink-secondary">{model.description}</span>
+                <span className="mt-3 grid gap-2">
+                  <ModelMeter label={text.intelligenceLabel} value={meter.intelligence} valueLabel={model.intelligence} />
+                  <ModelMeter label={text.costLabel} value={meter.cost} valueLabel={model.cost} />
+                </span>
+                <span className="mt-2 block text-[9px] leading-4 text-ink-secondary">{model.price}</span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
       <section className="space-y-2">
         <p className="text-[11px] font-semibold text-ink-primary">{text.aiPermissionsHeading}</p>
@@ -678,6 +778,25 @@ function DiagnosticsSettings({
   );
 }
 
+function ModelMeter({ label, value, valueLabel }: { label: string; value: number; valueLabel: string }) {
+  return (
+    <span className="block min-w-0 text-[9px] leading-4">
+      <span className="flex min-w-0 items-center justify-between gap-2">
+        <span className="font-semibold text-ink-secondary">{label}</span>
+        <span className="truncate text-right font-semibold text-ink-primary">{valueLabel}</span>
+      </span>
+      <span className="mt-1 grid grid-cols-4 gap-1" aria-hidden="true">
+        {[1, 2, 3, 4].map((step) => (
+          <span
+            key={step}
+            className={["h-1.5 rounded-full", step <= value ? "bg-brand-orange" : "bg-line"].join(" ")}
+          />
+        ))}
+      </span>
+    </span>
+  );
+}
+
 function ToggleRow({ label, enabled, onToggle }: { label: string; enabled: boolean; onToggle: () => void }) {
   return (
     <div className="flex items-center justify-between gap-4 rounded-md border border-line px-4 py-3">
@@ -762,6 +881,8 @@ const settingsCopy = {
     sidecarPathLabel: "Ejecutable sidecar",
     lastErrorLabel: "Último problema detectado",
     copyDiagnostic: "Copiar diagnóstico",
+    copyDiagnosticCopied: "Diagnóstico copiado",
+    copyDiagnosticFailed: "No se pudo copiar",
     advancedBackend: "Avanzado",
     portModeLabel: "Modo de puerto",
     portModeAutomatic: "Automático",
@@ -792,6 +913,45 @@ const settingsCopy = {
     saveKey: "Guardar",
     deleteKey: "Eliminar clave",
     aiKeyPrivacy: "La clave se guarda localmente y no se escribe en proyectos, logs ni trazas.",
+    aiModelHeading: "Modelo de respuesta",
+    aiModelDescription: "Elige el equilibrio entre inteligencia, velocidad y coste para las respuestas documentales.",
+    recommendedModel: "Recomendado",
+    intelligenceLabel: "Inteligencia",
+    costLabel: "Coste",
+    aiModels: {
+      "gpt-5.4-mini": {
+        name: "Equilibrado",
+        description: "Buen criterio documental con coste bajo para uso diario.",
+        intelligence: "Alta",
+        cost: "Bajo",
+        price: "$0.75 entrada / $4.50 salida por 1M tokens",
+        recommended: true,
+      },
+      "gpt-5.4": {
+        name: "Avanzado",
+        description: "Más precisión para razonamiento y documentos complejos.",
+        intelligence: "Muy alta",
+        cost: "Medio",
+        price: "$2.50 entrada / $15 salida por 1M tokens",
+        recommended: false,
+      },
+      "gpt-5.5": {
+        name: "Máxima inteligencia",
+        description: "Elige esta opción cuando la calidad pesa más que el coste.",
+        intelligence: "Máxima",
+        cost: "Alto",
+        price: "$5 entrada / $30 salida por 1M tokens",
+        recommended: false,
+      },
+      "gpt-5.4-nano": {
+        name: "Económico",
+        description: "Respuestas rápidas y baratas para tareas simples.",
+        intelligence: "Media",
+        cost: "Muy bajo",
+        price: "$0.20 entrada / $1.25 salida por 1M tokens",
+        recommended: false,
+      },
+    },
     aiPermissionsHeading: "Permisos de acciones",
     createFolders: "Crear carpetas",
     createDocuments: "Crear documentos",
@@ -850,6 +1010,8 @@ const settingsCopy = {
     sidecarPathLabel: "Sidecar executable",
     lastErrorLabel: "Last detected problem",
     copyDiagnostic: "Copy diagnostic",
+    copyDiagnosticCopied: "Diagnostic copied",
+    copyDiagnosticFailed: "Could not copy",
     advancedBackend: "Advanced",
     portModeLabel: "Port mode",
     portModeAutomatic: "Automatic",
@@ -880,6 +1042,45 @@ const settingsCopy = {
     saveKey: "Save",
     deleteKey: "Delete key",
     aiKeyPrivacy: "The key is stored locally and is not written to projects, logs, or traces.",
+    aiModelHeading: "Response model",
+    aiModelDescription: "Choose the balance between intelligence, speed, and cost for documentation answers.",
+    recommendedModel: "Recommended",
+    intelligenceLabel: "Intelligence",
+    costLabel: "Cost",
+    aiModels: {
+      "gpt-5.4-mini": {
+        name: "Balanced",
+        description: "Strong documentation judgment with low cost for daily work.",
+        intelligence: "High",
+        cost: "Low",
+        price: "$0.75 input / $4.50 output per 1M tokens",
+        recommended: true,
+      },
+      "gpt-5.4": {
+        name: "Advanced",
+        description: "More precision for reasoning and complex documents.",
+        intelligence: "Very high",
+        cost: "Medium",
+        price: "$2.50 input / $15 output per 1M tokens",
+        recommended: false,
+      },
+      "gpt-5.5": {
+        name: "Max intelligence",
+        description: "Use when answer quality matters more than cost.",
+        intelligence: "Maximum",
+        cost: "High",
+        price: "$5 input / $30 output per 1M tokens",
+        recommended: false,
+      },
+      "gpt-5.4-nano": {
+        name: "Economy",
+        description: "Fast, inexpensive answers for simple tasks.",
+        intelligence: "Medium",
+        cost: "Very low",
+        price: "$0.20 input / $1.25 output per 1M tokens",
+        recommended: false,
+      },
+    },
     aiPermissionsHeading: "Action permissions",
     createFolders: "Create folders",
     createDocuments: "Create documents",

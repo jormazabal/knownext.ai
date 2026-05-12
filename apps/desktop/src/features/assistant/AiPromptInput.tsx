@@ -1,4 +1,4 @@
-import { Mic, Plus, SendHorizontal } from "lucide-react";
+import { Mic, Plus, SendHorizontal, X } from "lucide-react";
 import { useState } from "react";
 
 type AiPromptInputProps = {
@@ -6,10 +6,19 @@ type AiPromptInputProps = {
   projectId?: string;
   markdown: string;
   providerReady: boolean;
-  onSubmit: (prompt: string) => void;
+  appliedChangeSummary?: string | null;
+  onSubmit: (prompt: string) => void | Promise<void>;
+  onDismissAppliedChange?: () => void;
 };
 
-export function AiPromptInput({ documentId, projectId, providerReady, onSubmit }: AiPromptInputProps) {
+export function AiPromptInput({
+  documentId,
+  projectId,
+  providerReady,
+  appliedChangeSummary,
+  onSubmit,
+  onDismissAppliedChange,
+}: AiPromptInputProps) {
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
   const hasContext = Boolean(documentId || projectId);
@@ -28,8 +37,30 @@ export function AiPromptInput({ documentId, projectId, providerReady, onSubmit }
 
   return (
     <div className="pointer-events-auto absolute bottom-11 left-1/2 z-20 w-[min(700px,calc(100%-56px))] -translate-x-1/2">
-      <div className="flex min-h-10 items-end rounded-md border border-line bg-white px-2 py-1.5 shadow-subtle">
-        <button className="mb-0.5 grid h-6 w-6 place-items-center rounded-md text-ink-secondary opacity-60" data-tooltip="Añadir contexto" aria-label="Añadir contexto" disabled>
+      {loading || appliedChangeSummary ? (
+        <div className="absolute bottom-full right-0 mb-2 flex w-[min(380px,78%)] flex-col items-end gap-2">
+          {loading ? (
+            <div className="flex max-w-full items-center gap-2 rounded-2xl border border-line bg-white px-3 py-2 text-[11px] text-ink-secondary shadow-menu" role="status" aria-live="polite">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-brand-orange" />
+              <span>Esperando respuesta...</span>
+            </div>
+          ) : null}
+          {appliedChangeSummary ? (
+            <div className="flex max-w-full items-start gap-2 rounded-2xl border border-orange-200 bg-white px-3 py-2 text-[11px] text-ink-primary shadow-menu">
+              <p className="min-w-0 flex-1 truncate leading-5">{appliedChangeSummary}</p>
+              <button
+                className="grid h-5 w-5 shrink-0 place-items-center rounded-full text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
+                aria-label="Cerrar aviso de cambios IA"
+                onClick={onDismissAppliedChange}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      <div className="flex min-h-11 items-end rounded-2xl border border-line bg-white px-2 py-1.5 shadow-subtle">
+        <button className="mb-0.5 grid h-7 w-7 place-items-center rounded-full text-ink-secondary opacity-60" data-tooltip="Añadir contexto" aria-label="Añadir contexto" disabled>
           <Plus size={16} />
         </button>
         <textarea
@@ -55,7 +86,7 @@ export function AiPromptInput({ documentId, projectId, providerReady, onSubmit }
           disabled={!canPrompt}
         />
         <button
-          className="mb-0.5 grid h-6 w-6 place-items-center rounded-md text-brand-orange hover:bg-brand-hover disabled:opacity-50"
+          className="mb-0.5 grid h-7 w-7 place-items-center rounded-full text-brand-orange hover:bg-brand-hover disabled:opacity-50"
           data-tooltip="Enviar"
           aria-label="Enviar"
           onClick={() => void handleSubmit()}
@@ -63,7 +94,7 @@ export function AiPromptInput({ documentId, projectId, providerReady, onSubmit }
         >
           {loading ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-brand-orange border-t-transparent" /> : <SendHorizontal size={16} />}
         </button>
-        <button className="mb-0.5 grid h-6 w-6 place-items-center rounded-md text-ink-secondary opacity-50" data-tooltip="Micrófono no disponible" aria-label="Micrófono no disponible" disabled>
+        <button className="mb-0.5 grid h-7 w-7 place-items-center rounded-full text-ink-secondary opacity-50" data-tooltip="Micrófono no disponible" aria-label="Micrófono no disponible" disabled>
           <Mic size={15} />
         </button>
       </div>

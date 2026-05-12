@@ -31,6 +31,7 @@ describe("ProjectActions", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: /sin cuenta github/i }));
     fireEvent.click(screen.getByText("Buscar actualizaciones"));
 
     expect(onCheckForUpdates).toHaveBeenCalledTimes(1);
@@ -60,6 +61,7 @@ describe("ProjectActions", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: /sin cuenta github/i }));
     fireEvent.click(screen.getByText("Notas de release"));
 
     expect(onOpenReleaseNotes).toHaveBeenCalledTimes(1);
@@ -89,6 +91,7 @@ describe("ProjectActions", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: /sin cuenta github/i }));
     fireEvent.click(screen.getByText("Configuración de la app"));
 
     expect(onOpenAppSettings).toHaveBeenCalledTimes(1);
