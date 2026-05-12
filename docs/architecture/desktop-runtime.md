@@ -5,7 +5,7 @@ KnowNext.ai uses Tauri as the desktop shell.
 ## Current Runtime
 
 - Tauri loads the Vite React app.
-- The installed Tauri app starts and supervises the bundled FastAPI sidecar on `127.0.0.1:8765`.
+- The installed Tauri app starts and supervises the bundled FastAPI sidecar on `127.0.0.1:8765` by default, with automatic fallback across `8765-8799` when the default port is occupied by another service.
 - Browser development runs a separate FastAPI profile on `127.0.0.1:8766` through `pnpm backend:web` so browser projects, credentials, and app settings do not overwrite the installed app profile.
 - The frontend calls FastAPI for product data and must not silently fall back to local mock data.
 - Tauri owns desktop update checks through the updater plugin. React calls only the runtime wrapper under `apps/desktop/src/lib/runtime`, and the updater downloads signed packages from GitHub Releases.
@@ -48,14 +48,20 @@ Tauri starts FastAPI as a sidecar process when the installed desktop app opens.
 
 The sidecar integration must:
 
-- Use the reserved desktop port `127.0.0.1:8765`.
+- Prefer the reserved desktop port `127.0.0.1:8765`, but use a configured fixed port or automatic fallback port when needed.
 - Start FastAPI with explicit host `127.0.0.1`.
 - Pass the Tauri app data directory to the backend through `KNOWNEXT_APP_DATA_DIR`.
+- Pass `KNOWNEXT_RUNTIME_PROFILE=desktop`, `KNOWNEXT_MANAGED_BY=tauri`, and the selected `KNOWNEXT_API_PORT`.
+- Expose the active API endpoint to React through Tauri instead of requiring the frontend to hard-code a port.
 - Health-check the backend before enabling backend-backed actions and while the app remains open.
-- Restart the backend when health checks fail or the active version/profile does not match the installed app.
+- Restart the backend when health checks fail. If a fixed port is occupied by an incompatible service, report the conflict instead of killing unrelated processes.
 - Shut down FastAPI when the desktop app closes.
 - Record startup failures, health mismatches, and restart attempts in `knownext.log`.
 - Avoid exposing the API beyond localhost.
+
+The backend `/health` contract is the runtime identity boundary. It must include `app=knownext`, `schemaVersion`, `profile`, `version`, `port`, `endpoint`, `instanceId`, `startedAt`, `managedBy`, and `appDataDir`. Desktop frontends must reject non-`desktop` profiles; browser development frontends must reject non-`web-dev` profiles.
+
+The Services settings panel exposes port control under an advanced section. Automatic mode is the product default. Fixed mode is intended for managed machines or port reservation scenarios and must validate conflicts before applying.
 
 ## Security Notes
 

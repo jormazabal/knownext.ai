@@ -1,4 +1,7 @@
+import os
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi import HTTPException
@@ -45,6 +48,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title=settings.app_name, version=APP_VERSION, lifespan=lifespan)
+BACKEND_INSTANCE_ID = f"backend-{uuid4()}"
+BACKEND_STARTED_AT = datetime.now(timezone.utc).isoformat()
 
 app.add_middleware(
     CORSMiddleware,
@@ -66,11 +71,22 @@ async def trace_unhandled_errors(request: Request, call_next):
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
+def health() -> dict[str, str | int]:
+    host = os.environ.get("KNOWNEXT_API_HOST", "127.0.0.1")
+    port = int(os.environ.get("KNOWNEXT_API_PORT", "8765"))
     return {
+        "app": "knownext",
+        "schemaVersion": 2,
         "status": "ok",
         "service": settings.app_name,
         "version": APP_VERSION,
+        "profile": os.environ.get("KNOWNEXT_RUNTIME_PROFILE", "desktop"),
+        "host": host,
+        "port": port,
+        "endpoint": f"http://{host}:{port}",
+        "instanceId": BACKEND_INSTANCE_ID,
+        "startedAt": BACKEND_STARTED_AT,
+        "managedBy": os.environ.get("KNOWNEXT_MANAGED_BY", "manual"),
         "appDataDir": str(get_app_data_dir()),
     }
 

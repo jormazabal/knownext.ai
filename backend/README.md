@@ -18,6 +18,8 @@ pnpm backend:web
 
 The web backend listens on `127.0.0.1:8766` and stores data under `ai.knownext.web`. Browser-created projects do not request a local PC folder; when `folderPath` is empty the backend creates the project under its managed `projects/<project-id>` storage directory.
 
+Runtime identity is part of `/health`. Desktop backends must report `profile=desktop`; browser development backends started with `pnpm backend:web` report `profile=web-dev`. Frontends use this profile to avoid mixing the installed Windows app data with browser development data.
+
 ## Test
 
 ```bash

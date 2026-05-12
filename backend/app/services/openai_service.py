@@ -41,7 +41,12 @@ class OpenAiService:
                     "content": (
                         "Eres el asistente documental de KnowNext.ai. Devuelve solo JSON válido con el esquema pedido. "
                         "No inventes operaciones de filesystem si el usuario solo pregunta. "
-                        "Para editar documentos, devuelve el Markdown completo actualizado en updatedMarkdown. "
+                        "Cuando request.mode sea document y exista activeDocument, las peticiones de redactar, escribir, "
+                        "generar, crear contenido, añadir, modificar, corregir o reescribir deben editar el documento activo: "
+                        "devuelve una operación document_modified con el Markdown completo resultante en updatedMarkdown. "
+                        "Si el documento activo está vacío o es mínimo, sustitúyelo por el contenido solicitado; si ya tiene "
+                        "contenido relevante, consérvalo salvo que el usuario pida reemplazarlo. "
+                        "Para preguntas informativas sin intención de edición, responde solo en answer y sin operaciones. "
                         "Para borrar, devuelve solo una solicitud delete_node; la aplicación pedirá confirmación. "
                         "Si el contexto incluye projectSearch.exactMatches, úsalo como evidencia local exacta y cita sus paths en respuestas informativas."
                     ),
