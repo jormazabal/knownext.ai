@@ -601,7 +601,7 @@ function ReferencePicker({
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => onSelect(result)}
           >
-            <FileText size={13} className="shrink-0" />
+            {result.kind === "image" ? <Image size={13} className="shrink-0" /> : <FileText size={13} className="shrink-0" />}
             <span className="min-w-0">
               <span className="block truncate text-[11px] font-semibold">{result.name}</span>
               <span className="block truncate text-[10px] text-ink-secondary">{result.path}</span>

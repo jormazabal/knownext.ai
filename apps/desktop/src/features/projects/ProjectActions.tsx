@@ -1,45 +1,25 @@
 import {
   BarChart3,
   ChevronRight,
-  ChevronDown,
-  ChevronUp,
   FileClock,
-  FilePlus2,
-  FolderPlus,
   LogOut,
   RefreshCw,
   ScrollText,
-  Search,
   Settings,
   UserPlus,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { AiUsageSummaryResponse, AppearanceConfig, AuthStatus } from "../../types/domain";
 
-const actions = [
-  { id: "search", label: "Buscar", icon: Search },
-  { id: "folder", label: "Crear carpeta", icon: FolderPlus },
-  { id: "document", label: "Crear documento", icon: FilePlus2 },
-  { id: "expand", label: "Expandir árbol", icon: ChevronDown },
-  { id: "collapse", label: "Contraer árbol", icon: ChevronUp },
-  { id: "settings", label: "Configurar proyecto", icon: Settings },
-];
-
 type ProjectActionsProps = {
   appVersion: string;
   language?: AppearanceConfig["language"];
   authStatus: AuthStatus;
   aiUsageSummary?: AiUsageSummaryResponse | null;
-  hasActiveProject: boolean;
   orphanDraftCount: number;
   isCheckingForUpdates: boolean;
   onLoginGithub: () => void;
   onLogout: () => void;
-  onCreateFolder: () => void;
-  onCreateDocument: () => void;
-  onExpandTree: () => void;
-  onCollapseTree: () => void;
-  onConfigureProject: () => void;
   onOpenAppSettings: () => void;
   onOpenRecoverableDrafts: () => void;
   onCheckForUpdates: () => void;
@@ -51,16 +31,10 @@ export function ProjectActions({
   language = "es",
   authStatus,
   aiUsageSummary = null,
-  hasActiveProject,
   orphanDraftCount,
   isCheckingForUpdates,
   onLoginGithub,
   onLogout,
-  onCreateFolder,
-  onCreateDocument,
-  onExpandTree,
-  onCollapseTree,
-  onConfigureProject,
   onOpenAppSettings,
   onOpenRecoverableDrafts,
   onCheckForUpdates,
@@ -69,14 +43,6 @@ export function ProjectActions({
   const text = projectActionsCopy[language];
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
-
-  function handleAction(actionId: string) {
-    if (actionId === "folder") onCreateFolder();
-    if (actionId === "document") onCreateDocument();
-    if (actionId === "expand") onExpandTree();
-    if (actionId === "collapse") onCollapseTree();
-    if (actionId === "settings") onConfigureProject();
-  }
 
   const accountName = authStatus.user?.name || authStatus.user?.login || text.noGithubAccount;
   const accountInitials = getInitials(accountName);
@@ -108,21 +74,7 @@ export function ProjectActions({
 
   return (
     <div className="mt-auto border-t border-line">
-      <div className="flex h-9 items-center justify-between px-3">
-        {actions.map((action) => (
-          <button
-            key={action.label}
-            className="grid h-6 w-6 place-items-center rounded-md hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-40"
-            data-tooltip={action.label}
-            aria-label={action.label}
-            disabled={!hasActiveProject && action.id !== "search"}
-            onClick={() => handleAction(action.id)}
-          >
-            <action.icon size={15} />
-          </button>
-        ))}
-      </div>
-      <div ref={accountMenuRef} className="relative border-t border-line px-3 py-1">
+      <div ref={accountMenuRef} className="relative px-3 py-1">
         <button
           className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-1 text-left hover:bg-brand-hover"
           aria-expanded={accountMenuOpen}

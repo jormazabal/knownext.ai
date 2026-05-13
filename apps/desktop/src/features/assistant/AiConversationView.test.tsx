@@ -137,6 +137,15 @@ const config: AiConfigStatus = {
     status: "not-indexed",
     error: null,
   },
+  vision: {
+    enabled: true,
+    model: "gpt-5.4-mini",
+    imageIndexingEnabled: false,
+    maxImagesPerPrompt: 4,
+    maxImageSizeMb: 12,
+    detail: "auto",
+    storeVisualDescriptions: true,
+  },
   agentic: {
     depth: "guided",
     webResearchEnabled: false,

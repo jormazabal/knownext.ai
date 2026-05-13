@@ -13,6 +13,7 @@ AiExecutionMode = Literal["quick", "reasoning"]
 AiReasoningDepth = Literal["light", "medium", "deep"]
 AiExecutionScope = Literal["direct_action", "needs_permission", "needs_clarification", "agentic_task", "too_expensive_or_unclear"]
 AiModelId = Literal["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"]
+AiVisionModelId = Literal["gpt-5.4-mini", "gpt-5.4", "gpt-5.5"]
 AiAgenticDepth = Literal["quick", "guided", "deep", "bounded_autonomous"]
 AiPendingIntentStatus = Literal["awaiting_decision", "awaiting_web_permission", "ready", "running", "completed", "cancelled"]
 AiPendingIntentAction = Literal["replace_document", "edit_document", "create_document", "project_operation", "research_then_write"]
@@ -73,6 +74,16 @@ class AiRagConfig(BaseModel):
     error: str | None = None
 
 
+class AiVisionConfig(BaseModel):
+    enabled: bool = True
+    model: AiVisionModelId = "gpt-5.4-mini"
+    imageIndexingEnabled: bool = False
+    maxImagesPerPrompt: int = 4
+    maxImageSizeMb: int = 12
+    detail: Literal["auto", "low", "high"] = "auto"
+    storeVisualDescriptions: bool = True
+
+
 class AiAgenticConfig(BaseModel):
     depth: AiAgenticDepth = "guided"
     webResearchEnabled: bool = False
@@ -88,6 +99,7 @@ class AiConfig(BaseModel):
     model: AiModelId = "gpt-5.4-mini"
     permissions: AiPermissions = Field(default_factory=AiPermissions)
     rag: AiRagConfig = Field(default_factory=AiRagConfig)
+    vision: AiVisionConfig = Field(default_factory=AiVisionConfig)
     agentic: AiAgenticConfig = Field(default_factory=AiAgenticConfig)
 
 
@@ -163,6 +175,8 @@ class AiContextSearchResult(BaseModel):
     documentId: str
     name: str
     path: str
+    kind: AiContextSourceKind = "project_document"
+    mimeType: str | None = None
 
 
 class AiCreateProjectDocumentContextRequest(BaseModel):

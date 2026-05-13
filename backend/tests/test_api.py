@@ -12,12 +12,26 @@ from app.services.app_storage import JsonFileStore
 
 client = TestClient(app)
 
+TINY_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+)
+
 
 @pytest.fixture(autouse=True)
 def isolated_app_data(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("KNOWNEXT_APP_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("APPDATA", str(tmp_path / "isolated-appdata"))
     monkeypatch.delenv("KNOWNEXT_GITHUB_CLIENT_ID", raising=False)
+
+
+def _find_tree_node(nodes: list[dict], name: str) -> dict:
+    for node in nodes or []:
+        if node["name"] == name:
+            return node
+        child = _find_tree_node(node.get("children") or [], name)
+        if child:
+            return child
+    return {}
 
 
 def test_health() -> None:
@@ -27,7 +41,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.10.0"
+    assert payload["version"] == "0.11.0"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -277,6 +291,138 @@ def test_project_tree_reads_local_folder_and_manages_files(tmp_path) -> None:
     deleted = client.delete(f"/api/projects/{project_id}/nodes/{renamed_id}")
     assert deleted.status_code == 200
     assert not (docs_root / "Guides" / "notes-renamed.md").exists()
+
+
+def test_project_tree_imports_and_exposes_image_assets(tmp_path) -> None:
+    docs_root = tmp_path / "docs-images"
+    docs_root.mkdir()
+    (docs_root / "intro.md").write_text("# Intro\n", encoding="utf-8")
+    (docs_root / "diagram.png").write_bytes(TINY_PNG)
+
+    created = client.post(
+        "/api/projects",
+        json={"name": "Docs con imagenes", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+
+    tree = client.get(f"/api/projects/{project_id}/tree").json()
+    image_node = _find_tree_node(tree, "diagram.png")
+
+    assert image_node["type"] == "image"
+    assert image_node["mimeType"] == "image/png"
+    assert image_node["sizeBytes"] > 0
+
+    imported = client.post(
+        f"/api/projects/{project_id}/assets/images",
+        files={"file": ("screen.webp", TINY_PNG, "image/webp")},
+    )
+
+    assert imported.status_code == 200
+    assert imported.json()["asset"]["name"] == "screen.webp"
+    assert (docs_root / "screen.webp").exists()
+
+
+def test_image_references_are_built_tracked_and_rewritten_when_image_moves(tmp_path) -> None:
+    docs_root = tmp_path / "docs-image-references"
+    docs_root.mkdir()
+    (docs_root / "readme.md").write_text("# Readme\n\n![Diagram](./diagram.png)\n", encoding="utf-8")
+    (docs_root / "diagram.png").write_bytes(TINY_PNG)
+
+    created = client.post(
+        "/api/projects",
+        json={"name": "Referencias", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    tree = client.get(f"/api/projects/{project_id}/tree").json()
+    document_id = _find_tree_node(tree, "readme.md")["id"]
+    image_id = _find_tree_node(tree, "diagram.png")["id"]
+
+    reference = client.post(
+        f"/api/projects/{project_id}/documents/{document_id}/image-reference",
+        json={"assetId": image_id, "altText": "Arquitectura"},
+    )
+    assert reference.status_code == 200
+    assert reference.json()["markdown"] == "![Arquitectura](./diagram.png)"
+
+    usage = client.get(f"/api/projects/{project_id}/assets/{image_id}/usage")
+    assert usage.status_code == 200
+    assert usage.json()["references"][0]["documentPath"] == "readme.md"
+    assert usage.json()["references"][0]["status"] == "valid"
+
+    folder = client.post(f"/api/projects/{project_id}/folders", json={"parentId": None, "name": "Media"}).json()["node"]
+    moved = client.patch(f"/api/projects/{project_id}/nodes/{image_id}/move", json={"targetFolderId": folder["id"]})
+    assert moved.status_code == 200
+
+    updated_tree = moved.json()["tree"]
+    moved_image_id = _find_tree_node(updated_tree, "diagram.png")["id"]
+    updated_document = client.get(f"/api/documents/{document_id}").json()
+    assert "![Diagram](Media/diagram.png)" in updated_document["markdown"]
+
+    moved_usage = client.get(f"/api/projects/{project_id}/assets/{moved_image_id}/usage").json()
+    assert moved_usage["references"][0]["resolvedAssetPath"] == "Media/diagram.png"
+
+
+def test_document_move_impact_and_move_preserve_image_links(tmp_path) -> None:
+    docs_root = tmp_path / "docs-document-move"
+    docs_root.mkdir()
+    (docs_root / "Assets").mkdir()
+    (docs_root / "Assets" / "flow.png").write_bytes(TINY_PNG)
+    (docs_root / "guide.md").write_text("# Guide\n\n![Flow](Assets/flow.png)\n", encoding="utf-8")
+
+    created = client.post(
+        "/api/projects",
+        json={"name": "Mover docs", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    tree = client.get(f"/api/projects/{project_id}/tree").json()
+    document_id = _find_tree_node(tree, "guide.md")["id"]
+
+    impact = client.get(f"/api/projects/{project_id}/documents/{document_id}/move-impact")
+    assert impact.status_code == 200
+    assert impact.json()["references"][0]["resolvedAssetPath"] == "Assets/flow.png"
+
+    destination = client.post(f"/api/projects/{project_id}/folders", json={"parentId": None, "name": "Docs"}).json()["node"]
+    moved = client.patch(f"/api/projects/{project_id}/nodes/{document_id}/move", json={"targetFolderId": destination["id"]})
+    assert moved.status_code == 200
+    moved_document_id = moved.json()["affectedDocuments"][0]["newId"]
+    moved_document = client.get(f"/api/documents/{moved_document_id}").json()
+    assert "![Flow](../Assets/flow.png)" in moved_document["markdown"]
+
+
+def test_visual_image_reindex_uses_configured_vision_model(tmp_path, monkeypatch) -> None:
+    from app.services.asset_service import asset_service
+    from app.services.openai_service import openai_service
+
+    docs_root = tmp_path / "docs-vision"
+    docs_root.mkdir()
+    (docs_root / "screen.png").write_bytes(TINY_PNG)
+    created = client.post(
+        "/api/projects",
+        json={"name": "Vision", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    config = client.get("/api/config/ai").json()
+    config["vision"]["imageIndexingEnabled"] = True
+    config["vision"]["model"] = "gpt-5.4"
+    config["vision"]["detail"] = "low"
+    client.put("/api/config/ai", json=config)
+
+    calls: list[dict[str, str | bool]] = []
+
+    def fake_describe(image_data_url: str, prompt: str, model: str, detail: str) -> str:
+        calls.append({"model": model, "detail": detail, "image": image_data_url.startswith("data:image/png;base64,"), "prompt": prompt[:20]})
+        return "Captura de pantalla de prueba."
+
+    monkeypatch.setattr(openai_service, "describe_image", fake_describe)
+    result = asset_service.reindex_visual_assets(project_id)
+
+    assert result["indexedImageCount"] == 1
+    assert calls == [{"model": "gpt-5.4", "detail": "low", "image": True, "prompt": "Describe esta imagen"}]
+    tree = client.get(f"/api/projects/{project_id}/tree").json()
+    image_id = _find_tree_node(tree, "screen.png")["id"]
+    metadata = client.get(f"/api/projects/{project_id}/assets/{image_id}").json()
+    assert metadata["indexed"] is True
+    assert metadata["visualDescription"] == "Captura de pantalla de prueba."
 
 
 def test_project_registry_writes_projects_json(tmp_path) -> None:

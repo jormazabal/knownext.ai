@@ -22,6 +22,7 @@ from app.schemas.ai import (
 )
 from app.services.ai_service import ai_service
 from app.services.ai_context_service import ai_context_service
+from app.services.asset_service import asset_service
 from app.services.ai_usage_service import ai_usage_service
 from app.services.credential_service import credential_service
 
@@ -56,6 +57,11 @@ def list_context_sources(project_id: str) -> AiContextSourceListResponse:
 @router.post("/projects/{project_id}/ai/context/project-documents", response_model=AiContextSource)
 def create_project_document_context_source(project_id: str, payload: AiCreateProjectDocumentContextRequest) -> AiContextSource:
     return ai_context_service.create_project_document_source(project_id, payload.documentId)
+
+
+@router.post("/projects/{project_id}/ai/context/project-images", response_model=AiContextSource)
+def create_project_image_context_source(project_id: str, payload: AiCreateProjectDocumentContextRequest) -> AiContextSource:
+    return asset_service.create_project_image_context_source(project_id, payload.documentId)
 
 
 @router.post("/projects/{project_id}/ai/context/files", response_model=AiContextSourceListResponse)

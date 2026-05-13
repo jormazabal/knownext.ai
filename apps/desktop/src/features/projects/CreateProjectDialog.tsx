@@ -270,7 +270,7 @@ export function CreateProjectDialog({
       <section
         className={[
           "flex max-h-[calc(100vh-32px)] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu",
-          isEditing ? "w-[min(840px,calc(100vw-32px))]" : "w-[min(960px,calc(100vw-32px))]",
+          isEditing ? "w-[min(480px,calc(100vw-32px))]" : "w-[min(960px,calc(100vw-32px))]",
         ].join(" ")}
       >
         <header className="flex shrink-0 items-center justify-between border-b border-line px-5 py-4">
@@ -961,94 +961,75 @@ function EditProjectForm({
 
   return (
     <section className="space-y-5">
-      <StepHeader
-        title="Editar proyecto"
-        description="Modifica solo los datos seguros del proyecto. El origen, el historial y la sincronización se muestran como referencia para evitar cambiar accidentalmente el flujo con el que se creó."
-      />
-
-      <div className="flex items-center gap-3 rounded-md border border-line bg-panel px-4 py-3">
-        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-white shadow-[0_1px_2px_rgba(17,24,39,0.06)]" style={{ color: iconColor }}>
-          <SelectedIcon size={20} />
-        </span>
-        <div className="min-w-0">
-          <div className="truncate text-[14px] font-semibold text-ink-primary">{name.trim() || project?.name || "Proyecto sin nombre"}</div>
-          <div className="mt-0.5 truncate text-[11px] text-ink-secondary">
-            {isWebRuntime ? "Proyecto en almacenamiento web gestionado" : projectOriginLabel(project)}
-          </div>
+      <section className="rounded-md border border-line bg-white px-4 py-4">
+        <SectionTitle
+          title="Identidad"
+          description="Datos visibles dentro de KnowNext.ai. No renombran carpetas, repositorios ni archivos."
+        />
+        <div className="mt-4 space-y-4">
+          <ProjectNameField name={name} iconColor={iconColor} SelectedIcon={SelectedIcon} onNameChange={onNameChange} autoFocus />
+          <ProjectVisualPicker icon={icon} iconColor={iconColor} onIconChange={onIconChange} onIconColorChange={onIconColorChange} />
         </div>
-      </div>
+      </section>
 
-      <div className="grid grid-cols-1 gap-5 md:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="min-w-0 space-y-5">
-          <section className="rounded-md border border-line bg-white px-4 py-4">
-            <SectionTitle
-              title="Identidad visible"
-              description="Solo afecta al selector y a la navegación interna. No renombra carpetas, repositorios ni archivos."
-            />
-            <div className="mt-4 space-y-4">
-              <ProjectNameField name={name} iconColor={iconColor} SelectedIcon={SelectedIcon} onNameChange={onNameChange} autoFocus />
-              <ProjectVisualPicker icon={icon} iconColor={iconColor} onIconChange={onIconChange} onIconColorChange={onIconColorChange} />
-            </div>
-          </section>
-
-          {!isWebRuntime ? (
-            <section className="rounded-md border border-line bg-white px-4 py-4">
-              <SectionTitle
-                title="Carpeta de trabajo"
-                description={
-                  canEditFolder
-                    ? "Puedes reasignar la referencia local si has movido la documentación. KnowNext.ai no moverá archivos."
-                    : "Esta carpeta es una copia local gestionada desde GitHub; cambiarla rompería la relación con el repositorio remoto."
-                }
-              />
-              <div className="mt-4">
-                {canEditFolder ? (
-                  <EditableFolderField
-                    folderPath={folderPath}
-                    onFolderPathChange={onFolderPathChange}
-                    onSelectFolder={onSelectFolder}
-                  />
-                ) : (
-                  <ReadOnlyField
-                    icon={FolderOpen}
-                    label={folderReadOnlyLabel}
-                    value={folderPath}
-                    help={folderReadOnlyHelp}
-                  />
-                )}
-              </div>
-            </section>
-          ) : null}
-        </div>
-
-        <aside className="min-w-0 space-y-3 rounded-md border border-line bg-white px-4 py-4">
+      {!isWebRuntime ? (
+        <section className="rounded-md border border-line bg-white px-4 py-4">
           <SectionTitle
-            title="Configuración de solo lectura"
-            description="Define el comportamiento del proyecto y no se cambia desde edición."
+            title="Carpeta de trabajo"
+            description={
+              canEditFolder
+                ? "Referencia local del proyecto. Se puede actualizar si has movido la documentación; KnowNext.ai no mueve archivos."
+                : "Copia local gestionada desde GitHub. Cambiarla rompería la relación con el repositorio remoto."
+            }
           />
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-1">
-            <ReadOnlyField icon={projectStorageIcon(project)} label="Origen del proyecto" value={isWebRuntime ? "Proyecto web" : projectOriginLabel(project)} />
-            <ReadOnlyField icon={HardDrive} label="Modo de almacenamiento" value={isWebRuntime ? "Backend web gestionado" : storageModeLabel(project?.storageMode)} />
-            <ReadOnlyField icon={GitBranch} label="Historial" value={versioningModeLabel(project?.versioningMode ?? "none")} />
-            <ReadOnlyField icon={Cloud} label="Sincronización" value={syncModeLabel(project?.syncMode)} />
-            {githubRepository ? (
-              <ReadOnlyField
-                icon={Github}
-                label="Repositorio GitHub"
-                value={`${githubRepository.owner}/${githubRepository.repo}`}
-                help={githubRepository.defaultRef ? `Referencia interna: ${githubRepository.defaultRef}` : "Repositorio asociado al crear el proyecto."}
+          <div className="mt-4">
+            {canEditFolder ? (
+              <EditableFolderField
+                folderPath={folderPath}
+                onFolderPathChange={onFolderPathChange}
+                onSelectFolder={onSelectFolder}
               />
             ) : (
-              <ReadOnlyField icon={Github} label="Repositorio GitHub" value="No conectado" help="Este proyecto no tiene repositorio GitHub asociado." />
+              <ReadOnlyField
+                icon={FolderOpen}
+                label={folderReadOnlyLabel}
+                value={folderPath}
+                help={folderReadOnlyHelp}
+              />
             )}
           </div>
+        </section>
+      ) : null}
+
+      <section className="rounded-md border border-line bg-white px-4 py-4">
+        <SectionTitle
+          title="Configuración"
+          description="Origen, almacenamiento, historial y sincronización. Se muestran como referencia y no se cambian desde edición."
+        />
+        <div className="mt-4 grid grid-cols-2 gap-3 max-[520px]:grid-cols-1">
+          <ReadOnlyField icon={projectStorageIcon(project)} label="Origen del proyecto" value={isWebRuntime ? "Proyecto web" : projectOriginLabel(project)} />
+          <ReadOnlyField icon={HardDrive} label="Modo de almacenamiento" value={isWebRuntime ? "Backend web gestionado" : storageModeLabel(project?.storageMode)} />
+          <ReadOnlyField icon={GitBranch} label="Historial" value={versioningModeLabel(project?.versioningMode ?? "none")} />
+          <ReadOnlyField icon={Cloud} label="Sincronización" value={syncModeLabel(project?.syncMode)} />
+          {githubRepository ? (
+            <ReadOnlyField
+              icon={Github}
+              label="Repositorio GitHub"
+              value={`${githubRepository.owner}/${githubRepository.repo}`}
+              help={githubRepository.defaultRef ? `Referencia interna: ${githubRepository.defaultRef}` : "Repositorio asociado al crear el proyecto."}
+            />
+          ) : (
+            <ReadOnlyField icon={Github} label="Repositorio GitHub" value="No conectado" help="Este proyecto no tiene repositorio GitHub asociado." />
+          )}
+        </div>
+        <div className="mt-4">
           <GuidanceNote
             icon={Lock}
             title="Para cambiar origen o historial"
             description="Crea un proyecto nuevo con el asistente. Así se evita mezclar una carpeta local, una caché GitHub o un remoto distinto dentro del mismo registro."
           />
-        </aside>
-      </div>
+        </div>
+      </section>
     </section>
   );
 }
@@ -1595,10 +1576,10 @@ function ProjectVisualPicker({
   onIconColorChange: (color: string) => void;
 }) {
   return (
-    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_220px]">
+    <div className="space-y-4">
       <div className="text-[11px] font-medium text-ink-secondary">
         Icono
-        <div className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(32px,32px))] gap-2">
+        <div className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(28px,28px))] gap-1">
           {projectIconOptions.map((option) => {
             const OptionIcon = option.icon;
             const selected = option.id === icon;
@@ -1607,7 +1588,7 @@ function ProjectVisualPicker({
               <button
                 key={option.id}
                 className={[
-                  "relative grid h-8 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange",
+                  "relative grid h-7 w-7 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange",
                   selected ? "bg-brand-hover text-brand-orange" : "",
                 ].join(" ")}
                 type="button"
@@ -1615,7 +1596,7 @@ function ProjectVisualPicker({
                 aria-label={`Icono ${option.label}`}
                 onClick={() => onIconChange(option.id)}
               >
-                <OptionIcon size={19} strokeWidth={selected ? 2.25 : 1.9} style={selected ? { color: iconColor } : undefined} />
+                <OptionIcon size={17} strokeWidth={selected ? 2.25 : 1.9} style={selected ? { color: iconColor } : undefined} />
               </button>
             );
           })}
@@ -1623,17 +1604,17 @@ function ProjectVisualPicker({
       </div>
       <div className="text-[11px] font-medium text-ink-secondary">
         Color
-        <div className="mt-2 flex flex-wrap gap-2">
+        <div className="mt-2 flex flex-wrap gap-1">
           {projectColors.map((color) => (
             <button
               key={color}
-              className="grid h-8 w-8 place-items-center rounded-full"
+              className="grid h-7 w-7 place-items-center rounded-full"
               type="button"
               onClick={() => onIconColorChange(color)}
               aria-label={`Color ${color}`}
             >
               <span
-                className={["block h-6 w-6 rounded-full", color === iconColor ? "ring-2 ring-ink-primary ring-offset-2" : ""].join(" ")}
+                className={["block h-5 w-5 rounded-full", color === iconColor ? "ring-2 ring-ink-primary ring-offset-2" : ""].join(" ")}
                 style={{ backgroundColor: color }}
               />
             </button>

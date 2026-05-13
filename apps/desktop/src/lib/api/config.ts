@@ -32,6 +32,15 @@ export const defaultAiConfig: AiConfig = {
     status: "not-indexed",
     error: null,
   },
+  vision: {
+    enabled: true,
+    model: "gpt-5.4-mini",
+    imageIndexingEnabled: false,
+    maxImagesPerPrompt: 4,
+    maxImageSizeMb: 12,
+    detail: "auto",
+    storeVisualDescriptions: true,
+  },
   agentic: {
     depth: "guided",
     webResearchEnabled: false,
@@ -154,6 +163,15 @@ function normalizeAi(ai: AiConfig | undefined): AiConfig | undefined {
       lastIndexedAt: ai.rag?.lastIndexedAt ?? null,
       status: ["not-indexed", "indexing", "updated", "error"].includes(ai.rag?.status ?? "") ? ai.rag.status : "not-indexed",
       error: ai.rag?.error ?? null,
+    },
+    vision: {
+      enabled: ai.vision?.enabled !== false,
+      model: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"].includes(String(ai.vision?.model)) ? ai.vision!.model : defaultAiConfig.vision.model,
+      imageIndexingEnabled: Boolean(ai.vision?.imageIndexingEnabled),
+      maxImagesPerPrompt: clampNumber(ai.vision?.maxImagesPerPrompt, 1, 12, defaultAiConfig.vision.maxImagesPerPrompt),
+      maxImageSizeMb: clampNumber(ai.vision?.maxImageSizeMb, 1, 50, defaultAiConfig.vision.maxImageSizeMb),
+      detail: ["auto", "low", "high"].includes(String(ai.vision?.detail)) ? ai.vision!.detail : "auto",
+      storeVisualDescriptions: ai.vision?.storeVisualDescriptions !== false,
     },
     agentic: {
       depth: normalizeAgenticDepth(ai.agentic?.depth),

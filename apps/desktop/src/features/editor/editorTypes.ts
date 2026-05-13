@@ -37,6 +37,10 @@ export type MarkdownEditorActionOptions = {
     rows: number;
     columns: number;
   };
+  image?: {
+    src: string;
+    alt: string;
+  };
 };
 
 export type MarkdownEditorReplaceOptions = {

@@ -1,5 +1,17 @@
-import { requestJson } from "./client";
-import type { DocumentTreeNode, FileOperationResult, Project, ProjectCapabilities, ProjectPayload, ProjectVersioningStatus } from "../../types/domain";
+import { API_BASE_URL, requestFormData, requestJson } from "./client";
+import type {
+  AssetImportResponse,
+  AssetMetadata,
+  AssetUsageResponse,
+  DocumentMoveImpact,
+  DocumentTreeNode,
+  FileOperationResult,
+  InsertImageReferenceResponse,
+  Project,
+  ProjectCapabilities,
+  ProjectPayload,
+  ProjectVersioningStatus,
+} from "../../types/domain";
 
 export async function listProjects(): Promise<Project[]> {
   return requestJson<Project[]>("/api/projects");
@@ -102,4 +114,40 @@ export async function setActiveProject(projectId: string): Promise<Project> {
   return requestJson<Project>(`/api/projects/${projectId}/active`, {
     method: "PUT",
   });
+}
+
+export async function importProjectImage(projectId: string, parentId: string | null, file: File): Promise<AssetImportResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const params = new URLSearchParams();
+  if (parentId) params.set("parentId", parentId);
+  const query = params.toString();
+  return requestFormData<AssetImportResponse>(`/api/projects/${projectId}/assets/images${query ? `?${query}` : ""}`, formData);
+}
+
+export async function getProjectImage(projectId: string, assetId: string): Promise<AssetMetadata> {
+  return requestJson<AssetMetadata>(`/api/projects/${projectId}/assets/${encodeURIComponent(assetId)}`);
+}
+
+export async function getProjectImageUsage(projectId: string, assetId: string): Promise<AssetUsageResponse> {
+  return requestJson<AssetUsageResponse>(`/api/projects/${projectId}/assets/${encodeURIComponent(assetId)}/usage`);
+}
+
+export function getProjectImageContentUrl(projectId: string, assetId: string): string {
+  return `${API_BASE_URL}/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/content`;
+}
+
+export async function buildImageReference(projectId: string, documentId: string, assetId: string, altText?: string | null): Promise<InsertImageReferenceResponse> {
+  return requestJson<InsertImageReferenceResponse>(`/api/projects/${projectId}/documents/${encodeURIComponent(documentId)}/image-reference`, {
+    method: "POST",
+    body: JSON.stringify({ assetId, altText }),
+  });
+}
+
+export async function getDocumentMoveImpact(projectId: string, documentId: string): Promise<DocumentMoveImpact> {
+  return requestJson<DocumentMoveImpact>(`/api/projects/${projectId}/documents/${encodeURIComponent(documentId)}/move-impact`);
+}
+
+export async function reindexProjectImages(projectId: string): Promise<{ projectId: string; imageCount: number; indexedImageCount: number; status: string }> {
+  return requestJson(`/api/projects/${projectId}/assets/reindex-images`, { method: "POST" });
 }

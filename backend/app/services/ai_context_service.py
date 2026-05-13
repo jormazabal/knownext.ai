@@ -27,7 +27,7 @@ from app.schemas.ai import (
 from app.schemas.project import CreateDocumentRequest, TreeNode
 from app.services.app_storage import JsonFileStore, get_app_data_dir
 from app.services.document_service import document_service
-from app.services.filesystem_service import decode_document_id
+from app.services.filesystem_service import IMAGE_SUFFIXES, decode_document_id, encode_node_id
 from app.services.project_service import project_service
 
 
@@ -52,10 +52,29 @@ class AiContextService:
                 if normalized_query in document.name.lower() or normalized_query in (document.path or "").lower()
             ]
         documents.sort(key=lambda document: (_score_document(document, normalized_query), document.path or document.name))
-        return [
-            AiContextSearchResult(documentId=document.id, name=document.name, path=document.path or document.name)
-            for document in documents[:20]
+        images = _flatten_images(tree)
+        if normalized_query:
+            images = [
+                image
+                for image in images
+                if normalized_query in image.name.lower() or normalized_query in (image.path or "").lower()
+            ]
+        images.sort(key=lambda image: (_score_document(image, normalized_query), image.path or image.name))
+        results = [
+            AiContextSearchResult(documentId=document.id, name=document.name, path=document.path or document.name, kind="project_document")
+            for document in documents[:12]
         ]
+        results.extend(
+            AiContextSearchResult(
+                documentId=image.id,
+                name=image.name,
+                path=image.path or image.name,
+                kind="image",
+                mimeType=image.mimeType,
+            )
+            for image in images[:8]
+        )
+        return results[:20]
 
     def list_sources(self, project_id: str) -> AiContextSourceListResponse:
         data = self._read_project_data(project_id)
@@ -89,6 +108,47 @@ class AiContextService:
             "sizeBytes": len(document.markdown.encode("utf-8")),
             "status": "ready",
             "weight": _weight_for_chars(len(document.markdown)),
+            "warning": None,
+            "error": None,
+            "createdAt": now,
+            "updatedAt": now,
+            "lastUsedAt": None,
+            "expiresAt": _expires_from(now),
+        }
+        self._append_source(project_id, record)
+        return self._source_from_record(record)
+
+    def create_project_image_source(self, project_id: str, image_path: Path, root: Path) -> AiContextSource:
+        relative_path = image_path.relative_to(root).as_posix().strip("/")
+        data = self._read_project_data(project_id)
+        sources = data.get("sources") if isinstance(data.get("sources"), list) else []
+        for source in sources:
+            if source.get("kind") == "image" and source.get("assetPath") == relative_path and not self._is_expired(source):
+                updated = self._refresh_record(source)
+                self._replace_source(project_id, updated)
+                return self._source_from_record(updated)
+
+        source_id = f"ctx_{uuid4().hex}"
+        now = _now()
+        mime_type = mimetypes.guess_type(image_path.name)[0] or "image/*"
+        data_bytes = image_path.read_bytes()
+        extracted = {
+            "text": "",
+            "metadata": {"mimeType": mime_type, "sizeBytes": len(data_bytes), "source": "project", "path": relative_path},
+            "imageDataUrl": f"data:{mime_type};base64,{base64.b64encode(data_bytes).decode('ascii')}",
+        }
+        self._write_extracted(project_id, source_id, extracted)
+        record = {
+            "id": source_id,
+            "projectId": project_id,
+            "kind": "image",
+            "assetPath": relative_path,
+            "name": image_path.name,
+            "path": relative_path,
+            "mimeType": mime_type,
+            "sizeBytes": len(data_bytes),
+            "status": "ready",
+            "weight": "medium" if len(data_bytes) > 2 * 1024 * 1024 else "light",
             "warning": None,
             "error": None,
             "createdAt": now,
@@ -452,6 +512,16 @@ def _flatten_documents(nodes: list[TreeNode]) -> list[TreeNode]:
         if node.children:
             documents.extend(_flatten_documents(node.children))
     return documents
+
+
+def _flatten_images(nodes: list[TreeNode]) -> list[TreeNode]:
+    images: list[TreeNode] = []
+    for node in nodes:
+        if node.type == "image":
+            images.append(node)
+        if node.children:
+            images.extend(_flatten_images(node.children))
+    return images
 
 
 def _score_document(document: TreeNode, query: str) -> int:

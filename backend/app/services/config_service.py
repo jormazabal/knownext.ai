@@ -38,6 +38,15 @@ DEFAULT_AI = {
         "status": "not-indexed",
         "error": None,
     },
+    "vision": {
+        "enabled": True,
+        "model": "gpt-5.4-mini",
+        "imageIndexingEnabled": False,
+        "maxImagesPerPrompt": 4,
+        "maxImageSizeMb": 12,
+        "detail": "auto",
+        "storeVisualDescriptions": True,
+    },
     "agentic": {
         "depth": "guided",
         "webResearchEnabled": False,
@@ -139,6 +148,9 @@ def _normalize_ai(value: object) -> dict:
     agentic = value.get("agentic")
     if not isinstance(agentic, dict):
         agentic = {}
+    vision = value.get("vision")
+    if not isinstance(vision, dict):
+        vision = {}
 
     rag_status = rag.get("status")
     if rag_status not in {"not-indexed", "indexing", "updated", "error"}:
@@ -162,6 +174,15 @@ def _normalize_ai(value: object) -> dict:
             "lastIndexedAt": _normalize_optional_string(rag.get("lastIndexedAt")),
             "status": rag_status,
             "error": _normalize_optional_string(rag.get("error")),
+        },
+        "vision": {
+            "enabled": bool(vision.get("enabled", DEFAULT_AI["vision"]["enabled"])),
+            "model": vision.get("model") if vision.get("model") in {"gpt-5.5", "gpt-5.4", "gpt-5.4-mini"} else DEFAULT_AI["vision"]["model"],
+            "imageIndexingEnabled": bool(vision.get("imageIndexingEnabled", DEFAULT_AI["vision"]["imageIndexingEnabled"])),
+            "maxImagesPerPrompt": _clamp_int(vision.get("maxImagesPerPrompt"), 1, 12, DEFAULT_AI["vision"]["maxImagesPerPrompt"]),
+            "maxImageSizeMb": _clamp_int(vision.get("maxImageSizeMb"), 1, 50, DEFAULT_AI["vision"]["maxImageSizeMb"]),
+            "detail": vision.get("detail") if vision.get("detail") in {"auto", "low", "high"} else DEFAULT_AI["vision"]["detail"],
+            "storeVisualDescriptions": bool(vision.get("storeVisualDescriptions", DEFAULT_AI["vision"]["storeVisualDescriptions"])),
         },
         "agentic": {
             "depth": depth,

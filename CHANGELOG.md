@@ -2,6 +2,16 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.11.0 - 2026-05-14
+
+- Added project image asset management: image files now appear in the tree, can be imported into folders, opened in an image viewer, inserted into Markdown, and used as AI prompt context.
+- Added Markdown image reference governance so moving or renaming images and moving Markdown documents rewrites relative links where possible and warns before breaking referenced images.
+- Added configurable OpenAI vision controls for image context and image indexing, including model/detail selection and project image reindexing.
+- Redesigned project tree actions and file filtering so creation/import, view filters, expand/collapse, and project settings sit in a compact professional toolbar.
+- Improved settings UX with top-level tabs and a denser IA panel for OpenAI credentials, vision settings, permissions, agentic limits, and RAG indexing.
+- Hardened legacy AI configuration loading so older local configs without vision or agentic defaults no longer crash the IA settings panel.
+- Updated product, architecture, backend service, API contract, and manual validation documentation for project image workflows.
+
 ## 0.10.0 - 2026-05-13
 
 - Added persistent AI prompt context chips for project document references and external files, making the exact context sent to the model visible before every prompt.

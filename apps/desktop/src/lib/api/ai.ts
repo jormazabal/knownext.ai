@@ -66,6 +66,13 @@ export async function addProjectDocumentAiContextSource(projectId: string, docum
   });
 }
 
+export async function addProjectImageAiContextSource(projectId: string, assetId: string): Promise<AiContextSource> {
+  return requestJson<AiContextSource>(`/api/projects/${projectId}/ai/context/project-images`, {
+    method: "POST",
+    body: JSON.stringify({ documentId: assetId }),
+  });
+}
+
 export async function uploadAiContextFiles(projectId: string, files: File[]): Promise<AiContextSourceListResponse> {
   const formData = new FormData();
   for (const file of files) formData.append("files", file);

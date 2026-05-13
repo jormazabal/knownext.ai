@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Activity, Brain, ChevronDown, Copy, Eye, FolderOpen, Gauge, Globe2, KeyRound, Languages, ListChecks, RefreshCw, RotateCcw, Server, ShieldCheck, Trash2, Underline, X } from "lucide-react";
-import type { AiConfigStatus, AiIndexStatusResponse, AiModelId, AppearanceConfig, DiagnosticsConfig } from "../../types/domain";
+import type { ReactNode } from "react";
+import { Activity, Brain, ChevronDown, Copy, Eye, FolderOpen, Gauge, Globe2, Image as ImageIcon, KeyRound, Languages, ListChecks, RefreshCw, RotateCcw, Server, ShieldCheck, Trash2, Underline, X } from "lucide-react";
+import { defaultAiConfig } from "../../lib/api/config";
+import type { AiConfigStatus, AiIndexStatusResponse, AiModelId, AiVisionModelId, AppearanceConfig, DiagnosticsConfig } from "../../types/domain";
 import type { TraceLogStatus } from "../../lib/runtime/logging";
 import type { BackendPortConfig, RuntimeServicesStatus } from "../../lib/runtime/services";
 
@@ -22,6 +24,7 @@ type AppSettingsDialogProps = {
   onSaveOpenAiKey: (apiKey: string) => void;
   onDeleteOpenAiKey: () => void;
   onRebuildAiIndex: () => void;
+  onReindexImages: () => void;
   onDeleteAiIndex: () => void;
   onOpenTraceLogFolder: () => void;
   onRefreshRuntimeServices: () => void;
@@ -30,6 +33,7 @@ type AppSettingsDialogProps = {
 };
 
 const aiModelIds: AiModelId[] = ["gpt-5.4-mini", "gpt-5.4", "gpt-5.5", "gpt-5.4-nano"];
+const aiVisionModelIds: AiVisionModelId[] = ["gpt-5.4-mini", "gpt-5.4", "gpt-5.5"];
 
 const aiModelMeter: Record<AiModelId, { intelligence: number; cost: number }> = {
   "gpt-5.5": { intelligence: 4, cost: 4 },
@@ -54,6 +58,7 @@ export function AppSettingsDialog({
   onSaveOpenAiKey,
   onDeleteOpenAiKey,
   onRebuildAiIndex,
+  onReindexImages,
   onDeleteAiIndex,
   onOpenTraceLogFolder,
   onRefreshRuntimeServices,
@@ -94,27 +99,43 @@ export function AppSettingsDialog({
           </button>
         </header>
 
-        <div className="grid min-h-0 flex-1 grid-cols-[210px_minmax(0,1fr)]">
-          <nav className="border-r border-line bg-panel p-2" aria-label={text.sectionsLabel}>
-            {sections.map((section) => (
-              <button
-                key={section.id}
-                className={[
-                  "flex w-full items-start gap-2 rounded-md px-3 py-2 text-left transition",
-                  activeSection === section.id ? "bg-brand-hover text-brand-orange" : "text-ink-primary hover:bg-white",
-                ].join(" ")}
-                onClick={() => setActiveSection(section.id)}
-              >
-                <section.icon size={15} className="mt-0.5 shrink-0" />
-                <span className="min-w-0">
-                  <span className="block text-[11px] font-semibold">{section.label}</span>
-                  <span className="mt-0.5 block text-[10px] leading-4 text-ink-secondary">{section.description}</span>
-                </span>
-              </button>
-            ))}
+        <div className="flex min-h-0 flex-1 flex-col">
+          <nav
+            className="shrink-0 border-b border-line bg-panel px-4 py-2"
+            aria-label={text.sectionsLabel}
+            role="tablist"
+          >
+            <div className="flex gap-1 overflow-x-auto">
+              {sections.map((section) => (
+                <button
+                  key={section.id}
+                  id={`app-settings-tab-${section.id}`}
+                  className={[
+                    "inline-flex h-9 shrink-0 items-center gap-2 rounded-md border px-3 text-[11px] font-semibold transition",
+                    activeSection === section.id
+                      ? "border-line bg-white text-brand-orange shadow-subtle"
+                      : "border-transparent text-ink-secondary hover:bg-white hover:text-ink-primary",
+                  ].join(" ")}
+                  role="tab"
+                  aria-selected={activeSection === section.id}
+                  aria-controls={`app-settings-panel-${section.id}`}
+                  data-tooltip={section.description}
+                  data-tooltip-placement="bottom"
+                  onClick={() => setActiveSection(section.id)}
+                >
+                  <section.icon size={14} className="shrink-0" />
+                  <span>{section.label}</span>
+                </button>
+              ))}
+            </div>
           </nav>
 
-          <div className="min-h-0 overflow-y-auto px-6 py-5">
+          <div
+            id={`app-settings-panel-${activeSection}`}
+            className="min-h-0 flex-1 overflow-y-auto px-6 py-5"
+            role="tabpanel"
+            aria-labelledby={`app-settings-tab-${activeSection}`}
+          >
             {activeSection === "services" ? (
               <ServicesSettings
                 runtimeServicesStatus={runtimeServicesStatus}
@@ -135,6 +156,7 @@ export function AppSettingsDialog({
                 onSaveOpenAiKey={onSaveOpenAiKey}
                 onDeleteOpenAiKey={onDeleteOpenAiKey}
                 onRebuildAiIndex={onRebuildAiIndex}
+                onReindexImages={onReindexImages}
                 onDeleteAiIndex={onDeleteAiIndex}
               />
             ) : (
@@ -151,6 +173,83 @@ export function AppSettingsDialog({
       </section>
     </div>
   );
+}
+
+function normalizeAiStatus(ai: Partial<AiConfigStatus> | null | undefined): AiConfigStatus {
+  const permissions = ai?.permissions as Partial<AiConfigStatus["permissions"]> | undefined;
+  const rag = ai?.rag as Partial<AiConfigStatus["rag"]> | undefined;
+  const vision = ai?.vision as Partial<AiConfigStatus["vision"]> | undefined;
+  const agentic = ai?.agentic as Partial<AiConfigStatus["agentic"]> | undefined;
+
+  return {
+    provider: "openai",
+    model: normalizeAiModel(ai?.model),
+    permissions: {
+      editDocuments: permissions?.editDocuments ?? defaultAiConfig.permissions.editDocuments,
+      createFolders: permissions?.createFolders ?? defaultAiConfig.permissions.createFolders,
+      createDocuments: permissions?.createDocuments ?? defaultAiConfig.permissions.createDocuments,
+      deleteDocumentsAndFolders: permissions?.deleteDocumentsAndFolders ?? defaultAiConfig.permissions.deleteDocumentsAndFolders,
+    },
+    rag: {
+      enabled: rag?.enabled ?? defaultAiConfig.rag.enabled,
+      vectorStoreId: rag?.vectorStoreId ?? defaultAiConfig.rag.vectorStoreId,
+      lastIndexedAt: rag?.lastIndexedAt ?? defaultAiConfig.rag.lastIndexedAt,
+      status: normalizeRagStatus(rag?.status),
+      error: rag?.error ?? defaultAiConfig.rag.error,
+    },
+    vision: {
+      enabled: vision?.enabled ?? defaultAiConfig.vision.enabled,
+      model: normalizeAiVisionModel(vision?.model),
+      imageIndexingEnabled: vision?.imageIndexingEnabled ?? defaultAiConfig.vision.imageIndexingEnabled,
+      maxImagesPerPrompt: clampSettingsNumber(vision?.maxImagesPerPrompt, 1, 12, defaultAiConfig.vision.maxImagesPerPrompt),
+      maxImageSizeMb: clampSettingsNumber(vision?.maxImageSizeMb, 1, 50, defaultAiConfig.vision.maxImageSizeMb),
+      detail: normalizeVisionDetail(vision?.detail),
+      storeVisualDescriptions: vision?.storeVisualDescriptions ?? defaultAiConfig.vision.storeVisualDescriptions,
+    },
+    agentic: {
+      depth: normalizeAgenticDepth(agentic?.depth),
+      webResearchEnabled: agentic?.webResearchEnabled ?? defaultAiConfig.agentic.webResearchEnabled,
+      confirmBeforeApplying: agentic?.confirmBeforeApplying ?? defaultAiConfig.agentic.confirmBeforeApplying,
+      maxSteps: clampSettingsNumber(agentic?.maxSteps, 1, 12, defaultAiConfig.agentic.maxSteps),
+      maxDocuments: clampSettingsNumber(agentic?.maxDocuments, 1, 30, defaultAiConfig.agentic.maxDocuments),
+      maxEstimatedCostEur: clampSettingsNumber(agentic?.maxEstimatedCostEur, 0.1, 25, defaultAiConfig.agentic.maxEstimatedCostEur),
+      maxSources: clampSettingsNumber(agentic?.maxSources, 1, 20, defaultAiConfig.agentic.maxSources),
+    },
+    openaiKeyConfigured: Boolean(ai?.openaiKeyConfigured),
+    openaiKeyPreview: ai?.openaiKeyPreview ?? null,
+  };
+}
+
+function normalizeAiModel(model: unknown): AiModelId {
+  return aiModelIds.includes(model as AiModelId) ? model as AiModelId : defaultAiConfig.model;
+}
+
+function normalizeAiVisionModel(model: unknown): AiVisionModelId {
+  return aiVisionModelIds.includes(model as AiVisionModelId) ? model as AiVisionModelId : defaultAiConfig.vision.model;
+}
+
+function normalizeRagStatus(status: unknown): AiConfigStatus["rag"]["status"] {
+  return ["not-indexed", "indexing", "updated", "error"].includes(String(status))
+    ? status as AiConfigStatus["rag"]["status"]
+    : defaultAiConfig.rag.status;
+}
+
+function normalizeVisionDetail(detail: unknown): AiConfigStatus["vision"]["detail"] {
+  return ["auto", "low", "high"].includes(String(detail))
+    ? detail as AiConfigStatus["vision"]["detail"]
+    : defaultAiConfig.vision.detail;
+}
+
+function normalizeAgenticDepth(depth: unknown): AiConfigStatus["agentic"]["depth"] {
+  return ["quick", "guided", "deep", "bounded_autonomous"].includes(String(depth))
+    ? depth as AiConfigStatus["agentic"]["depth"]
+    : defaultAiConfig.agentic.depth;
+}
+
+function clampSettingsNumber(value: unknown, minimum: number, maximum: number, fallback: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(parsed, minimum), maximum);
 }
 
 function ServicesSettings({
@@ -540,6 +639,7 @@ function AiSettings({
   onSaveOpenAiKey,
   onDeleteOpenAiKey,
   onRebuildAiIndex,
+  onReindexImages,
   onDeleteAiIndex,
 }: {
   ai: AiConfigStatus;
@@ -549,27 +649,35 @@ function AiSettings({
   onSaveOpenAiKey: (apiKey: string) => void;
   onDeleteOpenAiKey: () => void;
   onRebuildAiIndex: () => void;
+  onReindexImages: () => void;
   onDeleteAiIndex: () => void;
 }) {
   const [apiKey, setApiKey] = useState("");
-  const [localAi, setLocalAi] = useState(ai);
-  const localAiRef = useRef(ai);
+  const [localAi, setLocalAi] = useState<AiConfigStatus>(() => normalizeAiStatus(ai));
+  const localAiRef = useRef<AiConfigStatus>(normalizeAiStatus(ai));
   const settingsAi = localAi;
-  const statusLabel = settingsAi.openaiKeyConfigured ? text.aiConfigured : text.aiMissingKey;
   const indexStatus = aiIndexStatus?.status ?? settingsAi.rag.status;
   const indexedCount = aiIndexStatus?.indexedDocumentCount ?? 0;
   const documentCount = aiIndexStatus?.documentCount ?? 0;
   const failedCount = aiIndexStatus?.failedDocumentCount ?? 0;
+  const openAiKeySuffix = settingsAi.openaiKeyPreview?.slice(-4) ?? "";
+  const openAiKeyPlaceholder = settingsAi.openaiKeyConfigured
+    ? openAiKeySuffix
+      ? `${text.openAiKeyConfiguredPlaceholder} ${openAiKeySuffix}`
+      : text.openAiKeyConfiguredGenericPlaceholder
+    : text.openAiKeyMissingPlaceholder;
 
   useEffect(() => {
-    localAiRef.current = ai;
-    setLocalAi(ai);
+    const normalizedAi = normalizeAiStatus(ai);
+    localAiRef.current = normalizedAi;
+    setLocalAi(normalizedAi);
   }, [ai]);
 
   function commitAi(nextAi: AiConfigStatus) {
-    localAiRef.current = nextAi;
-    setLocalAi(nextAi);
-    onAiChange(nextAi);
+    const normalizedAi = normalizeAiStatus(nextAi);
+    localAiRef.current = normalizedAi;
+    setLocalAi(normalizedAi);
+    onAiChange(normalizedAi);
   }
 
   function updatePermissions(nextPermissions: Partial<AiConfigStatus["permissions"]>) {
@@ -602,6 +710,17 @@ function AiSettings({
     });
   }
 
+  function updateVision(nextVision: Partial<AiConfigStatus["vision"]>) {
+    const currentAi = localAiRef.current;
+    commitAi({
+      ...currentAi,
+      vision: {
+        ...currentAi.vision,
+        ...nextVision,
+      },
+    });
+  }
+
   function updateAgentic(nextAgentic: Partial<AiConfigStatus["agentic"]>) {
     const currentAi = localAiRef.current;
     const nextAi = {
@@ -624,22 +743,22 @@ function AiSettings({
         <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.aiDescription}</p>
       </section>
 
-      <div className="rounded-md border border-line px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
+      <div className="rounded-md border border-line px-3 py-3">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+          <div className="min-w-0">
             <p className="text-[11px] font-semibold text-ink-primary">OpenAI</p>
-            <p className="mt-1 text-[11px] text-ink-secondary">{statusLabel}{settingsAi.openaiKeyPreview ? ` · ${settingsAi.openaiKeyPreview}` : ""}</p>
+            <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{text.aiKeyPrivacy}</p>
           </div>
           <span className={["rounded px-2 py-1 text-[10px] font-semibold", settingsAi.openaiKeyConfigured ? "bg-brand-hover text-brand-orange" : "bg-panel text-ink-secondary"].join(" ")}>
             {settingsAi.openaiKeyConfigured ? text.enabled : text.disabled}
           </span>
         </div>
-        <div className="mt-3 flex gap-2">
+        <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2">
           <input
             className="h-9 min-w-0 flex-1 rounded-md border border-line bg-white px-3 text-[11px] outline-none focus:border-brand-orange"
             type="password"
             value={apiKey}
-            placeholder={text.openAiKeyPlaceholder}
+            placeholder={openAiKeyPlaceholder}
             onChange={(event) => setApiKey(event.target.value)}
           />
           <button
@@ -663,7 +782,6 @@ function AiSettings({
             <Trash2 size={14} />
           </button>
         </div>
-        <p className="mt-2 text-[10px] leading-4 text-ink-secondary">{text.aiKeyPrivacy}</p>
       </div>
 
       <section className="rounded-md border border-line px-4 py-3">
@@ -713,19 +831,91 @@ function AiSettings({
         </div>
       </section>
 
-      <section className="space-y-2">
-        <p className="text-[11px] font-semibold text-ink-primary">{text.aiPermissionsHeading}</p>
-        <ToggleRow label={text.editDocuments} enabled={settingsAi.permissions.editDocuments} onToggle={() => updatePermissions({ editDocuments: !settingsAi.permissions.editDocuments })} />
-        <ToggleRow label={text.createFolders} enabled={settingsAi.permissions.createFolders} onToggle={() => updatePermissions({ createFolders: !settingsAi.permissions.createFolders })} />
-        <ToggleRow label={text.createDocuments} enabled={settingsAi.permissions.createDocuments} onToggle={() => updatePermissions({ createDocuments: !settingsAi.permissions.createDocuments })} />
-        <ToggleRow
-          label={text.deleteDocuments}
-          enabled={settingsAi.permissions.deleteDocumentsAndFolders}
-          onToggle={() => updatePermissions({ deleteDocumentsAndFolders: !settingsAi.permissions.deleteDocumentsAndFolders })}
-        />
+      <section className="rounded-md border border-line px-3 py-3">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <ImageIcon size={15} className="text-brand-orange" />
+              <p className="text-[11px] font-semibold text-ink-primary">{text.visionHeading}</p>
+            </div>
+            <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.visionDescription}</p>
+          </div>
+          <Switch enabled={settingsAi.vision.enabled} label={text.visionHeading} onToggle={() => updateVision({ enabled: !settingsAi.vision.enabled })} />
+        </div>
+
+        <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(135px,1fr))] gap-2">
+          <label className="block min-w-0">
+            <span className="block text-[9px] font-semibold uppercase text-ink-secondary">{text.visionModelHeading}</span>
+            <select
+              className="mt-1 h-8 w-full rounded-md border border-line bg-white px-2 text-[11px] font-semibold text-ink-primary outline-none focus:border-brand-orange"
+              value={settingsAi.vision.model}
+              onChange={(event) => updateVision({ model: event.target.value as AiVisionModelId })}
+            >
+              {aiVisionModelIds.map((modelId) => (
+                <option key={modelId} value={modelId}>{modelId}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block min-w-0">
+            <span className="block text-[9px] font-semibold uppercase text-ink-secondary">{text.visionDetailHeading}</span>
+            <select
+              className="mt-1 h-8 w-full rounded-md border border-line bg-white px-2 text-[11px] font-semibold text-ink-primary outline-none focus:border-brand-orange"
+              value={settingsAi.vision.detail}
+              onChange={(event) => updateVision({ detail: event.target.value as AiConfigStatus["vision"]["detail"] })}
+            >
+              <option value="auto">{text.visionDetailAuto}</option>
+              <option value="low">{text.visionDetailLow}</option>
+              <option value="high">{text.visionDetailHigh}</option>
+            </select>
+          </label>
+          <LimitField label={text.visionMaxImages} value={settingsAi.vision.maxImagesPerPrompt} min={1} max={12} step={1} onChange={(maxImagesPerPrompt) => updateVision({ maxImagesPerPrompt })} />
+          <LimitField label={text.visionMaxSize} value={settingsAi.vision.maxImageSizeMb} min={1} max={50} step={1} suffix="MB" onChange={(maxImageSizeMb) => updateVision({ maxImageSizeMb })} />
+        </div>
+
+        <div className="mt-3 grid gap-x-6 border-t border-line md:grid-cols-2">
+          <CompactToggle
+            label={text.visionIndexHeading}
+            description={text.visionIndexDescription}
+            enabled={settingsAi.vision.imageIndexingEnabled}
+            onToggle={() => updateVision({ imageIndexingEnabled: !settingsAi.vision.imageIndexingEnabled })}
+          />
+          <CompactToggle
+            label={text.visionStoreHeading}
+            description={text.visionStoreDescription}
+            enabled={settingsAi.vision.storeVisualDescriptions}
+            onToggle={() => updateVision({ storeVisualDescriptions: !settingsAi.vision.storeVisualDescriptions })}
+          />
+        </div>
+
+        <div className="mt-3 flex justify-end">
+          <button
+            className="h-8 rounded-md border border-brand-orange px-3 text-[11px] font-semibold text-brand-orange hover:bg-brand-hover disabled:opacity-50"
+            disabled={!settingsAi.vision.enabled || !settingsAi.vision.imageIndexingEnabled || !settingsAi.openaiKeyConfigured}
+            onClick={onReindexImages}
+          >
+            {text.reindexImages}
+          </button>
+        </div>
       </section>
 
-      <section className="rounded-md border border-line px-4 py-3">
+      <section className="rounded-md border border-line px-3 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[11px] font-semibold text-ink-primary">{text.aiPermissionsHeading}</p>
+          <span className="rounded bg-panel px-2 py-1 text-[10px] font-semibold text-ink-secondary">{text.aiPermissionsScope}</span>
+        </div>
+        <div className="mt-2 grid gap-x-6 border-t border-line md:grid-cols-2">
+          <PermissionToggle label={text.editDocuments} enabled={settingsAi.permissions.editDocuments} onToggle={() => updatePermissions({ editDocuments: !settingsAi.permissions.editDocuments })} />
+          <PermissionToggle label={text.createFolders} enabled={settingsAi.permissions.createFolders} onToggle={() => updatePermissions({ createFolders: !settingsAi.permissions.createFolders })} />
+          <PermissionToggle label={text.createDocuments} enabled={settingsAi.permissions.createDocuments} onToggle={() => updatePermissions({ createDocuments: !settingsAi.permissions.createDocuments })} />
+          <PermissionToggle
+            label={text.deleteDocuments}
+            enabled={settingsAi.permissions.deleteDocumentsAndFolders}
+            onToggle={() => updatePermissions({ deleteDocumentsAndFolders: !settingsAi.permissions.deleteDocumentsAndFolders })}
+          />
+        </div>
+      </section>
+
+      <section className="rounded-md border border-line px-3 py-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
@@ -737,28 +927,21 @@ function AiSettings({
           <span className="rounded bg-panel px-2 py-1 text-[10px] font-semibold text-ink-secondary">{text.agenticModeHint}</span>
         </div>
 
-        <div className="mt-3 grid gap-2">
-          <div className="flex items-center justify-between gap-4 rounded-md border border-orange-100 bg-orange-50/50 px-3 py-2.5">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <Globe2 size={14} className="text-brand-orange" />
-                <p className="text-[11px] font-semibold text-ink-primary">{text.webResearchHeading}</p>
-              </div>
-              <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{text.webResearchDescription}</p>
-            </div>
-            <Switch enabled={settingsAi.agentic.webResearchEnabled} label={text.webResearchHeading} onToggle={() => updateAgentic({ webResearchEnabled: !settingsAi.agentic.webResearchEnabled })} />
-          </div>
-
-          <div className="flex items-center justify-between gap-4 rounded-md border border-line px-3 py-2.5">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <ShieldCheck size={14} className="text-brand-orange" />
-                <p className="text-[11px] font-semibold text-ink-primary">{text.agenticConfirmHeading}</p>
-              </div>
-              <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{text.agenticConfirmDescription}</p>
-            </div>
-            <Switch enabled={settingsAi.agentic.confirmBeforeApplying} label={text.agenticConfirmHeading} onToggle={() => updateAgentic({ confirmBeforeApplying: !settingsAi.agentic.confirmBeforeApplying })} />
-          </div>
+        <div className="mt-3 grid gap-x-6 border-y border-line md:grid-cols-2">
+          <CompactToggle
+            icon={<Globe2 size={14} />}
+            label={text.webResearchHeading}
+            description={text.webResearchDescription}
+            enabled={settingsAi.agentic.webResearchEnabled}
+            onToggle={() => updateAgentic({ webResearchEnabled: !settingsAi.agentic.webResearchEnabled })}
+          />
+          <CompactToggle
+            icon={<ShieldCheck size={14} />}
+            label={text.agenticConfirmHeading}
+            description={text.agenticConfirmDescription}
+            enabled={settingsAi.agentic.confirmBeforeApplying}
+            onToggle={() => updateAgentic({ confirmBeforeApplying: !settingsAi.agentic.confirmBeforeApplying })}
+          />
         </div>
 
         <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-2">
@@ -769,24 +952,22 @@ function AiSettings({
         </div>
       </section>
 
-      <section className="rounded-md border border-line px-4 py-3">
-        <div className="flex items-start justify-between gap-4">
+      <section className="rounded-md border border-line px-3 py-3">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4">
           <div className="min-w-0">
             <p className="text-[11px] font-semibold text-ink-primary">{text.ragHeading}</p>
             <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.ragDescription}</p>
-            <p className="mt-2 text-[10px] text-ink-secondary">{text.ragStatus}: {describeIndexStatus(indexStatus)}</p>
-            {aiIndexStatus ? (
-              <p className="mt-1 text-[10px] text-ink-secondary">
-                {text.ragDocuments}: {indexedCount}/{documentCount}
-                {failedCount > 0 ? ` · ${text.ragFailed}: ${failedCount}` : ""}
-                {aiIndexStatus.localExactReady ? ` · ${text.ragExactReady}` : ""}
-              </p>
-            ) : null}
-            {aiIndexStatus?.error ? <p className="mt-1 text-[10px] leading-4 text-red-700">{aiIndexStatus.error}</p> : null}
           </div>
           <Switch enabled={settingsAi.rag.enabled} label={text.ragHeading} onToggle={() => updateRag(!settingsAi.rag.enabled)} />
         </div>
-        <div className="mt-3 flex gap-2">
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
+          <StatusPill label={text.ragStatus} value={describeIndexStatus(indexStatus)} />
+          <StatusPill label={text.ragDocuments} value={`${indexedCount}/${documentCount}`} />
+          {failedCount > 0 ? <StatusPill label={text.ragFailed} value={String(failedCount)} tone="danger" /> : null}
+          {aiIndexStatus?.localExactReady ? <StatusPill label={text.ragExactReady} value={text.enabled} tone="success" /> : null}
+        </div>
+        {aiIndexStatus?.error ? <p className="mt-2 text-[10px] leading-4 text-red-700">{aiIndexStatus.error}</p> : null}
+        <div className="mt-3 flex flex-wrap gap-2">
           <button
             className="h-8 rounded-md border border-brand-orange px-3 text-[11px] font-semibold text-brand-orange hover:bg-brand-hover disabled:opacity-50"
             disabled={!settingsAi.rag.enabled || !settingsAi.openaiKeyConfigured}
@@ -897,12 +1078,63 @@ function ModelMeter({ label, value, valueLabel }: { label: string; value: number
   );
 }
 
-function ToggleRow({ label, enabled, onToggle }: { label: string; enabled: boolean; onToggle: () => void }) {
+function CompactToggle({
+  label,
+  description,
+  enabled,
+  onToggle,
+  icon,
+}: {
+  label: string;
+  description: string;
+  enabled: boolean;
+  onToggle: () => void;
+  icon?: ReactNode;
+}) {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-md border border-line px-4 py-3">
-      <span className="text-[11px] font-medium text-ink-primary">{label}</span>
+    <div className="flex min-w-0 items-center justify-between gap-3 py-2.5">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          {icon ? <span className="shrink-0 text-brand-orange">{icon}</span> : null}
+          <p className="text-[11px] font-semibold text-ink-primary">{label}</p>
+        </div>
+        <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{description}</p>
+      </div>
       <Switch enabled={enabled} label={label} onToggle={onToggle} />
     </div>
+  );
+}
+
+function PermissionToggle({ label, enabled, onToggle }: { label: string; enabled: boolean; onToggle: () => void }) {
+  return (
+    <div className="flex min-w-0 items-center justify-between gap-3 py-2.5">
+      <span className="min-w-0 text-[11px] font-medium text-ink-primary">{label}</span>
+      <Switch enabled={enabled} label={label} onToggle={onToggle} />
+    </div>
+  );
+}
+
+function StatusPill({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  tone?: "neutral" | "success" | "danger";
+}) {
+  const toneClass =
+    tone === "success"
+      ? "border-emerald-100 bg-emerald-50 text-emerald-700"
+      : tone === "danger"
+        ? "border-red-100 bg-red-50 text-red-700"
+        : "border-line bg-panel text-ink-secondary";
+
+  return (
+    <span className={["inline-flex items-center gap-1.5 rounded border px-2 py-1 text-[10px] font-medium", toneClass].join(" ")}>
+      <span>{label}</span>
+      <span className="font-semibold text-ink-primary">{value}</span>
+    </span>
   );
 }
 
@@ -924,11 +1156,11 @@ function LimitField({
   onChange: (value: number) => void;
 }) {
   return (
-    <label className="block rounded-md border border-line bg-white px-3 py-2">
+    <label className="block min-w-0">
       <span className="block text-[9px] font-semibold uppercase text-ink-secondary">{label}</span>
-      <span className="mt-1 flex items-center gap-1">
+      <span className="mt-1 flex h-8 items-center gap-1 rounded-md border border-line bg-white px-2 focus-within:border-brand-orange">
         <input
-          className="h-7 min-w-0 flex-1 rounded border border-line px-2 text-[11px] font-semibold text-ink-primary outline-none focus:border-brand-orange"
+          className="h-7 min-w-0 flex-1 border-0 bg-transparent text-[11px] font-semibold text-ink-primary outline-none"
           type="number"
           min={min}
           max={max}
@@ -1054,6 +1286,9 @@ const settingsCopy = {
     enabled: "Activo",
     disabled: "Inactivo",
     openAiKeyPlaceholder: "sk-...",
+    openAiKeyConfiguredPlaceholder: "Clave configurada. Últimos 4 caracteres:",
+    openAiKeyConfiguredGenericPlaceholder: "Clave OpenAI configurada. Escribe una nueva para sustituirla.",
+    openAiKeyMissingPlaceholder: "Configura la API key de OpenAI para activar IA real",
     saveKey: "Guardar",
     deleteKey: "Eliminar clave",
     aiKeyPrivacy: "La clave se guarda localmente y no se escribe en proyectos, logs ni trazas.",
@@ -1062,6 +1297,20 @@ const settingsCopy = {
     recommendedModel: "Recomendado",
     intelligenceLabel: "Inteligencia",
     costLabel: "Coste",
+    visionHeading: "Visión de imágenes",
+    visionDescription: "Controla cómo se usan las imágenes del proyecto como contexto IA y cuándo se indexan sus descripciones visuales.",
+    visionModelHeading: "Modelo visión",
+    visionDetailHeading: "Detalle",
+    visionDetailAuto: "Automático",
+    visionDetailLow: "Bajo",
+    visionDetailHigh: "Alto",
+    visionMaxImages: "Imágenes por prompt",
+    visionMaxSize: "Tamaño máx.",
+    visionIndexHeading: "Indexar imágenes en RAG",
+    visionIndexDescription: "Permite que el índice del proyecto incluya descripciones visuales generadas desde las imágenes.",
+    visionStoreHeading: "Guardar descripciones visuales",
+    visionStoreDescription: "Conserva metadatos locales para reutilizar contexto sin volver a analizar cada imagen.",
+    reindexImages: "Reindexar imágenes",
     aiModels: {
       "gpt-5.4-mini": {
         name: "Equilibrado",
@@ -1097,6 +1346,7 @@ const settingsCopy = {
       },
     },
     aiPermissionsHeading: "Permisos de acciones",
+    aiPermissionsScope: "Límites de ejecución",
     editDocuments: "Editar documentos",
     createFolders: "Crear y mover carpetas",
     createDocuments: "Crear, duplicar y mover documentos",
@@ -1200,6 +1450,9 @@ const settingsCopy = {
     enabled: "Enabled",
     disabled: "Disabled",
     openAiKeyPlaceholder: "sk-...",
+    openAiKeyConfiguredPlaceholder: "Key configured. Last 4 characters:",
+    openAiKeyConfiguredGenericPlaceholder: "OpenAI key configured. Type a new one to replace it.",
+    openAiKeyMissingPlaceholder: "Configure the OpenAI API key to enable real AI",
     saveKey: "Save",
     deleteKey: "Delete key",
     aiKeyPrivacy: "The key is stored locally and is not written to projects, logs, or traces.",
@@ -1208,6 +1461,20 @@ const settingsCopy = {
     recommendedModel: "Recommended",
     intelligenceLabel: "Intelligence",
     costLabel: "Cost",
+    visionHeading: "Image vision",
+    visionDescription: "Control how project images are used as AI context and when visual descriptions are indexed.",
+    visionModelHeading: "Vision model",
+    visionDetailHeading: "Detail",
+    visionDetailAuto: "Automatic",
+    visionDetailLow: "Low",
+    visionDetailHigh: "High",
+    visionMaxImages: "Images per prompt",
+    visionMaxSize: "Max size",
+    visionIndexHeading: "Index images in RAG",
+    visionIndexDescription: "Allow the project index to include visual descriptions generated from images.",
+    visionStoreHeading: "Store visual descriptions",
+    visionStoreDescription: "Keep local metadata to reuse context without analyzing each image again.",
+    reindexImages: "Reindex images",
     aiModels: {
       "gpt-5.4-mini": {
         name: "Balanced",
@@ -1243,6 +1510,7 @@ const settingsCopy = {
       },
     },
     aiPermissionsHeading: "Action permissions",
+    aiPermissionsScope: "Execution limits",
     editDocuments: "Edit documents",
     createFolders: "Create and move folders",
     createDocuments: "Create, duplicate, and move documents",

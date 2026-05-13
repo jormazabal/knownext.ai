@@ -1,4 +1,4 @@
-import { FileText, PanelLeftOpen, ScrollText, Sparkles, X } from "lucide-react";
+import { FileText, Image, PanelLeftOpen, ScrollText, Sparkles, X } from "lucide-react";
 import type { WorkspaceTab } from "../../types/domain";
 
 type DocumentTabsProps = {
@@ -30,7 +30,7 @@ export function DocumentTabs({ tabs, activeTabId, dirtyDocumentIds, onOpenNaviga
         {tabs.map((tab) => {
           const active = tab.id === activeTabId;
           const dirty = tab.kind === "document" && dirtyIds.has(tab.id);
-          const Icon = tab.kind === "release-notes" ? ScrollText : tab.kind === "ai-conversation" ? Sparkles : FileText;
+          const Icon = tab.kind === "release-notes" ? ScrollText : tab.kind === "ai-conversation" ? Sparkles : tab.kind === "image" ? Image : FileText;
           const isAiTab = tab.kind === "ai-conversation";
           return (
             <button
