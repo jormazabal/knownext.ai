@@ -221,10 +221,36 @@ describe("AppSettingsDialog", () => {
     fireEvent.click(screen.getByText("IA"));
     expect(screen.getByText("Modelo de respuesta")).toBeInTheDocument();
     expect(screen.getAllByText("Coste").length).toBeGreaterThanOrEqual(4);
+    expect(screen.getByText("Crear, duplicar y mover documentos")).toBeInTheDocument();
+    expect(screen.getByText("Crear y mover carpetas")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /equilibrado/i })).toHaveAttribute("aria-checked", "true");
 
     fireEvent.click(screen.getByRole("radio", { name: /máxima inteligencia/i }));
 
     expect(onAiChange).toHaveBeenCalledWith(expect.objectContaining({ model: "gpt-5.5" }));
+  });
+
+  it("shows agentic limits and web research controls", () => {
+    const onAiChange = vi.fn();
+
+    render(
+      <AppSettingsDialog
+        {...baseProps}
+        runtimeServicesStatus={null}
+        onAiChange={onAiChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("IA"));
+
+    expect(screen.getByText("Tareas agénticas")).toBeInTheDocument();
+    expect(screen.getByText("Control desde el prompt")).toBeInTheDocument();
+    expect(screen.getByText("Investigación web")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Investigación web"));
+
+    expect(onAiChange).toHaveBeenCalledWith(expect.objectContaining({
+      agentic: expect.objectContaining({ webResearchEnabled: true }),
+    }));
   });
 });

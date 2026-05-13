@@ -172,6 +172,12 @@ input[type="range"]::-moz-range-thumb {
   font-family: Inter, ui-sans-serif, system-ui, "Segoe UI", Arial, sans-serif !important;
 }
 
+.knownext-editor .knownext-selection-focus {
+  border-radius: 3px;
+  background: rgba(243, 112, 33, 0.18);
+  box-shadow: 0 0 0 1px rgba(243, 112, 33, 0.22);
+}
+
 .knownext-readonly-editor .milkdown .editor,
 .knownext-readonly-editor .milkdown .ProseMirror {
   cursor: default;

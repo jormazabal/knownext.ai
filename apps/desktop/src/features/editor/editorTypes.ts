@@ -22,8 +22,15 @@ export type MarkdownEditorAction =
 export type MarkdownEditorController = {
   run: (action: MarkdownEditorAction) => boolean;
   getFormatState: () => MarkdownEditorFormatState;
+  setSelectionFocus: (selection: MarkdownEditorSelection | null) => boolean;
 };
 
 export type MarkdownEditorFormatState = Partial<Record<MarkdownEditorAction, boolean>>;
+
+export type MarkdownEditorSelection = {
+  from: number;
+  to: number;
+  text: string;
+};
 
 export const emptyMarkdownEditorFormatState: MarkdownEditorFormatState = {};

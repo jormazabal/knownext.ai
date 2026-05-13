@@ -11,7 +11,7 @@ import {
   MoveRight,
   FilePlus2,
 } from "lucide-react";
-import { useRef, useState, type MouseEvent } from "react";
+import { useRef, useState, type DragEvent, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import type { DocumentTreeNode } from "../../types/domain";
 
@@ -22,6 +22,7 @@ type DocumentTreeProps = {
   onRenameNode: (nodeId: string, name: string) => void;
   onToggleNode: (nodeId: string) => void;
   onContextAction: (action: DocumentTreeAction, node: DocumentTreeNode) => void;
+  onMoveNode: (node: DocumentTreeNode, targetFolderId: string | null) => void | Promise<void>;
 };
 
 export type DocumentTreeAction =
@@ -39,13 +40,18 @@ export function DocumentTree({
   onRenameNode,
   onToggleNode,
   onContextAction,
+  onMoveNode,
 }: DocumentTreeProps) {
   const closeTimer = useRef<number | null>(null);
+  const expandTimer = useRef<number | null>(null);
+  const autoExpandedNodeIds = useRef<Set<string>>(new Set());
   const [openMenu, setOpenMenu] = useState<{
     node: DocumentTreeNode;
     x: number;
     y: number;
   } | null>(null);
+  const [draggedNode, setDraggedNode] = useState<DocumentTreeNode | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ id: string | null; valid: boolean; label: string } | null>(null);
 
   function clearCloseTimer() {
     if (closeTimer.current !== null) {
@@ -69,8 +75,88 @@ export function DocumentTree({
     });
   }
 
+  function clearExpandTimer() {
+    if (expandTimer.current !== null) {
+      window.clearTimeout(expandTimer.current);
+      expandTimer.current = null;
+    }
+  }
+
+  function startDrag(node: DocumentTreeNode, event: DragEvent<HTMLDivElement>) {
+    if (node.isEditing) {
+      event.preventDefault();
+      return;
+    }
+    clearCloseTimer();
+    setOpenMenu(null);
+    setDraggedNode(node);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", node.id);
+  }
+
+  function finishDrag() {
+    clearExpandTimer();
+    autoExpandedNodeIds.current.clear();
+    setDraggedNode(null);
+    setDropTarget(null);
+  }
+
+  function handleRootDragOver(event: DragEvent<HTMLDivElement>) {
+    if (!draggedNode) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    const parentId = getParentId(nodes, draggedNode.id);
+    setDropTarget({
+      id: null,
+      valid: parentId !== null && parentId !== undefined,
+      label: "Raíz del proyecto",
+    });
+  }
+
+  function handleRootDrop(event: DragEvent<HTMLDivElement>) {
+    if (!draggedNode) return;
+    event.preventDefault();
+    const parentId = getParentId(nodes, draggedNode.id);
+    const valid = parentId !== null && parentId !== undefined;
+    if (valid) void onMoveNode(draggedNode, null);
+    finishDrag();
+  }
+
+  function handleFolderDragOver(targetNode: DocumentTreeNode, event: DragEvent<HTMLDivElement>) {
+    if (!draggedNode) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const valid = isValidFolderDrop(nodes, draggedNode, targetNode);
+    event.dataTransfer.dropEffect = valid ? "move" : "none";
+    setDropTarget({ id: targetNode.id, valid, label: targetNode.name });
+
+    if (valid && targetNode.type === "folder" && !targetNode.open && !autoExpandedNodeIds.current.has(targetNode.id)) {
+      clearExpandTimer();
+      expandTimer.current = window.setTimeout(() => {
+        autoExpandedNodeIds.current.add(targetNode.id);
+        onToggleNode(targetNode.id);
+      }, 600);
+    }
+  }
+
+  function handleFolderDrop(targetNode: DocumentTreeNode, event: DragEvent<HTMLDivElement>) {
+    if (!draggedNode) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (isValidFolderDrop(nodes, draggedNode, targetNode)) {
+      void onMoveNode(draggedNode, targetNode.id);
+    }
+    finishDrag();
+  }
+
   return (
-    <div className="cursor-default text-[11px]" onScroll={() => setOpenMenu(null)}>
+    <div
+      className="cursor-default text-[11px]"
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null);
+      }}
+      onScroll={() => setOpenMenu(null)}
+    >
       <div>
         {nodes.length > 0 ? (
           nodes.map((node) => (
@@ -83,8 +169,14 @@ export function DocumentTree({
               onRenameNode={onRenameNode}
               onToggleNode={onToggleNode}
               menuNodeId={openMenu?.node.id}
+              draggedNodeId={draggedNode?.id}
+              dropTarget={dropTarget}
               onMenuEnter={handleMenuEnter}
               onMenuLeave={scheduleCloseMenu}
+              onDragStart={startDrag}
+              onDragEnd={finishDrag}
+              onFolderDragOver={handleFolderDragOver}
+              onFolderDrop={handleFolderDrop}
             />
           ))
         ) : (
@@ -93,6 +185,20 @@ export function DocumentTree({
           </div>
         )}
       </div>
+      {draggedNode ? (
+        <div
+          className={[
+            "mx-1 mt-2 rounded-lg border border-dashed px-3 py-2 text-[11px] transition",
+            dropTarget?.id === null && dropTarget.valid
+              ? "border-brand-orange bg-brand-hover text-brand-orange"
+              : "border-line bg-white text-ink-secondary hover:border-orange-200 hover:bg-brand-hover",
+          ].join(" ")}
+          onDragOver={handleRootDragOver}
+          onDrop={handleRootDrop}
+        >
+          Soltar en la raíz del proyecto
+        </div>
+      ) : null}
       {openMenu
         ? createPortal(
           <ContextMenu
@@ -121,8 +227,14 @@ type TreeNodeProps = {
   onRenameNode: (nodeId: string, name: string) => void;
   onToggleNode: (nodeId: string) => void;
   menuNodeId?: string;
+  draggedNodeId?: string;
+  dropTarget: { id: string | null; valid: boolean; label: string } | null;
   onMenuEnter: (node: DocumentTreeNode, event: MouseEvent<HTMLButtonElement>) => void;
   onMenuLeave: () => void;
+  onDragStart: (node: DocumentTreeNode, event: DragEvent<HTMLDivElement>) => void;
+  onDragEnd: () => void;
+  onFolderDragOver: (node: DocumentTreeNode, event: DragEvent<HTMLDivElement>) => void;
+  onFolderDrop: (node: DocumentTreeNode, event: DragEvent<HTMLDivElement>) => void;
 };
 
 function TreeNode({
@@ -133,22 +245,40 @@ function TreeNode({
   onRenameNode,
   onToggleNode,
   menuNodeId,
+  draggedNodeId,
+  dropTarget,
   onMenuEnter,
   onMenuLeave,
+  onDragStart,
+  onDragEnd,
+  onFolderDragOver,
+  onFolderDrop,
 }: TreeNodeProps) {
   const isFolder = node.type === "folder";
   const isActive = node.id === activeDocumentId;
   const hasOpenMenu = node.id === menuNodeId;
+  const isDragging = node.id === draggedNodeId;
+  const isDropTarget = node.id === dropTarget?.id;
   const shouldRenderChildren = isFolder && node.open && node.children?.length;
 
   return (
     <div>
       <div
         className={[
-          "tree-row group relative flex h-6 cursor-default select-none items-center rounded-md pr-1.5",
-          isActive || hasOpenMenu ? "bg-brand-hover" : "hover:bg-brand-hover",
+          "tree-row group relative flex h-6 select-none items-center rounded-md pr-1.5 transition",
+          node.isEditing ? "cursor-default" : isDragging ? "cursor-grabbing" : "cursor-default",
+          isDragging ? "opacity-45" : "",
+          isDropTarget && dropTarget?.valid ? "bg-brand-hover ring-1 ring-inset ring-brand-orange" : "",
+          isDropTarget && !dropTarget?.valid ? "bg-red-50 ring-1 ring-inset ring-red-200" : "",
+          !isDropTarget && (isActive || hasOpenMenu) ? "bg-brand-hover" : "",
+          !isDropTarget && !isActive && !hasOpenMenu ? "hover:bg-brand-hover" : "",
         ].join(" ")}
         style={{ paddingLeft: 6 + depth * 18 }}
+        draggable={!node.isEditing}
+        onDragStart={(event) => onDragStart(node, event)}
+        onDragEnd={onDragEnd}
+        onDragOver={isFolder ? (event) => onFolderDragOver(node, event) : undefined}
+        onDrop={isFolder ? (event) => onFolderDrop(node, event) : undefined}
         onClick={() => {
           if (node.isEditing) return;
           if (isFolder) onToggleNode(node.id);
@@ -205,13 +335,47 @@ function TreeNode({
               onRenameNode={onRenameNode}
               onToggleNode={onToggleNode}
               menuNodeId={menuNodeId}
+              draggedNodeId={draggedNodeId}
+              dropTarget={dropTarget}
               onMenuEnter={onMenuEnter}
               onMenuLeave={onMenuLeave}
+              onDragStart={onDragStart}
+              onDragEnd={onDragEnd}
+              onFolderDragOver={onFolderDragOver}
+              onFolderDrop={onFolderDrop}
             />
           ))
         : null}
     </div>
   );
+}
+
+function getParentId(nodes: DocumentTreeNode[], nodeId: string, parentId: string | null = null): string | null | undefined {
+  for (const node of nodes) {
+    if (node.id === nodeId) return parentId;
+    if (node.children) {
+      const childParent = getParentId(node.children, nodeId, node.id);
+      if (childParent !== undefined) return childParent;
+    }
+  }
+  return undefined;
+}
+
+function isValidFolderDrop(nodes: DocumentTreeNode[], draggedNode: DocumentTreeNode, targetNode: DocumentTreeNode) {
+  if (targetNode.type !== "folder") return false;
+  if (draggedNode.id === targetNode.id) return false;
+  if (getParentId(nodes, draggedNode.id) === targetNode.id) return false;
+  if (draggedNode.type === "folder" && containsNode(draggedNode, targetNode.id)) return false;
+  return true;
+}
+
+function containsNode(node: DocumentTreeNode, nodeId: string): boolean {
+  if (!node.children) return false;
+  for (const child of node.children) {
+    if (child.id === nodeId) return true;
+    if (containsNode(child, nodeId)) return true;
+  }
+  return false;
 }
 
 function ContextMenu({
@@ -233,6 +397,7 @@ function ContextMenu({
     { label: "Nueva carpeta", icon: FolderPlus, action: "create-folder" },
     { label: "Nuevo documento", icon: FilePlus2, action: "create-document" },
     { label: "Renombrar", icon: Pencil, action: "rename" },
+    { label: "Mover", icon: MoveRight, action: "move" },
     { label: "Eliminar", icon: Trash2, action: "delete" },
   ];
   const documentItems = [

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DocumentTreeAction } from "../features/documents/DocumentTree";
+import type { MarkdownEditorSelection } from "../features/editor/editorTypes";
+import type { AiPromptExecutionOptions } from "../features/assistant/AiPromptInput";
 import { CreateDocumentDialog } from "../features/documents/CreateDocumentDialog";
 import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
 import { AppSettingsDialog } from "../features/settings/AppSettingsDialog";
@@ -33,6 +35,8 @@ import {
   deleteOpenAiKey,
   getAiConversation,
   getAiIndexStatus,
+  getAiPendingIntent,
+  getAiUsageSummary,
   rebuildAiIndex,
   saveOpenAiKey,
   sendAiInteraction,
@@ -87,7 +91,11 @@ import type {
   AiConversationEvent,
   AiIndexStatusResponse,
   AiInteractionResponse,
+  AiIntentActionType,
   AiPendingDelete,
+  AiPendingIntent,
+  AiSelectionFocus,
+  AiUsageSummaryResponse,
   AppearanceConfig,
   AppUtilityTabId,
   DiagnosticsConfig,
@@ -145,11 +153,15 @@ export function App() {
   const [appearanceConfig, setAppearanceConfig] = useState<AppearanceConfig>(defaultAppearanceConfig);
   const [diagnosticsConfig, setDiagnosticsConfig] = useState<DiagnosticsConfig>(defaultDiagnosticsConfig);
   const [aiConfig, setAiConfig] = useState<AiConfigStatus>({ ...defaultAiConfig, openaiKeyConfigured: false, openaiKeyPreview: null });
+  const aiConfigSaveSequence = useRef(0);
   const [aiConversationEvents, setAiConversationEvents] = useState<AiConversationEvent[]>([]);
   const [aiIndexStatus, setAiIndexStatus] = useState<AiIndexStatusResponse | null>(null);
+  const [aiUsageSummary, setAiUsageSummary] = useState<AiUsageSummaryResponse | null>(null);
   const [aiPendingDelete, setAiPendingDelete] = useState<AiPendingDelete | null>(null);
+  const [aiPendingIntent, setAiPendingIntent] = useState<AiPendingIntent | null>(null);
   const [aiBubble, setAiBubble] = useState<{ id: string; answer: string } | null>(null);
   const [aiAppliedChange, setAiAppliedChange] = useState<{ documentId: string; summary: string } | null>(null);
+  const [aiSelectionFocus, setAiSelectionFocus] = useState<AiSelectionFocus | null>(null);
   const [tabsByProject, setTabsByProject] = useState<Record<string, ProjectTabsConfig>>({});
   const [openUtilityTabs, setOpenUtilityTabs] = useState<AppUtilityTabId[]>([]);
   const [activeUtilityTab, setActiveUtilityTab] = useState<AppUtilityTabId | null>(null);
@@ -179,18 +191,20 @@ export function App() {
   const [syncState, setSyncState] = useState<"idle" | "pulling" | "pushing">("idle");
   const lastTraceLogRef = useRef<{ fingerprint: string; timestamp: number } | null>(null);
   const githubLoginPollingRef = useRef(false);
+  const lastDocumentContextRef = useRef<{ id: string | null; path: string | null }>({ id: null, path: null });
 
   useEffect(() => {
     void (async () => {
       const localPreferences = readLocalAppPreferences();
       try {
         await waitForApiReady();
-        const [projectList, appConfig, auth, capabilities, loadedAiConfig] = await Promise.all([
+        const [projectList, appConfig, auth, capabilities, loadedAiConfig, loadedAiUsageSummary] = await Promise.all([
           listProjects(),
           getAppConfig(),
           getAuthStatus(),
           getProjectCapabilities(),
           getAiConfig(),
+          loadAiUsageSummary("app.startup.aiUsageSummary"),
         ]);
         const active = projectList.find((project) => project.active) ?? projectList[0];
         let projectTree: DocumentTreeNode[] = [];
@@ -232,6 +246,7 @@ export function App() {
         setAppearanceConfig(appConfig.appearance ?? defaultAppearanceConfig);
         setDiagnosticsConfig(appConfig.diagnostics ?? defaultDiagnosticsConfig);
         setAiConfig(loadedAiConfig);
+        setAiUsageSummary(loadedAiUsageSummary);
         setConfigPersistenceAvailable(true);
         setTabsByProject(appConfig.tabsByProject);
         setOpenUtilityTabs(nextOpenUtilityTabs);
@@ -260,6 +275,7 @@ export function App() {
         setAppearanceConfig(localPreferences.appearance ?? defaultAppearanceConfig);
         setDiagnosticsConfig(localPreferences.diagnostics ?? defaultDiagnosticsConfig);
         setAiConfig({ ...(localPreferences.ai ?? defaultAiConfig), openaiKeyConfigured: false, openaiKeyPreview: null });
+        setAiUsageSummary(null);
         setConfigPersistenceAvailable(false);
         setOpenUtilityTabs([]);
         setActiveUtilityTab(null);
@@ -444,6 +460,12 @@ export function App() {
   }, [activeDocumentId, documentSessions]);
 
   useEffect(() => {
+    setAiSelectionFocus((currentSelection) => (
+      currentSelection && currentSelection.documentId !== activeDocumentId ? null : currentSelection
+    ));
+  }, [activeDocumentId]);
+
+  useEffect(() => {
     if (!configLoaded) return;
     void refreshOrphanDrafts();
   }, [configLoaded]);
@@ -518,6 +540,10 @@ export function App() {
   ], [activeProject, openUtilityTabs, tabs]);
   const activeTabId = activeUtilityTab === RELEASE_NOTES_UTILITY_TAB_ID ? RELEASE_NOTES_WORKSPACE_TAB_ID : activeDocumentId || (activeProject ? AI_CONVERSATION_TAB_ID : "");
   const activeSession = activeDocumentId ? documentSessions[activeDocumentId] : undefined;
+  useEffect(() => {
+    if (!activeDocumentId || !activeSession?.document) return;
+    lastDocumentContextRef.current = { id: activeDocumentId, path: activeSession.document.path };
+  }, [activeDocumentId, activeSession?.document?.path]);
   const dirtyDocumentIds = useMemo(
     () => Object.entries(documentSessions).filter(([, session]) => session.isDirty).map(([documentId]) => documentId),
     [documentSessions],
@@ -651,7 +677,7 @@ export function App() {
     });
   }
 
-  async function handleSendAiPrompt(prompt: string) {
+  async function handleSendAiPrompt(prompt: string, selectionFocus?: AiSelectionFocus | null, options?: AiPromptExecutionOptions) {
     if (!activeProject) return;
     const hasDocumentContext = Boolean(activeDocumentId && activeSession?.document);
     if (hasDocumentContext && (activeSession?.conflictStatus === "disk-changed" || activeSession?.orphaned || activeSession?.conflictStatus === "missing")) {
@@ -666,12 +692,46 @@ export function App() {
         documentId: hasDocumentContext ? activeDocumentId : null,
         prompt,
         activeMarkdown: hasDocumentContext ? activeSession?.markdown ?? "" : "",
+        selectionFocus: hasDocumentContext && selectionFocus?.documentId === activeDocumentId ? selectionFocus : null,
+        clientContext: {
+          lastDocumentId: lastDocumentContextRef.current.id,
+          lastDocumentPath: lastDocumentContextRef.current.path,
+        },
+        executionMode: options?.executionMode ?? "quick",
+        reasoningDepth: options?.reasoningDepth ?? "light",
         mode: hasDocumentContext ? "document" : "project",
         clientMessageId: `client-${Date.now()}`,
       });
       applyAiInteractionResponse(response);
+      void refreshAiUsageSummary();
     } catch (error) {
       showError(error, "No se pudo completar la interacción IA.", { source: "app.aiInteraction" });
+    }
+  }
+
+  async function handleAiIntentAction(action: AiIntentActionType, intentId: string) {
+    if (!activeProject || !aiPendingIntent) return;
+    const targetDocumentId = aiPendingIntent.targetDocumentId ?? lastDocumentContextRef.current.id;
+    const targetSession = targetDocumentId ? documentSessions[targetDocumentId] : undefined;
+    try {
+      const response = await sendAiInteraction({
+        projectId: activeProject.id,
+        documentId: targetDocumentId ?? null,
+        prompt: "",
+        activeMarkdown: targetSession?.markdown ?? "",
+        selectionFocus: null,
+        clientContext: {
+          lastDocumentId: lastDocumentContextRef.current.id,
+          lastDocumentPath: lastDocumentContextRef.current.path,
+        },
+        intentAction: { type: action, intentId },
+        mode: targetDocumentId ? "document" : "project",
+        clientMessageId: `client-intent-${Date.now()}`,
+      });
+      applyAiInteractionResponse(response);
+      void refreshAiUsageSummary();
+    } catch (error) {
+      showError(error, "No se pudo aplicar la intención IA.", { source: "app.aiIntentAction" });
     }
   }
 
@@ -679,7 +739,19 @@ export function App() {
     if (response.conversationEvents.length > 0) {
       setAiConversationEvents((currentEvents) => mergeAiEvents(currentEvents, response.conversationEvents));
     }
-    if (response.tree) setTree(response.tree);
+    if (response.pendingIntent && response.pendingIntent.status !== "completed" && response.pendingIntent.status !== "cancelled") {
+      setAiPendingIntent(response.pendingIntent);
+    } else if (response.pendingIntentStatus === "completed" || response.pendingIntentStatus === "cancelled") {
+      setAiPendingIntent(null);
+    } else if (response.executionMode === "quick") {
+      setAiPendingIntent(null);
+    }
+    const affectedDocuments = response.affectedDocuments ?? [];
+    if (response.tree && affectedDocuments.length > 0) {
+      applyFileOperationResult({ tree: response.tree, node: null, affectedDocuments });
+    } else if (response.tree) {
+      setTree(response.tree);
+    }
     if (response.requiresConfirmation) setAiPendingDelete(response.requiresConfirmation);
     const deletedPaths = getDeletedOperationPaths(response);
     if (deletedPaths.length > 0) {
@@ -710,6 +782,26 @@ export function App() {
 
     if (response.updatedDocument) {
       const updated = response.updatedDocument;
+      const existingSession = documentSessions[updated.documentId];
+      const targetNode = findNodeById(tree, updated.documentId);
+      if (!existingSession) {
+        setTabs((currentTabs) => (
+          currentTabs.some((tab) => tab.id === updated.documentId)
+            ? currentTabs
+            : [...currentTabs, { id: updated.documentId, name: targetNode?.name ?? updated.documentId }]
+        ));
+        setActiveUtilityTab(null);
+        setActiveDocumentId(updated.documentId);
+        void getDocument(updated.documentId)
+          .then((record) => {
+            setDocumentSessions((currentSessions) => ({
+              ...currentSessions,
+              [updated.documentId]: applyExternalMarkdownUpdate(createLoadedDocumentSession(record, currentSessions[updated.documentId]), updated.markdown),
+            }));
+            setAiAppliedChange({ documentId: updated.documentId, summary: updated.summary });
+          })
+          .catch((error) => showError(error, "No se pudo abrir el documento actualizado por IA.", { source: "app.aiUpdatedDocument" }));
+      }
       if (documentSessions[updated.documentId]) {
         setAiAppliedChange({
           documentId: updated.documentId,
@@ -726,18 +818,40 @@ export function App() {
       });
     }
 
-    const createdDocument = response.operations.find((operation) => operation.type === "document_created" && operation.documentId);
+    if (response.uiPlacement === "conversation_tab" || response.routeToAiTab) {
+      handleSelectTab(AI_CONVERSATION_TAB_ID);
+    }
+
+    const createdDocument = response.operations.find((operation) => (
+      (operation.type === "document_created" || operation.type === "document_duplicated") && operation.documentId
+    ));
     if (createdDocument?.documentId) {
       handleOpenDocument(createdDocument.documentId, createdDocument.path?.split("/").pop() ?? "Documento IA");
     }
 
-    if (response.display === "bubble" && response.answer) {
+    if (response.answer && response.display !== "none") {
       setAiBubble({ id: response.interactionId, answer: response.answer });
     }
   }
 
   function handleDismissAiAppliedChange() {
     setAiAppliedChange(null);
+  }
+
+  function handleDocumentSelectionChange(documentId: string, selection: MarkdownEditorSelection | null) {
+    if (documentId !== activeDocumentId) return;
+    if (!selection) {
+      setAiSelectionFocus((currentSelection) => (currentSelection?.documentId === documentId ? null : currentSelection));
+      return;
+    }
+
+    setAiSelectionFocus({
+      documentId,
+      path: documentSessions[documentId]?.document?.path ?? null,
+      from: selection.from,
+      to: selection.to,
+      text: selection.text,
+    });
   }
 
   async function handleConfirmAiDelete() {
@@ -1241,27 +1355,53 @@ export function App() {
   async function refreshAiState(projectId = activeProject?.id) {
     try {
       const nextAiConfig = await getAiConfig();
-      const [conversation, indexStatus] = await Promise.all([
+      const [conversation, indexStatus, usageSummary, pendingIntent] = await Promise.all([
         projectId ? getAiConversation(projectId) : Promise.resolve({ events: [] }),
         projectId && nextAiConfig.rag.enabled ? getAiIndexStatus(projectId) : Promise.resolve(null),
+        loadAiUsageSummary("app.aiState.aiUsageSummary"),
+        projectId ? getAiPendingIntent(projectId) : Promise.resolve(null),
       ]);
       setAiConfig(nextAiConfig);
       setAiConversationEvents(conversation.events);
       setAiIndexStatus(indexStatus);
+      setAiUsageSummary(usageSummary);
+      setAiPendingIntent(pendingIntent);
     } catch (error) {
       showError(error, "No se pudo cargar la configuración de IA.", { source: "app.aiState" });
     }
   }
 
+  async function refreshAiUsageSummary() {
+    setAiUsageSummary(await loadAiUsageSummary("app.aiUsageSummary"));
+  }
+
+  async function loadAiUsageSummary(source: string) {
+    try {
+      return await getAiUsageSummary();
+    } catch (error) {
+      void recordTraceLog({
+        source,
+        message: "No se pudo cargar el resumen de uso IA.",
+        detail: describeError(error),
+      });
+      return null;
+    }
+  }
+
   function handleAiConfigChange(nextAiConfig: AiConfigStatus) {
+    const saveSequence = aiConfigSaveSequence.current + 1;
+    aiConfigSaveSequence.current = saveSequence;
     setAiConfig(nextAiConfig);
     void updateAiConfig({
       provider: nextAiConfig.provider,
       model: nextAiConfig.model,
       permissions: nextAiConfig.permissions,
       rag: nextAiConfig.rag,
+      agentic: nextAiConfig.agentic,
     })
-      .then(setAiConfig)
+      .then((savedAiConfig) => {
+        if (aiConfigSaveSequence.current === saveSequence) setAiConfig(savedAiConfig);
+      })
       .catch((error) => showError(error, "No se pudo guardar la configuración de IA.", { source: "app.aiConfig" }));
   }
 
@@ -1431,12 +1571,29 @@ export function App() {
 
   async function handleMoveNode(targetFolderId: string | null) {
     if (!activeProject || !moveNode) return;
+    const moved = await moveTreeNodeToFolder(moveNode, targetFolderId);
+    if (moved) setMoveNode(null);
+  }
+
+  async function handleMoveTreeNodeDrop(node: DocumentTreeNode, targetFolderId: string | null) {
+    await moveTreeNodeToFolder(node, targetFolderId);
+  }
+
+  async function moveTreeNodeToFolder(node: DocumentTreeNode, targetFolderId: string | null) {
+    if (!activeProject) return false;
     try {
-      const result = await moveTreeNode(activeProject.id, moveNode.id, targetFolderId);
+      const result = await moveTreeNode(activeProject.id, node.id, targetFolderId);
       applyFileOperationResult(result);
-      setMoveNode(null);
+      const targetFolder = targetFolderId ? findNodeById(result.tree, targetFolderId) : null;
+      setNotice({
+        title: "Elemento movido",
+        message: targetFolder ? `"${node.name}" se movió a "${targetFolder.name}".` : `"${node.name}" se movió a la raíz del proyecto.`,
+        tone: "info",
+      });
+      return true;
     } catch (error) {
       showError(error, "No se pudo mover el elemento.");
+      return false;
     }
   }
 
@@ -1486,6 +1643,7 @@ export function App() {
                 ...currentSession.document,
                 id: affectedDocument.newId,
                 name: affectedDocument.name ?? currentSession.document.name,
+                path: affectedDocument.path ?? currentSession.document.path,
               }
               : currentSession.document,
             loadVersion: currentSession.loadVersion + 1,
@@ -1521,8 +1679,11 @@ export function App() {
         aiConfig={aiConfig}
         aiIndexStatus={aiIndexStatus}
         aiConversationEvents={aiConversationEvents}
+        aiUsageSummary={aiUsageSummary}
+        aiPendingIntent={aiPendingIntent}
         aiBubble={aiBubble}
         aiAppliedChange={aiAppliedChange}
+        aiSelectionFocus={aiSelectionFocus}
         tree={tree}
         tabs={workspaceTabs}
         activeTabId={activeTabId}
@@ -1570,6 +1731,8 @@ export function App() {
         onPushProject={() => void handlePushProject()}
         onCreateVersion={handleCreateActiveVersion}
         onSendAiPrompt={handleSendAiPrompt}
+        onClearAiSelectionFocus={() => setAiSelectionFocus(null)}
+        onAiIntentAction={handleAiIntentAction}
         onCloseAiBubble={() => setAiBubble(null)}
         onDismissAiAppliedChange={handleDismissAiAppliedChange}
         onOpenAiConversation={() => handleSelectTab(AI_CONVERSATION_TAB_ID)}
@@ -1578,7 +1741,9 @@ export function App() {
         onSelectTab={handleSelectTab}
         onCloseTab={handleCloseTab}
         onTreeContextAction={handleTreeContextAction}
+        onMoveTreeNode={handleMoveTreeNodeDrop}
         onMarkdownChange={handleMarkdownChange}
+        onDocumentSelectionChange={handleDocumentSelectionChange}
         onSave={() => void handleSave()}
         onKeepLocalVersion={() => void handleSave(activeDocumentId, true)}
         onLoadDiskVersion={() => void handleLoadDiskVersion()}
@@ -1678,7 +1843,7 @@ export function App() {
       <MoveDocumentDialog
         open={moveNode !== null}
         node={moveNode}
-        folders={collectFolders(tree)}
+        folders={moveNode ? collectMoveTargetFolders(tree, moveNode) : collectFolders(tree)}
         onClose={() => setMoveNode(null)}
         onMove={handleMoveNode}
       />
@@ -2480,6 +2645,19 @@ function collectFolders(nodes: DocumentTreeNode[]): DocumentTreeNode[] {
   });
 }
 
+function collectMoveTargetFolders(nodes: DocumentTreeNode[], movingNode: DocumentTreeNode): DocumentTreeNode[] {
+  return collectFolders(nodes).filter((folder) => {
+    if (folder.id === movingNode.id) return false;
+    if (movingNode.type === "folder" && isNodeDescendant(movingNode, folder.id)) return false;
+    return true;
+  });
+}
+
+function isNodeDescendant(node: DocumentTreeNode, targetNodeId: string): boolean {
+  if (!node.children) return false;
+  return node.children.some((child) => child.id === targetNodeId || isNodeDescendant(child, targetNodeId));
+}
+
 function mergeAiEvents(currentEvents: AiConversationEvent[], nextEvents: AiConversationEvent[]) {
   const seen = new Set(currentEvents.map((event) => event.id));
   return [
@@ -2517,7 +2695,7 @@ function MoveDocumentDialog({
     <div className="fixed inset-0 z-[80] grid place-items-center bg-black/20">
       <section className="w-[420px] rounded-lg border border-line bg-white shadow-menu">
         <header className="border-b border-line px-5 py-4">
-          <h2 className="text-[15px] font-semibold">Mover documento</h2>
+          <h2 className="text-[15px] font-semibold">Mover elemento</h2>
           <p className="mt-1 truncate text-[11px] text-ink-secondary">{node.name}</p>
         </header>
         <div className="px-5 py-5">

@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { AiConversationView } from "../features/assistant/AiConversationView";
-import { AiPromptInput } from "../features/assistant/AiPromptInput";
+import { AiPromptInput, type AiPromptExecutionOptions } from "../features/assistant/AiPromptInput";
 import { AiResponseBubble } from "../features/assistant/AiResponseBubble";
 import { DocumentStatusBar } from "../features/documents/DocumentStatusBar";
 import { DocumentTabs } from "../features/documents/DocumentTabs";
@@ -12,13 +12,14 @@ import {
   type MarkdownEditorAction,
   type MarkdownEditorController,
   type MarkdownEditorFormatState,
+  type MarkdownEditorSelection,
 } from "../features/editor/editorTypes";
 import { ProjectActions } from "../features/projects/ProjectActions";
 import { ProjectSelector } from "../features/projects/ProjectSelector";
 import { ReleaseNotesViewer } from "../features/releaseNotes/ReleaseNotesViewer";
 import { VersionHistoryPanel } from "../features/versions/VersionHistoryPanel";
 import { TitleBar } from "../components/window/TitleBar";
-import type { AiConfigStatus, AiConversationEvent, AiIndexStatusResponse, AppearanceConfig, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentTreeNode, LayoutConfig, Project, ProjectVersioningStatus, WorkspaceTab } from "../types/domain";
+import type { AiConfigStatus, AiConversationEvent, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiUsageSummaryResponse, AppearanceConfig, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentTreeNode, LayoutConfig, Project, ProjectVersioningStatus, WorkspaceTab } from "../types/domain";
 
 const sidebarWidthConfig = {
   defaultWidth: 338,
@@ -43,8 +44,11 @@ type DesktopLayoutProps = {
   aiConfig: AiConfigStatus;
   aiIndexStatus: AiIndexStatusResponse | null;
   aiConversationEvents: AiConversationEvent[];
+  aiUsageSummary: AiUsageSummaryResponse | null;
+  aiPendingIntent: AiPendingIntent | null;
   aiBubble: { id: string; answer: string } | null;
   aiAppliedChange: { documentId: string; summary: string } | null;
+  aiSelectionFocus: AiSelectionFocus | null;
   tree: DocumentTreeNode[];
   tabs: WorkspaceTab[];
   activeTabId: string;
@@ -83,7 +87,9 @@ type DesktopLayoutProps = {
   onPullProject: () => void;
   onPushProject: () => void;
   onCreateVersion: (title: string) => Promise<CreateVersionResponse | null>;
-  onSendAiPrompt: (prompt: string) => void | Promise<void>;
+  onSendAiPrompt: (prompt: string, selectionFocus?: AiSelectionFocus | null, options?: AiPromptExecutionOptions) => void | Promise<void>;
+  onClearAiSelectionFocus: () => void;
+  onAiIntentAction: (action: AiIntentActionType, intentId: string) => void | Promise<void>;
   onCloseAiBubble: () => void;
   onDismissAiAppliedChange: () => void;
   onOpenAiConversation: () => void;
@@ -92,7 +98,9 @@ type DesktopLayoutProps = {
   onSelectTab: (documentId: string) => void;
   onCloseTab: (documentId: string) => void;
   onTreeContextAction: (action: DocumentTreeAction, node: DocumentTreeNode) => void;
+  onMoveTreeNode: (node: DocumentTreeNode, targetFolderId: string | null) => void | Promise<void>;
   onMarkdownChange: (documentId: string, markdown: string) => void;
+  onDocumentSelectionChange: (documentId: string, selection: MarkdownEditorSelection | null) => void;
   onSave: () => void;
   onKeepLocalVersion: () => void;
   onLoadDiskVersion: () => void;
@@ -208,7 +216,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
         ) : null}
         <aside
           className={[
-            "absolute inset-y-0 left-0 z-50 flex shrink-0 flex-col border-r border-line bg-panel shadow-menu transition-transform duration-200 ease-out lg:relative lg:z-auto lg:translate-x-0 lg:shadow-none",
+            "absolute inset-y-0 left-0 z-50 flex shrink-0 flex-col border-r border-line bg-panel shadow-menu transition-transform duration-200 ease-out lg:relative lg:translate-x-0 lg:shadow-none",
             navigationOpen ? "translate-x-0" : "-translate-x-full",
           ].join(" ")}
           style={{ width: sidebar.width, maxWidth: "calc(100vw - 48px)" }}
@@ -242,6 +250,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 onRenameNode={props.onRenameNode}
                 onToggleNode={props.onToggleNode}
                 onContextAction={props.onTreeContextAction}
+                onMoveNode={props.onMoveTreeNode}
               />
             ) : null}
           </div>
@@ -249,6 +258,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             appVersion={props.appVersion}
             language={props.appLanguage}
             authStatus={props.authStatus}
+            aiUsageSummary={props.aiUsageSummary}
             hasActiveProject={Boolean(props.activeProject)}
             orphanDraftCount={props.orphanDraftCount}
             onLoginGithub={props.onLoginGithub}
@@ -305,8 +315,8 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             <section className={["relative flex min-w-0 flex-1 flex-col", hasOpenTab ? "bg-white" : "bg-[#F7F7F7]"].join(" ")}>
               {hasOpenTab ? (
                 <>
-                  <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-24 pt-4">
-                    <div className="mx-auto max-w-[900px]">
+                  <div className={hasAiConversation ? "min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1 overflow-y-auto px-8 pb-24 pt-4"}>
+                    <div className={hasAiConversation ? "h-full min-h-0" : "mx-auto max-w-[900px]"}>
                       {hasReleaseNotes ? (
                         <ReleaseNotesViewer markdown={props.releaseNotesMarkdown} />
                       ) : hasAiConversation ? (
@@ -315,6 +325,8 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                           config={props.aiConfig}
                           indexStatus={props.aiIndexStatus}
                           events={props.aiConversationEvents}
+                          pendingIntent={props.aiPendingIntent}
+                          onIntentAction={props.onAiIntentAction}
                         />
                       ) : (
                         <>
@@ -340,6 +352,8 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                                     setEditorFormatState((currentFormatState) => keepStableFormatState(currentFormatState, formatState));
                                   }
                                 }}
+                                onSelectionChange={(selection) => props.onDocumentSelectionChange(session.documentId, selection)}
+                                selectionFocus={toMarkdownEditorSelection(props.aiSelectionFocus, session.documentId)}
                               />
                             </Suspense>
                           ) : (
@@ -380,10 +394,20 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 markdown={hasOpenDocument ? props.activeMarkdown : ""}
                 providerReady={props.aiConfig.openaiKeyConfigured}
                 appliedChangeSummary={props.aiAppliedChange?.documentId === props.activeDocumentId ? props.aiAppliedChange.summary : null}
+                selectionFocus={props.aiSelectionFocus?.documentId === props.activeDocumentId ? props.aiSelectionFocus : null}
                 onSubmit={props.onSendAiPrompt}
+                onClearSelectionFocus={props.onClearAiSelectionFocus}
                 onDismissAppliedChange={props.onDismissAiAppliedChange}
               />
-              <AiResponseBubble bubble={props.aiBubble} onClose={props.onCloseAiBubble} onOpenConversation={props.onOpenAiConversation} />
+              {hasOpenDocument ? (
+                <AiResponseBubble
+                  bubble={props.aiBubble}
+                  pendingIntent={props.aiPendingIntent}
+                  onIntentAction={props.onAiIntentAction}
+                  onClose={props.onCloseAiBubble}
+                  onOpenConversation={props.onOpenAiConversation}
+                />
+              ) : null}
               {hasOpenDocument ? (
                 <DocumentStatusBar
                   statusLabel={activeStatus.label}
@@ -504,6 +528,17 @@ function useResizablePanelWidth({ defaultWidth, minWidth, maxWidth, width, resiz
 
 function clamp(value: number, min: number, max: number) {
   return Math.round(Math.min(Math.max(value, min), max));
+}
+
+function toMarkdownEditorSelection(selectionFocus: AiSelectionFocus | null, documentId: string): MarkdownEditorSelection | null {
+  if (selectionFocus?.documentId !== documentId) return null;
+  if (typeof selectionFocus.from !== "number" || typeof selectionFocus.to !== "number") return null;
+  if (!selectionFocus.text.trim()) return null;
+  return {
+    from: selectionFocus.from,
+    to: selectionFocus.to,
+    text: selectionFocus.text,
+  };
 }
 
 function keepStableFormatState(currentFormatState: MarkdownEditorFormatState, nextFormatState: MarkdownEditorFormatState) {

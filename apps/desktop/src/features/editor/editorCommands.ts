@@ -1,6 +1,7 @@
 import type { Editor } from "@milkdown/kit/core";
 import { commandsCtx, editorViewCtx } from "@milkdown/kit/core";
 import type { EditorState } from "@milkdown/kit/prose/state";
+import type { PluginKey } from "@milkdown/kit/prose/state";
 import {
   createCodeBlockCommand,
   insertHrCommand,
@@ -18,9 +19,9 @@ import {
 } from "@milkdown/kit/preset/commonmark";
 import { insertTableCommand, toggleStrikethroughCommand } from "@milkdown/kit/preset/gfm";
 import { redoCommand, undoCommand } from "@milkdown/kit/plugin/history";
-import type { MarkdownEditorAction, MarkdownEditorController, MarkdownEditorFormatState } from "./editorTypes";
+import type { MarkdownEditorAction, MarkdownEditorController, MarkdownEditorFormatState, MarkdownEditorSelection } from "./editorTypes";
 
-export function createMarkdownEditorController(editor: Editor): MarkdownEditorController {
+export function createMarkdownEditorController(editor: Editor, selectionFocusPluginKey?: PluginKey): MarkdownEditorController {
   return {
     run(action) {
       return editor.action((ctx) => {
@@ -78,6 +79,18 @@ export function createMarkdownEditorController(editor: Editor): MarkdownEditorCo
         return editor.action((ctx) => readMarkdownEditorFormatState(ctx.get(editorViewCtx).state));
       } catch {
         return {};
+      }
+    },
+    setSelectionFocus(selection: MarkdownEditorSelection | null) {
+      if (!selectionFocusPluginKey) return false;
+      try {
+        return editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          view.dispatch(view.state.tr.setMeta(selectionFocusPluginKey, selection ? { from: selection.from, to: selection.to } : null));
+          return true;
+        });
+      } catch {
+        return false;
       }
     },
   };

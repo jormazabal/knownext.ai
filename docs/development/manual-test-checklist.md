@@ -120,10 +120,22 @@
 - [ ] Submit an informational AI prompt and confirm the response appears in a right-aligned bubble above the prompt with an X close button.
 - [ ] Submit a second AI prompt and confirm the previous bubble disappears before the new response is shown.
 - [ ] Submit an AI prompt and confirm a right-aligned waiting bubble appears above the prompt while the request is processing.
+- [ ] Confirm the prompt defaults to `Rápido`, shows a `Razonar` option, and only shows Ligero/Medio/Profundo when `Razonar` is selected.
+- [ ] In `Rápido`, ask for a simple file/document action and confirm it executes without opening the `IA` tab or creating an agentic task.
+- [ ] In `Rápido`, ask for a broad multi-step task and confirm the app asks to switch to `Razonar` instead of opening an agentic task automatically.
+- [ ] In `Razonar`, choose a depth and confirm the task first classifies the work, then either executes directly, asks for permission/clarification, or opens `IA` only for long work.
+- [ ] Select text in the active document, focus the AI prompt, and confirm the document selection remains visually highlighted while a removable selected-text context chip appears in the prompt.
+- [ ] Remove the selected-text context chip and confirm the prompt can be sent without selected-text focus.
 - [ ] Submit an AI edit for the active document and confirm Milkdown content changes, the document remains `Cambios sin guardar`, and the AI change notice appears as a floating prompt-area bubble with only the summary and an X close button.
+- [ ] From an active document, ask for a document-writing task that needs confirmation or web research and confirm a compact pending-intent card appears above the prompt without automatically switching to `IA`.
+- [ ] In the pending-intent card, confirm Permitir búsqueda, Aplicar, and Cancelar perform structured actions and do not inject artificial user text into the conversation.
+- [ ] Continue the pending task from the `IA` tab or with no document active and confirm the preserved target document receives the unsaved buffer update.
 - [ ] Create a folder/document through AI with permissions enabled and confirm the tree refreshes and the created document opens when applicable.
+- [ ] Duplicate and move a document through AI with `Crear, duplicar y mover documentos` enabled and confirm the tree, opened tab, and disk path update correctly.
+- [ ] From a document inside a nested folder, ask AI to create a related document without naming a folder and confirm it is created in the active document's folder.
 - [ ] Request a delete through AI and confirm the confirmation modal lists paths, Cancelar keeps files intact, and Eliminar removes the selected nodes.
 - [ ] Hover over the account area and confirm the account menu appears with GitHub login/logout, recoverable drafts, and update actions.
+- [ ] Hover or focus Uso IA from the account menu and confirm the usage layer appears next to the menu, grouped by model with interactions, tokens, estimated EUR cost, and a monthly total only when more than one model was used.
 - [ ] Open the account menu and click Configuración de la app.
 - [ ] Confirm the settings modal opens with a left section list and right configuration pane.
 - [ ] In Servicios, confirm Backend local shows status, endpoint, active version, expected version, app data directory, and last check time.
@@ -136,10 +148,13 @@
 - [ ] In IA, save an OpenAI API key and confirm only configured/preview status is shown, never the full key.
 - [ ] In the browser development build, save an OpenAI API key and confirm the request succeeds through the web backend profile without a CORS or `Failed to fetch` error.
 - [ ] In IA, confirm the model selector shows intelligence and cost indicators, select a different model, close/reopen settings, and confirm the selected model persists.
-- [ ] In IA, toggle Crear carpetas, Crear documentos, and Eliminar documentos y carpetas and confirm permissions persist.
+- [ ] In IA settings, confirm task depth is not configured globally; enable Investigación web, adjust step/source/cost limits, close/reopen settings, and confirm the values persist.
+- [ ] In IA, toggle Crear y mover carpetas, Crear, duplicar y mover documentos, and Eliminar documentos y carpetas and confirm permissions persist.
 - [ ] In IA, enable project indexing, run Reindexar ahora, and confirm status shows indexed document counts plus local exact-search readiness.
 - [ ] Edit one Markdown file after indexing, run Reindexar ahora again, and confirm the index updates without forcing a full project reset from the user's perspective.
 - [ ] Ask an IA question using an exact term, acronym, filename, or code-like token that exists in the project and confirm the answer references the expected path.
+- [ ] From an active document, ask for a multi-step documentation task and confirm the app opens the `IA` tab, shows a guided task card with steps, limits, source/web status, and a checkpoint before applying document changes.
+- [ ] Ask a conversational clarification while a document is active and confirm the answer appears in the bubble and `IA` tab without replacing the document.
 - [ ] Delete the IA index and confirm the vector-store status returns to not indexed and local exact-search readiness disappears.
 - [ ] In Trazas, activate Registro de trazas and confirm the log folder path appears.
 - [ ] With Registro de trazas active, trigger a recoverable API error and confirm `knownext.log` is written under the dedicated `logs` folder in the KnowNext.ai app data directory.

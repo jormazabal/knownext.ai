@@ -84,6 +84,9 @@ KnowNext.ai is a Tauri desktop application for managing, editing, versioning, an
 ## AI Rules
 
 - AI interactions must be contextual to the active document.
+- AI intent resolution must be structured: backend state + LLM decision + validated deterministic execution.
+- The prompt execution mode controls cost and routing: quick mode is direct and non-agentic; reasoning mode may run structured preflight and then choose direct or agentic work.
+- Do not implement intent logic with user-text heuristics, regexes, language-specific phrase lists, or keyword matching.
 - Do not call real AI providers directly from React components.
 - All future AI calls go through FastAPI.
 - Initial AI behavior can be mocked, but request/response schemas should be stable.

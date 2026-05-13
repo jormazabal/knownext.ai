@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Activity, Brain, ChevronDown, Copy, Eye, FolderOpen, KeyRound, Languages, ListChecks, RefreshCw, RotateCcw, Server, Trash2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Activity, Brain, ChevronDown, Copy, Eye, FolderOpen, Gauge, Globe2, KeyRound, Languages, ListChecks, RefreshCw, RotateCcw, Server, ShieldCheck, Trash2, X } from "lucide-react";
 import type { AiConfigStatus, AiIndexStatusResponse, AiModelId, AppearanceConfig, DiagnosticsConfig } from "../../types/domain";
 import type { TraceLogStatus } from "../../lib/runtime/logging";
 import type { BackendPortConfig, RuntimeServicesStatus } from "../../lib/runtime/services";
@@ -526,37 +526,66 @@ function AiSettings({
   onDeleteAiIndex: () => void;
 }) {
   const [apiKey, setApiKey] = useState("");
-  const statusLabel = ai.openaiKeyConfigured ? text.aiConfigured : text.aiMissingKey;
-  const indexStatus = aiIndexStatus?.status ?? ai.rag.status;
+  const [localAi, setLocalAi] = useState(ai);
+  const localAiRef = useRef(ai);
+  const settingsAi = localAi;
+  const statusLabel = settingsAi.openaiKeyConfigured ? text.aiConfigured : text.aiMissingKey;
+  const indexStatus = aiIndexStatus?.status ?? settingsAi.rag.status;
   const indexedCount = aiIndexStatus?.indexedDocumentCount ?? 0;
   const documentCount = aiIndexStatus?.documentCount ?? 0;
   const failedCount = aiIndexStatus?.failedDocumentCount ?? 0;
 
+  useEffect(() => {
+    localAiRef.current = ai;
+    setLocalAi(ai);
+  }, [ai]);
+
+  function commitAi(nextAi: AiConfigStatus) {
+    localAiRef.current = nextAi;
+    setLocalAi(nextAi);
+    onAiChange(nextAi);
+  }
+
   function updatePermissions(nextPermissions: Partial<AiConfigStatus["permissions"]>) {
-    onAiChange({
-      ...ai,
+    const currentAi = localAiRef.current;
+    commitAi({
+      ...currentAi,
       permissions: {
-        ...ai.permissions,
+        ...currentAi.permissions,
         ...nextPermissions,
       },
     });
   }
 
   function updateModel(model: AiModelId) {
-    onAiChange({
-      ...ai,
+    const currentAi = localAiRef.current;
+    commitAi({
+      ...currentAi,
       model,
     });
   }
 
   function updateRag(enabled: boolean) {
-    onAiChange({
-      ...ai,
+    const currentAi = localAiRef.current;
+    commitAi({
+      ...currentAi,
       rag: {
-        ...ai.rag,
+        ...currentAi.rag,
         enabled,
       },
     });
+  }
+
+  function updateAgentic(nextAgentic: Partial<AiConfigStatus["agentic"]>) {
+    const currentAi = localAiRef.current;
+    const nextAi = {
+      ...currentAi,
+      agentic: {
+        ...currentAi.agentic,
+        ...nextAgentic,
+      },
+    };
+    commitAi(nextAi);
   }
 
   return (
@@ -573,10 +602,10 @@ function AiSettings({
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="text-[11px] font-semibold text-ink-primary">OpenAI</p>
-            <p className="mt-1 text-[11px] text-ink-secondary">{statusLabel}{ai.openaiKeyPreview ? ` · ${ai.openaiKeyPreview}` : ""}</p>
+            <p className="mt-1 text-[11px] text-ink-secondary">{statusLabel}{settingsAi.openaiKeyPreview ? ` · ${settingsAi.openaiKeyPreview}` : ""}</p>
           </div>
-          <span className={["rounded px-2 py-1 text-[10px] font-semibold", ai.openaiKeyConfigured ? "bg-brand-hover text-brand-orange" : "bg-panel text-ink-secondary"].join(" ")}>
-            {ai.openaiKeyConfigured ? text.enabled : text.disabled}
+          <span className={["rounded px-2 py-1 text-[10px] font-semibold", settingsAi.openaiKeyConfigured ? "bg-brand-hover text-brand-orange" : "bg-panel text-ink-secondary"].join(" ")}>
+            {settingsAi.openaiKeyConfigured ? text.enabled : text.disabled}
           </span>
         </div>
         <div className="mt-3 flex gap-2">
@@ -600,7 +629,7 @@ function AiSettings({
           </button>
           <button
             className="grid h-9 w-9 place-items-center rounded-md border border-line text-ink-secondary hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
-            disabled={!ai.openaiKeyConfigured}
+            disabled={!settingsAi.openaiKeyConfigured}
             data-tooltip={text.deleteKey}
             aria-label={text.deleteKey}
             onClick={onDeleteOpenAiKey}
@@ -617,14 +646,14 @@ function AiSettings({
             <p className="text-[11px] font-semibold text-ink-primary">{text.aiModelHeading}</p>
             <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.aiModelDescription}</p>
           </div>
-          <span className="rounded bg-panel px-2 py-1 font-mono text-[10px] font-semibold text-ink-secondary">{ai.model}</span>
+          <span className="rounded bg-panel px-2 py-1 font-mono text-[10px] font-semibold text-ink-secondary">{settingsAi.model}</span>
         </div>
 
         <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2" role="radiogroup" aria-label={text.aiModelHeading}>
           {aiModelIds.map((modelId) => {
             const model = text.aiModels[modelId];
             const meter = aiModelMeter[modelId];
-            const selected = ai.model === modelId;
+            const selected = settingsAi.model === modelId;
             return (
               <button
                 key={modelId}
@@ -660,13 +689,57 @@ function AiSettings({
 
       <section className="space-y-2">
         <p className="text-[11px] font-semibold text-ink-primary">{text.aiPermissionsHeading}</p>
-        <ToggleRow label={text.createFolders} enabled={ai.permissions.createFolders} onToggle={() => updatePermissions({ createFolders: !ai.permissions.createFolders })} />
-        <ToggleRow label={text.createDocuments} enabled={ai.permissions.createDocuments} onToggle={() => updatePermissions({ createDocuments: !ai.permissions.createDocuments })} />
+        <ToggleRow label={text.createFolders} enabled={settingsAi.permissions.createFolders} onToggle={() => updatePermissions({ createFolders: !settingsAi.permissions.createFolders })} />
+        <ToggleRow label={text.createDocuments} enabled={settingsAi.permissions.createDocuments} onToggle={() => updatePermissions({ createDocuments: !settingsAi.permissions.createDocuments })} />
         <ToggleRow
           label={text.deleteDocuments}
-          enabled={ai.permissions.deleteDocumentsAndFolders}
-          onToggle={() => updatePermissions({ deleteDocumentsAndFolders: !ai.permissions.deleteDocumentsAndFolders })}
+          enabled={settingsAi.permissions.deleteDocumentsAndFolders}
+          onToggle={() => updatePermissions({ deleteDocumentsAndFolders: !settingsAi.permissions.deleteDocumentsAndFolders })}
         />
+      </section>
+
+      <section className="rounded-md border border-line px-4 py-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <Gauge size={15} className="text-brand-orange" />
+              <p className="text-[11px] font-semibold text-ink-primary">{text.agenticHeading}</p>
+            </div>
+            <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.agenticDescription}</p>
+          </div>
+          <span className="rounded bg-panel px-2 py-1 text-[10px] font-semibold text-ink-secondary">{text.agenticModeHint}</span>
+        </div>
+
+        <div className="mt-3 grid gap-2">
+          <div className="flex items-center justify-between gap-4 rounded-md border border-orange-100 bg-orange-50/50 px-3 py-2.5">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <Globe2 size={14} className="text-brand-orange" />
+                <p className="text-[11px] font-semibold text-ink-primary">{text.webResearchHeading}</p>
+              </div>
+              <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{text.webResearchDescription}</p>
+            </div>
+            <Switch enabled={settingsAi.agentic.webResearchEnabled} label={text.webResearchHeading} onToggle={() => updateAgentic({ webResearchEnabled: !settingsAi.agentic.webResearchEnabled })} />
+          </div>
+
+          <div className="flex items-center justify-between gap-4 rounded-md border border-line px-3 py-2.5">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <ShieldCheck size={14} className="text-brand-orange" />
+                <p className="text-[11px] font-semibold text-ink-primary">{text.agenticConfirmHeading}</p>
+              </div>
+              <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{text.agenticConfirmDescription}</p>
+            </div>
+            <Switch enabled={settingsAi.agentic.confirmBeforeApplying} label={text.agenticConfirmHeading} onToggle={() => updateAgentic({ confirmBeforeApplying: !settingsAi.agentic.confirmBeforeApplying })} />
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-2">
+          <LimitField label={text.agenticMaxSteps} value={settingsAi.agentic.maxSteps} min={1} max={12} step={1} onChange={(maxSteps) => updateAgentic({ maxSteps })} />
+          <LimitField label={text.agenticMaxDocuments} value={settingsAi.agentic.maxDocuments} min={1} max={30} step={1} onChange={(maxDocuments) => updateAgentic({ maxDocuments })} />
+          <LimitField label={text.agenticMaxSources} value={settingsAi.agentic.maxSources} min={1} max={20} step={1} onChange={(maxSources) => updateAgentic({ maxSources })} />
+          <LimitField label={text.agenticMaxCost} value={settingsAi.agentic.maxEstimatedCostEur} min={0.1} max={25} step={0.1} suffix="€" onChange={(maxEstimatedCostEur) => updateAgentic({ maxEstimatedCostEur })} />
+        </div>
       </section>
 
       <section className="rounded-md border border-line px-4 py-3">
@@ -684,19 +757,19 @@ function AiSettings({
             ) : null}
             {aiIndexStatus?.error ? <p className="mt-1 text-[10px] leading-4 text-red-700">{aiIndexStatus.error}</p> : null}
           </div>
-          <Switch enabled={ai.rag.enabled} label={text.ragHeading} onToggle={() => updateRag(!ai.rag.enabled)} />
+          <Switch enabled={settingsAi.rag.enabled} label={text.ragHeading} onToggle={() => updateRag(!settingsAi.rag.enabled)} />
         </div>
         <div className="mt-3 flex gap-2">
           <button
             className="h-8 rounded-md border border-brand-orange px-3 text-[11px] font-semibold text-brand-orange hover:bg-brand-hover disabled:opacity-50"
-            disabled={!ai.rag.enabled || !ai.openaiKeyConfigured}
+            disabled={!settingsAi.rag.enabled || !settingsAi.openaiKeyConfigured}
             onClick={onRebuildAiIndex}
           >
             {text.rebuildIndex}
           </button>
           <button
             className="h-8 rounded-md border border-line px-3 text-[11px] text-ink-secondary hover:bg-panel disabled:opacity-50"
-            disabled={!ai.rag.vectorStoreId && !aiIndexStatus?.vectorStoreId}
+            disabled={!settingsAi.rag.vectorStoreId && !aiIndexStatus?.vectorStoreId}
             onClick={onDeleteAiIndex}
           >
             {text.deleteIndex}
@@ -803,6 +876,45 @@ function ToggleRow({ label, enabled, onToggle }: { label: string; enabled: boole
       <span className="text-[11px] font-medium text-ink-primary">{label}</span>
       <Switch enabled={enabled} label={label} onToggle={onToggle} />
     </div>
+  );
+}
+
+function LimitField({
+  label,
+  value,
+  min,
+  max,
+  step,
+  suffix,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  suffix?: string;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="block rounded-md border border-line bg-white px-3 py-2">
+      <span className="block text-[9px] font-semibold uppercase text-ink-secondary">{label}</span>
+      <span className="mt-1 flex items-center gap-1">
+        <input
+          className="h-7 min-w-0 flex-1 rounded border border-line px-2 text-[11px] font-semibold text-ink-primary outline-none focus:border-brand-orange"
+          type="number"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(event) => {
+            const nextValue = Number(event.target.value);
+            if (Number.isFinite(nextValue)) onChange(Math.min(Math.max(nextValue, min), max));
+          }}
+        />
+        {suffix ? <span className="text-[10px] font-semibold text-ink-secondary">{suffix}</span> : null}
+      </span>
+    </label>
   );
 }
 
@@ -953,9 +1065,20 @@ const settingsCopy = {
       },
     },
     aiPermissionsHeading: "Permisos de acciones",
-    createFolders: "Crear carpetas",
-    createDocuments: "Crear documentos",
+    createFolders: "Crear y mover carpetas",
+    createDocuments: "Crear, duplicar y mover documentos",
     deleteDocuments: "Eliminar documentos y carpetas",
+    agenticHeading: "Tareas agénticas",
+    agenticDescription: "Define límites y permisos máximos. La profundidad se elige en el prompt con el modo Razonar para no gastar tokens por defecto.",
+    agenticModeHint: "Control desde el prompt",
+    webResearchHeading: "Investigación web",
+    webResearchDescription: "Permite planificar tareas que consulten fuentes externas y muestren las fuentes usadas. Las acciones siguen pasando por confirmación.",
+    agenticConfirmHeading: "Confirmar antes de aplicar",
+    agenticConfirmDescription: "Las tareas pueden preparar cambios, pero no crear ni modificar documentos sin un checkpoint visible.",
+    agenticMaxSteps: "Pasos",
+    agenticMaxDocuments: "Documentos",
+    agenticMaxSources: "Fuentes",
+    agenticMaxCost: "Coste máx.",
     ragHeading: "Indexar documentación del proyecto",
     ragDescription: "Permite consultar el proyecto completo con búsqueda semántica. El contenido Markdown se enviará a OpenAI para indexación.",
     ragStatus: "Estado",
@@ -1082,9 +1205,20 @@ const settingsCopy = {
       },
     },
     aiPermissionsHeading: "Action permissions",
-    createFolders: "Create folders",
-    createDocuments: "Create documents",
+    createFolders: "Create and move folders",
+    createDocuments: "Create, duplicate, and move documents",
     deleteDocuments: "Delete documents and folders",
+    agenticHeading: "Agentic tasks",
+    agenticDescription: "Set maximum limits and permissions. Depth is chosen in the prompt with Reasoning mode so tokens are not spent by default.",
+    agenticModeHint: "Controlled from prompt",
+    webResearchHeading: "Web research",
+    webResearchDescription: "Allows tasks that consult external sources and show the sources used. Actions still go through confirmation.",
+    agenticConfirmHeading: "Confirm before applying",
+    agenticConfirmDescription: "Tasks can prepare changes, but cannot create or modify documents without a visible checkpoint.",
+    agenticMaxSteps: "Steps",
+    agenticMaxDocuments: "Documents",
+    agenticMaxSources: "Sources",
+    agenticMaxCost: "Max cost",
     ragHeading: "Index project documentation",
     ragDescription: "Allows project-wide semantic search. Markdown content will be sent to OpenAI for indexing.",
     ragStatus: "Status",

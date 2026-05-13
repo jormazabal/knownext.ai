@@ -72,11 +72,16 @@ def _resolve_child(root: Path, relative_path: str | None) -> Path:
     return candidate
 
 
-def _unique_duplicate_path(source: Path) -> Path:
-    candidate = source.with_name(f"{source.stem} copia{source.suffix}")
+def _unique_duplicate_path(source: Path, target_folder: Path | None = None) -> Path:
+    parent = target_folder or source.parent
+    if parent != source.parent:
+        candidate = parent / source.name
+        if not candidate.exists():
+            return candidate
+    candidate = parent / f"{source.stem} copia{source.suffix}"
     counter = 2
     while candidate.exists():
-        candidate = source.with_name(f"{source.stem} copia {counter}{source.suffix}")
+        candidate = parent / f"{source.stem} copia {counter}{source.suffix}"
         counter += 1
     return candidate
 
@@ -99,6 +104,7 @@ def _document_change(project_id: str, old_relative_path: str, new_relative_path:
         oldId=get_document_id(project_id, old_relative_path),
         newId=get_document_id(project_id, new_relative_path) if new_relative_path else None,
         name=Path(new_relative_path).name if new_relative_path else None,
+        path=new_relative_path,
     )
 
 
@@ -164,11 +170,17 @@ class FileSystemService:
             node_path.unlink()
         return FileOperationResult(tree=self.get_tree(project_id, root), affectedDocuments=affected)
 
-    def duplicate_document(self, project_id: str, root: Path, document_id: str) -> FileOperationResult:
+    def duplicate_document(self, project_id: str, root: Path, document_id: str, target_folder_id: str | None = None, name: str | None = None) -> FileOperationResult:
         document_path = self._resolve_node(project_id, root, document_id)
         if not document_path.is_file() or document_path.suffix.lower() != DOCUMENT_SUFFIX:
             raise HTTPException(status_code=400, detail="Only Markdown documents can be duplicated")
-        target_path = _unique_duplicate_path(document_path)
+        target_folder = self._resolve_parent_folder(project_id, root, target_folder_id) if target_folder_id else document_path.parent
+        if name and name.strip():
+            target_path = target_folder / _ensure_markdown_name(name)
+            if target_path.exists():
+                raise HTTPException(status_code=409, detail="Target already exists")
+        else:
+            target_path = _unique_duplicate_path(document_path, target_folder)
         shutil.copy2(document_path, target_path)
         return FileOperationResult(tree=self.get_tree(project_id, root), node=self._document_node(project_id, target_path, root.resolve()))
 

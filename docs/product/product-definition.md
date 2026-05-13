@@ -19,11 +19,20 @@ The first version focuses on the core editing surface:
 KnowNext.ai includes a project-scoped AI assistant mediated by the local FastAPI backend.
 
 - When a project is active, the first workspace tab is always `IA`. It shows the project conversation, including user prompts, assistant responses, and file-operation events.
-- When a document is active, prompts use that document as the primary context. AI edits are applied directly to the editor buffer and leave the document in `Cambios sin guardar`; the user still controls saving to disk and versioning.
+- When a document is active, prompts use that document as the primary context, including the folder that contains it so related document-creation requests can default to the same location. AI edits are applied directly to the editor buffer and leave the document in `Cambios sin guardar`; the user still controls saving to disk and versioning.
+- When text is selected in the active document, focusing the AI prompt keeps that selection visually highlighted and adds it as a removable focus context. This focus supplements the full document context; it does not replace it.
+- Prompts include a short backend-built recent conversation context to resolve references like `eso`, `lo anterior`, or `ahora`, filtered to the active document when applicable. The active document and current prompt remain higher priority than conversation history.
+- AI provider responses are interpreted as a structured plan with separate conversational `answer`, optional document change, optional project operations, and optional task plan. Conversational text must never be promoted into document content by backend keyword heuristics.
+- The prompt has two execution modes. `Rápido` is the default: one direct call, no automatic agentic task, no automatic IA-tab routing. `Razonar` performs a short structured preflight before execution and can choose direct action, clarification, permission request, or an agentic task.
+- Reasoning depth is selected per prompt (`Ligero`, `Medio`, `Profundo`) so token use is explicit and task-specific instead of a global app default.
+- Requests that need confirmation, web permission, or delayed execution create a project-scoped pending intent with a preserved target document. Follow-up prompts from the `IA` tab or from project mode still apply to that target when the LLM returns a structured execution decision.
+- Pending intent controls appear as a compact card above the prompt with the target, action, state, and structured actions for allowing web research, applying, cancelling, or opening the IA conversation.
 - Informational responses that do not modify a document appear in a compact dismissible bubble above the prompt and are also recorded in the `IA` tab.
-- The assistant can create folders and Markdown documents only when the corresponding permissions are enabled in app settings.
+- Multi-step requests can be routed automatically to the `IA` tab as guided tasks. Task cards show steps, source intent, estimated limits, web-research requirements, and checkpoints before creating or modifying documents.
+- The assistant can create folders and Markdown documents only when the corresponding permissions are enabled in app settings. The document creation permission also allows AI document duplication and document moves; the folder creation permission also allows AI folder moves.
 - Delete operations always require a confirmation dialog listing the affected paths, even when the delete permission is enabled.
 - OpenAI is the first supported provider. API keys are configured in app settings, stored locally through backend credential storage, and never exposed to React after save.
+- App settings include web research, confirmation-before-apply, and max step/document/source/cost limits for agentic work. Task depth is selected from the prompt when using `Razonar`.
 - Project-wide RAG is opt-in. When enabled, Markdown documentation is indexed with a project manifest, incremental file hashing, OpenAI vector stores for semantic retrieval, and a local exact-search index for terms, acronyms, filenames, and code-like references. Responses should cite relevant paths when evidence comes from the project.
 - Prompts and document content must not be written to trace logs.
 
@@ -103,6 +112,8 @@ In desktop layout, the internal structure must also be width-resizable:
 ## Application Settings
 
 The account menu includes `Configuración de la app`. It opens a modal settings window instead of navigating away from the workspace.
+
+The account menu also exposes `Uso IA`, which shows a hover/focus usage layer grouped by active model. The layer reports monthly interactions, tokens, estimated cost in EUR, and a monthly total only when the month includes more than one model.
 
 The modal requirements are:
 

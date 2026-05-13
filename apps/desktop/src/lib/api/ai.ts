@@ -4,6 +4,8 @@ import type {
   AiIndexStatusResponse,
   AiInteractionRequest,
   AiInteractionResponse,
+  AiPendingIntent,
+  AiUsageSummaryResponse,
   AiPromptRequest,
   AiPromptResponse,
   OpenAiKeyStatus,
@@ -43,6 +45,17 @@ export async function sendAiInteraction(request: AiInteractionRequest): Promise<
 
 export async function getAiConversation(projectId: string): Promise<AiConversationResponse> {
   return requestJson<AiConversationResponse>(`/api/projects/${projectId}/ai/conversation`);
+}
+
+export async function getAiPendingIntent(projectId: string): Promise<AiPendingIntent | null> {
+  return requestJson<AiPendingIntent | null>(`/api/projects/${projectId}/ai/pending-intent`);
+}
+
+export async function getAiUsageSummary(month?: string): Promise<AiUsageSummaryResponse> {
+  const params = new URLSearchParams();
+  params.set("tzOffsetMinutes", String(-new Date().getTimezoneOffset()));
+  if (month) params.set("month", month);
+  return requestJson<AiUsageSummaryResponse>(`/api/ai/usage/summary?${params.toString()}`);
 }
 
 export async function clearAiConversation(projectId: string): Promise<AiConversationResponse> {
