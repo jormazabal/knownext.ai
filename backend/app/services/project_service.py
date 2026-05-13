@@ -259,8 +259,8 @@ class ProjectService:
         draft_service.apply_affected_documents(result.affectedDocuments)
         return result
 
-    def duplicate_document(self, project_id: str, document_id: str) -> FileOperationResult:
-        return filesystem_service.duplicate_document(project_id, self._get_project_root(project_id), document_id)
+    def duplicate_document(self, project_id: str, document_id: str, target_folder_id: str | None = None, name: str | None = None) -> FileOperationResult:
+        return filesystem_service.duplicate_document(project_id, self._get_project_root(project_id), document_id, target_folder_id, name)
 
     def move_node(self, project_id: str, node_id: str, payload: MoveNodeRequest) -> FileOperationResult:
         result = filesystem_service.move_node(project_id, self._get_project_root(project_id), node_id, payload.targetFolderId)

@@ -27,7 +27,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.7.2"
+    assert payload["version"] == "0.8.0"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -63,12 +63,18 @@ def test_ai_config_persists_selected_model() -> None:
     assert current.status_code == 200
     payload = current.json()
     assert payload["model"] == "gpt-5.4-mini"
+    assert payload["agentic"]["depth"] == "guided"
+    assert payload["agentic"]["webResearchEnabled"] is False
 
     payload["model"] = "gpt-5.5"
+    payload["agentic"]["depth"] = "deep"
+    payload["agentic"]["webResearchEnabled"] = True
     updated = client.put("/api/config/ai", json=payload)
 
     assert updated.status_code == 200
     assert updated.json()["model"] == "gpt-5.5"
+    assert updated.json()["agentic"]["depth"] == "deep"
+    assert updated.json()["agentic"]["webResearchEnabled"] is True
     assert client.get("/api/config/ai").json()["model"] == "gpt-5.5"
 
 
@@ -1141,6 +1147,77 @@ def test_ai_interaction_without_openai_key_returns_unavailable(tmp_path) -> None
     assert client.get(f"/api/projects/{project_id}/ai/conversation").json()["events"]
 
 
+def test_ai_usage_summary_starts_empty() -> None:
+    response = client.get("/api/ai/usage/summary?month=2026-05&tzOffsetMinutes=120")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["month"] == "2026-05"
+    assert payload["currency"] == "EUR"
+    assert payload["estimated"] is True
+    assert payload["totalEstimatedCost"] == 0
+    assert payload["models"] == []
+
+
+def test_ai_interaction_records_provider_usage_summary(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "ai-usage"
+    docs_root.mkdir()
+    (docs_root / "usage.md").write_text("# Usage\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Usage", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    document_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+
+    def fake_plan(payload, context, rag, model=None):
+        return {
+            "display": "bubble",
+            "answer": "Respuesta medida",
+            "operations": [],
+            "__openaiUsage": {
+                "inputTokens": 1000,
+                "cachedInputTokens": 200,
+                "outputTokens": 500,
+                "reasoningTokens": 50,
+                "embeddingTokens": 0,
+                "totalTokens": 1500,
+                "usageSource": "provider",
+            },
+        }
+
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+
+    response = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "documentId": document_id,
+            "prompt": "Resume",
+            "activeMarkdown": "# Usage\n",
+            "mode": "document",
+            "clientMessageId": "client-usage",
+        },
+    )
+
+    assert response.status_code == 200
+    summary = client.get("/api/ai/usage/summary?tzOffsetMinutes=120").json()
+    model_summary = summary["models"][0]
+    assert model_summary["model"] == "gpt-5.4-mini"
+    assert model_summary["interactions"] == 1
+    assert model_summary["inputTokens"] == 1000
+    assert model_summary["cachedInputTokens"] == 200
+    assert model_summary["outputTokens"] == 500
+    assert model_summary["reasoningTokens"] == 50
+    assert model_summary["totalTokens"] == 1500
+    assert model_summary["usageSource"] == "provider"
+    assert model_summary["estimatedCost"] > 0
+    assert summary["totalEstimatedCost"] == model_summary["estimatedCost"]
+
+
 def test_ai_index_status_returns_project_rag_status(tmp_path) -> None:
     docs_root = tmp_path / "project-ai-index-status"
     docs_root.mkdir()
@@ -1245,7 +1322,77 @@ def test_ai_document_edit_returns_markdown_without_writing_disk(tmp_path, monkey
     assert document_path.read_text(encoding="utf-8") == "# Original\n"
 
 
-def test_ai_writing_prompt_updates_active_document_when_provider_answers_only(tmp_path, monkeypatch) -> None:
+def test_ai_context_includes_active_document_folder_for_related_documents(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "ai-active-folder"
+    docs_root.mkdir()
+    nested = docs_root / "guias" / "producto"
+    nested.mkdir(parents=True)
+    (nested / "base.md").write_text("# Base\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Active Folder", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+
+    def flatten(nodes):
+        for node in nodes:
+            yield node
+            yield from flatten(node.get("children", []))
+
+    tree = client.get(f"/api/projects/{project_id}/tree").json()
+    document_id = next(node["id"] for node in flatten(tree) if node["name"] == "base.md")
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+    captured_context: dict | None = None
+
+    def fake_plan(payload, context, rag, model=None):
+        nonlocal captured_context
+        captured_context = context
+        return {
+            "display": "conversation",
+            "answer": None,
+            "operations": [
+                {
+                    "type": "create_document",
+                    "name": "relacionado.md",
+                    "parentPath": context["activeDocumentFolder"]["path"],
+                    "path": None,
+                    "nodeId": None,
+                    "markdown": "# Relacionado\n",
+                    "updatedMarkdown": None,
+                    "summary": None,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+    config = client.get("/api/config/ai").json()
+    config["permissions"]["createDocuments"] = True
+    client.put("/api/config/ai", json=config)
+
+    response = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "documentId": document_id,
+            "prompt": "Crea otro documento relacionado",
+            "activeMarkdown": "# Base\n",
+            "mode": "document",
+            "clientMessageId": "client-active-folder",
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured_context is not None
+    assert captured_context["activeDocument"]["path"] == "guias/producto/base.md"
+    assert captured_context["activeDocumentFolder"]["path"] == "guias/producto"
+    assert captured_context["activeDocumentFolder"]["name"] == "producto"
+    assert captured_context["activeDocumentFolder"]["id"]
+    assert (nested / "relacionado.md").read_text(encoding="utf-8") == "# Relacionado\n"
+
+
+def test_ai_answer_only_never_updates_active_document(tmp_path, monkeypatch) -> None:
     from app.services.ai_service import openai_service
 
     docs_root = tmp_path / "ai-writing-fallback"
@@ -1283,11 +1430,702 @@ def test_ai_writing_prompt_updates_active_document_when_provider_answers_only(tm
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["updatedDocument"]["markdown"].startswith("# Receta de cocina")
-    assert payload["updatedDocument"]["summary"] == "Contenido redactado por IA."
-    assert payload["operations"][0]["type"] == "document_modified"
-    assert payload["answer"] is None
+    assert payload["updatedDocument"] is None
+    assert payload["operations"] == []
+    assert payload["answer"].startswith("# Receta de cocina")
+    assert payload["interactionType"] == "chat"
     assert document_path.read_text(encoding="utf-8") == "# Borrador\n"
+
+
+def test_ai_document_change_contract_updates_active_document_without_writing_disk(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "ai-document-change-contract"
+    docs_root.mkdir()
+    document_path = docs_root / "contract.md"
+    document_path.write_text("# Borrador\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Contract", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    document_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+
+    def fake_plan(payload, context, rag, model=None):
+        return {
+            "display": "conversation",
+            "interactionType": "document_edit",
+            "confidence": "high",
+            "routeToAiTab": False,
+            "needsUserClarification": False,
+            "answer": "He actualizado el documento.",
+            "documentChange": {
+                "updatedMarkdown": "# Receta de cocina\n\n## Ingredientes\n\n- Tomate\n- Aceite\n",
+                "summary": "Receta redactada.",
+            },
+            "task": None,
+            "operations": [],
+        }
+
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+
+    response = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "documentId": document_id,
+            "prompt": "Redacta una receta de cocina",
+            "activeMarkdown": "# Borrador\n",
+            "mode": "document",
+            "clientMessageId": "client-document-change",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["updatedDocument"]["markdown"].startswith("# Receta de cocina")
+    assert payload["updatedDocument"]["summary"] == "Receta redactada."
+    assert payload["operations"][0]["type"] == "document_modified"
+    assert payload["answer"] == "He actualizado el documento."
+    assert payload["interactionType"] == "document_edit"
+    assert document_path.read_text(encoding="utf-8") == "# Borrador\n"
+
+
+def test_ai_agentic_task_routes_to_conversation_with_limits(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "ai-agentic-task"
+    docs_root.mkdir()
+    (docs_root / "base.md").write_text("# Base\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Agentic", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    document_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+    config = client.get("/api/config/ai").json()
+    config["agentic"]["maxSteps"] = 2
+    config["agentic"]["maxDocuments"] = 3
+    config["agentic"]["maxEstimatedCostEur"] = 0.5
+    client.put("/api/config/ai", json=config)
+
+    def fake_plan(payload, context, rag, model=None):
+        return {
+            "display": "conversation",
+            "interactionType": "agentic_task",
+            "confidence": "medium",
+            "routeToAiTab": True,
+            "needsUserClarification": True,
+            "answer": "Necesito encauzar esta tarea en la pestaña IA antes de crear documentos.",
+            "documentChange": None,
+            "task": {
+                "title": "Preparar resúmenes documentales",
+                "status": "proposed",
+                "depth": "deep",
+                "requiresWebResearch": True,
+                "webResearchAllowed": True,
+                "needsUserConfirmation": False,
+                "maxSteps": 6,
+                "maxDocuments": 10,
+                "maxEstimatedCostEur": 4.0,
+                "steps": [
+                    {"id": "s1", "title": "Revisar instrucciones", "status": "pending", "detail": None},
+                    {"id": "s2", "title": "Buscar fuentes", "status": "pending", "detail": "Solo si está permitido."},
+                    {"id": "s3", "title": "Crear borradores", "status": "pending", "detail": None},
+                ],
+                "sources": [
+                    {"title": "Fuente prevista", "url": "https://example.com", "path": None, "status": "planned"},
+                ],
+            },
+            "operations": [],
+        }
+
+    def fake_preflight_agentic(payload, context, rag, model=None):
+        return {
+            "executionScope": "agentic_task",
+            "uiPlacement": "conversation_tab",
+            "confidence": "medium",
+            "requiresWebResearch": True,
+            "estimatedSteps": 3,
+            "estimatedAffectedDocuments": 3,
+            "requiresCheckpoint": True,
+            "reason": "Requiere varios pasos y fuentes.",
+            "answer": None,
+        }
+
+    monkeypatch.setattr(openai_service, "analyze_interaction", fake_preflight_agentic)
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+
+    response = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "documentId": document_id,
+            "prompt": "Prepara varios resúmenes buscando fuentes",
+            "activeMarkdown": "# Base\n",
+            "executionMode": "reasoning",
+            "reasoningDepth": "medium",
+            "mode": "document",
+            "clientMessageId": "client-agentic",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["interactionType"] == "agentic_task"
+    assert payload["routeToAiTab"] is True
+    assert payload["needsUserClarification"] is True
+    assert payload["updatedDocument"] is None
+    assert payload["task"]["maxSteps"] == 2
+    assert payload["task"]["maxDocuments"] == 3
+    assert payload["task"]["maxEstimatedCostEur"] == 0.5
+    assert payload["task"]["steps"][1]["title"] == "Buscar fuentes"
+    assert len(payload["task"]["steps"]) == 2
+    assert payload["task"]["webResearchAllowed"] is False
+    assert payload["conversationEvents"][-1]["type"] == "task_planned"
+    assert payload["conversationEvents"][-1]["task"]["title"] == "Preparar resúmenes documentales"
+
+
+def test_ai_interaction_includes_recent_document_conversation_context(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "ai-recent-context"
+    docs_root.mkdir()
+    (docs_root / "context.md").write_text("# Borrador\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Recent Context", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    document_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+    captured_context: dict | None = None
+    calls = 0
+
+    def fake_plan(payload, context, rag, model=None):
+        nonlocal captured_context, calls
+        calls += 1
+        if calls == 1:
+            return {
+                "display": "conversation",
+                "answer": None,
+                "operations": [
+                    {
+                        "type": "document_modified",
+                        "name": None,
+                        "parentPath": None,
+                        "path": None,
+                        "nodeId": None,
+                        "markdown": None,
+                        "updatedMarkdown": "# Patata\n",
+                        "summary": "Se escribió un título sobre patatas.",
+                    }
+                ],
+            }
+        captured_context = context
+        return {
+            "display": "conversation",
+            "answer": None,
+            "operations": [
+                {
+                    "type": "document_modified",
+                    "name": None,
+                    "parentPath": None,
+                    "path": None,
+                    "nodeId": None,
+                    "markdown": None,
+                    "updatedMarkdown": "# PATATA\n",
+                    "summary": "Se puso el título anterior en mayúsculas.",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+
+    first = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "documentId": document_id,
+            "prompt": "Escribe un título sobre patatas",
+            "activeMarkdown": "# Borrador\n",
+            "mode": "document",
+            "clientMessageId": "client-context-1",
+        },
+    )
+    assert first.status_code == 200
+
+    second = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "documentId": document_id,
+            "prompt": "Ahora ponlo en mayúsculas",
+            "activeMarkdown": "# Patata\n",
+            "mode": "document",
+            "clientMessageId": "client-context-2",
+        },
+    )
+    assert second.status_code == 200
+    assert captured_context is not None
+    recent_events = captured_context["recentConversation"]["events"]
+    recent_text = " ".join(event["content"] for event in recent_events)
+    assert "Escribe un título sobre patatas" in recent_text
+    assert "Se escribió un título sobre patatas." in recent_text
+    assert "Ahora ponlo en mayúsculas" not in recent_text
+    assert all(event["documentId"] == document_id for event in recent_events)
+
+
+def test_ai_interaction_includes_selected_text_focus_without_replacing_document_context(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "ai-selection-focus"
+    docs_root.mkdir()
+    document_path = docs_root / "focus.md"
+    document_path.write_text("Primer párrafo.\n\nTexto importante.\n\nÚltimo párrafo.\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Selection Focus", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    document_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+    captured_context: dict | None = None
+
+    def fake_plan(payload, context, rag, model=None):
+        nonlocal captured_context
+        captured_context = context
+        return {
+            "display": "conversation",
+            "answer": None,
+            "operations": [
+                {
+                    "type": "document_modified",
+                    "name": None,
+                    "parentPath": None,
+                    "path": None,
+                    "nodeId": None,
+                    "markdown": None,
+                    "updatedMarkdown": "Primer párrafo.\n\n**Texto importante.**\n\nÚltimo párrafo.\n",
+                    "summary": "Se puso en negrita el texto seleccionado.",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+
+    response = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "documentId": document_id,
+            "prompt": "Ponlo en negrita",
+            "activeMarkdown": "Primer párrafo.\n\nTexto importante.\n\nÚltimo párrafo.\n",
+            "selectionFocus": {
+                "documentId": document_id,
+                "path": "focus.md",
+                "from": 18,
+                "to": 35,
+                "text": "Texto importante.",
+            },
+            "mode": "document",
+            "clientMessageId": "client-selection-focus",
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured_context is not None
+    assert captured_context["activeDocument"]["markdown"].startswith("Primer párrafo.")
+    assert captured_context["selectionFocus"]["text"] == "Texto importante."
+    assert captured_context["selectionFocus"]["path"] == "focus.md"
+    assert captured_context["selectionFocus"]["from"] == 18
+    assert response.json()["updatedDocument"]["markdown"] == "Primer párrafo.\n\n**Texto importante.**\n\nÚltimo párrafo.\n"
+    assert document_path.read_text(encoding="utf-8") == "Primer párrafo.\n\nTexto importante.\n\nÚltimo párrafo.\n"
+
+
+def test_ai_pending_intent_preserves_target_document_across_project_conversation(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "ai-pending-intent"
+    docs_root.mkdir()
+    document_path = docs_root / "pp.md"
+    document_path.write_text("# Original\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Pending Intent", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    document_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+    calls = 0
+    captured_context: dict | None = None
+
+    def fake_plan(payload, context, rag, model=None):
+        nonlocal calls, captured_context
+        calls += 1
+        if calls == 1:
+            return {
+                "display": "bubble",
+                "uiPlacement": "document_bubble",
+                "interactionType": "clarification",
+                "confidence": "high",
+                "intentDecision": "create_intent",
+                "routeToAiTab": False,
+                "needsUserClarification": True,
+                "answer": "Prepararé el cambio sobre pp.md.",
+                "pendingIntent": {
+                    "id": None,
+                    "originDocumentId": document_id,
+                    "targetDocumentId": document_id,
+                    "targetPath": "pp.md",
+                    "goal": "Redactar una descripción externa y ponerla en pp.md.",
+                    "proposedAction": "research_then_write",
+                    "requiresWebResearch": False,
+                    "webResearchAllowed": False,
+                    "status": "awaiting_decision",
+                },
+                "documentChange": None,
+                "task": None,
+                "operations": [],
+            }
+        captured_context = context
+        return {
+            "display": "bubble",
+            "uiPlacement": "document_bubble",
+            "interactionType": "document_edit",
+            "confidence": "high",
+            "intentDecision": "execute_now",
+            "routeToAiTab": False,
+            "needsUserClarification": False,
+            "answer": "Lo cambié.",
+            "pendingIntent": None,
+            "documentChange": {"targetDocumentId": None, "updatedMarkdown": "# MATTIN.AI\n\nDescripción redactada.\n", "summary": "Descripción redactada."},
+            "task": None,
+            "operations": [],
+        }
+
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+
+    first = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "documentId": document_id,
+            "prompt": "Redacta una descripción externa",
+            "activeMarkdown": "# Original\n",
+            "clientContext": {"lastDocumentId": document_id, "lastDocumentPath": "pp.md"},
+            "mode": "document",
+            "clientMessageId": "client-pending-1",
+        },
+    )
+    assert first.status_code == 200
+    assert first.json()["pendingIntent"]["targetDocumentId"] == document_id
+    assert first.json()["uiPlacement"] == "document_bubble"
+    persisted = client.get(f"/api/projects/{project_id}/ai/pending-intent")
+    assert persisted.status_code == 200
+    assert persisted.json()["targetDocumentId"] == document_id
+
+    second = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "documentId": None,
+            "prompt": "Continúa",
+            "activeMarkdown": "",
+            "clientContext": {"lastDocumentId": document_id, "lastDocumentPath": "pp.md"},
+            "mode": "project",
+            "clientMessageId": "client-pending-2",
+        },
+    )
+
+    assert second.status_code == 200
+    payload = second.json()
+    assert captured_context is not None
+    assert captured_context["pendingIntent"]["targetDocumentId"] == document_id
+    assert payload["updatedDocument"]["documentId"] == document_id
+    assert payload["updatedDocument"]["markdown"].startswith("# MATTIN.AI")
+    assert document_path.read_text(encoding="utf-8") == "# Original\n"
+
+
+def test_ai_pending_intent_requires_web_permission_without_applying_document_change(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "ai-pending-web"
+    docs_root.mkdir()
+    document_path = docs_root / "pp.md"
+    document_path.write_text("# Original\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Pending Web", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    document_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+
+    def fake_plan(payload, context, rag, model=None):
+        return {
+            "display": "bubble",
+            "uiPlacement": "document_bubble",
+            "interactionType": "clarification",
+            "confidence": "high",
+            "intentDecision": "create_intent",
+            "routeToAiTab": False,
+            "needsUserClarification": True,
+            "answer": "Necesito permiso para buscar en la web antes de redactar.",
+            "pendingIntent": {
+                "id": None,
+                "originDocumentId": document_id,
+                "targetDocumentId": document_id,
+                "targetPath": "pp.md",
+                "goal": "Investigar y redactar en pp.md.",
+                "proposedAction": "research_then_write",
+                "requiresWebResearch": True,
+                "webResearchAllowed": False,
+                "status": "awaiting_web_permission",
+            },
+            "documentChange": None,
+            "task": None,
+            "operations": [],
+        }
+
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+
+    response = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "documentId": document_id,
+            "prompt": "Redacta investigando online",
+            "activeMarkdown": "# Original\n",
+            "mode": "document",
+            "clientMessageId": "client-pending-web",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["pendingIntentStatus"] == "awaiting_web_permission"
+    assert payload["pendingIntent"]["requiresWebResearch"] is True
+    assert payload["updatedDocument"] is None
+    assert document_path.read_text(encoding="utf-8") == "# Original\n"
+
+
+def test_ai_quick_mode_never_enters_agentic_task(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "ai-quick-mode"
+    docs_root.mkdir()
+    (docs_root / "pp.md").write_text("# Base\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Quick Mode", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    document_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+
+    def fake_plan(payload, context, rag, model=None):
+        return {
+            "display": "conversation",
+            "uiPlacement": "conversation_tab",
+            "interactionType": "agentic_task",
+            "confidence": "medium",
+            "executionScope": "agentic_task",
+            "intentDecision": None,
+            "routeToAiTab": True,
+            "needsUserClarification": False,
+            "answer": "Prepararía una tarea larga.",
+            "pendingIntent": None,
+            "documentChange": None,
+            "task": {
+                "title": "Tarea larga",
+                "status": "proposed",
+                "depth": "deep",
+                "requiresWebResearch": False,
+                "webResearchAllowed": False,
+                "needsUserConfirmation": True,
+                "maxSteps": 4,
+                "maxDocuments": 6,
+                "maxEstimatedCostEur": 1,
+                "steps": [{"id": "s1", "title": "Paso", "status": "pending", "detail": None}],
+                "sources": [],
+            },
+            "operations": [],
+        }
+
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+
+    response = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "documentId": document_id,
+            "prompt": "Haz una tarea larga",
+            "activeMarkdown": "# Base\n",
+            "executionMode": "quick",
+            "reasoningDepth": "light",
+            "mode": "document",
+            "clientMessageId": "client-quick-never-agentic",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["interactionType"] == "clarification"
+    assert payload["uiPlacement"] == "document_bubble"
+    assert payload["routeToAiTab"] is False
+    assert payload["task"] is None
+
+
+def test_ai_reasoning_mode_runs_preflight_before_planning(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "ai-reasoning-mode"
+    docs_root.mkdir()
+    (docs_root / "pp.md").write_text("# Base\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Reasoning Mode", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    document_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+    plan_called = False
+
+    def fake_preflight(payload, context, rag, model=None):
+        assert payload["executionMode"] == "reasoning"
+        assert payload["reasoningDepth"] == "deep"
+        return {
+            "executionScope": "needs_clarification",
+            "uiPlacement": "document_bubble",
+            "confidence": "high",
+            "requiresWebResearch": False,
+            "estimatedSteps": 1,
+            "estimatedAffectedDocuments": 0,
+            "requiresCheckpoint": False,
+            "reason": "Falta el tema.",
+            "answer": "Indica el tema antes de continuar.",
+        }
+
+    def fake_plan(payload, context, rag, model=None):
+        nonlocal plan_called
+        plan_called = True
+        return {}
+
+    monkeypatch.setattr(openai_service, "analyze_interaction", fake_preflight)
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+
+    response = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "documentId": document_id,
+            "prompt": "Hazlo bien",
+            "activeMarkdown": "# Base\n",
+            "executionMode": "reasoning",
+            "reasoningDepth": "deep",
+            "mode": "document",
+            "clientMessageId": "client-reasoning-preflight",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert plan_called is False
+    assert payload["executionMode"] == "reasoning"
+    assert payload["reasoningDepth"] == "deep"
+    assert payload["executionScope"] == "needs_clarification"
+    assert payload["answer"] == "Indica el tema antes de continuar."
+
+
+def test_openai_web_search_tool_requires_agentic_web_and_permission() -> None:
+    from app.services.openai_service import _web_search_enabled
+
+    payload = {"intentAction": {"type": "apply", "intentId": "intent-1"}}
+    disabled_context = {"agentic": {"webResearchEnabled": False}, "pendingIntent": {"webResearchAllowed": True}}
+    blocked_context = {"agentic": {"webResearchEnabled": True}, "pendingIntent": {"webResearchAllowed": False}}
+    allowed_context = {"agentic": {"webResearchEnabled": True}, "pendingIntent": {"webResearchAllowed": True}}
+
+    assert _web_search_enabled(payload, disabled_context) is False
+    assert _web_search_enabled(payload, blocked_context) is False
+    assert _web_search_enabled(payload, allowed_context) is True
+
+
+def test_ai_recent_document_context_excludes_other_documents(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "ai-recent-context-scope"
+    docs_root.mkdir()
+    (docs_root / "first.md").write_text("# Primero\n", encoding="utf-8")
+    (docs_root / "second.md").write_text("# Segundo\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Context Scope", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    tree = client.get(f"/api/projects/{project_id}/tree").json()
+    first_document_id = next(node["id"] for node in tree if node["name"] == "first.md")
+    second_document_id = next(node["id"] for node in tree if node["name"] == "second.md")
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+    captured_context: dict | None = None
+    calls = 0
+
+    def fake_plan(payload, context, rag, model=None):
+        nonlocal captured_context, calls
+        calls += 1
+        if calls == 2:
+            captured_context = context
+        return {
+            "display": "conversation",
+            "answer": None,
+            "operations": [
+                {
+                    "type": "document_modified",
+                    "name": None,
+                    "parentPath": None,
+                    "path": None,
+                    "nodeId": None,
+                    "markdown": None,
+                    "updatedMarkdown": payload["activeMarkdown"] or "# Actualizado\n",
+                    "summary": "Resumen específico del primer documento" if payload["documentId"] == first_document_id else "Resumen del segundo documento",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+
+    first = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "documentId": first_document_id,
+            "prompt": "Trabaja sobre el primer documento",
+            "activeMarkdown": "# Primero\n",
+            "mode": "document",
+            "clientMessageId": "client-scope-1",
+        },
+    )
+    assert first.status_code == 200
+
+    second = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "documentId": second_document_id,
+            "prompt": "Resume el contexto disponible",
+            "activeMarkdown": "# Segundo\n",
+            "mode": "document",
+            "clientMessageId": "client-scope-2",
+        },
+    )
+    assert second.status_code == 200
+    assert captured_context is not None
+    recent_events = captured_context["recentConversation"]["events"]
+    recent_text = " ".join(event["content"] for event in recent_events)
+    assert "primer documento" not in recent_text
+    assert all(event["documentId"] in {None, second_document_id} for event in recent_events)
 
 
 def test_ai_create_document_respects_permissions(tmp_path, monkeypatch) -> None:
@@ -1340,6 +2178,123 @@ def test_ai_create_document_respects_permissions(tmp_path, monkeypatch) -> None:
     assert created_doc.status_code == 200
     assert created_doc.json()["operations"][0]["type"] == "document_created"
     assert (docs_root / "generated.md").read_text(encoding="utf-8") == "# Generated\n"
+
+
+def test_ai_duplicate_document_uses_create_document_permission(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "ai-duplicate"
+    target_folder = docs_root / "Nueva carpeta"
+    target_folder.mkdir(parents=True)
+    (docs_root / "source.md").write_text("# Source\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Duplicate", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+
+    def fake_plan(payload, context, rag, model=None):
+        return {
+            "display": "conversation",
+            "answer": None,
+            "operations": [
+                {
+                    "type": "duplicate_document",
+                    "name": "source-copy.md",
+                    "parentPath": "Nueva carpeta",
+                    "path": "source.md",
+                    "nodeId": None,
+                    "markdown": None,
+                    "updatedMarkdown": None,
+                    "summary": None,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+
+    blocked = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={"projectId": project_id, "prompt": "Duplica source.md", "activeMarkdown": "", "mode": "project", "clientMessageId": "client-duplicate-1"},
+    )
+    assert blocked.status_code == 200
+    assert blocked.json()["operations"][0]["type"] == "permission_blocked"
+    assert not (target_folder / "source-copy.md").exists()
+
+    config = client.get("/api/config/ai").json()
+    config["permissions"]["createDocuments"] = True
+    client.put("/api/config/ai", json=config)
+    duplicated = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={"projectId": project_id, "prompt": "Duplica source.md", "activeMarkdown": "", "mode": "project", "clientMessageId": "client-duplicate-2"},
+    )
+
+    assert duplicated.status_code == 200
+    payload = duplicated.json()
+    assert payload["operations"][0]["type"] == "document_duplicated"
+    assert payload["operations"][0]["path"] == "Nueva carpeta/source-copy.md"
+    assert (target_folder / "source-copy.md").read_text(encoding="utf-8") == "# Source\n"
+
+
+def test_ai_move_document_uses_create_document_permission_and_reports_affected_documents(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "ai-move"
+    target_folder = docs_root / "Nueva carpeta"
+    target_folder.mkdir(parents=True)
+    (docs_root / "source.md").write_text("# Source\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Move", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+
+    def fake_plan(payload, context, rag, model=None):
+        return {
+            "display": "conversation",
+            "answer": None,
+            "operations": [
+                {
+                    "type": "move_node",
+                    "name": None,
+                    "parentPath": "Nueva carpeta",
+                    "path": "source.md",
+                    "nodeId": None,
+                    "markdown": None,
+                    "updatedMarkdown": None,
+                    "summary": None,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+
+    blocked = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={"projectId": project_id, "prompt": "Mueve source.md a Nueva carpeta", "activeMarkdown": "", "mode": "project", "clientMessageId": "client-move-1"},
+    )
+    assert blocked.status_code == 200
+    assert blocked.json()["operations"][0]["type"] == "permission_blocked"
+    assert (docs_root / "source.md").exists()
+
+    config = client.get("/api/config/ai").json()
+    config["permissions"]["createDocuments"] = True
+    client.put("/api/config/ai", json=config)
+    moved = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={"projectId": project_id, "prompt": "Mueve source.md a Nueva carpeta", "activeMarkdown": "", "mode": "project", "clientMessageId": "client-move-2"},
+    )
+
+    assert moved.status_code == 200
+    payload = moved.json()
+    assert payload["operations"][0]["type"] == "node_moved"
+    assert payload["operations"][0]["path"] == "Nueva carpeta/source.md"
+    assert payload["affectedDocuments"][0]["oldId"] != payload["affectedDocuments"][0]["newId"]
+    assert payload["affectedDocuments"][0]["path"] == "Nueva carpeta/source.md"
+    assert (target_folder / "source.md").read_text(encoding="utf-8") == "# Source\n"
+    assert not (docs_root / "source.md").exists()
 
 
 def test_ai_index_status_is_project_scoped(tmp_path, monkeypatch) -> None:

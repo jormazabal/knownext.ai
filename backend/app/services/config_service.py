@@ -36,6 +36,15 @@ DEFAULT_AI = {
         "status": "not-indexed",
         "error": None,
     },
+    "agentic": {
+        "depth": "guided",
+        "webResearchEnabled": False,
+        "confirmBeforeApplying": True,
+        "maxSteps": 4,
+        "maxDocuments": 6,
+        "maxEstimatedCostEur": 1.0,
+        "maxSources": 6,
+    },
 }
 
 DEFAULT_TABS = {}
@@ -124,10 +133,16 @@ def _normalize_ai(value: object) -> dict:
     rag = value.get("rag")
     if not isinstance(rag, dict):
         rag = {}
+    agentic = value.get("agentic")
+    if not isinstance(agentic, dict):
+        agentic = {}
 
     rag_status = rag.get("status")
     if rag_status not in {"not-indexed", "indexing", "updated", "error"}:
         rag_status = DEFAULT_AI["rag"]["status"]
+    depth = agentic.get("depth")
+    if depth not in {"quick", "guided", "deep", "bounded_autonomous"}:
+        depth = DEFAULT_AI["agentic"]["depth"]
 
     return {
         "provider": "openai",
@@ -143,6 +158,15 @@ def _normalize_ai(value: object) -> dict:
             "lastIndexedAt": _normalize_optional_string(rag.get("lastIndexedAt")),
             "status": rag_status,
             "error": _normalize_optional_string(rag.get("error")),
+        },
+        "agentic": {
+            "depth": depth,
+            "webResearchEnabled": bool(agentic.get("webResearchEnabled", DEFAULT_AI["agentic"]["webResearchEnabled"])),
+            "confirmBeforeApplying": bool(agentic.get("confirmBeforeApplying", DEFAULT_AI["agentic"]["confirmBeforeApplying"])),
+            "maxSteps": _clamp_int(agentic.get("maxSteps"), 1, 12, DEFAULT_AI["agentic"]["maxSteps"]),
+            "maxDocuments": _clamp_int(agentic.get("maxDocuments"), 1, 30, DEFAULT_AI["agentic"]["maxDocuments"]),
+            "maxEstimatedCostEur": _clamp_float(agentic.get("maxEstimatedCostEur"), 0.1, 25.0, DEFAULT_AI["agentic"]["maxEstimatedCostEur"]),
+            "maxSources": _clamp_int(agentic.get("maxSources"), 1, 20, DEFAULT_AI["agentic"]["maxSources"]),
         },
     }
 
@@ -196,6 +220,22 @@ def _normalize_optional_string(value: object) -> str | None:
         return None
     normalized = value.strip()
     return normalized or None
+
+
+def _clamp_int(value: object, minimum: int, maximum: int, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return min(max(parsed, minimum), maximum)
+
+
+def _clamp_float(value: object, minimum: float, maximum: float, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return min(max(parsed, minimum), maximum)
 
 
 def _normalize_utility_tabs(value: object) -> list[str]:

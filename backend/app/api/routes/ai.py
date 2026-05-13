@@ -6,12 +6,15 @@ from app.schemas.ai import (
     AiIndexStatusResponse,
     AiInteractionRequest,
     AiInteractionResponse,
+    AiPendingIntent,
     AiPromptRequest,
     AiPromptResponse,
+    AiUsageSummaryResponse,
     OpenAiKeyStatus,
     OpenAiKeyUpdate,
 )
 from app.services.ai_service import ai_service
+from app.services.ai_usage_service import ai_usage_service
 from app.services.credential_service import credential_service
 
 router = APIRouter()
@@ -32,9 +35,19 @@ def interact(project_id: str, payload: AiInteractionRequest) -> AiInteractionRes
     return ai_service.interact(project_id, payload)
 
 
+@router.get("/ai/usage/summary", response_model=AiUsageSummaryResponse)
+def get_ai_usage_summary(month: str | None = None, tzOffsetMinutes: int = 0) -> AiUsageSummaryResponse:
+    return ai_usage_service.get_summary(month=month, tz_offset_minutes=tzOffsetMinutes)
+
+
 @router.get("/projects/{project_id}/ai/conversation", response_model=AiConversationResponse)
 def get_conversation(project_id: str) -> AiConversationResponse:
     return ai_service.get_conversation(project_id)
+
+
+@router.get("/projects/{project_id}/ai/pending-intent", response_model=AiPendingIntent | None)
+def get_pending_intent(project_id: str) -> AiPendingIntent | None:
+    return ai_service.get_pending_intent(project_id)
 
 
 @router.delete("/projects/{project_id}/ai/conversation", response_model=AiConversationResponse)

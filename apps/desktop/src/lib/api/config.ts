@@ -30,6 +30,15 @@ export const defaultAiConfig: AiConfig = {
     status: "not-indexed",
     error: null,
   },
+  agentic: {
+    depth: "guided",
+    webResearchEnabled: false,
+    confirmBeforeApplying: true,
+    maxSteps: 4,
+    maxDocuments: 6,
+    maxEstimatedCostEur: 1,
+    maxSources: 6,
+  },
 };
 
 export const defaultProjectTabsConfig: ProjectTabsConfig = {
@@ -142,6 +151,15 @@ function normalizeAi(ai: AiConfig | undefined): AiConfig | undefined {
       status: ["not-indexed", "indexing", "updated", "error"].includes(ai.rag?.status ?? "") ? ai.rag.status : "not-indexed",
       error: ai.rag?.error ?? null,
     },
+    agentic: {
+      depth: normalizeAgenticDepth(ai.agentic?.depth),
+      webResearchEnabled: Boolean(ai.agentic?.webResearchEnabled),
+      confirmBeforeApplying: ai.agentic?.confirmBeforeApplying !== false,
+      maxSteps: clampNumber(ai.agentic?.maxSteps, 1, 12, defaultAiConfig.agentic.maxSteps),
+      maxDocuments: clampNumber(ai.agentic?.maxDocuments, 1, 30, defaultAiConfig.agentic.maxDocuments),
+      maxEstimatedCostEur: clampNumber(ai.agentic?.maxEstimatedCostEur, 0.1, 25, defaultAiConfig.agentic.maxEstimatedCostEur),
+      maxSources: clampNumber(ai.agentic?.maxSources, 1, 20, defaultAiConfig.agentic.maxSources),
+    },
   };
 }
 
@@ -149,4 +167,16 @@ function normalizeAiModel(model: unknown): AiModelId {
   return ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"].includes(String(model))
     ? model as AiModelId
     : defaultAiConfig.model;
+}
+
+function normalizeAgenticDepth(depth: unknown) {
+  return ["quick", "guided", "deep", "bounded_autonomous"].includes(String(depth))
+    ? depth as AiConfig["agentic"]["depth"]
+    : defaultAiConfig.agentic.depth;
+}
+
+function clampNumber(value: unknown, minimum: number, maximum: number, fallback: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(parsed, minimum), maximum);
 }

@@ -1,13 +1,17 @@
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { AiPendingIntentActions } from "./AiPendingIntentActions";
+import type { AiIntentActionType, AiPendingIntent } from "../../types/domain";
 
 type AiResponseBubbleProps = {
   bubble: { id: string; answer: string } | null;
+  pendingIntent?: AiPendingIntent | null;
+  onIntentAction?: (action: AiIntentActionType, intentId: string) => void | Promise<void>;
   onClose: () => void;
   onOpenConversation: () => void;
 };
 
-export function AiResponseBubble({ bubble, onClose, onOpenConversation }: AiResponseBubbleProps) {
+export function AiResponseBubble({ bubble, pendingIntent = null, onIntentAction, onClose, onOpenConversation }: AiResponseBubbleProps) {
   const [visibleBubble, setVisibleBubble] = useState(bubble);
   const [closing, setClosing] = useState(false);
 
@@ -46,6 +50,14 @@ export function AiResponseBubble({ bubble, onClose, onOpenConversation }: AiResp
             <button className="mt-2 rounded-full px-2 py-1 text-[11px] font-semibold text-brand-orange hover:bg-brand-hover hover:text-brand-dark" onClick={onOpenConversation}>
               Abrir en IA
             </button>
+          ) : null}
+          {onIntentAction ? (
+            <AiPendingIntentActions
+              intent={pendingIntent}
+              onAction={onIntentAction}
+              onOpenConversation={onOpenConversation}
+              showConversationAction
+            />
           ) : null}
         </div>
         <button

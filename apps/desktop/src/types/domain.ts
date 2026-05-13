@@ -132,12 +132,24 @@ export type AiRagConfig = {
 };
 
 export type AiModelId = "gpt-5.5" | "gpt-5.4" | "gpt-5.4-mini" | "gpt-5.4-nano";
+export type AiAgenticDepth = "quick" | "guided" | "deep" | "bounded_autonomous";
+
+export type AiAgenticConfig = {
+  depth: AiAgenticDepth;
+  webResearchEnabled: boolean;
+  confirmBeforeApplying: boolean;
+  maxSteps: number;
+  maxDocuments: number;
+  maxEstimatedCostEur: number;
+  maxSources: number;
+};
 
 export type AiConfig = {
   provider: "openai";
   model: AiModelId;
   permissions: AiPermissionsConfig;
   rag: AiRagConfig;
+  agentic: AiAgenticConfig;
 };
 
 export type AiConfigStatus = AiConfig & {
@@ -197,6 +209,7 @@ export type AffectedDocument = {
   oldId: string;
   newId?: string | null;
   name?: string | null;
+  path?: string | null;
 };
 
 export type FileOperationResult = {
@@ -286,15 +299,29 @@ export type AiPromptResponse = {
 export type AiInteractionMode = "document" | "project";
 export type AiInteractionStatus = "completed" | "blocked" | "error";
 export type AiInteractionDisplay = "bubble" | "conversation" | "none";
+export type AiUiPlacement = "document_bubble" | "conversation_tab" | "none";
+export type AiInteractionType = "chat" | "document_edit" | "project_operation" | "agentic_task" | "clarification" | "mixed";
+export type AiConfidence = "high" | "medium" | "low";
+export type AiExecutionMode = "quick" | "reasoning";
+export type AiReasoningDepth = "light" | "medium" | "deep";
+export type AiExecutionScope = "direct_action" | "needs_permission" | "needs_clarification" | "agentic_task" | "too_expensive_or_unclear";
+export type AiPendingIntentStatus = "awaiting_decision" | "awaiting_web_permission" | "ready" | "running" | "completed" | "cancelled";
+export type AiPendingIntentAction = "replace_document" | "edit_document" | "create_document" | "project_operation" | "research_then_write";
+export type AiIntentActionType = "allow_web_research" | "apply" | "cancel";
 export type AiOperationType =
   | "document_modified"
   | "folder_created"
   | "document_created"
+  | "document_duplicated"
+  | "node_moved"
   | "delete_requested"
   | "node_deleted"
   | "permission_blocked"
   | "provider_unavailable"
-  | "provider_error";
+  | "provider_error"
+  | "task_planned"
+  | "task_checkpoint"
+  | "source_found";
 
 export type AiConversationEventType =
   | "user_message"
@@ -302,19 +329,63 @@ export type AiConversationEventType =
   | "document_modified"
   | "folder_created"
   | "document_created"
+  | "document_duplicated"
+  | "node_moved"
   | "delete_requested"
   | "node_deleted"
   | "permission_blocked"
   | "provider_unavailable"
-  | "provider_error";
+  | "provider_error"
+  | "task_planned"
+  | "task_checkpoint"
+  | "source_found";
 
 export type AiInteractionRequest = {
   projectId: string;
   documentId?: string | null;
   prompt: string;
   activeMarkdown: string;
+  selectionFocus?: AiSelectionFocus | null;
+  clientContext?: AiClientContext | null;
+  intentAction?: AiIntentActionRequest | null;
+  executionMode?: AiExecutionMode;
+  reasoningDepth?: AiReasoningDepth;
   mode: AiInteractionMode;
   clientMessageId: string;
+};
+
+export type AiClientContext = {
+  lastDocumentId?: string | null;
+  lastDocumentPath?: string | null;
+};
+
+export type AiIntentActionRequest = {
+  type: AiIntentActionType;
+  intentId: string;
+};
+
+export type AiSelectionFocus = {
+  documentId?: string | null;
+  path?: string | null;
+  from?: number | null;
+  to?: number | null;
+  text: string;
+};
+
+export type AiPendingIntent = {
+  id: string;
+  projectId: string;
+  originDocumentId?: string | null;
+  targetDocumentId?: string | null;
+  targetPath?: string | null;
+  goal: string;
+  proposedAction: AiPendingIntentAction;
+  requiresWebResearch: boolean;
+  webResearchAllowed: boolean;
+  status: AiPendingIntentStatus;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string;
 };
 
 export type AiUpdatedDocument = {
@@ -330,6 +401,34 @@ export type AiPendingDelete = {
   documentCount: number;
 };
 
+export type AiAgenticTaskStep = {
+  id: string;
+  title: string;
+  status: "pending" | "running" | "completed" | "blocked";
+  detail?: string | null;
+};
+
+export type AiAgenticTaskSource = {
+  title: string;
+  url?: string | null;
+  path?: string | null;
+  status: "planned" | "used" | "blocked";
+};
+
+export type AiAgenticTask = {
+  title: string;
+  status: "proposed" | "waiting_confirmation" | "running" | "completed" | "blocked";
+  depth: AiAgenticDepth;
+  requiresWebResearch: boolean;
+  webResearchAllowed: boolean;
+  needsUserConfirmation: boolean;
+  maxSteps: number;
+  maxDocuments: number;
+  maxEstimatedCostEur: number;
+  steps: AiAgenticTaskStep[];
+  sources: AiAgenticTaskSource[];
+};
+
 export type AiOperation = {
   type: AiOperationType;
   status: "completed" | "blocked" | "pending" | "error";
@@ -339,6 +438,7 @@ export type AiOperation = {
   path?: string | null;
   paths: string[];
   summary?: string | null;
+  task?: AiAgenticTask | null;
   confirmationId?: string | null;
 };
 
@@ -353,6 +453,7 @@ export type AiConversationEvent = {
   path?: string | null;
   paths: string[];
   summary?: string | null;
+  task?: AiAgenticTask | null;
 };
 
 export type AiConversationResponse = {
@@ -363,11 +464,23 @@ export type AiInteractionResponse = {
   interactionId: string;
   status: AiInteractionStatus;
   display: AiInteractionDisplay;
+  uiPlacement: AiUiPlacement;
+  interactionType: AiInteractionType;
+  confidence: AiConfidence;
+  executionMode: AiExecutionMode;
+  reasoningDepth: AiReasoningDepth;
+  executionScope?: AiExecutionScope | null;
+  routeToAiTab: boolean;
+  needsUserClarification: boolean;
+  pendingIntent?: AiPendingIntent | null;
+  pendingIntentStatus?: AiPendingIntentStatus | null;
   answer?: string | null;
   conversationEvents: AiConversationEvent[];
   operations: AiOperation[];
   updatedDocument?: AiUpdatedDocument | null;
+  task?: AiAgenticTask | null;
   tree?: DocumentTreeNode[] | null;
+  affectedDocuments: AffectedDocument[];
   requiresConfirmation?: AiPendingDelete | null;
 };
 
@@ -384,6 +497,29 @@ export type AiIndexStatusResponse = {
   failedDocumentCount: number;
   deletedDocumentCount: number;
   localExactReady: boolean;
+};
+
+export type AiUsageModelSummary = {
+  model: string;
+  interactions: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  embeddingTokens: number;
+  totalTokens: number;
+  estimatedCost: number;
+  currency: "EUR";
+  usageSource: "provider" | "estimated" | "unknown" | "mixed";
+};
+
+export type AiUsageSummaryResponse = {
+  month: string;
+  currency: "EUR";
+  estimated: boolean;
+  totalEstimatedCost: number;
+  generatedAt: string;
+  models: AiUsageModelSummary[];
 };
 
 export type SaveDocumentPayload = {

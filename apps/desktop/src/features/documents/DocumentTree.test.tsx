@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DocumentTree } from "./DocumentTree";
@@ -18,6 +18,13 @@ const nodes: DocumentTreeNode[] = [
       },
     ],
   },
+  {
+    id: "folder-archive",
+    name: "Archivo",
+    type: "folder",
+    open: true,
+    children: [],
+  },
 ];
 
 afterEach(() => cleanup());
@@ -35,6 +42,7 @@ describe("DocumentTree", () => {
         onRenameNode={vi.fn()}
         onToggleNode={onToggleNode}
         onContextAction={vi.fn()}
+        onMoveNode={vi.fn()}
       />,
     );
 
@@ -56,6 +64,7 @@ describe("DocumentTree", () => {
         onRenameNode={vi.fn()}
         onToggleNode={vi.fn()}
         onContextAction={onContextAction}
+        onMoveNode={vi.fn()}
       />,
     );
 
@@ -78,6 +87,7 @@ describe("DocumentTree", () => {
         onRenameNode={vi.fn()}
         onToggleNode={vi.fn()}
         onContextAction={onContextAction}
+        onMoveNode={vi.fn()}
       />,
     );
 
@@ -87,4 +97,43 @@ describe("DocumentTree", () => {
 
     expect(onContextAction).toHaveBeenCalledWith("move", documentNode);
   });
+
+  it("moves a document by dragging it onto a folder", () => {
+    const onMoveNode = vi.fn();
+    const documentNode = nodes[0].children![0];
+
+    render(
+      <DocumentTree
+        nodes={nodes}
+        activeDocumentId=""
+        onOpenDocument={vi.fn()}
+        onRenameNode={vi.fn()}
+        onToggleNode={vi.fn()}
+        onContextAction={vi.fn()}
+        onMoveNode={onMoveNode}
+      />,
+    );
+
+    const documentRow = screen.getByText("requisitos-funcionales.md").closest(".tree-row");
+    const folderRow = screen.getByText("Archivo").closest(".tree-row");
+    expect(documentRow).not.toBeNull();
+    expect(folderRow).not.toBeNull();
+
+    const dataTransfer = createDataTransfer();
+    fireEvent.dragStart(documentRow!, { dataTransfer });
+    fireEvent.dragOver(folderRow!, { dataTransfer });
+    fireEvent.drop(folderRow!, { dataTransfer });
+
+    expect(onMoveNode).toHaveBeenCalledWith(documentNode, "folder-archive");
+  });
 });
+
+function createDataTransfer() {
+  const data = new Map<string, string>();
+  return {
+    effectAllowed: "",
+    dropEffect: "",
+    setData: (key: string, value: string) => data.set(key, value),
+    getData: (key: string) => data.get(key) ?? "",
+  };
+}

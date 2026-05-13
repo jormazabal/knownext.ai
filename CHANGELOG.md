@@ -2,6 +2,17 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.8.0 - 2026-05-13
+
+- Added prompt-level AI response modes so everyday requests can stay in fast direct mode while reasoning tasks can opt into structured preflight and selectable depth.
+- Added structured pending-intent handling for document AI work, including preserved target documents, explicit action controls, web permission flow, and deterministic execution after validated LLM decisions.
+- Added selected-text focus context, active document folder context, move/duplicate action support, and safer handling for conversational responses versus document edits.
+- Added AI usage UI and backend usage accounting foundations grouped by model, interactions, tokens, and estimated cost.
+- Redesigned the AI conversation tab, prompt input, response bubbles, and pending action controls for a more compact professional chat-style experience.
+- Added drag-and-drop moving for documents and folders in the project tree with visual drop targets and backend validation.
+- Improved the document status bar so save appears only when needed and document metrics are separated from history/status information.
+- Updated AI interaction documentation, backend contracts, frontend coverage, and manual validation notes for `0.8.0`.
+
 ## 0.7.2 - 2026-05-12
 
 - Moved AI system response notices out of the document body into compact floating bubbles above the prompt, with right alignment, large rounded corners, and a close action.

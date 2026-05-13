@@ -105,6 +105,7 @@ class AffectedDocument(BaseModel):
     oldId: str
     newId: str | None = None
     name: str | None = None
+    path: str | None = None
 
 
 class FileOperationResult(BaseModel):
