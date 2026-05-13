@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from app.schemas.ai import (
     AiConfirmDeleteRequest,
     AiAgenticTask,
+    AiContextSourceRef,
     AiConversationEvent,
     AiConversationResponse,
     AiIndexStatusResponse,
@@ -24,6 +25,7 @@ from app.schemas.ai import (
     AiUpdatedDocument,
 )
 from app.schemas.project import CreateDocumentRequest, CreateFolderRequest, MoveNodeRequest, TreeNode
+from app.services.ai_context_service import ai_context_service
 from app.services.app_storage import JsonFileStore
 from app.services.config_service import config_service
 from app.services.credential_service import credential_service
@@ -102,6 +104,7 @@ class AiService:
         if action_response is not None:
             return action_response
         pending_intent = self._active_pending_intent(project_id)
+        explicit_context_sources, sources_used, expired_context_source_ids = ai_context_service.resolve_sources(project_id, payload.contextSourceIds)
 
         user_event = self._event(
             project_id,
@@ -109,6 +112,7 @@ class AiService:
             "user",
             payload.prompt.strip() or _intent_action_event_content(payload),
             document_id=payload.documentId or (pending_intent.targetDocumentId if pending_intent else None),
+            sources_used=sources_used,
         )
 
         if not credential_service.get_openai_key():
@@ -126,6 +130,8 @@ class AiService:
                 answer=operation.message,
                 operations=[operation],
                 conversationEvents=[user_event, provider_event],
+                contextSources=ai_context_service.list_sources(project_id).sources,
+                expiredContextSourceIds=expired_context_source_ids,
             )
 
         ai_config = config_service.get_config().ai
@@ -134,7 +140,7 @@ class AiService:
         if payload.executionMode == "quick" and payload.intentAction is None and pending_intent is not None:
             self._write_project_pending_intent(project_id, None)
             pending_intent = None
-        context = self._build_context(project_id, payload, rag_context, pending_intent)
+        context = self._build_context(project_id, payload, rag_context, pending_intent, explicit_context_sources)
         provider_usage: dict[str, Any] | None = None
         preflight: dict[str, Any] | None = None
         try:
@@ -159,7 +165,11 @@ class AiService:
                         usage=provider_usage,
                     )
                     self._append_events(project_id, [user_event, *response.conversationEvents])
-                    return response.model_copy(update={"conversationEvents": [user_event, *response.conversationEvents]})
+                    return response.model_copy(update={
+                        "conversationEvents": [user_event, *response.conversationEvents],
+                        "contextSources": ai_context_service.list_sources(project_id).sources,
+                        "expiredContextSourceIds": expired_context_source_ids,
+                    })
                 context["reasoningPreflight"] = preflight
             plan = openai_service.plan_interaction(
                 payload.model_dump(),
@@ -199,7 +209,8 @@ class AiService:
                 if repaired_plan:
                     plan = repaired_plan
         except OpenAiUnavailableError as error:
-            return self._provider_error_response(project_id, interaction_id, user_event, str(error), unavailable=True)
+            response = self._provider_error_response(project_id, interaction_id, user_event, str(error), unavailable=True)
+            return response.model_copy(update={"contextSources": ai_context_service.list_sources(project_id).sources, "expiredContextSourceIds": expired_context_source_ids})
         except Exception as error:
             provider_usage = getattr(error, "usage", None) if isinstance(error, OpenAiProviderError) else None
             if provider_usage:
@@ -214,7 +225,8 @@ class AiService:
                     error_code=type(error).__name__,
                 )
             message = str(error) if isinstance(error, OpenAiProviderError) else "OpenAI no pudo completar la interacción."
-            return self._provider_error_response(project_id, interaction_id, user_event, message, unavailable=False)
+            response = self._provider_error_response(project_id, interaction_id, user_event, message, unavailable=False)
+            return response.model_copy(update={"contextSources": ai_context_service.list_sources(project_id).sources, "expiredContextSourceIds": expired_context_source_ids})
 
         try:
             response = self._execute_plan(project_id, interaction_id, payload, plan, pending_intent)
@@ -231,7 +243,8 @@ class AiService:
                     usage=provider_usage,
                     error_code=type(error).__name__,
                 )
-            return self._provider_error_response(project_id, interaction_id, user_event, message, unavailable=False)
+            response = self._provider_error_response(project_id, interaction_id, user_event, message, unavailable=False)
+            return response.model_copy(update={"contextSources": ai_context_service.list_sources(project_id).sources, "expiredContextSourceIds": expired_context_source_ids})
         except Exception as error:
             if provider_usage:
                 ai_usage_service.record_provider_event(
@@ -244,7 +257,8 @@ class AiService:
                     usage=provider_usage,
                     error_code=type(error).__name__,
                 )
-            return self._provider_error_response(project_id, interaction_id, user_event, "No se pudieron aplicar las acciones propuestas por la IA.", unavailable=False)
+            response = self._provider_error_response(project_id, interaction_id, user_event, "No se pudieron aplicar las acciones propuestas por la IA.", unavailable=False)
+            return response.model_copy(update={"contextSources": ai_context_service.list_sources(project_id).sources, "expiredContextSourceIds": expired_context_source_ids})
         ai_usage_service.record_provider_event(
             project_id=project_id,
             document_id=payload.documentId,
@@ -255,7 +269,11 @@ class AiService:
             usage=provider_usage,
         )
         self._append_events(project_id, [user_event, *response.conversationEvents])
-        return response.model_copy(update={"conversationEvents": [user_event, *response.conversationEvents]})
+        return response.model_copy(update={
+            "conversationEvents": [user_event, *response.conversationEvents],
+            "contextSources": ai_context_service.list_sources(project_id).sources,
+            "expiredContextSourceIds": expired_context_source_ids,
+        })
 
     def get_conversation(self, project_id: str) -> AiConversationResponse:
         project_service.get_project_tree(project_id)
@@ -849,6 +867,7 @@ class AiService:
         payload: AiInteractionRequest,
         rag_context: dict[str, Any] | None = None,
         pending_intent: AiPendingIntent | None = None,
+        explicit_context_sources: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         tree = project_service.get_project_tree(project_id)
         ai_config = config_service.get_config().ai
@@ -873,6 +892,11 @@ class AiService:
             },
             "projectSearch": {
                 "exactMatches": (rag_context or {}).get("exactMatches", []),
+            },
+            "explicitSources": {
+                "purpose": "Fuentes visibles como chips en el prompt. Si aparecen aquí, el usuario espera que se usen como contexto activo.",
+                "priority": "Prioridad alta después del documento activo y del prompt actual. Cita name/path cuando bases una afirmación en una fuente.",
+                "sources": explicit_context_sources or [],
             },
             "recentConversation": self._recent_conversation_context(project_id, payload),
             "pendingIntent": pending_intent.model_dump() if pending_intent else None,
@@ -985,6 +1009,7 @@ class AiService:
         paths: list[str] | None = None,
         summary: str | None = None,
         task: AiAgenticTask | None = None,
+        sources_used: list[AiContextSourceRef] | None = None,
     ) -> AiConversationEvent:
         return AiConversationEvent(
             id=f"event-{uuid4()}",
@@ -998,6 +1023,7 @@ class AiService:
             paths=paths or [],
             summary=summary,
             task=task,
+            sourcesUsed=sources_used or [],
         )
 
     def _blocked(self, project_id: str, message: str) -> AiOperation:

@@ -33,13 +33,21 @@ import {
   confirmAiDelete,
   deleteAiIndex,
   deleteOpenAiKey,
+  addAiContextSourceToProject,
+  addProjectDocumentAiContextSource,
+  extendAiContextSource,
+  getAiContextSources,
   getAiConversation,
   getAiIndexStatus,
   getAiPendingIntent,
   getAiUsageSummary,
+  previewAiContextSource,
+  removeAiContextSource,
   rebuildAiIndex,
   saveOpenAiKey,
+  searchAiContextDocuments,
   sendAiInteraction,
+  uploadAiContextFiles,
 } from "../lib/api/ai";
 import { API_BASE_URL, ApiError, getApiErrorMessage, isApiConnectionError, isBackendEnabled, waitForApiReady } from "../lib/api/client";
 import {
@@ -87,6 +95,9 @@ import {
 } from "../lib/api/projects";
 import type {
   AuthStatus,
+  AiContextSearchResult,
+  AiContextSource,
+  AiContextSourcePreviewResponse,
   AiConfigStatus,
   AiConversationEvent,
   AiIndexStatusResponse,
@@ -155,6 +166,7 @@ export function App() {
   const [aiConfig, setAiConfig] = useState<AiConfigStatus>({ ...defaultAiConfig, openaiKeyConfigured: false, openaiKeyPreview: null });
   const aiConfigSaveSequence = useRef(0);
   const [aiConversationEvents, setAiConversationEvents] = useState<AiConversationEvent[]>([]);
+  const [aiContextSources, setAiContextSources] = useState<AiContextSource[]>([]);
   const [aiIndexStatus, setAiIndexStatus] = useState<AiIndexStatusResponse | null>(null);
   const [aiUsageSummary, setAiUsageSummary] = useState<AiUsageSummaryResponse | null>(null);
   const [aiPendingDelete, setAiPendingDelete] = useState<AiPendingDelete | null>(null);
@@ -395,11 +407,20 @@ export function App() {
   useEffect(() => {
     if (!configLoaded || !activeProject) {
       setAiConversationEvents([]);
+      setAiContextSources([]);
       setAiIndexStatus(null);
       return;
     }
     void refreshAiState(activeProject.id);
   }, [activeProject?.id, configLoaded]);
+
+  useEffect(() => {
+    if (!activeProject) return;
+    const interval = window.setInterval(() => {
+      void refreshAiContextSources(activeProject.id, { silent: true });
+    }, 30_000);
+    return () => window.clearInterval(interval);
+  }, [activeProject?.id]);
 
   useEffect(() => {
     if (!authStatus.isAuthenticated) {
@@ -720,11 +741,78 @@ export function App() {
         reasoningDepth: options?.reasoningDepth ?? "light",
         mode: hasDocumentContext ? "document" : "project",
         clientMessageId: `client-${Date.now()}`,
+        contextSourceIds: aiContextSources.filter((source) => source.status !== "error" && source.status !== "processing").map((source) => source.id),
       });
       applyAiInteractionResponse(response);
       void refreshAiUsageSummary();
     } catch (error) {
       showError(error, "No se pudo completar la interacción IA.", { source: "app.aiInteraction" });
+    }
+  }
+
+  async function handleSearchAiContextDocuments(query: string): Promise<AiContextSearchResult[]> {
+    if (!activeProject) return [];
+    return searchAiContextDocuments(activeProject.id, query);
+  }
+
+  async function handleAddProjectDocumentContext(documentId: string) {
+    if (!activeProject) return;
+    try {
+      await addProjectDocumentAiContextSource(activeProject.id, documentId);
+      await refreshAiContextSources(activeProject.id);
+    } catch (error) {
+      showError(error, "No se pudo añadir el documento al contexto IA.", { source: "app.aiContext.addDocument" });
+    }
+  }
+
+  async function handleUploadAiContextFiles(files: File[]) {
+    if (!activeProject || files.length === 0) return;
+    try {
+      const response = await uploadAiContextFiles(activeProject.id, files);
+      setAiContextSources(response.sources);
+    } catch (error) {
+      showError(error, "No se pudieron adjuntar los archivos al contexto IA.", { source: "app.aiContext.upload" });
+    }
+  }
+
+  async function handleRemoveAiContextSource(sourceId: string) {
+    if (!activeProject) return;
+    try {
+      const response = await removeAiContextSource(activeProject.id, sourceId);
+      setAiContextSources(response.sources);
+    } catch (error) {
+      showError(error, "No se pudo quitar la fuente del contexto IA.", { source: "app.aiContext.remove" });
+    }
+  }
+
+  async function handleExtendAiContextSource(sourceId: string) {
+    if (!activeProject) return;
+    try {
+      const source = await extendAiContextSource(activeProject.id, sourceId);
+      setAiContextSources((currentSources) => currentSources.map((current) => (current.id === source.id ? source : current)));
+    } catch (error) {
+      showError(error, "No se pudo mantener la fuente en el contexto IA.", { source: "app.aiContext.extend" });
+    }
+  }
+
+  async function handlePreviewAiContextSource(sourceId: string): Promise<AiContextSourcePreviewResponse> {
+    if (!activeProject) throw new Error("No hay proyecto activo.");
+    return previewAiContextSource(activeProject.id, sourceId);
+  }
+
+  async function handleAddAiContextSourceToProject(sourceId: string) {
+    if (!activeProject) return;
+    try {
+      const source = aiContextSources.find((item) => item.id === sourceId);
+      const result = await addAiContextSourceToProject(activeProject.id, sourceId, {
+        name: source?.name ? `${source.name.replace(/\.[^.]+$/, "")}.md` : undefined,
+        parentId: null,
+      });
+      if (result.tree) setTree(result.tree);
+      if (result.documentId) handleOpenDocument(result.documentId, result.path.split("/").pop() || result.path);
+      await refreshAiContextSources(activeProject.id);
+    } catch (error) {
+      showError(error, "No se pudo añadir la fuente al proyecto.", { source: "app.aiContext.addToProject" });
     }
   }
 
@@ -755,6 +843,11 @@ export function App() {
   }
 
   function applyAiInteractionResponse(response: AiInteractionResponse) {
+    if (response.contextSources) {
+      setAiContextSources(response.contextSources);
+    } else if (response.expiredContextSourceIds?.length) {
+      setAiContextSources((currentSources) => currentSources.filter((source) => !response.expiredContextSourceIds?.includes(source.id)));
+    }
     if (response.conversationEvents.length > 0) {
       setAiConversationEvents((currentEvents) => mergeAiEvents(currentEvents, response.conversationEvents));
     }
@@ -1381,19 +1474,31 @@ export function App() {
   async function refreshAiState(projectId = activeProject?.id) {
     try {
       const nextAiConfig = await getAiConfig();
-      const [conversation, indexStatus, usageSummary, pendingIntent] = await Promise.all([
+      const [conversation, indexStatus, usageSummary, pendingIntent, contextSources] = await Promise.all([
         projectId ? getAiConversation(projectId) : Promise.resolve({ events: [] }),
         projectId && nextAiConfig.rag.enabled ? getAiIndexStatus(projectId) : Promise.resolve(null),
         loadAiUsageSummary("app.aiState.aiUsageSummary"),
         projectId ? getAiPendingIntent(projectId) : Promise.resolve(null),
+        projectId ? getAiContextSources(projectId) : Promise.resolve({ sources: [], expiredSourceIds: [] }),
       ]);
       setAiConfig(nextAiConfig);
       setAiConversationEvents(conversation.events);
       setAiIndexStatus(indexStatus);
       setAiUsageSummary(usageSummary);
       setAiPendingIntent(pendingIntent);
+      setAiContextSources(contextSources.sources);
     } catch (error) {
       showError(error, "No se pudo cargar la configuración de IA.", { source: "app.aiState" });
+    }
+  }
+
+  async function refreshAiContextSources(projectId = activeProject?.id, options: { silent?: boolean } = {}) {
+    if (!projectId) return;
+    try {
+      const response = await getAiContextSources(projectId);
+      setAiContextSources(response.sources);
+    } catch (error) {
+      if (!options.silent) showError(error, "No se pudo cargar el contexto IA.", { source: "app.aiContext" });
     }
   }
 
@@ -1718,6 +1823,7 @@ export function App() {
         aiBubble={aiBubble}
         aiAppliedChange={aiAppliedChange}
         aiSelectionFocus={aiSelectionFocus}
+        aiContextSources={aiContextSources}
         tree={tree}
         tabs={workspaceTabs}
         activeTabId={activeTabId}
@@ -1767,6 +1873,13 @@ export function App() {
         onCreateVersion={handleCreateActiveVersion}
         onSendAiPrompt={handleSendAiPrompt}
         onClearAiSelectionFocus={() => setAiSelectionFocus(null)}
+        onSearchAiContextDocuments={handleSearchAiContextDocuments}
+        onAddProjectDocumentContext={handleAddProjectDocumentContext}
+        onUploadAiContextFiles={handleUploadAiContextFiles}
+        onRemoveAiContextSource={handleRemoveAiContextSource}
+        onExtendAiContextSource={handleExtendAiContextSource}
+        onPreviewAiContextSource={handlePreviewAiContextSource}
+        onAddAiContextSourceToProject={handleAddAiContextSourceToProject}
         onAiIntentAction={handleAiIntentAction}
         onCloseAiBubble={() => setAiBubble(null)}
         onDismissAiAppliedChange={handleDismissAiAppliedChange}

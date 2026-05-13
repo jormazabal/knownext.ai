@@ -53,6 +53,9 @@ AiConversationEventType = Literal[
 AiIndexStatus = Literal["not-indexed", "indexing", "updated", "error"]
 AiUsageStatus = Literal["completed", "failed", "cancelled"]
 AiUsageSource = Literal["provider", "estimated", "unknown", "mixed"]
+AiContextSourceKind = Literal["project_document", "external_file", "image"]
+AiContextSourceStatus = Literal["processing", "ready", "warning", "error", "expiring", "expired"]
+AiContextWeight = Literal["light", "medium", "high", "too_large"]
 
 
 class AiPermissions(BaseModel):
@@ -130,6 +133,64 @@ class AiIntentActionRequest(BaseModel):
     intentId: str
 
 
+class AiContextSourceRef(BaseModel):
+    id: str
+    kind: AiContextSourceKind
+    name: str
+    path: str | None = None
+    status: Literal["used", "expired", "failed"] = "used"
+
+
+class AiContextSource(BaseModel):
+    id: str
+    projectId: str
+    kind: AiContextSourceKind
+    name: str
+    path: str | None = None
+    mimeType: str | None = None
+    sizeBytes: int = 0
+    status: AiContextSourceStatus = "processing"
+    weight: AiContextWeight = "light"
+    warning: str | None = None
+    error: str | None = None
+    createdAt: str
+    updatedAt: str
+    lastUsedAt: str | None = None
+    expiresAt: str | None = None
+
+
+class AiContextSearchResult(BaseModel):
+    documentId: str
+    name: str
+    path: str
+
+
+class AiCreateProjectDocumentContextRequest(BaseModel):
+    documentId: str
+
+
+class AiContextSourceListResponse(BaseModel):
+    sources: list[AiContextSource]
+    expiredSourceIds: list[str] = Field(default_factory=list)
+
+
+class AiContextSourcePreviewResponse(BaseModel):
+    source: AiContextSource
+    previewText: str | None = None
+    metadata: dict = Field(default_factory=dict)
+
+
+class AiContextAddToProjectRequest(BaseModel):
+    name: str | None = None
+    parentId: str | None = None
+
+
+class AiContextAddToProjectResponse(BaseModel):
+    documentId: str
+    path: str
+    tree: list[dict] | None = None
+
+
 class AiInteractionRequest(BaseModel):
     projectId: str
     documentId: str | None = None
@@ -142,6 +203,7 @@ class AiInteractionRequest(BaseModel):
     reasoningDepth: AiReasoningDepth = "light"
     mode: AiInteractionMode
     clientMessageId: str
+    contextSourceIds: list[str] = Field(default_factory=list)
 
 
 class AiPendingIntent(BaseModel):
@@ -225,6 +287,7 @@ class AiConversationEvent(BaseModel):
     paths: list[str] = Field(default_factory=list)
     summary: str | None = None
     task: AiAgenticTask | None = None
+    sourcesUsed: list[AiContextSourceRef] = Field(default_factory=list)
 
 
 class AiConversationResponse(BaseModel):
@@ -253,6 +316,8 @@ class AiInteractionResponse(BaseModel):
     tree: list[dict] | None = None
     affectedDocuments: list[dict] = Field(default_factory=list)
     requiresConfirmation: AiPendingDelete | None = None
+    contextSources: list[AiContextSource] = Field(default_factory=list)
+    expiredContextSourceIds: list[str] = Field(default_factory=list)
 
 
 class AiConfirmDeleteRequest(BaseModel):

@@ -2,6 +2,15 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.10.0 - 2026-05-13
+
+- Added persistent AI prompt context chips for project document references and external files, making the exact context sent to the model visible before every prompt.
+- Added `@` document reference search in the AI prompt with incremental filtering over the active project's Markdown tree.
+- Added external file context uploads for Markdown, text, PDF, DOCX, PPTX, and image files, including drag-and-drop, paste handling, previews, and conversion of supported external text sources into project documents.
+- Added time-boxed prompt context with expiry, warning states, manual removal, one-hour extension, and conversation-level source traceability.
+- Routed explicit prompt context through FastAPI AI contracts and OpenAI Responses payloads, including image context when the selected model supports vision input.
+- Updated backend context contracts, frontend API clients, architecture notes, AI interaction guidance, and manual acceptance coverage for the new context workflow.
+
 ## 0.9.0 - 2026-05-13
 
 - Added a complete document undo/redo history model with independent enabled states, bounded in-memory history, and AI document edits recorded as undoable editor changes.

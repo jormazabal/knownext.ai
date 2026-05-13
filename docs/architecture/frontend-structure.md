@@ -45,6 +45,7 @@ Any remaining mock fixtures must be limited to tests, Storybook/demo surfaces, o
 - The project AI conversation is a fixed first workspace tab whenever a project is active. It is project-scoped, not closable, and renders persisted conversation events from FastAPI.
 - AI edits update the in-memory document session and leave the document dirty; React does not write the AI result to disk until the normal document save flow runs.
 - AI project operations are dispatched through `src/lib/api/ai.ts`. Folder/document creation, move, duplicate, and delete results refresh the backend tree when app IA permissions allow them; blocked actions are rendered from structured `permission_blocked` responses.
+- AI prompt context is rendered as chips inside `AiPromptInput`. If a source chip is visible, it is active and its id is sent with the next AI interaction. React owns only source presentation and user intent; FastAPI owns file upload, extraction, expiry, preview, source resolution, and conversion into project documents.
 - The project assistant supports local files, local Git with manual sync, and GitHub API projects. Versioned modes remain disabled until GitHub login is active.
 - The history button is enabled only when the active project has a versioning provider and the user is authenticated.
 - UI components receive persisted values as props and dispatch user intent back to the root app state.

@@ -1,12 +1,13 @@
 [project]
 name = "knownext-backend"
-version = "0.9.0"
+version = "0.10.0"
 description = "FastAPI backend for KnowNext.ai local desktop services."
 license = "Apache-2.0"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115.0",
   "openai>=1.84.0",
+  "python-multipart>=0.0.20",
   "uvicorn[standard]>=0.32.0",
   "pydantic>=2.10.0"
 ]

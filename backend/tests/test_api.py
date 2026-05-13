@@ -27,7 +27,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.9.0"
+    assert payload["version"] == "0.10.0"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -1159,6 +1159,80 @@ def test_ai_interaction_without_openai_key_returns_unavailable(tmp_path) -> None
     assert payload["status"] == "blocked"
     assert payload["operations"][0]["type"] == "provider_unavailable"
     assert client.get(f"/api/projects/{project_id}/ai/conversation").json()["events"]
+
+
+def test_ai_context_project_document_source_is_resolved_and_traced(tmp_path) -> None:
+    docs_root = tmp_path / "project-ai-context"
+    docs_root.mkdir()
+    (docs_root / "scope.md").write_text("# Scope\n\nContexto interno.", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "Project AI Context", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    document_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
+
+    search = client.get(f"/api/projects/{project_id}/ai/context/search?q=scop")
+    assert search.status_code == 200
+    assert search.json()[0]["path"] == "scope.md"
+
+    source = client.post(
+        f"/api/projects/{project_id}/ai/context/project-documents",
+        json={"documentId": document_id},
+    )
+    assert source.status_code == 200
+    source_payload = source.json()
+    assert source_payload["kind"] == "project_document"
+    assert source_payload["status"] == "ready"
+    assert source_payload["expiresAt"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "prompt": "Usa la fuente",
+            "activeMarkdown": "",
+            "mode": "project",
+            "clientMessageId": "client-context",
+            "contextSourceIds": [source_payload["id"]],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["conversationEvents"][0]["sourcesUsed"][0]["name"] == "scope.md"
+    assert payload["contextSources"][0]["lastUsedAt"]
+
+
+def test_ai_context_external_markdown_preview_and_add_to_project(tmp_path) -> None:
+    docs_root = tmp_path / "project-ai-context-external"
+    docs_root.mkdir()
+    created = client.post(
+        "/api/projects",
+        json={"name": "Project AI External", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+
+    uploaded = client.post(
+        f"/api/projects/{project_id}/ai/context/files",
+        files={"files": ("brief.md", b"# Brief\n\nTexto externo para IA.", "text/markdown")},
+    )
+    assert uploaded.status_code == 200
+    source = uploaded.json()["sources"][0]
+    assert source["kind"] == "external_file"
+    assert source["status"] == "ready"
+
+    preview = client.get(f"/api/projects/{project_id}/ai/context/sources/{source['id']}/preview")
+    assert preview.status_code == 200
+    assert "Texto externo" in preview.json()["previewText"]
+
+    added = client.post(
+        f"/api/projects/{project_id}/ai/context/sources/{source['id']}/add-to-project",
+        json={"name": "brief-extraido.md", "parentId": None},
+    )
+    assert added.status_code == 200
+    assert added.json()["path"] == "brief-extraido.md"
+    assert (docs_root / "brief-extraido.md").exists()
 
 
 def test_ai_usage_summary_starts_empty() -> None:

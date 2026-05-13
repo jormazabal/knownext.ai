@@ -96,6 +96,34 @@ export async function requestJson<T>(path: string, init?: ApiRequestInit): Promi
   throw lastError;
 }
 
+export async function requestFormData<T>(path: string, formData: FormData, init?: ApiRequestInit): Promise<T> {
+  await initializeApiBaseUrl();
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), init?.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
+  const { timeoutMs: _timeoutMs, headers: _headers, body: _body, ...requestInit } = init ?? {};
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...requestInit,
+    method: requestInit.method ?? "POST",
+    body: formData,
+    signal: controller.signal,
+  }).finally(() => window.clearTimeout(timeout));
+
+  if (!response.ok) {
+    let detail: unknown;
+    try {
+      const body = await response.json();
+      if (body?.detail) detail = body.detail;
+    } catch {
+      // Some errors do not return a JSON body.
+    }
+    throw new ApiError(response.status, response.statusText, detail);
+  }
+
+  if (response.status === 204) return undefined as T;
+  return response.json() as Promise<T>;
+}
+
 export async function waitForApiReady(options: { attempts?: number; intervalMs?: number } = {}) {
   await initializeApiBaseUrl();
   if (!isTauriRuntime()) {

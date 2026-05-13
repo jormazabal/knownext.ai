@@ -354,6 +354,7 @@ export type AiInteractionRequest = {
   reasoningDepth?: AiReasoningDepth;
   mode: AiInteractionMode;
   clientMessageId: string;
+  contextSourceIds?: string[];
 };
 
 export type AiClientContext = {
@@ -372,6 +373,59 @@ export type AiSelectionFocus = {
   from?: number | null;
   to?: number | null;
   text: string;
+};
+
+export type AiContextSourceKind = "project_document" | "external_file" | "image";
+export type AiContextSourceStatus = "processing" | "ready" | "warning" | "error" | "expiring" | "expired";
+export type AiContextWeight = "light" | "medium" | "high" | "too_large";
+
+export type AiContextSource = {
+  id: string;
+  projectId: string;
+  kind: AiContextSourceKind;
+  name: string;
+  path?: string | null;
+  mimeType?: string | null;
+  sizeBytes: number;
+  status: AiContextSourceStatus;
+  weight: AiContextWeight;
+  warning?: string | null;
+  error?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt?: string | null;
+  expiresAt?: string | null;
+};
+
+export type AiContextSourceRef = {
+  id: string;
+  kind: AiContextSourceKind;
+  name: string;
+  path?: string | null;
+  status: "used" | "expired" | "failed";
+};
+
+export type AiContextSearchResult = {
+  documentId: string;
+  name: string;
+  path: string;
+};
+
+export type AiContextSourceListResponse = {
+  sources: AiContextSource[];
+  expiredSourceIds: string[];
+};
+
+export type AiContextSourcePreviewResponse = {
+  source: AiContextSource;
+  previewText?: string | null;
+  metadata: Record<string, unknown>;
+};
+
+export type AiContextAddToProjectResponse = {
+  documentId: string;
+  path: string;
+  tree?: DocumentTreeNode[] | null;
 };
 
 export type AiPendingIntent = {
@@ -456,6 +510,7 @@ export type AiConversationEvent = {
   paths: string[];
   summary?: string | null;
   task?: AiAgenticTask | null;
+  sourcesUsed?: AiContextSourceRef[];
 };
 
 export type AiConversationResponse = {
@@ -484,6 +539,8 @@ export type AiInteractionResponse = {
   tree?: DocumentTreeNode[] | null;
   affectedDocuments: AffectedDocument[];
   requiresConfirmation?: AiPendingDelete | null;
+  contextSources?: AiContextSource[];
+  expiredContextSourceIds?: string[];
 };
 
 export type AiIndexStatusResponse = {

@@ -13,6 +13,8 @@ Use this guidance when changing KnowNext.ai AI flows.
 - Preserve `targetDocumentId` from the originating document until the intent is completed or cancelled, even if the user continues in the IA tab.
 - Execute document and project changes only from structured fields such as `documentChange`, `operations`, `pendingIntent`, and `intentAction`.
 - Treat `answer` as conversational UI text only. Never promote it into document content.
+- Treat visible prompt context chips as the active source set. The frontend sends `contextSourceIds`; FastAPI resolves, validates, refreshes TTL, and records `sourcesUsed` on the user conversation event.
+- Reference explicit source names or paths when a response uses `context.explicitSources.sources`, and do not invent content from sources that are not included.
 
 ## Forbidden Pattern
 
@@ -24,5 +26,6 @@ Use this guidance when changing KnowNext.ai AI flows.
 
 - Keep simple document tasks in-place with `uiPlacement=document_bubble`.
 - Keep the prompt default on `Rápido` to avoid unnecessary token use.
+- Keep context chips inside the prompt surface so the user can see exactly what will be sent. Warning/expiry states should remain compact and use the orange KnowNext.ai accent.
 - Use `uiPlacement=conversation_tab` only for longer agentic tasks: multiple documents, multiple sources, checkpoints, or extended web research.
 - Buttons on pending intent cards must send structured `intentAction` values such as `apply` or `cancel`.
