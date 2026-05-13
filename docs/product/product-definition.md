@@ -23,16 +23,16 @@ KnowNext.ai includes a project-scoped AI assistant mediated by the local FastAPI
 - When text is selected in the active document, focusing the AI prompt keeps that selection visually highlighted and adds it as a removable focus context. This focus supplements the full document context; it does not replace it.
 - Prompts include a short backend-built recent conversation context to resolve references like `eso`, `lo anterior`, or `ahora`, filtered to the active document when applicable. The active document and current prompt remain higher priority than conversation history.
 - AI provider responses are interpreted as a structured plan with separate conversational `answer`, optional document change, optional project operations, and optional task plan. Conversational text must never be promoted into document content by backend keyword heuristics.
-- The prompt has two execution modes. `Rápido` is the default: one direct call, no automatic agentic task, no automatic IA-tab routing. `Razonar` performs a short structured preflight before execution and can choose direct action, clarification, permission request, or an agentic task.
+- The prompt has two execution modes. `Rápido` is the default: one direct call, no automatic agentic task, no automatic IA-tab routing. `Razonar` performs a short structured preflight before execution and can choose direct action, a real clarification, a blocked-permission response, or an agentic task.
 - Reasoning depth is selected per prompt (`Ligero`, `Medio`, `Profundo`) so token use is explicit and task-specific instead of a global app default.
-- Requests that need confirmation, web permission, or delayed execution create a project-scoped pending intent with a preserved target document. Follow-up prompts from the `IA` tab or from project mode still apply to that target when the LLM returns a structured execution decision.
+- Requests that need delayed execution create a project-scoped pending intent with a preserved target document. Follow-up prompts from the `IA` tab or from project mode still apply to that target when the LLM returns a structured execution decision.
 - Pending intent controls appear as a compact card above the prompt with the target, action, state, and structured actions for allowing web research, applying, cancelling, or opening the IA conversation.
 - Informational responses that do not modify a document appear in a compact dismissible bubble above the prompt and are also recorded in the `IA` tab.
 - Multi-step requests can be routed automatically to the `IA` tab as guided tasks. Task cards show steps, source intent, estimated limits, web-research requirements, and checkpoints before creating or modifying documents.
-- The assistant can create folders and Markdown documents only when the corresponding permissions are enabled in app settings. The document creation permission also allows AI document duplication and document moves; the folder creation permission also allows AI folder moves.
-- Delete operations always require a confirmation dialog listing the affected paths, even when the delete permission is enabled.
+- App settings permissions are the source of truth for AI actions. When the required permission is enabled, the assistant executes directly without asking for extra permission or showing a pre-approval step. When the permission is disabled, the assistant does not execute the action and tells the user it can be enabled in `Configuración de la app > IA`.
+- The assistant can edit Markdown documents only when `Editar documentos` is enabled. It can create folders and Markdown documents only when the corresponding permissions are enabled. The document creation permission also allows AI document duplication and document moves; the folder creation permission also allows AI folder moves. Delete operations execute only when the delete permission is enabled.
 - OpenAI is the first supported provider. API keys are configured in app settings, stored locally through backend credential storage, and never exposed to React after save.
-- App settings include web research, confirmation-before-apply, and max step/document/source/cost limits for agentic work. Task depth is selected from the prompt when using `Razonar`.
+- App settings include web research, action permissions, and max step/document/source/cost limits for agentic work. Task depth is selected from the prompt when using `Razonar`.
 - Project-wide RAG is opt-in. When enabled, Markdown documentation is indexed with a project manifest, incremental file hashing, OpenAI vector stores for semantic retrieval, and a local exact-search index for terms, acronyms, filenames, and code-like references. Responses should cite relevant paths when evidence comes from the project.
 - Prompts and document content must not be written to trace logs.
 
@@ -121,9 +121,10 @@ The modal requirements are:
 - The right side shows the options for the selected section.
 - `Servicios` is the first section and shows the health of local runtime services, including the backend endpoint, active/expected version, app data profile, and the latest diagnostic error.
 - In the installed desktop app, `Servicios` includes a manual backend restart action. The runtime also monitors the backend and attempts to restart it automatically when the health check fails.
-- `Apariencia` includes a language selector and an interface zoom control.
+- `Apariencia` includes a language selector, an interface zoom control, and Markdown compatibility controls.
 - The language selector persists the selected locale and applies it to the application document language.
 - The zoom control persists a percentage between 85% and 125% and applies it to the current interface immediately.
+- `Subrayado extendido` is enabled by default. It controls whether the editor may expose underline as an extended formatting option and must explain that underline is not standard Markdown and is saved as inline HTML such as `<u>texto</u>`.
 - `Trazas` includes a toggle for local trace logging.
 - When trace logging is enabled, KnowNext.ai writes user-visible errors and unhandled runtime failures to `knownext.log`.
 - Logs live in a dedicated `logs` folder under the KnowNext.ai app data directory.
@@ -131,6 +132,19 @@ The modal requirements are:
 - When trace logging is enabled, the settings panel shows an action to open that dedicated log folder in Windows Explorer.
 - Logging must not expose prompts, document contents, or provider secrets; entries are limited to timestamp, level, source, message, and technical detail.
 - If the local API is unavailable, the UI still shows the normal API error. Trace logging resumes when the backend is available and the setting remains enabled.
+
+## Editor Toolbar UX
+
+The editor toolbar must remain compact, fixed under the document tabs, and aligned with Markdown semantics rather than word-processor styling.
+
+- The title bar, document tabs, editor toolbar, AI prompt, and document status bar stay fixed; the document canvas is the only vertical scrolling region.
+- Block formatting uses a dropdown with `Texto normal` and headings `Título 1` through `Título 6` instead of separate heading buttons.
+- Inline formatting exposes bold, italic, strikethrough, optional extended underline, inline code, and clear formatting.
+- Structure tools include bullet lists, ordered lists, checklists, quotes, code blocks, and horizontal separators.
+- Insert tools include links, images, and a table picker.
+- Table insertion opens a compact 5 x 5 visual grid with the hovered size and a secondary custom-size action.
+- The toolbar degrades by priority on narrower widths: primary actions remain visible and less frequent actions move into compact format/structure/insert menus.
+- The editor must not add free font colors, arbitrary font sizes, free alignment, or other non-Markdown word-processor controls.
 
 ## Project Creation Flow UX
 

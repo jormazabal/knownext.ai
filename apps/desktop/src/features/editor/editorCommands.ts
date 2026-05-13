@@ -1,7 +1,8 @@
 import type { Editor } from "@milkdown/kit/core";
-import { commandsCtx, editorViewCtx } from "@milkdown/kit/core";
+import { commandsCtx, editorViewCtx, parserCtx } from "@milkdown/kit/core";
 import type { EditorState } from "@milkdown/kit/prose/state";
 import type { PluginKey } from "@milkdown/kit/prose/state";
+import { redoDepth, undoDepth } from "@milkdown/kit/prose/history";
 import {
   createCodeBlockCommand,
   insertHrCommand,
@@ -19,11 +20,13 @@ import {
 } from "@milkdown/kit/preset/commonmark";
 import { insertTableCommand, toggleStrikethroughCommand } from "@milkdown/kit/preset/gfm";
 import { redoCommand, undoCommand } from "@milkdown/kit/plugin/history";
-import type { MarkdownEditorAction, MarkdownEditorController, MarkdownEditorFormatState, MarkdownEditorSelection } from "./editorTypes";
+import type { MarkdownEditorAction, MarkdownEditorController, MarkdownEditorFormatState, MarkdownEditorHistoryState, MarkdownEditorSelection } from "./editorTypes";
+import { emptyMarkdownEditorHistoryState } from "./editorTypes";
+import { toggleUnderlineCommand } from "./underlineExtension";
 
 export function createMarkdownEditorController(editor: Editor, selectionFocusPluginKey?: PluginKey): MarkdownEditorController {
   return {
-    run(action) {
+    run(action, options) {
       return editor.action((ctx) => {
         const view = ctx.get(editorViewCtx);
         const commands = ctx.get(commandsCtx);
@@ -39,10 +42,18 @@ export function createMarkdownEditorController(editor: Editor, selectionFocusPlu
             return commands.call(wrapInHeadingCommand.key, 2);
           case "heading-3":
             return commands.call(wrapInHeadingCommand.key, 3);
+          case "heading-4":
+            return commands.call(wrapInHeadingCommand.key, 4);
+          case "heading-5":
+            return commands.call(wrapInHeadingCommand.key, 5);
+          case "heading-6":
+            return commands.call(wrapInHeadingCommand.key, 6);
           case "bold":
             return commands.call(toggleStrongCommand.key);
           case "italic":
             return commands.call(toggleEmphasisCommand.key);
+          case "underline":
+            return commands.call(toggleUnderlineCommand.key);
           case "strike":
             return commands.call(toggleStrikethroughCommand.key);
           case "clear-format":
@@ -54,9 +65,14 @@ export function createMarkdownEditorController(editor: Editor, selectionFocusPlu
           case "check-list":
             return toggleTaskList(ctx);
           case "table":
-            return commands.call(insertTableCommand.key, { row: 3, col: 4 });
-          case "code":
-            return commands.call(createCodeBlockCommand.key) || commands.call(toggleInlineCodeCommand.key);
+            return commands.call(insertTableCommand.key, {
+              row: clampTableDimension(options?.table?.rows ?? 3),
+              col: clampTableDimension(options?.table?.columns ?? 4),
+            });
+          case "inline-code":
+            return commands.call(toggleInlineCodeCommand.key);
+          case "code-block":
+            return commands.call(createCodeBlockCommand.key);
           case "link":
             return applyLink(ctx);
           case "image":
@@ -74,11 +90,40 @@ export function createMarkdownEditorController(editor: Editor, selectionFocusPlu
         }
       });
     },
+    replaceMarkdown(markdown, options) {
+      try {
+        return editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const parser = ctx.get(parserCtx);
+          const nextDocument = parser(markdown);
+          const { state } = view;
+
+          if (state.doc.eq(nextDocument)) return true;
+
+          const transaction = state.tr
+            .replaceWith(0, state.doc.content.size, nextDocument.content)
+            .setMeta("addToHistory", options?.addToHistory !== false)
+            .scrollIntoView();
+
+          view.dispatch(transaction);
+          return true;
+        });
+      } catch {
+        return false;
+      }
+    },
     getFormatState() {
       try {
         return editor.action((ctx) => readMarkdownEditorFormatState(ctx.get(editorViewCtx).state));
       } catch {
         return {};
+      }
+    },
+    getHistoryState() {
+      try {
+        return editor.action((ctx) => readMarkdownEditorHistoryState(ctx.get(editorViewCtx).state));
+      } catch {
+        return emptyMarkdownEditorHistoryState;
       }
     },
     setSelectionFocus(selection: MarkdownEditorSelection | null) {
@@ -113,15 +158,36 @@ export function readMarkdownEditorFormatState(state: EditorState): MarkdownEdito
     "heading-1": block.textBlockType === "heading" && block.headingLevel === 1,
     "heading-2": block.textBlockType === "heading" && block.headingLevel === 2,
     "heading-3": block.textBlockType === "heading" && block.headingLevel === 3,
+    "heading-4": block.textBlockType === "heading" && block.headingLevel === 4,
+    "heading-5": block.textBlockType === "heading" && block.headingLevel === 5,
+    "heading-6": block.textBlockType === "heading" && block.headingLevel === 6,
     bold: selectionHasMark(state, "strong"),
     italic: selectionHasMark(state, "emphasis"),
+    underline: selectionHasMark(state, "underline"),
     strike: selectionHasMark(state, "strike_through"),
-    code: selectionHasMark(state, "inlineCode") || block.codeBlock,
+    "inline-code": selectionHasMark(state, "inlineCode"),
+    "code-block": block.codeBlock,
     link: selectionHasMark(state, "link"),
     "bullet-list": inBulletList && !inTaskItem,
     "ordered-list": inOrderedList && !inTaskItem,
     "check-list": inTaskItem,
     quote: block.blockquote,
+  };
+}
+
+function clampTableDimension(value: number) {
+  return Math.min(Math.max(Math.floor(value) || 1, 1), 20);
+}
+
+export function readMarkdownEditorHistoryState(state: EditorState): MarkdownEditorHistoryState {
+  const undoableEvents = Number(undoDepth(state)) || 0;
+  const redoableEvents = Number(redoDepth(state)) || 0;
+
+  return {
+    canUndo: undoableEvents > 0,
+    canRedo: redoableEvents > 0,
+    undoDepth: undoableEvents,
+    redoDepth: redoableEvents,
   };
 }
 

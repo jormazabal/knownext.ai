@@ -16,6 +16,7 @@ class LayoutConfig(BaseModel):
 class AppearanceConfig(BaseModel):
     language: Literal["es", "en"] = "es"
     zoomPercent: int = 100
+    markdownExtendedUnderlineEnabled: bool = True
 
 
 class DiagnosticsConfig(BaseModel):

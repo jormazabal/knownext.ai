@@ -45,7 +45,8 @@ type TauriWindow = Window & {
   __TAURI_INTERNALS__?: unknown;
 };
 
-const BROWSER_SERVICE_STATUS_TIMEOUT_MS = 2500;
+const BROWSER_SERVICE_STATUS_TIMEOUT_MS = 5000;
+const BROWSER_SERVICE_STATUS_RETRY_DELAY_MS = 300;
 
 export async function getRuntimeServiceStatus() {
   if (isTauriRuntime()) {
@@ -82,7 +83,7 @@ async function getBrowserRuntimeServiceStatus(): Promise<RuntimeServicesStatus> 
   const endpoint = `${API_BASE_URL}/health`;
   const expectedProfile = expectedBackendProfile();
   try {
-    const response = await fetchWithTimeout(endpoint, BROWSER_SERVICE_STATUS_TIMEOUT_MS);
+    const response = await fetchHealthWithRetry(endpoint);
     if (!response.ok) throw new Error(`/health devolvió ${response.status} ${response.statusText}`);
     const health = (await response.json()) as BackendHealth;
     const isHealthy = health.status === "ok";
@@ -172,6 +173,23 @@ async function fetchWithTimeout(url: string, timeoutMs: number) {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   return fetch(url, { signal: controller.signal }).finally(() => window.clearTimeout(timeout));
+}
+
+async function fetchHealthWithRetry(endpoint: string) {
+  try {
+    return await fetchWithTimeout(endpoint, BROWSER_SERVICE_STATUS_TIMEOUT_MS);
+  } catch (firstError) {
+    await delay(BROWSER_SERVICE_STATUS_RETRY_DELAY_MS);
+    try {
+      return await fetchWithTimeout(endpoint, BROWSER_SERVICE_STATUS_TIMEOUT_MS);
+    } catch {
+      throw firstError;
+    }
+  }
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function isTauriRuntime() {

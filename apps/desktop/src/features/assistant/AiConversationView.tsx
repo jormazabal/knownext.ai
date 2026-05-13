@@ -142,7 +142,7 @@ function AiEventBubble({
           </span>
           <div className="min-w-0 flex-1">
             <p className="font-medium">{event.content}</p>
-            {event.path ? <p className="mt-1 truncate font-mono text-[10px] text-ink-secondary">{event.path}</p> : null}
+            {shouldRenderEventPath(event) ? <p className="mt-1 truncate font-mono text-[10px] text-ink-secondary">{event.path}</p> : null}
             {event.paths.length > 0 ? (
               <div className="mt-1 grid gap-1">
                 {event.paths.map((path) => (
@@ -157,6 +157,10 @@ function AiEventBubble({
       </div>
     </div>
   );
+}
+
+function shouldRenderEventPath(event: AiConversationEvent) {
+  return Boolean(event.path && !event.content.includes(event.path));
 }
 
 function getPendingActionEventId(events: AiConversationEvent[], pendingIntent: AiPendingIntent | null) {

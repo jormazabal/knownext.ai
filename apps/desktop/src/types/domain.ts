@@ -111,6 +111,7 @@ export type LayoutConfig = {
 export type AppearanceConfig = {
   language: "es" | "en";
   zoomPercent: number;
+  markdownExtendedUnderlineEnabled: boolean;
 };
 
 export type DiagnosticsConfig = {
@@ -118,6 +119,7 @@ export type DiagnosticsConfig = {
 };
 
 export type AiPermissionsConfig = {
+  editDocuments: boolean;
   createFolders: boolean;
   createDocuments: boolean;
   deleteDocumentsAndFolders: boolean;

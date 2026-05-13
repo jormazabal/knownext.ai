@@ -23,7 +23,7 @@ Backend code lives in `backend/app`.
 - `git_service`: local Git operations mediated by FastAPI; React never executes Git.
 - `github_service`: GitHub REST API access for repository discovery, cache hydration, history, and commit creation.
 - `version_service`: provider abstraction for local Git and GitHub API histories. Development fakes must not be exposed as production history.
-- `ai_service`: project-scoped AI orchestration for prompts, active document and containing-folder context, optional selected-text focus context, short recent conversation context, conversation events, structured interaction plans, document edit plans, project file operations including create, duplicate, move, and delete-confirmation flows, guided task plans, configured task limits, and RAG query context. It must only apply document changes from explicit structured document-change fields, never by inferring edits from conversational text.
+- `ai_service`: project-scoped AI orchestration for prompts, active document and containing-folder context, optional selected-text focus context, short recent conversation context, conversation events, structured interaction plans, document edit plans, permission-gated project file operations including create, duplicate, move, and delete flows, guided task plans, configured task limits, and RAG query context. It must only apply document changes from explicit structured document-change fields, never by inferring edits from conversational text.
 - `rag_service`: project RAG indexing boundary. It owns the local manifest, incremental Markdown scanning by hash, local SQLite FTS exact search, and OpenAI vector-store synchronization state.
 - `openai_service`: OpenAI Responses API, strict structured response parsing, and low-level vector-store/file operations. It is the only backend service that should call OpenAI directly.
 
@@ -34,7 +34,7 @@ The local API owns application metadata files. React must access them through AP
 - `projects.json`: known projects, local/cache folder paths, visual metadata, per-project storage/versioning/sync modes, optional GitHub repository metadata, and the active project id.
 - `config.json`: user-level application configuration such as sidebar and history panel widths, appearance settings, diagnostics settings, AI model/RAG/agentic-task limits, plus the open document tabs per project, active document id, and tab order.
 - `ai-conversations/*.json`: project-scoped AI conversation events, including user prompts, assistant responses, and file-operation events.
-- `ai-pending-deletes.json`: short-lived AI delete requests waiting for explicit UI confirmation.
+- `ai-pending-deletes.json`: legacy short-lived AI delete requests retained for backward-compatible confirmation cleanup.
 - `ai-rag-manifests/*.json`: project-scoped RAG manifests with vector store id, last indexed time, per-document `sha256`, local path, OpenAI file ids, indexing status, and failures. Global AI settings can enable RAG, but vector store state is tracked per project.
 - `ai-rag/*.sqlite3`: project-scoped SQLite FTS indexes for local exact keyword search. These indexes complement OpenAI File Search and are rebuilt from Markdown content during indexing.
 - `logs/knownext.log`: readable trace blocks for user-visible errors, runtime failures, backend startup/shutdown, and sidecar supervision. This folder is dedicated to logs; errors are always written and informational entries depend on diagnostics settings.
@@ -63,10 +63,10 @@ Project metadata remains in local JSON, while document tree and Markdown documen
 - History and AI endpoints must distinguish unavailable providers, empty results, and service errors with structured responses or documented status errors so the UI can show the correct empty or disabled state.
 - AI document edits must return updated Markdown to the frontend without writing to disk. The normal draft/save flow remains responsible for persistence.
 - AI interactions must separate conversational answer, document change, project operations, and task plan in the response contract. A provider answer alone is a conversation event; it is not document Markdown.
-- Agentic task plans can only be surfaced from reasoning-mode interactions and must respect web-research permission, confirmation-before-apply, and max step/document/source/cost limits before surfacing in the UI.
+- Agentic task plans can only be surfaced from reasoning-mode interactions and must respect web-research permission plus max step/document/source/cost limits before surfacing in the UI.
 - AI selected-text focus is an additive context item for resolving references in the current prompt. It must not replace `activeDocument.markdown`.
 - AI duplicate and move operations must return the refreshed tree and any affected document id/path mappings so open tabs and drafts can follow moved files.
-- AI delete requests must be represented as pending confirmations. Actual deletion only occurs through the confirmation endpoint.
+- AI operations must use configured app permissions as the execution gate. If a permission is enabled, the backend may execute the structured operation directly; if it is disabled, the backend returns a structured `permission_blocked` operation with guidance to change `Configuración de la app > IA`.
 
 ## Draft and Sync Contracts
 

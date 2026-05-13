@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import type { DocumentTreeAction } from "../features/documents/DocumentTree";
-import type { MarkdownEditorSelection } from "../features/editor/editorTypes";
+import type { MarkdownEditorExternalOperation, MarkdownEditorSelection } from "../features/editor/editorTypes";
 import type { AiPromptExecutionOptions } from "../features/assistant/AiPromptInput";
 import { CreateDocumentDialog } from "../features/documents/CreateDocumentDialog";
 import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
@@ -162,6 +162,7 @@ export function App() {
   const [aiBubble, setAiBubble] = useState<{ id: string; answer: string } | null>(null);
   const [aiAppliedChange, setAiAppliedChange] = useState<{ documentId: string; summary: string } | null>(null);
   const [aiSelectionFocus, setAiSelectionFocus] = useState<AiSelectionFocus | null>(null);
+  const [pendingEditorOperations, setPendingEditorOperations] = useState<MarkdownEditorExternalOperation[]>([]);
   const [tabsByProject, setTabsByProject] = useState<Record<string, ProjectTabsConfig>>({});
   const [openUtilityTabs, setOpenUtilityTabs] = useState<AppUtilityTabId[]>([]);
   const [activeUtilityTab, setActiveUtilityTab] = useState<AppUtilityTabId | null>(null);
@@ -177,6 +178,7 @@ export function App() {
   const [traceLogStatus, setTraceLogStatus] = useState<TraceLogStatus | null>(null);
   const [runtimeServicesStatus, setRuntimeServicesStatus] = useState<RuntimeServicesStatus | null>(null);
   const [runtimeServicesRefreshing, setRuntimeServicesRefreshing] = useState(false);
+  const runtimeServiceSilentFailuresRef = useRef(0);
   const [updateState, setUpdateState] = useState<UpdateState>("idle");
   const [availableUpdate, setAvailableUpdate] = useState<AvailableUpdate | null>(null);
   const [updateProgress, setUpdateProgress] = useState<UpdateDownloadProgress | null>(null);
@@ -622,6 +624,7 @@ export function App() {
   function closeTabNow(documentId: string) {
     const nextTabs = tabs.filter((tab) => tab.id !== documentId);
     setTabs(nextTabs);
+    setPendingEditorOperations((currentOperations) => currentOperations.filter((operation) => operation.documentId !== documentId));
     setDocumentSessions((currentSessions) => {
       const { [documentId]: _closedSession, ...nextSessions } = currentSessions;
       return nextSessions;
@@ -673,6 +676,22 @@ export function App() {
           saveState: "idle",
           document: session.document ? { ...session.document, wordCount: countWords(nextMarkdown) } : session.document,
         },
+      };
+    });
+  }
+
+  function handleEditorOperationApplied(operationId: string) {
+    setPendingEditorOperations((currentOperations) => currentOperations.filter((operation) => operation.id !== operationId));
+  }
+
+  function handleEditorOperationFailed(operation: MarkdownEditorExternalOperation) {
+    setPendingEditorOperations((currentOperations) => currentOperations.filter((currentOperation) => currentOperation.id !== operation.id));
+    setDocumentSessions((currentSessions) => {
+      const session = currentSessions[operation.documentId];
+      if (!session) return currentSessions;
+      return {
+        ...currentSessions,
+        [operation.documentId]: applyExternalMarkdownUpdate(session, operation.markdown),
       };
     });
   }
@@ -778,6 +797,12 @@ export function App() {
       if (aiChangedDocumentPath && isPathInDeletedScope(aiChangedDocumentPath, deletedPaths)) {
         setAiAppliedChange(null);
       }
+      setPendingEditorOperations((currentOperations) =>
+        currentOperations.filter((operation) => {
+          const documentPath = documentSessions[operation.documentId]?.document?.path;
+          return !documentPath || !isPathInDeletedScope(documentPath, deletedPaths);
+        }),
+      );
     }
 
     if (response.updatedDocument) {
@@ -801,21 +826,22 @@ export function App() {
             setAiAppliedChange({ documentId: updated.documentId, summary: updated.summary });
           })
           .catch((error) => showError(error, "No se pudo abrir el documento actualizado por IA.", { source: "app.aiUpdatedDocument" }));
-      }
-      if (documentSessions[updated.documentId]) {
+      } else {
         setAiAppliedChange({
           documentId: updated.documentId,
           summary: updated.summary,
         });
+        setPendingEditorOperations((currentOperations) => [
+          ...currentOperations,
+          {
+            id: `ai-${response.interactionId}-${updated.documentId}-${Date.now()}`,
+            documentId: updated.documentId,
+            markdown: updated.markdown,
+            source: "ai",
+            addToHistory: true,
+          },
+        ]);
       }
-      setDocumentSessions((currentSessions) => {
-        const session = currentSessions[updated.documentId];
-        if (!session) return currentSessions;
-        return {
-          ...currentSessions,
-          [updated.documentId]: applyExternalMarkdownUpdate(session, updated.markdown),
-        };
-      });
     }
 
     if (response.uiPlacement === "conversation_tab" || response.routeToAiTab) {
@@ -1454,7 +1480,14 @@ export function App() {
   async function refreshRuntimeServiceStatus(options?: { silent?: boolean }) {
     if (!options?.silent) setRuntimeServicesRefreshing(true);
     try {
-      setRuntimeServicesStatus(await getRuntimeServiceStatus());
+      const nextStatus = await getRuntimeServiceStatus();
+      setRuntimeServicesStatus((currentStatus) => {
+        if (options?.silent && shouldKeepCurrentRuntimeStatus(currentStatus, nextStatus, runtimeServiceSilentFailuresRef)) {
+          return currentStatus;
+        }
+        if (!hasUnavailableBackend(nextStatus)) runtimeServiceSilentFailuresRef.current = 0;
+        return nextStatus;
+      });
     } catch (error) {
       if (!options?.silent) showError(error, "No se pudo consultar el estado de los servicios.");
     } finally {
@@ -1673,6 +1706,7 @@ export function App() {
       <DesktopLayout
         appVersion={APP_VERSION}
         appLanguage={appearanceConfig.language}
+        markdownExtendedUnderlineEnabled={appearanceConfig.markdownExtendedUnderlineEnabled}
         authStatus={authStatus}
         projects={projects}
         activeProject={activeProject}
@@ -1693,6 +1727,7 @@ export function App() {
         activeDocument={activeSession?.document ?? null}
         activeMarkdown={activeSession?.markdown ?? ""}
         activeDocumentDirty={activeSession?.isDirty ?? false}
+        pendingEditorOperations={pendingEditorOperations}
         activeDocumentConflictStatus={activeSession?.conflictStatus ?? "none"}
         activeDocumentHasRecoveredDraft={activeSession?.hasRecoveredDraft ?? false}
         activeDocumentDiskChanged={activeSession?.diskChanged ?? false}
@@ -1743,6 +1778,8 @@ export function App() {
         onTreeContextAction={handleTreeContextAction}
         onMoveTreeNode={handleMoveTreeNodeDrop}
         onMarkdownChange={handleMarkdownChange}
+        onEditorOperationApplied={handleEditorOperationApplied}
+        onEditorOperationFailed={handleEditorOperationFailed}
         onDocumentSelectionChange={handleDocumentSelectionChange}
         onSave={() => void handleSave()}
         onKeepLocalVersion={() => void handleSave(activeDocumentId, true)}
@@ -2059,6 +2096,27 @@ export function App() {
       showError(error, "No se pudo descartar el borrador recuperable.");
     }
   }
+}
+
+function hasUnavailableBackend(status: RuntimeServicesStatus | null) {
+  return status?.services.some((service) => service.id === "backend" && service.status === "unavailable") ?? false;
+}
+
+function hasAvailableBackend(status: RuntimeServicesStatus | null) {
+  return status?.services.some((service) => service.id === "backend" && service.status !== "unavailable") ?? false;
+}
+
+function shouldKeepCurrentRuntimeStatus(
+  currentStatus: RuntimeServicesStatus | null,
+  nextStatus: RuntimeServicesStatus,
+  silentFailuresRef: MutableRefObject<number>,
+) {
+  if (!hasAvailableBackend(currentStatus) || !hasUnavailableBackend(nextStatus)) {
+    silentFailuresRef.current = 0;
+    return false;
+  }
+  silentFailuresRef.current += 1;
+  return silentFailuresRef.current < 3;
 }
 
 function getUniqueFolderName(nodes: DocumentTreeNode[]) {

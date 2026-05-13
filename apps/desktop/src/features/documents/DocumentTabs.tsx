@@ -14,7 +14,7 @@ export function DocumentTabs({ tabs, activeTabId, dirtyDocumentIds, onOpenNaviga
   const dirtyIds = new Set(dirtyDocumentIds);
 
   return (
-    <div className="flex h-9 items-end border-b border-line bg-white">
+    <div className="flex h-9 shrink-0 items-end overflow-y-hidden border-b border-line bg-white">
       {onOpenNavigation ? (
         <button
           className="grid h-full w-10 shrink-0 place-items-center border-r border-line text-ink-secondary hover:bg-brand-hover hover:text-brand-orange lg:hidden"
@@ -26,7 +26,7 @@ export function DocumentTabs({ tabs, activeTabId, dirtyDocumentIds, onOpenNaviga
           <PanelLeftOpen size={16} />
         </button>
       ) : null}
-      <div className="flex h-full min-w-0 flex-1 items-end overflow-x-auto">
+      <div className="flex h-full min-w-0 flex-1 items-end overflow-x-auto overflow-y-hidden">
         {tabs.map((tab) => {
           const active = tab.id === activeTabId;
           const dirty = tab.kind === "document" && dirtyIds.has(tab.id);

@@ -15,6 +15,7 @@ DEFAULT_LAYOUT = {
 DEFAULT_APPEARANCE = {
     "language": "es",
     "zoomPercent": 100,
+    "markdownExtendedUnderlineEnabled": True,
 }
 
 DEFAULT_DIAGNOSTICS = {
@@ -25,6 +26,7 @@ DEFAULT_AI = {
     "provider": "openai",
     "model": "gpt-5.4-mini",
     "permissions": {
+        "editDocuments": True,
         "createFolders": False,
         "createDocuments": False,
         "deleteDocumentsAndFolders": False,
@@ -106,6 +108,7 @@ def _normalize_appearance(value: object) -> dict:
     return {
         "language": language,
         "zoomPercent": min(max(zoom_percent, min_zoom), max_zoom),
+        "markdownExtendedUnderlineEnabled": bool(value.get("markdownExtendedUnderlineEnabled", DEFAULT_APPEARANCE["markdownExtendedUnderlineEnabled"])),
     }
 
 
@@ -148,6 +151,7 @@ def _normalize_ai(value: object) -> dict:
         "provider": "openai",
         "model": model,
         "permissions": {
+            "editDocuments": bool(permissions.get("editDocuments", DEFAULT_AI["permissions"]["editDocuments"])),
             "createFolders": bool(permissions.get("createFolders", DEFAULT_AI["permissions"]["createFolders"])),
             "createDocuments": bool(permissions.get("createDocuments", DEFAULT_AI["permissions"]["createDocuments"])),
             "deleteDocumentsAndFolders": bool(permissions.get("deleteDocumentsAndFolders", DEFAULT_AI["permissions"]["deleteDocumentsAndFolders"])),

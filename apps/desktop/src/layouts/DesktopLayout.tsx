@@ -8,10 +8,14 @@ import { DocumentTabs } from "../features/documents/DocumentTabs";
 import { DocumentTree, type DocumentTreeAction } from "../features/documents/DocumentTree";
 import { MarkdownToolbar } from "../features/editor/MarkdownToolbar";
 import {
+  emptyMarkdownEditorHistoryState,
   emptyMarkdownEditorFormatState,
   type MarkdownEditorAction,
+  type MarkdownEditorActionOptions,
   type MarkdownEditorController,
+  type MarkdownEditorExternalOperation,
   type MarkdownEditorFormatState,
+  type MarkdownEditorHistoryState,
   type MarkdownEditorSelection,
 } from "../features/editor/editorTypes";
 import { ProjectActions } from "../features/projects/ProjectActions";
@@ -38,6 +42,7 @@ const MarkdownEditor = lazy(() => import("../features/editor/MarkdownEditor").th
 type DesktopLayoutProps = {
   appVersion: string;
   appLanguage: AppearanceConfig["language"];
+  markdownExtendedUnderlineEnabled: boolean;
   authStatus: AuthStatus;
   projects: Project[];
   activeProject: Project | null;
@@ -58,6 +63,7 @@ type DesktopLayoutProps = {
   activeDocument: DocumentRecord | null;
   activeMarkdown: string;
   activeDocumentDirty: boolean;
+  pendingEditorOperations: MarkdownEditorExternalOperation[];
   activeDocumentConflictStatus: DocumentConflictStatus;
   activeDocumentHasRecoveredDraft: boolean;
   activeDocumentDiskChanged: boolean;
@@ -100,6 +106,8 @@ type DesktopLayoutProps = {
   onTreeContextAction: (action: DocumentTreeAction, node: DocumentTreeNode) => void;
   onMoveTreeNode: (node: DocumentTreeNode, targetFolderId: string | null) => void | Promise<void>;
   onMarkdownChange: (documentId: string, markdown: string) => void;
+  onEditorOperationApplied: (operationId: string) => void;
+  onEditorOperationFailed: (operation: MarkdownEditorExternalOperation) => void;
   onDocumentSelectionChange: (documentId: string, selection: MarkdownEditorSelection | null) => void;
   onSave: () => void;
   onKeepLocalVersion: () => void;
@@ -120,6 +128,7 @@ type EditorDocumentSession = {
 export function DesktopLayout(props: DesktopLayoutProps) {
   const [editorControllers, setEditorControllers] = useState<Record<string, MarkdownEditorController>>({});
   const [editorFormatState, setEditorFormatState] = useState<MarkdownEditorFormatState>(emptyMarkdownEditorFormatState);
+  const [editorHistoryStates, setEditorHistoryStates] = useState<Record<string, MarkdownEditorHistoryState>>({});
   const [navigationOpen, setNavigationOpen] = useState(false);
   const activeWorkspaceTab = props.tabs.find((tab) => tab.id === props.activeTabId);
   const hasOpenDocument = activeWorkspaceTab?.kind === "document" && Boolean(props.activeDocumentId);
@@ -127,6 +136,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   const hasAiConversation = activeWorkspaceTab?.kind === "ai-conversation";
   const hasOpenTab = hasOpenDocument || hasReleaseNotes || hasAiConversation;
   const activeEditorController = editorControllers[props.activeDocumentId] ?? null;
+  const activeEditorHistoryState = editorHistoryStates[props.activeDocumentId] ?? emptyMarkdownEditorHistoryState;
   const sidebar = useResizablePanelWidth({
     ...sidebarWidthConfig,
     width: props.layoutConfig.sidebarWidth,
@@ -140,12 +150,13 @@ export function DesktopLayout(props: DesktopLayoutProps) {
     onWidthChange: (historyWidth) => props.onLayoutConfigChange({ historyWidth }),
   });
 
-  const handleRunEditorAction = useCallback((action: MarkdownEditorAction) => {
+  const handleRunEditorAction = useCallback((action: MarkdownEditorAction, options?: MarkdownEditorActionOptions) => {
     if (!activeEditorController) return;
 
-    activeEditorController.run(action);
+    activeEditorController.run(action, options);
     setEditorFormatState((currentFormatState) => keepStableFormatState(currentFormatState, activeEditorController.getFormatState()));
-  }, [activeEditorController]);
+    setEditorHistoryStates((currentHistoryStates) => keepStableHistoryStateForDocument(currentHistoryStates, props.activeDocumentId, activeEditorController.getHistoryState()));
+  }, [activeEditorController, props.activeDocumentId]);
 
   const handleEditorControllerChange = useCallback((documentId: string, controller: MarkdownEditorController | null) => {
     setEditorControllers((currentControllers) => {
@@ -159,6 +170,15 @@ export function DesktopLayout(props: DesktopLayoutProps) {
       setEditorFormatState((currentFormatState) =>
         keepStableFormatState(currentFormatState, controller ? controller.getFormatState() : emptyMarkdownEditorFormatState),
       );
+      setEditorHistoryStates((currentHistoryStates) =>
+        keepStableHistoryStateForDocument(currentHistoryStates, documentId, controller ? controller.getHistoryState() : emptyMarkdownEditorHistoryState),
+      );
+    }
+    if (!controller) {
+      setEditorHistoryStates((currentHistoryStates) => {
+        const { [documentId]: _removedHistoryState, ...nextHistoryStates } = currentHistoryStates;
+        return nextHistoryStates;
+      });
     }
   }, [props.activeDocumentId]);
 
@@ -166,7 +186,39 @@ export function DesktopLayout(props: DesktopLayoutProps) {
     setEditorFormatState((currentFormatState) =>
       keepStableFormatState(currentFormatState, activeEditorController ? activeEditorController.getFormatState() : emptyMarkdownEditorFormatState),
     );
+    setEditorHistoryStates((currentHistoryStates) =>
+      keepStableHistoryStateForDocument(currentHistoryStates, props.activeDocumentId, activeEditorController ? activeEditorController.getHistoryState() : emptyMarkdownEditorHistoryState),
+    );
   }, [activeEditorController, props.activeDocumentId]);
+
+  useEffect(() => {
+    if (props.pendingEditorOperations.length === 0) return;
+
+    for (const operation of props.pendingEditorOperations) {
+      const controller = editorControllers[operation.documentId];
+      if (!controller) continue;
+
+      const applied = controller.replaceMarkdown(operation.markdown, { addToHistory: operation.addToHistory ?? true });
+      if (!applied) {
+        props.onEditorOperationFailed(operation);
+        continue;
+      }
+
+      setEditorHistoryStates((currentHistoryStates) =>
+        keepStableHistoryStateForDocument(currentHistoryStates, operation.documentId, controller.getHistoryState()),
+      );
+      if (operation.documentId === props.activeDocumentId) {
+        setEditorFormatState((currentFormatState) => keepStableFormatState(currentFormatState, controller.getFormatState()));
+      }
+      props.onEditorOperationApplied(operation.id);
+    }
+  }, [
+    editorControllers,
+    props.activeDocumentId,
+    props.onEditorOperationApplied,
+    props.onEditorOperationFailed,
+    props.pendingEditorOperations,
+  ]);
 
   useEffect(() => {
     if (!navigationOpen) return;
@@ -287,7 +339,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
           />
         </div>
 
-        <main className="flex min-w-0 flex-1 flex-col bg-white">
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white">
           {hasOpenTab ? (
             <>
           <DocumentTabs
@@ -304,7 +356,9 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 historyEnabled={props.historyEnabled}
                 historyDisabledReason={getHistoryDisabledReason(props.activeProject, props.authStatus, props.versioningStatus)}
                 editorReady={activeEditorController !== null}
+                extendedUnderlineEnabled={props.markdownExtendedUnderlineEnabled}
                 activeActions={editorFormatState}
+                editorHistoryState={activeEditorHistoryState}
                 onRunEditorAction={handleRunEditorAction}
                 onToggleHistory={props.onToggleHistory}
               />
@@ -312,7 +366,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             </>
           ) : null}
           <div className="flex min-h-0 flex-1">
-            <section className={["relative flex min-w-0 flex-1 flex-col", hasOpenTab ? "bg-white" : "bg-[#F7F7F7]"].join(" ")}>
+            <section className={["relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", hasOpenTab ? "bg-white" : "bg-[#F7F7F7]"].join(" ")}>
               {hasOpenTab ? (
                 <>
                   <div className={hasAiConversation ? "min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1 overflow-y-auto px-8 pb-24 pt-4"}>
@@ -351,6 +405,11 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                                   if (session.documentId === props.activeDocumentId) {
                                     setEditorFormatState((currentFormatState) => keepStableFormatState(currentFormatState, formatState));
                                   }
+                                }}
+                                onHistoryStateChange={(historyState) => {
+                                  setEditorHistoryStates((currentHistoryStates) =>
+                                    keepStableHistoryStateForDocument(currentHistoryStates, session.documentId, historyState),
+                                  );
                                 }}
                                 onSelectionChange={(selection) => props.onDocumentSelectionChange(session.documentId, selection)}
                                 selectionFocus={toMarkdownEditorSelection(props.aiSelectionFocus, session.documentId)}
@@ -549,6 +608,25 @@ function keepStableFormatState(currentFormatState: MarkdownEditorFormatState, ne
 
   const isSame = nextKeys.every((key) => currentFormatState[key] === nextFormatState[key]);
   return isSame ? currentFormatState : nextFormatState;
+}
+
+function keepStableHistoryStateForDocument(
+  currentHistoryStates: Record<string, MarkdownEditorHistoryState>,
+  documentId: string,
+  nextHistoryState: MarkdownEditorHistoryState,
+) {
+  const currentHistoryState = currentHistoryStates[documentId];
+  if (
+    currentHistoryState &&
+    currentHistoryState.canUndo === nextHistoryState.canUndo &&
+    currentHistoryState.canRedo === nextHistoryState.canRedo &&
+    currentHistoryState.undoDepth === nextHistoryState.undoDepth &&
+    currentHistoryState.redoDepth === nextHistoryState.redoDepth
+  ) {
+    return currentHistoryStates;
+  }
+
+  return { ...currentHistoryStates, [documentId]: nextHistoryState };
 }
 
 function getHistoryDisabledReason(project: Project | null, authStatus: AuthStatus, versioningStatus: ProjectVersioningStatus | null) {

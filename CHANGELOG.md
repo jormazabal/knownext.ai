@@ -2,6 +2,19 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.9.0 - 2026-05-13
+
+- Added a complete document undo/redo history model with independent enabled states, bounded in-memory history, and AI document edits recorded as undoable editor changes.
+- Made AI execution respect the configured permissions consistently: allowed edit operations run directly, while blocked operations explain which IA settings must be changed.
+- Improved AI proactivity for active-document requests so direct editing tasks avoid unnecessary clarification loops and use the active Markdown document as context.
+- Hardened local backend readiness, timeout handling, restart diagnostics, and frontend health checks for browser-development and installed-app flows.
+- Redesigned the Markdown editor toolbar with a block-format dropdown, H1-H6 support, grouped inline and structural actions, extended underline support, and responsive overflow menus.
+- Added a visual table insertion picker with grid selection and manual row/column fallback.
+- Added an Appearance setting to show or hide the extended underline action, with explanatory copy because underline is represented as HTML inside Markdown.
+- Fixed document tab/header layout so only the document canvas scrolls vertically while title, tabs, toolbar, prompt, and status surfaces remain stable.
+- Simplified AI modified-document bubbles by removing redundant path text already present in the title.
+- Updated product, frontend/backend architecture, AI interaction, manual validation, and release documentation for `0.9.0`.
+
 ## 0.8.0 - 2026-05-13
 
 - Added prompt-level AI response modes so everyday requests can stay in fast direct mode while reasoning tasks can opt into structured preflight and selectable depth.
