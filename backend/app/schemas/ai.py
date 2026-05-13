@@ -56,6 +56,7 @@ AiUsageSource = Literal["provider", "estimated", "unknown", "mixed"]
 
 
 class AiPermissions(BaseModel):
+    editDocuments: bool = True
     createFolders: bool = False
     createDocuments: bool = False
     deleteDocumentsAndFolders: bool = False

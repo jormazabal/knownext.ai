@@ -1,6 +1,7 @@
 import { Crepe } from "@milkdown/crepe";
 import { editorViewCtx, prosePluginsCtx } from "@milkdown/kit/core";
 import type { Ctx } from "@milkdown/kit/ctx";
+import { historyProviderConfig } from "@milkdown/kit/plugin/history";
 import { Plugin, PluginKey } from "@milkdown/kit/prose/state";
 import type { EditorState, Selection } from "@milkdown/kit/prose/state";
 import { Decoration, DecorationSet } from "@milkdown/kit/prose/view";
@@ -9,9 +10,16 @@ import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import { useEffect, useRef } from "react";
 import {
   createMarkdownEditorController,
+  readMarkdownEditorHistoryState,
   readMarkdownEditorFormatState,
 } from "./editorCommands";
-import type { MarkdownEditorController, MarkdownEditorFormatState } from "./editorTypes";
+import {
+  configureUnderlineMarkdownSerialization,
+  remarkUnderlineHtmlPlugin,
+  toggleUnderlineCommand,
+  underlineSchema,
+} from "./underlineExtension";
+import type { MarkdownEditorController, MarkdownEditorFormatState, MarkdownEditorHistoryState } from "./editorTypes";
 import type { MarkdownEditorSelection } from "./editorTypes";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
@@ -22,6 +30,7 @@ type MarkdownEditorProps = {
   onChange: (markdown: string) => void;
   onControllerChange: (controller: MarkdownEditorController | null) => void;
   onFormatStateChange: (formatState: MarkdownEditorFormatState) => void;
+  onHistoryStateChange: (historyState: MarkdownEditorHistoryState) => void;
   onSelectionChange: (selection: MarkdownEditorSelection | null) => void;
   selectionFocus?: MarkdownEditorSelection | null;
 };
@@ -36,17 +45,18 @@ export function MarkdownEditor(props: MarkdownEditorProps) {
 
 const selectionFocusPluginKey = new PluginKey<SelectionFocusRange | null>("knownext-selection-focus");
 
-function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStateChange, onSelectionChange, selectionFocus }: MarkdownEditorProps) {
+function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, selectionFocus }: MarkdownEditorProps) {
   const skipInitialUpdate = useRef(true);
   const lastMarkdownRef = useRef(markdown);
   const lastFormatStateRef = useRef<MarkdownEditorFormatState>({});
+  const lastHistoryStateRef = useRef<MarkdownEditorHistoryState>({ canUndo: false, canRedo: false, undoDepth: 0, redoDepth: 0 });
   const lastSelectionRef = useRef<MarkdownEditorSelection | null>(null);
-  const callbacksRef = useRef({ onChange, onControllerChange, onFormatStateChange, onSelectionChange });
+  const callbacksRef = useRef({ onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange });
   const controllerReadyRef = useRef(false);
 
   useEffect(() => {
-    callbacksRef.current = { onChange, onControllerChange, onFormatStateChange, onSelectionChange };
-  }, [onChange, onControllerChange, onFormatStateChange, onSelectionChange]);
+    callbacksRef.current = { onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange };
+  }, [onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange]);
 
   const { loading, get } = useEditor((root) => {
     const crepe = new Crepe({
@@ -60,8 +70,11 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
     });
 
     crepe.editor.config((ctx) => {
+      ctx.update(historyProviderConfig.key, (config) => ({ ...config, depth: 100, newGroupDelay: 500 }));
       ctx.update(prosePluginsCtx, (plugins) => [...plugins, createSelectionFocusPlugin()]);
+      configureUnderlineMarkdownSerialization(ctx);
     });
+    crepe.editor.use(remarkUnderlineHtmlPlugin).use(underlineSchema).use(toggleUnderlineCommand);
 
     crepe.on((listener) => {
       const syncFormatState = (ctx: Ctx, selection?: Selection) => {
@@ -76,6 +89,7 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
 
         const state = getStateForFormat(view.state, selection);
         notifyFormatState(readMarkdownEditorFormatState(state));
+        notifyHistoryState(readMarkdownEditorHistoryState(view.state));
         syncSelectionFocus(view, state);
       };
 
@@ -106,6 +120,7 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
       const controller = createMarkdownEditorController(editor, selectionFocusPluginKey);
       callbacksRef.current.onControllerChange(controller);
       notifyFormatState(controller.getFormatState());
+      notifyHistoryState(controller.getHistoryState());
     }
   }, [loading]);
 
@@ -136,6 +151,13 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
 
     lastFormatStateRef.current = formatState;
     callbacksRef.current.onFormatStateChange(formatState);
+  }
+
+  function notifyHistoryState(historyState: MarkdownEditorHistoryState) {
+    if (historyStatesAreEqual(lastHistoryStateRef.current, historyState)) return;
+
+    lastHistoryStateRef.current = historyState;
+    callbacksRef.current.onHistoryStateChange(historyState);
   }
 
   function syncSelectionFocus(view: EditorView, state: EditorState) {
@@ -217,6 +239,15 @@ function formatStatesAreEqual(currentFormatState: MarkdownEditorFormatState, nex
   if (currentKeys.length !== nextKeys.length) return false;
 
   return nextKeys.every((key) => currentFormatState[key] === nextFormatState[key]);
+}
+
+function historyStatesAreEqual(currentHistoryState: MarkdownEditorHistoryState, nextHistoryState: MarkdownEditorHistoryState) {
+  return (
+    currentHistoryState.canUndo === nextHistoryState.canUndo &&
+    currentHistoryState.canRedo === nextHistoryState.canRedo &&
+    currentHistoryState.undoDepth === nextHistoryState.undoDepth &&
+    currentHistoryState.redoDepth === nextHistoryState.redoDepth
+  );
 }
 
 function editorSelectionsAreEqual(currentSelection: MarkdownEditorSelection | null, nextSelection: MarkdownEditorSelection | null) {

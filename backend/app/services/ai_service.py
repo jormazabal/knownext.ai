@@ -131,6 +131,9 @@ class AiService:
         ai_config = config_service.get_config().ai
         selected_model = ai_config.model
         rag_context = rag_service.query_context(project_id, payload.prompt, ai_config.rag.enabled)
+        if payload.executionMode == "quick" and payload.intentAction is None and pending_intent is not None:
+            self._write_project_pending_intent(project_id, None)
+            pending_intent = None
         context = self._build_context(project_id, payload, rag_context, pending_intent)
         provider_usage: dict[str, Any] | None = None
         preflight: dict[str, Any] | None = None
@@ -171,6 +174,30 @@ class AiService:
                 plan["executionScope"] = preflight["executionScope"]
             if provider_sources:
                 plan["__webSources"] = provider_sources
+            if self._needs_document_change_repair(payload, plan):
+                repair_context = {
+                    **context,
+                    "contractRepair": {
+                        "reason": "El plan anterior clasifico una accion directa de edicion documental, pero no incluyo documentChange.",
+                        "required": "Si la peticion modifica el documento activo, devuelve documentChange con el Markdown completo actualizado. Si no era una edicion, devuelve un plan conversacional sin afirmar que has cambiado el documento.",
+                        "previousPlan": _safe_plan_for_context(plan),
+                    },
+                }
+                repaired_plan = openai_service.plan_interaction(
+                    payload.model_dump(),
+                    repair_context,
+                    rag_context,
+                    selected_model,
+                )
+                provider_usage = _merge_usage(provider_usage, self._pop_provider_usage(repaired_plan))
+                repaired_sources = self._pop_provider_sources(repaired_plan)
+                repaired_plan = self._normalize_provider_plan(repaired_plan)
+                if preflight is not None:
+                    repaired_plan["executionScope"] = preflight["executionScope"]
+                if repaired_sources:
+                    repaired_plan["__webSources"] = repaired_sources
+                if repaired_plan:
+                    plan = repaired_plan
         except OpenAiUnavailableError as error:
             return self._provider_error_response(project_id, interaction_id, user_event, str(error), unavailable=True)
         except Exception as error:
@@ -335,6 +362,17 @@ class AiService:
                     "sources": provider_sources,
                 }
         task = self._task_from_plan(plan.get("task"), ai_config)
+        permission_response = self._permission_policy_response(
+            project_id,
+            interaction_id,
+            payload,
+            plan,
+            task,
+            interaction_type,
+            confidence,
+        )
+        if permission_response is not None:
+            return permission_response
         if payload.executionMode == "quick" and (interaction_type == "agentic_task" or task is not None):
             answer = plan.get("answer") if isinstance(plan.get("answer"), str) and plan.get("answer").strip() else (
                 "Esta tarea necesita planificación. Cambia el modo del prompt a Razonar para analizarla antes de ejecutarla."
@@ -372,7 +410,18 @@ class AiService:
                 ui_placement = "document_bubble"
         route_to_ai_tab = ui_placement == "conversation_tab"
 
-        if intent_decision in {"create_intent", "update_intent", "needs_clarification"}:
+        if payload.executionMode == "quick" and intent_decision in {"create_intent", "update_intent", "needs_clarification"}:
+            if isinstance(plan.get("documentChange"), dict) or plan.get("operations"):
+                intent_decision = "execute_now"
+                plan["pendingIntent"] = None
+                needs_user_clarification = False
+            else:
+                intent_decision = None
+                plan["pendingIntent"] = None
+
+        if intent_decision == "needs_clarification":
+            plan["pendingIntent"] = None
+        elif intent_decision in {"create_intent", "update_intent"}:
             active_intent = self._intent_from_plan(project_id, payload, plan, active_intent)
             if active_intent is not None:
                 self._write_project_pending_intent(project_id, active_intent)
@@ -428,7 +477,7 @@ class AiService:
 
             if requested_type == "create_folder":
                 if not ai_config.permissions.createFolders:
-                    operation = self._blocked(project_id, "La IA no puede crear carpetas porque el permiso está desactivado.")
+                    operation = self._blocked(project_id, _permission_message("crear o mover carpetas"))
                     operations.append(operation)
                     events.append(self._operation_event(project_id, operation))
                     continue
@@ -443,7 +492,7 @@ class AiService:
 
             elif requested_type == "create_document":
                 if not ai_config.permissions.createDocuments:
-                    operation = self._blocked(project_id, "La IA no puede crear documentos porque el permiso está desactivado.")
+                    operation = self._blocked(project_id, _permission_message("crear, duplicar o mover documentos"))
                     operations.append(operation)
                     events.append(self._operation_event(project_id, operation))
                     continue
@@ -459,7 +508,7 @@ class AiService:
 
             elif requested_type == "duplicate_document":
                 if not ai_config.permissions.createDocuments:
-                    operation = self._blocked(project_id, "La IA no puede duplicar documentos porque el permiso de crear documentos está desactivado.")
+                    operation = self._blocked(project_id, _permission_message("crear, duplicar o mover documentos"))
                     operations.append(operation)
                     events.append(self._operation_event(project_id, operation))
                     continue
@@ -489,12 +538,12 @@ class AiService:
                 if node is None:
                     continue
                 if node.type == "folder" and not ai_config.permissions.createFolders:
-                    operation = self._blocked(project_id, "La IA no puede mover carpetas porque el permiso de crear carpetas está desactivado.")
+                    operation = self._blocked(project_id, _permission_message("crear o mover carpetas"))
                     operations.append(operation)
                     events.append(self._operation_event(project_id, operation))
                     continue
                 if node.type != "folder" and not ai_config.permissions.createDocuments:
-                    operation = self._blocked(project_id, "La IA no puede mover documentos porque el permiso de crear documentos está desactivado.")
+                    operation = self._blocked(project_id, _permission_message("crear, duplicar o mover documentos"))
                     operations.append(operation)
                     events.append(self._operation_event(project_id, operation))
                     continue
@@ -515,24 +564,25 @@ class AiService:
 
             elif requested_type == "delete_node":
                 if not ai_config.permissions.deleteDocumentsAndFolders:
-                    operation = self._blocked(project_id, "La IA no puede eliminar documentos o carpetas porque el permiso está desactivado.")
+                    operation = self._blocked(project_id, _permission_message("eliminar documentos o carpetas"))
                     operations.append(operation)
                     events.append(self._operation_event(project_id, operation))
                     continue
                 node_id = requested.get("nodeId") if isinstance(requested.get("nodeId"), str) else self._node_id_from_path(project_id, requested.get("path"))
                 if not node_id:
                     continue
-                pending_delete = self._create_pending_delete(project_id, [node_id])
+                result = project_service.delete_node(project_id, node_id)
+                tree = [tree_node.model_dump() for tree_node in result.tree]
+                affected_documents.extend(affected.model_dump() for affected in result.affectedDocuments)
+                path = self._path_from_node_id(node_id)
                 operation = AiOperation(
-                    type="delete_requested",
-                    status="pending",
-                    message="La IA solicita confirmación antes de eliminar.",
+                    type="node_deleted",
+                    message=f"Eliminado {path}",
                     nodeId=node_id,
-                    paths=pending_delete.paths,
-                    confirmationId=pending_delete.confirmationId,
+                    paths=[path],
                 )
                 operations.append(operation)
-                events.append(self._event(project_id, "delete_requested", "system", operation.message, paths=pending_delete.paths))
+                events.append(self._event(project_id, "node_deleted", "system", operation.message, paths=[path]))
 
         display = plan.get("display") if plan.get("display") in {"bubble", "conversation", "none"} else ("bubble" if answer else "conversation")
         if ui_placement == "conversation_tab" or pending_delete:
@@ -563,6 +613,78 @@ class AiService:
             tree=tree,
             affectedDocuments=affected_documents,
             requiresConfirmation=pending_delete,
+        )
+
+    def _permission_policy_response(
+        self,
+        project_id: str,
+        interaction_id: str,
+        payload: AiInteractionRequest,
+        plan: dict[str, Any],
+        task: AiAgenticTask | None,
+        interaction_type: str,
+        confidence: str,
+    ) -> AiInteractionResponse | None:
+        ai_config = config_service.get_config().ai
+        blocked_action: str | None = None
+
+        if isinstance(plan.get("documentChange"), dict) and not ai_config.permissions.editDocuments:
+            blocked_action = "editar documentos"
+
+        if blocked_action is None:
+            for requested in plan.get("operations", []):
+                if not isinstance(requested, dict):
+                    continue
+                requested_type = requested.get("type")
+                if requested_type == "create_folder" and not ai_config.permissions.createFolders:
+                    blocked_action = "crear o mover carpetas"
+                elif requested_type in {"create_document", "duplicate_document"} and not ai_config.permissions.createDocuments:
+                    blocked_action = "crear, duplicar o mover documentos"
+                elif requested_type == "move_node":
+                    node_id = self._node_id_from_request(project_id, requested, payload.documentId)
+                    node = _find_node(project_service.get_project_tree(project_id), node_id) if node_id else None
+                    is_folder = node is not None and node.type == "folder"
+                    if is_folder and not ai_config.permissions.createFolders:
+                        blocked_action = "crear o mover carpetas"
+                    elif not is_folder and not ai_config.permissions.createDocuments:
+                        blocked_action = "crear, duplicar o mover documentos"
+                elif requested_type == "delete_node" and not ai_config.permissions.deleteDocumentsAndFolders:
+                    blocked_action = "eliminar documentos o carpetas"
+                if blocked_action is not None:
+                    break
+
+        if blocked_action is None and self._plan_requires_web(plan, task) and not ai_config.agentic.webResearchEnabled:
+            blocked_action = "usar investigación web"
+
+        if blocked_action is None:
+            return None
+
+        message = _permission_message(blocked_action)
+        operation = self._blocked(project_id, message)
+        event = self._operation_event(project_id, operation)
+        return AiInteractionResponse(
+            interactionId=interaction_id,
+            status="blocked",
+            display="bubble",
+            uiPlacement="document_bubble",
+            interactionType=interaction_type if interaction_type in INTERACTION_TYPES else "chat",
+            confidence=confidence if confidence in CONFIDENCE_LEVELS else "medium",
+            executionMode=payload.executionMode,
+            reasoningDepth=payload.reasoningDepth,
+            executionScope="needs_permission",
+            routeToAiTab=False,
+            needsUserClarification=False,
+            answer=message,
+            conversationEvents=[event],
+            operations=[operation],
+        )
+
+    def _plan_requires_web(self, plan: dict[str, Any], task: AiAgenticTask | None) -> bool:
+        raw_intent = plan.get("pendingIntent") if isinstance(plan.get("pendingIntent"), dict) else {}
+        return bool(
+            plan.get("requiresWebResearch")
+            or raw_intent.get("requiresWebResearch")
+            or (task is not None and task.requiresWebResearch)
         )
 
     def _normalize_provider_plan(self, plan: dict[str, Any]) -> dict[str, Any]:
@@ -659,6 +781,15 @@ class AiService:
         sources = plan.pop("__webSources", None)
         return sources if isinstance(sources, list) else []
 
+    def _needs_document_change_repair(self, payload: AiInteractionRequest, plan: dict[str, Any]) -> bool:
+        if not payload.documentId or not isinstance(payload.activeMarkdown, str):
+            return False
+        if isinstance(plan.get("documentChange"), dict) or plan.get("operations") or plan.get("task"):
+            return False
+        if plan.get("intentDecision") in {"create_intent", "update_intent", "needs_clarification"}:
+            return False
+        return plan.get("interactionType") == "document_edit" or plan.get("executionScope") == "direct_action"
+
     def _task_from_plan(self, raw_task: object, ai_config: Any) -> AiAgenticTask | None:
         if not isinstance(raw_task, dict):
             return None
@@ -732,6 +863,14 @@ class AiService:
                 "rule": "quick never opens agentic task; reasoning may preflight then choose direct or agentic.",
             },
             "agentic": ai_config.agentic.model_dump(),
+            "permissions": {
+                "editDocuments": ai_config.permissions.editDocuments,
+                "createFolders": ai_config.permissions.createFolders,
+                "createDocuments": ai_config.permissions.createDocuments,
+                "deleteDocumentsAndFolders": ai_config.permissions.deleteDocumentsAndFolders,
+                "webResearchEnabled": ai_config.agentic.webResearchEnabled,
+                "policy": "Si el permiso necesario esta activo, ejecuta directamente. Si esta inactivo, devuelve una accion bloqueada; no pidas permiso en la conversacion.",
+            },
             "projectSearch": {
                 "exactMatches": (rag_context or {}).get("exactMatches", []),
             },
@@ -1287,6 +1426,36 @@ def _event_context_content(event: dict[str, Any]) -> str:
 def _intent_action_event_content(payload: AiInteractionRequest) -> str:
     action = payload.intentAction.type if payload.intentAction else "unknown"
     return f"Acción estructurada sobre intención IA: {action}"
+
+
+def _permission_message(action: str) -> str:
+    return (
+        f"No puedo {action} porque ese permiso está desactivado. "
+        "Puedes activarlo en Configuración de la app > IA."
+    )
+
+
+def _safe_plan_for_context(plan: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in plan.items()
+        if key
+        in {
+            "display",
+            "uiPlacement",
+            "interactionType",
+            "confidence",
+            "executionScope",
+            "intentDecision",
+            "routeToAiTab",
+            "needsUserClarification",
+            "answer",
+            "pendingIntent",
+            "documentChange",
+            "task",
+            "operations",
+        }
+    }
 
 
 def _truncate_text(value: str, max_chars: int) -> str:

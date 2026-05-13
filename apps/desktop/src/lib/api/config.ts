@@ -9,6 +9,7 @@ export const defaultLayoutConfig: LayoutConfig = {
 export const defaultAppearanceConfig: AppearanceConfig = {
   language: "es",
   zoomPercent: 100,
+  markdownExtendedUnderlineEnabled: true,
 };
 
 export const defaultDiagnosticsConfig: DiagnosticsConfig = {
@@ -19,6 +20,7 @@ export const defaultAiConfig: AiConfig = {
   provider: "openai",
   model: "gpt-5.4-mini",
   permissions: {
+    editDocuments: true,
     createFolders: false,
     createDocuments: false,
     deleteDocumentsAndFolders: false,
@@ -124,6 +126,7 @@ function normalizeAppearance(appearance: AppearanceConfig | undefined): Appearan
   return {
     language: appearance.language === "en" ? "en" : "es",
     zoomPercent: Math.min(Math.max(Number(appearance.zoomPercent) || 100, 85), 125),
+    markdownExtendedUnderlineEnabled: appearance.markdownExtendedUnderlineEnabled !== false,
   };
 }
 
@@ -140,6 +143,7 @@ function normalizeAi(ai: AiConfig | undefined): AiConfig | undefined {
     provider: "openai",
     model: normalizeAiModel(ai.model),
     permissions: {
+      editDocuments: ai.permissions?.editDocuments !== false,
       createFolders: Boolean(ai.permissions?.createFolders),
       createDocuments: Boolean(ai.permissions?.createDocuments),
       deleteDocumentsAndFolders: Boolean(ai.permissions?.deleteDocumentsAndFolders),

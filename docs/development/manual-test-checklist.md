@@ -84,7 +84,14 @@
 - [ ] Rename a folder or document from the tree and confirm the disk item is renamed.
 - [ ] Duplicate, move, and delete a document from the file context menu and confirm the disk changes.
 - [ ] Edit content in Milkdown visual mode.
+- [ ] Confirm the document tabs and editor toolbar stay fixed while only the document canvas scrolls vertically.
+- [ ] Confirm the toolbar uses a block-format dropdown with Texto normal and Título 1 through Título 6 instead of separate H1/H2/H3 buttons.
+- [ ] Confirm inline code and block code are separate toolbar actions.
+- [ ] Open Tabla and confirm the 5 x 5 visual picker shows the hovered size, can insert the selected size, and includes Personalizar.
+- [ ] Resize the window narrower and confirm the toolbar stays one row while lower-priority actions move into Formato, Estructura, or Insertar menus instead of causing vertical scroll.
 - [ ] Confirm the status changes to Cambios sin guardar.
+- [ ] Confirm Deshacer and Rehacer start disabled on a newly opened editor session.
+- [ ] Edit content, confirm only Deshacer becomes enabled, use Deshacer, then confirm only Rehacer becomes enabled until a new edit clears the redo state.
 - [ ] Use Deshacer and Rehacer in the active document and confirm they affect only that document.
 - [ ] Edit two open documents, switch between tabs, and confirm each tab keeps its own unsaved content and undo/redo history.
 - [ ] Save the document.
@@ -121,19 +128,19 @@
 - [ ] Submit a second AI prompt and confirm the previous bubble disappears before the new response is shown.
 - [ ] Submit an AI prompt and confirm a right-aligned waiting bubble appears above the prompt while the request is processing.
 - [ ] Confirm the prompt defaults to `Rápido`, shows a `Razonar` option, and only shows Ligero/Medio/Profundo when `Razonar` is selected.
-- [ ] In `Rápido`, ask for a simple file/document action and confirm it executes without opening the `IA` tab or creating an agentic task.
+- [ ] In `Rápido`, ask for a simple active-document edit and confirm it executes on the active document without opening the `IA` tab, creating an agentic task, or asking which document to edit.
 - [ ] In `Rápido`, ask for a broad multi-step task and confirm the app asks to switch to `Razonar` instead of opening an agentic task automatically.
-- [ ] In `Razonar`, choose a depth and confirm the task first classifies the work, then either executes directly, asks for permission/clarification, or opens `IA` only for long work.
+- [ ] In `Razonar`, choose a depth and confirm the task first classifies the work, then either executes directly, asks a real clarification, reports a disabled permission, or opens `IA` only for long work.
 - [ ] Select text in the active document, focus the AI prompt, and confirm the document selection remains visually highlighted while a removable selected-text context chip appears in the prompt.
 - [ ] Remove the selected-text context chip and confirm the prompt can be sent without selected-text focus.
 - [ ] Submit an AI edit for the active document and confirm Milkdown content changes, the document remains `Cambios sin guardar`, and the AI change notice appears as a floating prompt-area bubble with only the summary and an X close button.
-- [ ] From an active document, ask for a document-writing task that needs confirmation or web research and confirm a compact pending-intent card appears above the prompt without automatically switching to `IA`.
+- [ ] From an active document, disable `Editar documentos`, ask for a document edit, and confirm the AI does not modify the editor and tells the user the permission can be changed in `Configuración de la app > IA`.
 - [ ] In the pending-intent card, confirm Permitir búsqueda, Aplicar, and Cancelar perform structured actions and do not inject artificial user text into the conversation.
 - [ ] Continue the pending task from the `IA` tab or with no document active and confirm the preserved target document receives the unsaved buffer update.
 - [ ] Create a folder/document through AI with permissions enabled and confirm the tree refreshes and the created document opens when applicable.
 - [ ] Duplicate and move a document through AI with `Crear, duplicar y mover documentos` enabled and confirm the tree, opened tab, and disk path update correctly.
 - [ ] From a document inside a nested folder, ask AI to create a related document without naming a folder and confirm it is created in the active document's folder.
-- [ ] Request a delete through AI and confirm the confirmation modal lists paths, Cancelar keeps files intact, and Eliminar removes the selected nodes.
+- [ ] Request a delete through AI with delete permission disabled and confirm the action is blocked with guidance to `Configuración de la app > IA`; enable the permission and confirm the same structured delete removes the selected nodes directly.
 - [ ] Hover over the account area and confirm the account menu appears with GitHub login/logout, recoverable drafts, and update actions.
 - [ ] Hover or focus Uso IA from the account menu and confirm the usage layer appears next to the menu, grouped by model with interactions, tokens, estimated EUR cost, and a monthly total only when more than one model was used.
 - [ ] Open the account menu and click Configuración de la app.
@@ -145,11 +152,12 @@
 - [ ] Stop the packaged backend process and confirm KnowNext.ai records the failed health check and restart attempt in `knownext.log`.
 - [ ] In Apariencia, change Idioma and confirm the selection persists after closing and reopening the modal.
 - [ ] In Apariencia, adjust Zoom and confirm the interface scales immediately and persists after restart.
+- [ ] In Apariencia, confirm `Mostrar subrayado en el editor` is enabled by default, explains that underline is not standard Markdown and uses inline HTML, then disable and re-enable it to confirm the preference persists and the editor toolbar shows or hides `Subrayado` accordingly.
 - [ ] In IA, save an OpenAI API key and confirm only configured/preview status is shown, never the full key.
 - [ ] In the browser development build, save an OpenAI API key and confirm the request succeeds through the web backend profile without a CORS or `Failed to fetch` error.
 - [ ] In IA, confirm the model selector shows intelligence and cost indicators, select a different model, close/reopen settings, and confirm the selected model persists.
 - [ ] In IA settings, confirm task depth is not configured globally; enable Investigación web, adjust step/source/cost limits, close/reopen settings, and confirm the values persist.
-- [ ] In IA, toggle Crear y mover carpetas, Crear, duplicar y mover documentos, and Eliminar documentos y carpetas and confirm permissions persist.
+- [ ] In IA, toggle Editar documentos, Crear y mover carpetas, Crear, duplicar y mover documentos, and Eliminar documentos y carpetas and confirm permissions persist.
 - [ ] In IA, enable project indexing, run Reindexar ahora, and confirm status shows indexed document counts plus local exact-search readiness.
 - [ ] Edit one Markdown file after indexing, run Reindexar ahora again, and confirm the index updates without forcing a full project reset from the user's perspective.
 - [ ] Ask an IA question using an exact term, acronym, filename, or code-like token that exists in the project and confirm the answer references the expected path.

@@ -6,9 +6,10 @@ Use this guidance when changing KnowNext.ai AI flows.
 
 - Resolve user intent through structured state and an LLM `intentDecision`.
 - Use `executionMode=quick` by default. Quick mode must be one direct execution pass and must never return or route to `agentic_task`.
-- Use `executionMode=reasoning` only when the user selects Razonar in the prompt. Run a short structured preflight first, then execute direct, ask permission/clarification, or route to an agentic task.
+- Use `executionMode=reasoning` only when the user selects Razonar in the prompt. Run a short structured preflight first, then execute direct, ask a real clarification, block on missing configured permission, or route to an agentic task.
 - Treat `reasoningDepth` as a per-prompt budget signal: `light`, `medium`, or `deep`.
-- Persist a single active `AiPendingIntent` per project when a request needs confirmation, web permission, or later execution.
+- Persist a single active `AiPendingIntent` per project only when a request needs later execution.
+- Treat app IA settings as the permission source of truth. If the required permission is enabled, execute the structured change without conversational permission prompts; if it is disabled, return a blocked structured operation that tells the user to change `Configuración de la app > IA`.
 - Preserve `targetDocumentId` from the originating document until the intent is completed or cancelled, even if the user continues in the IA tab.
 - Execute document and project changes only from structured fields such as `documentChange`, `operations`, `pendingIntent`, and `intentAction`.
 - Treat `answer` as conversational UI text only. Never promote it into document content.
@@ -24,4 +25,4 @@ Use this guidance when changing KnowNext.ai AI flows.
 - Keep simple document tasks in-place with `uiPlacement=document_bubble`.
 - Keep the prompt default on `Rápido` to avoid unnecessary token use.
 - Use `uiPlacement=conversation_tab` only for longer agentic tasks: multiple documents, multiple sources, checkpoints, or extended web research.
-- Buttons on pending intent cards must send structured `intentAction` values: `allow_web_research`, `apply`, or `cancel`.
+- Buttons on pending intent cards must send structured `intentAction` values such as `apply` or `cancel`.

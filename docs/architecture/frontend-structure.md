@@ -44,7 +44,7 @@ Any remaining mock fixtures must be limited to tests, Storybook/demo surfaces, o
 - Recoverable orphan drafts are exposed through the account actions menu as a discrete maintenance panel.
 - The project AI conversation is a fixed first workspace tab whenever a project is active. It is project-scoped, not closable, and renders persisted conversation events from FastAPI.
 - AI edits update the in-memory document session and leave the document dirty; React does not write the AI result to disk until the normal document save flow runs.
-- AI project operations are dispatched through `src/lib/api/ai.ts`. Folder/document creation results refresh the backend tree, while delete requests require a confirmation modal before the backend deletes nodes.
+- AI project operations are dispatched through `src/lib/api/ai.ts`. Folder/document creation, move, duplicate, and delete results refresh the backend tree when app IA permissions allow them; blocked actions are rendered from structured `permission_blocked` responses.
 - The project assistant supports local files, local Git with manual sync, and GitHub API projects. Versioned modes remain disabled until GitHub login is active.
 - The history button is enabled only when the active project has a versioning provider and the user is authenticated.
 - UI components receive persisted values as props and dispatch user intent back to the root app state.
@@ -68,13 +68,14 @@ Any remaining mock fixtures must be limited to tests, Storybook/demo surfaces, o
 - Clamp left navigation and history widths so the central single-column editor keeps enough readable width.
 - In tablet/mobile layout, navigation and history become overlay drawers and the desktop separators are hidden.
 - Window resizing, panel resizing, and drawer transitions must not remount active document sessions or reset Milkdown undo/redo state.
+- The editor header structure is fixed: document tabs and Markdown toolbar do not own vertical scrolling; only the document canvas scrolls vertically.
 
 ## Application Settings Modal
 
 - `Configuración de la app` opens a modal settings surface over the current workspace.
 - The modal has a left settings list and a right detail pane.
 - `Servicios` is the first section and shows local backend health, version/profile details, last error, manual refresh, and backend restart where supported by the installed desktop runtime.
-- `Apariencia` owns the persisted locale and zoom percentage.
+- `Apariencia` owns the persisted locale, zoom percentage, and Markdown compatibility preferences such as extended underline visibility.
 - `IA` owns OpenAI provider status, action permissions, and project documentation indexing controls. RAG status from FastAPI includes semantic index state, indexed/failed document counts, and whether the local exact-search index is ready; React only renders those values and never indexes files itself.
 - `Trazas` owns the persisted trace logging toggle and the action to open the dedicated log folder.
 - The settings component remains visual: persistence goes through root app state and FastAPI config updates, while folder opening and log writes go through runtime/API helpers.
@@ -88,3 +89,11 @@ Any remaining mock fixtures must be limited to tests, Storybook/demo surfaces, o
 - Mode changes preserve form state already entered during the same dialog session.
 - Validation and loading states are scoped to the active mode and focus moves to the relevant field or step when an error blocks progression.
 - The same dialog supports both populated-project creation from `Nuevo proyecto` and first-project creation from `Añadir primer proyecto`.
+
+## Markdown Editor Toolbar
+
+- `MarkdownToolbar` renders grouped editor intent only; command execution stays in `editorCommands.ts`.
+- Block formats are selected through one dropdown from paragraph through heading level 6.
+- Table insertion passes explicit row/column options to the editor controller instead of relying on a fixed table size.
+- Extended underline visibility is driven by `AppearanceConfig.markdownExtendedUnderlineEnabled`; when enabled, Milkdown serializes underline as inline HTML.
+- Responsive compaction is CSS-driven so the toolbar remains one fixed row and moves lower-priority actions into menus instead of creating structural scroll.

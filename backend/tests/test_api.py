@@ -27,7 +27,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.8.0"
+    assert payload["version"] == "0.9.0"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -76,6 +76,20 @@ def test_ai_config_persists_selected_model() -> None:
     assert updated.json()["agentic"]["depth"] == "deep"
     assert updated.json()["agentic"]["webResearchEnabled"] is True
     assert client.get("/api/config/ai").json()["model"] == "gpt-5.5"
+
+
+def test_app_config_persists_extended_underline_appearance_option() -> None:
+    current = client.get("/api/config")
+    assert current.status_code == 200
+    payload = current.json()
+    assert payload["appearance"]["markdownExtendedUnderlineEnabled"] is True
+
+    payload["appearance"]["markdownExtendedUnderlineEnabled"] = False
+    updated = client.put("/api/config", json={"appearance": payload["appearance"]})
+
+    assert updated.status_code == 200
+    assert updated.json()["appearance"]["markdownExtendedUnderlineEnabled"] is False
+    assert client.get("/api/config").json()["appearance"]["markdownExtendedUnderlineEnabled"] is False
 
 
 def test_json_file_store_handles_concurrent_writes(tmp_path) -> None:
@@ -403,7 +417,7 @@ def test_config_writes_config_json(tmp_path) -> None:
     config = client.get("/api/config")
     assert config.status_code == 200
     assert config.json()["layout"]["sidebarWidth"] == 338
-    assert config.json()["appearance"] == {"language": "es", "zoomPercent": 100}
+    assert config.json()["appearance"] == {"language": "es", "zoomPercent": 100, "markdownExtendedUnderlineEnabled": True}
     assert config.json()["diagnostics"] == {"traceLoggingEnabled": False}
     assert config.json()["tabsByProject"] == {}
 
@@ -411,7 +425,7 @@ def test_config_writes_config_json(tmp_path) -> None:
         "/api/config",
         json={
             "layout": {"sidebarWidth": 420, "historyWidth": 360},
-            "appearance": {"language": "en", "zoomPercent": 115},
+            "appearance": {"language": "en", "zoomPercent": 115, "markdownExtendedUnderlineEnabled": False},
             "diagnostics": {"traceLoggingEnabled": True},
             "tabsByProject": {
                 "project-alpha": {
@@ -426,14 +440,14 @@ def test_config_writes_config_json(tmp_path) -> None:
     )
     assert updated.status_code == 200
     assert updated.json()["layout"] == {"sidebarWidth": 420, "historyWidth": 360}
-    assert updated.json()["appearance"] == {"language": "en", "zoomPercent": 115}
+    assert updated.json()["appearance"] == {"language": "en", "zoomPercent": 115, "markdownExtendedUnderlineEnabled": False}
     assert updated.json()["diagnostics"] == {"traceLoggingEnabled": True}
     assert updated.json()["tabsByProject"]["project-alpha"]["openTabs"][0]["id"] == "decision-tech"
 
     config_file = tmp_path / "config.json"
     persisted_config = json.loads(config_file.read_text(encoding="utf-8"))
     assert persisted_config["layout"] == {"sidebarWidth": 420, "historyWidth": 360}
-    assert persisted_config["appearance"] == {"language": "en", "zoomPercent": 115}
+    assert persisted_config["appearance"] == {"language": "en", "zoomPercent": 115, "markdownExtendedUnderlineEnabled": False}
     assert persisted_config["diagnostics"] == {"traceLoggingEnabled": True}
     assert persisted_config["tabsByProject"]["project-alpha"]["activeDocumentId"] == "decision-tech"
 
@@ -1492,6 +1506,208 @@ def test_ai_document_change_contract_updates_active_document_without_writing_dis
     assert document_path.read_text(encoding="utf-8") == "# Borrador\n"
 
 
+def test_ai_quick_document_edit_executes_without_pending_intent(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "ai-quick-edit-policy"
+    docs_root.mkdir()
+    document_path = docs_root / "quick.md"
+    document_path.write_text("Valor y vida.\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Quick Edit Policy", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    document_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+
+    def fake_plan(payload, context, rag, model=None):
+        return {
+            "display": "bubble",
+            "uiPlacement": "document_bubble",
+            "interactionType": "document_edit",
+            "confidence": "high",
+            "executionScope": "needs_clarification",
+            "intentDecision": "needs_clarification",
+            "routeToAiTab": False,
+            "needsUserClarification": True,
+            "answer": "Aplicaré el cambio en el documento activo.",
+            "pendingIntent": {
+                "id": None,
+                "originDocumentId": document_id,
+                "targetDocumentId": document_id,
+                "targetPath": "quick.md",
+                "goal": "Poner en negrita palabras con V.",
+                "proposedAction": "edit_document",
+                "requiresWebResearch": False,
+                "webResearchAllowed": False,
+                "status": "awaiting_decision",
+            },
+            "documentChange": {
+                "targetDocumentId": document_id,
+                "updatedMarkdown": "**Valor** y **vida**.\n",
+                "summary": "Palabras con V en negrita.",
+            },
+            "task": None,
+            "operations": [],
+        }
+
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+
+    response = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "documentId": document_id,
+            "prompt": "pon en negrita las palabras que comienzan con V",
+            "activeMarkdown": "Valor y vida.\n",
+            "executionMode": "quick",
+            "mode": "document",
+            "clientMessageId": "client-quick-edit-policy",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["updatedDocument"]["markdown"] == "**Valor** y **vida**.\n"
+    assert payload["pendingIntent"] is None
+    assert payload["pendingIntentStatus"] is None
+    assert payload["needsUserClarification"] is False
+    assert client.get(f"/api/projects/{project_id}/ai/pending-intent").status_code == 200
+    assert client.get(f"/api/projects/{project_id}/ai/pending-intent").json() is None
+    assert document_path.read_text(encoding="utf-8") == "Valor y vida.\n"
+
+
+def test_ai_repairs_document_edit_plan_without_document_change(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "ai-edit-repair"
+    docs_root.mkdir()
+    document_path = docs_root / "repair.md"
+    document_path.write_text("Valor y vida.\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Edit Repair", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    document_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+    calls: list[dict] = []
+
+    def fake_plan(payload, context, rag, model=None):
+        calls.append(context)
+        if len(calls) == 1:
+            return {
+                "display": "bubble",
+                "uiPlacement": "document_bubble",
+                "interactionType": "document_edit",
+                "confidence": "high",
+                "executionScope": "direct_action",
+                "intentDecision": None,
+                "routeToAiTab": False,
+                "needsUserClarification": False,
+                "answer": "He puesto en negrita las palabras que comienzan con V en el documento activo.",
+                "pendingIntent": None,
+                "documentChange": None,
+                "task": None,
+                "operations": [],
+            }
+        assert context["contractRepair"]["previousPlan"]["interactionType"] == "document_edit"
+        return {
+            "display": "bubble",
+            "uiPlacement": "document_bubble",
+            "interactionType": "document_edit",
+            "confidence": "high",
+            "executionScope": "direct_action",
+            "intentDecision": None,
+            "routeToAiTab": False,
+            "needsUserClarification": False,
+            "answer": "Palabras con V en negrita.",
+            "pendingIntent": None,
+            "documentChange": {
+                "targetDocumentId": document_id,
+                "updatedMarkdown": "**Valor** y **vida**.\n",
+                "summary": "Palabras con V en negrita.",
+            },
+            "task": None,
+            "operations": [],
+        }
+
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+
+    response = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "documentId": document_id,
+            "prompt": "pon en negrita las palabras que comienzan con V",
+            "activeMarkdown": "Valor y vida.\n",
+            "executionMode": "quick",
+            "mode": "document",
+            "clientMessageId": "client-edit-repair",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(calls) == 2
+    assert payload["updatedDocument"]["markdown"] == "**Valor** y **vida**.\n"
+    assert payload["needsUserClarification"] is False
+    assert payload["pendingIntent"] is None
+    assert document_path.read_text(encoding="utf-8") == "Valor y vida.\n"
+
+
+def test_ai_document_edit_respects_edit_permission(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "ai-edit-permission"
+    docs_root.mkdir()
+    document_path = docs_root / "blocked.md"
+    document_path.write_text("# Original\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Edit Permission", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    document_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+    config = client.get("/api/config/ai").json()
+    config["permissions"]["editDocuments"] = False
+    client.put("/api/config/ai", json=config)
+
+    def fake_plan(payload, context, rag, model=None):
+        return {
+            "display": "bubble",
+            "interactionType": "document_edit",
+            "confidence": "high",
+            "answer": "Cambio preparado.",
+            "documentChange": {"targetDocumentId": document_id, "updatedMarkdown": "# Updated\n", "summary": "Actualizado."},
+            "operations": [],
+        }
+
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+
+    response = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "documentId": document_id,
+            "prompt": "Actualiza el documento",
+            "activeMarkdown": "# Original\n",
+            "mode": "document",
+            "clientMessageId": "client-edit-permission",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "blocked"
+    assert payload["updatedDocument"] is None
+    assert payload["operations"][0]["type"] == "permission_blocked"
+    assert "Configuración de la app > IA" in payload["answer"]
+    assert document_path.read_text(encoding="utf-8") == "# Original\n"
+
+
 def test_ai_agentic_task_routes_to_conversation_with_limits(tmp_path, monkeypatch) -> None:
     from app.services.ai_service import openai_service
 
@@ -1509,6 +1725,7 @@ def test_ai_agentic_task_routes_to_conversation_with_limits(tmp_path, monkeypatc
     config["agentic"]["maxSteps"] = 2
     config["agentic"]["maxDocuments"] = 3
     config["agentic"]["maxEstimatedCostEur"] = 0.5
+    config["agentic"]["webResearchEnabled"] = True
     client.put("/api/config/ai", json=config)
 
     def fake_plan(payload, context, rag, model=None):
@@ -1583,7 +1800,7 @@ def test_ai_agentic_task_routes_to_conversation_with_limits(tmp_path, monkeypatc
     assert payload["task"]["maxEstimatedCostEur"] == 0.5
     assert payload["task"]["steps"][1]["title"] == "Buscar fuentes"
     assert len(payload["task"]["steps"]) == 2
-    assert payload["task"]["webResearchAllowed"] is False
+    assert payload["task"]["webResearchAllowed"] is True
     assert payload["conversationEvents"][-1]["type"] == "task_planned"
     assert payload["conversationEvents"][-1]["task"]["title"] == "Preparar resúmenes documentales"
 
@@ -1762,6 +1979,19 @@ def test_ai_pending_intent_preserves_target_document_across_project_conversation
     calls = 0
     captured_context: dict | None = None
 
+    def fake_preflight(payload, context, rag, model=None):
+        return {
+            "executionScope": "direct_action",
+            "uiPlacement": "document_bubble",
+            "confidence": "high",
+            "requiresWebResearch": False,
+            "estimatedSteps": 1,
+            "estimatedAffectedDocuments": 1,
+            "requiresCheckpoint": False,
+            "reason": "Preparar intención en modo razonamiento.",
+            "answer": None,
+        }
+
     def fake_plan(payload, context, rag, model=None):
         nonlocal calls, captured_context
         calls += 1
@@ -1806,6 +2036,7 @@ def test_ai_pending_intent_preserves_target_document_across_project_conversation
             "operations": [],
         }
 
+    monkeypatch.setattr(openai_service, "analyze_interaction", fake_preflight)
     monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
 
     first = client.post(
@@ -1816,6 +2047,7 @@ def test_ai_pending_intent_preserves_target_document_across_project_conversation
             "prompt": "Redacta una descripción externa",
             "activeMarkdown": "# Original\n",
             "clientContext": {"lastDocumentId": document_id, "lastDocumentPath": "pp.md"},
+            "executionMode": "reasoning",
             "mode": "document",
             "clientMessageId": "client-pending-1",
         },
@@ -1835,6 +2067,7 @@ def test_ai_pending_intent_preserves_target_document_across_project_conversation
             "prompt": "Continúa",
             "activeMarkdown": "",
             "clientContext": {"lastDocumentId": document_id, "lastDocumentPath": "pp.md"},
+            "executionMode": "reasoning",
             "mode": "project",
             "clientMessageId": "client-pending-2",
         },
@@ -1906,8 +2139,11 @@ def test_ai_pending_intent_requires_web_permission_without_applying_document_cha
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["pendingIntentStatus"] == "awaiting_web_permission"
-    assert payload["pendingIntent"]["requiresWebResearch"] is True
+    assert payload["status"] == "blocked"
+    assert payload["executionScope"] == "needs_permission"
+    assert payload["pendingIntent"] is None
+    assert payload["operations"][0]["type"] == "permission_blocked"
+    assert "Configuración de la app > IA" in payload["answer"]
     assert payload["updatedDocument"] is None
     assert document_path.read_text(encoding="utf-8") == "# Original\n"
 
@@ -2049,7 +2285,7 @@ def test_openai_web_search_tool_requires_agentic_web_and_permission() -> None:
     allowed_context = {"agentic": {"webResearchEnabled": True}, "pendingIntent": {"webResearchAllowed": True}}
 
     assert _web_search_enabled(payload, disabled_context) is False
-    assert _web_search_enabled(payload, blocked_context) is False
+    assert _web_search_enabled(payload, blocked_context) is True
     assert _web_search_enabled(payload, allowed_context) is True
 
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Activity, Brain, ChevronDown, Copy, Eye, FolderOpen, Gauge, Globe2, KeyRound, Languages, ListChecks, RefreshCw, RotateCcw, Server, ShieldCheck, Trash2, X } from "lucide-react";
+import { Activity, Brain, ChevronDown, Copy, Eye, FolderOpen, Gauge, Globe2, KeyRound, Languages, ListChecks, RefreshCw, RotateCcw, Server, ShieldCheck, Trash2, Underline, X } from "lucide-react";
 import type { AiConfigStatus, AiIndexStatusResponse, AiModelId, AppearanceConfig, DiagnosticsConfig } from "../../types/domain";
 import type { TraceLogStatus } from "../../lib/runtime/logging";
 import type { BackendPortConfig, RuntimeServicesStatus } from "../../lib/runtime/services";
@@ -502,6 +502,32 @@ function AppearanceSettings({
           <span>{text.zoomIncrease}</span>
         </div>
       </div>
+
+      <div className="rounded-md border border-line px-4 py-3">
+        <div className="mb-3 flex items-center gap-2">
+          <Underline size={14} className="text-brand-orange" />
+          <p className="text-[11px] font-semibold text-ink-primary">{text.markdownCompatibilityHeading}</p>
+        </div>
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-[11px] font-medium text-ink-primary">{text.underlineToggleLabel}</p>
+            <p className="mt-1 text-[11px] leading-5 text-ink-secondary">
+              {text.underlineToggleDescription}
+            </p>
+          </div>
+          <Switch
+            enabled={appearance.markdownExtendedUnderlineEnabled}
+            label={text.underlineToggleAria}
+            onToggle={() => onAppearanceChange({ markdownExtendedUnderlineEnabled: !appearance.markdownExtendedUnderlineEnabled })}
+          />
+        </div>
+        <div className="mt-3 rounded bg-panel px-3 py-2">
+          <div className="flex items-center gap-2">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand-orange" />
+            <p className="text-[10px] leading-4 text-ink-secondary">{text.markdownCompatibilityNote}</p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -689,6 +715,7 @@ function AiSettings({
 
       <section className="space-y-2">
         <p className="text-[11px] font-semibold text-ink-primary">{text.aiPermissionsHeading}</p>
+        <ToggleRow label={text.editDocuments} enabled={settingsAi.permissions.editDocuments} onToggle={() => updatePermissions({ editDocuments: !settingsAi.permissions.editDocuments })} />
         <ToggleRow label={text.createFolders} enabled={settingsAi.permissions.createFolders} onToggle={() => updatePermissions({ createFolders: !settingsAi.permissions.createFolders })} />
         <ToggleRow label={text.createDocuments} enabled={settingsAi.permissions.createDocuments} onToggle={() => updatePermissions({ createDocuments: !settingsAi.permissions.createDocuments })} />
         <ToggleRow
@@ -1015,6 +1042,11 @@ const settingsCopy = {
     zoomReduce: "Reducir",
     zoomNormal: "Normal",
     zoomIncrease: "Ampliar",
+    markdownCompatibilityHeading: "Compatibilidad Markdown",
+    markdownCompatibilityNote: "Mantén esta opción activa si el equipo acepta HTML inline en sus documentos Markdown. Desactívala si quieres limitar el editor a controles de Markdown estándar.",
+    underlineToggleLabel: "Mostrar subrayado en el editor",
+    underlineToggleDescription: "El subrayado no forma parte de Markdown estándar y se guardará como HTML inline con <u>texto</u>.",
+    underlineToggleAria: "Activar subrayado extendido",
     aiHeading: "IA documental",
     aiDescription: "Configura OpenAI, permisos de acciones y consulta semántica del proyecto.",
     aiConfigured: "Clave configurada",
@@ -1065,6 +1097,7 @@ const settingsCopy = {
       },
     },
     aiPermissionsHeading: "Permisos de acciones",
+    editDocuments: "Editar documentos",
     createFolders: "Crear y mover carpetas",
     createDocuments: "Crear, duplicar y mover documentos",
     deleteDocuments: "Eliminar documentos y carpetas",
@@ -1155,6 +1188,11 @@ const settingsCopy = {
     zoomReduce: "Reduce",
     zoomNormal: "Normal",
     zoomIncrease: "Increase",
+    markdownCompatibilityHeading: "Markdown compatibility",
+    markdownCompatibilityNote: "Keep this option enabled if the team accepts inline HTML in Markdown documents. Disable it to keep the editor limited to standard Markdown controls.",
+    underlineToggleLabel: "Show underline in the editor",
+    underlineToggleDescription: "Underline is not part of standard Markdown and will be saved as inline HTML with <u>text</u>.",
+    underlineToggleAria: "Enable extended underline",
     aiHeading: "Documentation AI",
     aiDescription: "Configure OpenAI, action permissions, and semantic project search.",
     aiConfigured: "Key configured",
@@ -1205,6 +1243,7 @@ const settingsCopy = {
       },
     },
     aiPermissionsHeading: "Action permissions",
+    editDocuments: "Edit documents",
     createFolders: "Create and move folders",
     createDocuments: "Create, duplicate, and move documents",
     deleteDocuments: "Delete documents and folders",

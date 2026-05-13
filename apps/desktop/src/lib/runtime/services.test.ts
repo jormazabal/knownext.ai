@@ -22,7 +22,7 @@ describe("runtime services", () => {
     );
 
     const statusPromise = getRuntimeServiceStatus();
-    await vi.advanceTimersByTimeAsync(2500);
+    await vi.advanceTimersByTimeAsync(10_300);
     const status = await statusPromise;
 
     expect(status.services[0]).toMatchObject({

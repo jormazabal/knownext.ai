@@ -230,6 +230,29 @@ describe("AppSettingsDialog", () => {
     expect(onAiChange).toHaveBeenCalledWith(expect.objectContaining({ model: "gpt-5.5" }));
   });
 
+  it("allows disabling the extended Markdown underline control from appearance settings", () => {
+    const onAppearanceChange = vi.fn();
+
+    render(
+      <AppSettingsDialog
+        {...baseProps}
+        runtimeServicesStatus={null}
+        onAppearanceChange={onAppearanceChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Apariencia"));
+
+    expect(screen.getByText("Compatibilidad Markdown")).toBeInTheDocument();
+    expect(screen.getByText("Mostrar subrayado en el editor")).toBeInTheDocument();
+    expect(screen.getByText(/no forma parte de Markdown estándar/i)).toBeInTheDocument();
+    expect(screen.getByText(/limitar el editor a controles de Markdown estándar/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("switch", { name: "Activar subrayado extendido" }));
+
+    expect(onAppearanceChange).toHaveBeenCalledWith({ markdownExtendedUnderlineEnabled: false });
+  });
+
   it("shows agentic limits and web research controls", () => {
     const onAiChange = vi.fn();
 

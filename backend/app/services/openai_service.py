@@ -91,7 +91,13 @@ class OpenAiService:
                         "Eres el asistente documental de KnowNext.ai. Devuelve solo JSON válido con el esquema pedido. "
                         "Separa siempre la respuesta conversacional de los cambios aplicables. "
                         "Respeta request.executionMode: en quick nunca devuelvas interactionType=agentic_task, task ni uiPlacement=conversation_tab. "
-                        "En quick resuelve en una sola ejecución directa o pide una aclaración breve; si requiere trabajo largo, responde que el usuario debe cambiar a Razonar. "
+                        "En quick resuelve en una sola ejecución directa; si requiere trabajo largo, responde que el usuario debe cambiar a Razonar. "
+                        "Usa context.permissions como fuente de verdad: si el permiso necesario está activo, ejecuta con documentChange u operations sin pedir confirmación; "
+                        "si está inactivo, devuelve el plan de la acción bloqueada para que la aplicación informe del permiso, no pidas permiso conversacional. "
+                        "Cuando hay context.activeDocument y el usuario pide editar o formatear texto, el destino por defecto es el documento activo. "
+                        "No preguntes si se refiere al documento activo salvo que no exista documento activo o haya una contradicción real. "
+                        "Si context.contractRepair existe, el plan anterior incumplió el contrato: corrígelo. "
+                        "Para una edición del documento activo debes devolver documentChange.updatedMarkdown con el Markdown completo resultante; no afirmes cambios en answer sin documentChange. "
                         "En reasoning puedes usar context.reasoningPreflight para decidir si la ejecución es directa, permiso, aclaración o tarea agentica. "
                         "Todas las decisiones de intención deben ir en intentDecision y pendingIntent; no dependas de palabras concretas, idioma, regex ni frases fijas. "
                         "Si context.pendingIntent existe, resuelve semánticamente el prompt o intentAction contra esa intención estructurada. "
@@ -115,8 +121,8 @@ class OpenAiService:
                         "Si el usuario pide crear documentos relacionados con el documento activo y no indica ubicación, usa context.activeDocumentFolder.path como parentPath. "
                         "Mover documentos y duplicar documentos dependen del permiso de crear documentos; mover carpetas depende del permiso de crear carpetas. "
                         "El historial reciente nunca sustituye una confirmación explícita para borrar. "
-                        "Si la petición nace desde un documento y requiere investigación o confirmación antes de escribir, crea o actualiza pendingIntent con ese documento como targetDocumentId. "
-                        "Si la tarea requiere web y context.agentic.webResearchEnabled no está activo o la intención no tiene webResearchAllowed, usa pendingIntent.status=awaiting_web_permission. "
+                        "No crees pendingIntent para ediciones simples del documento activo ni para acciones cuyo permiso ya está concedido. "
+                        "Si la tarea requiere web y context.permissions.webResearchEnabled no está activo, no pidas permiso puntual: devuelve una respuesta bloqueable. "
                         "Usa uiPlacement=document_bubble para tareas documentales simples y conversation_tab solo para tareas largas, múltiples documentos, múltiples fuentes o checkpoints. "
                         "Si la petición parece requerir varios pasos, investigación, decisiones intermedias o navegación por muchas fuentes, usa interactionType=agentic_task, "
                         "uiPlacement=conversation_tab y task con pasos claros. Si requiere web y context.agentic.webResearchEnabled no está activo, marca requiresWebResearch=true, "
@@ -323,13 +329,7 @@ def _usage_int(container: Any, key: str) -> int:
 
 def _web_search_enabled(payload: dict[str, Any], context: dict[str, Any]) -> bool:
     agentic = context.get("agentic") if isinstance(context.get("agentic"), dict) else {}
-    pending_intent = context.get("pendingIntent") if isinstance(context.get("pendingIntent"), dict) else {}
-    intent_action = payload.get("intentAction") if isinstance(payload.get("intentAction"), dict) else {}
-    if not agentic.get("webResearchEnabled"):
-        return False
-    if pending_intent.get("webResearchAllowed") or intent_action.get("type") == "allow_web_research":
-        return True
-    return bool(payload.get("allowWebResearch"))
+    return bool(agentic.get("webResearchEnabled"))
 
 
 def _extract_web_sources(response: Any) -> list[dict[str, str | None]]:

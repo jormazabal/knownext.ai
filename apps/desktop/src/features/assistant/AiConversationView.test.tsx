@@ -62,6 +62,32 @@ describe("AiConversationView", () => {
     expect(screen.getByRole("button", { name: "Aplicar" })).toBeInTheDocument();
     expect(screen.queryByText("Redactar descripción en el documento activo.")).not.toBeInTheDocument();
   });
+
+  it("does not repeat the document path when the event title already includes it", () => {
+    render(
+      <AiConversationView
+        project={project}
+        config={config}
+        indexStatus={null}
+        pendingIntent={null}
+        onIntentAction={vi.fn()}
+        events={[
+          conversationEvent({
+            id: "system-1",
+            role: "system",
+            type: "document_modified",
+            content: "Documento modificado: Nueva carpeta/Patata/pp.md",
+            path: "Nueva carpeta/Patata/pp.md",
+            summary: "Se actualizó el documento activo.",
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Documento modificado: Nueva carpeta/Patata/pp.md")).toBeInTheDocument();
+    expect(screen.getByText("Se actualizó el documento activo.")).toBeInTheDocument();
+    expect(screen.queryByText("Nueva carpeta/Patata/pp.md", { exact: true })).not.toBeInTheDocument();
+  });
 });
 
 function conversationEvent(overrides: Partial<AiConversationEvent>): AiConversationEvent {
@@ -99,6 +125,7 @@ const config: AiConfigStatus = {
   provider: "openai",
   model: "gpt-5.4-mini",
   permissions: {
+    editDocuments: true,
     createFolders: true,
     createDocuments: true,
     deleteDocumentsAndFolders: false,
