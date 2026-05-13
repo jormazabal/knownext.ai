@@ -56,6 +56,8 @@ Layout width values in `config.json` are user preferences. Services should prese
 
 Project metadata remains in local JSON, while document tree and Markdown document operations are mediated by backend services. Unsaved document content is mediated by `draft_service` until the user explicitly saves or versions it. Routers should stay thin and call services when contracts evolve.
 
+Image assets are normal files inside the project folder. `filesystem_service` exposes supported images in the tree, `asset_service` owns upload/metadata/content/usage/image-reference contracts, and `asset_reference_service` parses and rewrites Markdown image links. Moving or renaming images rewrites matching Markdown references across the project; moving Markdown documents rewrites that document's relative image links.
+
 ## Empty And Unavailable Data Contracts
 
 - `GET /api/projects` may return an empty array. This is a valid loaded state and must not be replaced by seeded projects unless an explicit onboarding/import action creates them.
@@ -68,6 +70,7 @@ Project metadata remains in local JSON, while document tree and Markdown documen
 - Agentic task plans can only be surfaced from reasoning-mode interactions and must respect web-research permission plus max step/document/source/cost limits before surfacing in the UI.
 - AI selected-text focus is an additive context item for resolving references in the current prompt. It must not replace `activeDocument.markdown`.
 - AI prompt context source ids are resolved by FastAPI at interaction time. If a source is expired, missing, processing, or unreadable, it must not be silently treated as active context; responses return the current source list and expired ids so the prompt can stay visually truthful.
+- Project image context sources are resolved by FastAPI and passed to OpenAI Responses as image inputs only when vision is enabled. The configured vision model is used for interactions with explicit image context, and image indexing stores local visual descriptions generated through the configured vision model/detail.
 - AI duplicate and move operations must return the refreshed tree and any affected document id/path mappings so open tabs and drafts can follow moved files.
 - AI operations must use configured app permissions as the execution gate. If a permission is enabled, the backend may execute the structured operation directly; if it is disabled, the backend returns a structured `permission_blocked` operation with guidance to change `Configuración de la app > IA`.
 

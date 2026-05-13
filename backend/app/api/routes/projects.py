@@ -1,9 +1,16 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, File, UploadFile
 
 from app.schemas.project import (
     CreateDocumentRequest,
     CreateFolderRequest,
     FileOperationResult,
+    AssetImportResponse,
+    AssetMetadata,
+    AssetMoveImpact,
+    AssetUsageResponse,
+    DocumentMoveImpact,
+    InsertImageReferenceRequest,
+    InsertImageReferenceResponse,
     MoveNodeRequest,
     Project,
     ProjectCapabilities,
@@ -13,6 +20,7 @@ from app.schemas.project import (
     TreeNode,
 )
 from app.schemas.github import SyncResponse
+from app.services.asset_service import asset_service
 from app.services.project_service import project_service
 
 router = APIRouter()
@@ -101,3 +109,48 @@ def duplicate_document(project_id: str, document_id: str) -> FileOperationResult
 @router.patch("/projects/{project_id}/nodes/{node_id}/move", response_model=FileOperationResult)
 def move_node(project_id: str, node_id: str, payload: MoveNodeRequest) -> FileOperationResult:
     return project_service.move_node(project_id, node_id, payload)
+
+
+@router.post("/projects/{project_id}/assets/images", response_model=AssetImportResponse)
+async def import_image_asset(project_id: str, parentId: str | None = None, file: UploadFile = File(...)) -> AssetImportResponse:
+    return await asset_service.import_image(project_id, parentId, file)
+
+
+@router.get("/projects/{project_id}/assets/{asset_id}", response_model=AssetMetadata)
+def get_asset(project_id: str, asset_id: str) -> AssetMetadata:
+    return asset_service.get_asset(project_id, asset_id)
+
+
+@router.get("/projects/{project_id}/assets/{asset_id}/content")
+def get_asset_content(project_id: str, asset_id: str):
+    return asset_service.get_content_response(project_id, asset_id)
+
+
+@router.get("/projects/{project_id}/assets/{asset_id}/usage", response_model=AssetUsageResponse)
+def get_asset_usage(project_id: str, asset_id: str) -> AssetUsageResponse:
+    return asset_service.usage(project_id, asset_id)
+
+
+@router.get("/projects/{project_id}/assets/{asset_id}/move-impact", response_model=AssetMoveImpact)
+def get_asset_move_impact(project_id: str, asset_id: str) -> AssetMoveImpact:
+    return asset_service.move_impact(project_id, asset_id)
+
+
+@router.get("/projects/{project_id}/documents/{document_id}/move-impact", response_model=DocumentMoveImpact)
+def get_document_move_impact(project_id: str, document_id: str) -> DocumentMoveImpact:
+    return asset_service.document_move_impact(project_id, document_id)
+
+
+@router.post("/projects/{project_id}/documents/{document_id}/image-reference", response_model=InsertImageReferenceResponse)
+def build_image_reference(project_id: str, document_id: str, payload: InsertImageReferenceRequest) -> InsertImageReferenceResponse:
+    return asset_service.build_markdown_reference(project_id, document_id, payload.assetId, payload.altText)
+
+
+@router.post("/projects/{project_id}/assets/reindex-images")
+def reindex_images(project_id: str) -> dict:
+    return asset_service.reindex_visual_assets(project_id)
+
+
+@router.get("/projects/{project_id}/references/broken")
+def list_broken_references(project_id: str) -> list:
+    return asset_service.list_broken_references(project_id)

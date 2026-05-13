@@ -155,6 +155,31 @@ class OpenAiService:
             parsed["__webSources"] = sources
         return parsed
 
+    def describe_image(self, image_data_url: str, prompt: str, model: str = DEFAULT_OPENAI_MODEL, detail: str = "auto") -> str:
+        api_key = credential_service.get_openai_key()
+        if not api_key:
+            raise OpenAiUnavailableError("OpenAI API key is not configured")
+
+        try:
+            from openai import OpenAI
+        except ImportError as error:
+            raise OpenAiUnavailableError("OpenAI SDK is not installed") from error
+
+        client = OpenAI(api_key=api_key)
+        response = client.responses.create(
+            model=model or DEFAULT_OPENAI_MODEL,
+            input=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": prompt},
+                        {"type": "input_image", "image_url": image_data_url, "detail": detail or "auto"},
+                    ],
+                }
+            ],
+        )
+        return (getattr(response, "output_text", None) or _extract_output_text(response)).strip()
+
     def create_vector_store(self, project_id: str) -> str:
         api_key = credential_service.get_openai_key()
         if not api_key:
@@ -356,6 +381,12 @@ def _context_without_image_data(context: dict[str, Any]) -> dict[str, Any]:
 
 
 def _image_inputs_from_context(context: dict[str, Any]) -> list[dict[str, str]]:
+    vision = context.get("vision") if isinstance(context.get("vision"), dict) else {}
+    if vision and vision.get("enabled") is False:
+        return []
+    detail = str(vision.get("detail") or "auto") if isinstance(vision, dict) else "auto"
+    if detail not in {"auto", "low", "high"}:
+        detail = "auto"
     explicit_sources = context.get("explicitSources") if isinstance(context.get("explicitSources"), dict) else {}
     sources = explicit_sources.get("sources") if isinstance(explicit_sources, dict) else []
     image_inputs: list[dict[str, str]] = []
@@ -366,7 +397,7 @@ def _image_inputs_from_context(context: dict[str, Any]) -> list[dict[str, str]]:
             continue
         image_url = source.get("imageDataUrl")
         if isinstance(image_url, str) and image_url.startswith("data:image/"):
-            image_inputs.append({"type": "input_image", "image_url": image_url})
+            image_inputs.append({"type": "input_image", "image_url": image_url, "detail": detail})
     return image_inputs
 
 

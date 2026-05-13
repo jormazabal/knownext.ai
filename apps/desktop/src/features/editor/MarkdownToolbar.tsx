@@ -332,26 +332,36 @@ export function MarkdownToolbar({
       </ToolbarActionGroup>
 
       <div className="ml-auto flex shrink-0 items-center gap-1">
-        <button
-          className={`toolbar-button ${editorReady && editorHistoryState.canUndo ? "" : "opacity-40"}`}
+        <span
+          className="inline-grid rounded-md focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-brand-orange"
           data-tooltip={editorHistoryState.canUndo ? "Deshacer" : "No hay cambios para deshacer"}
-          aria-label="Deshacer"
-          disabled={!editorReady || !editorHistoryState.canUndo}
-          onMouseDown={keepEditorSelection}
-          onClick={() => runAction("undo")}
+          tabIndex={editorReady && editorHistoryState.canUndo ? -1 : 0}
         >
-          <Undo2 size={15} />
-        </button>
-        <button
-          className={`toolbar-button ${editorReady && editorHistoryState.canRedo ? "" : "opacity-40"}`}
+          <button
+            className={`toolbar-button ${editorReady && editorHistoryState.canUndo ? "" : "pointer-events-none opacity-40"}`}
+            aria-label="Deshacer"
+            disabled={!editorReady || !editorHistoryState.canUndo}
+            onMouseDown={keepEditorSelection}
+            onClick={() => runAction("undo")}
+          >
+            <Undo2 size={15} />
+          </button>
+        </span>
+        <span
+          className="inline-grid rounded-md focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-brand-orange"
           data-tooltip={editorHistoryState.canRedo ? "Rehacer" : "No hay cambios para rehacer"}
-          aria-label="Rehacer"
-          disabled={!editorReady || !editorHistoryState.canRedo}
-          onMouseDown={keepEditorSelection}
-          onClick={() => runAction("redo")}
+          tabIndex={editorReady && editorHistoryState.canRedo ? -1 : 0}
         >
-          <Redo2 size={15} />
-        </button>
+          <button
+            className={`toolbar-button ${editorReady && editorHistoryState.canRedo ? "" : "pointer-events-none opacity-40"}`}
+            aria-label="Rehacer"
+            disabled={!editorReady || !editorHistoryState.canRedo}
+            onMouseDown={keepEditorSelection}
+            onClick={() => runAction("redo")}
+          >
+            <Redo2 size={15} />
+          </button>
+        </span>
       </div>
     </div>
   );

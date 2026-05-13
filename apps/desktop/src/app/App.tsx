@@ -5,6 +5,7 @@ import type { AiPromptExecutionOptions } from "../features/assistant/AiPromptInp
 import { CreateDocumentDialog } from "../features/documents/CreateDocumentDialog";
 import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
 import { AppSettingsDialog } from "../features/settings/AppSettingsDialog";
+import { GlobalTooltip } from "../components/ui/GlobalTooltip";
 import { DesktopLayout } from "../layouts/DesktopLayout";
 import {
   applyExternalMarkdownUpdate,
@@ -34,6 +35,7 @@ import {
   deleteAiIndex,
   deleteOpenAiKey,
   addAiContextSourceToProject,
+  addProjectImageAiContextSource,
   addProjectDocumentAiContextSource,
   extendAiContextSource,
   getAiContextSources,
@@ -79,16 +81,21 @@ import {
   createFolder,
   createProjectDocument,
   createProject,
+  buildImageReference,
   deleteProject,
   deleteTreeNode,
   duplicateProjectDocument,
+  getDocumentMoveImpact,
+  getProjectImageUsage,
   getProjectTree,
   getProjectCapabilities,
   getProjectVersioningStatus,
   listProjects,
+  importProjectImage,
   moveTreeNode,
   pullProject,
   pushProject,
+  reindexProjectImages,
   renameTreeNode,
   setActiveProject as persistActiveProject,
   updateProject,
@@ -110,9 +117,11 @@ import type {
   AppearanceConfig,
   AppUtilityTabId,
   DiagnosticsConfig,
+  AssetImportResponse,
   DocumentRecord,
   DocumentTreeNode,
   FileOperationResult,
+  InsertImageReferenceResponse,
   LayoutConfig,
   OpenDocumentTab,
   OrphanDraft,
@@ -153,6 +162,8 @@ export function App() {
   const [tree, setTree] = useState<DocumentTreeNode[]>([]);
   const [tabs, setTabs] = useState<OpenDocumentTab[]>(defaultProjectTabsConfig.openTabs);
   const [activeDocumentId, setActiveDocumentId] = useState(defaultProjectTabsConfig.activeDocumentId);
+  const [imageTabs, setImageTabs] = useState<Array<{ id: string; name: string; path: string }>>([]);
+  const [activeImageId, setActiveImageId] = useState("");
   const [documentSessions, setDocumentSessions] = useState<Record<string, DocumentSession>>({});
   const [historyOpen, setHistoryOpen] = useState(false);
   const [createDocumentOpen, setCreateDocumentOpen] = useState(false);
@@ -551,6 +562,7 @@ export function App() {
       }]
       : []),
     ...tabs.map((tab) => ({ ...tab, kind: "document" as const })),
+    ...imageTabs.map((tab) => ({ ...tab, kind: "image" as const })),
     ...(openUtilityTabs.includes(RELEASE_NOTES_UTILITY_TAB_ID)
       ? [{
         kind: "release-notes" as const,
@@ -560,8 +572,8 @@ export function App() {
         readonly: true as const,
       }]
       : []),
-  ], [activeProject, openUtilityTabs, tabs]);
-  const activeTabId = activeUtilityTab === RELEASE_NOTES_UTILITY_TAB_ID ? RELEASE_NOTES_WORKSPACE_TAB_ID : activeDocumentId || (activeProject ? AI_CONVERSATION_TAB_ID : "");
+  ], [activeProject, imageTabs, openUtilityTabs, tabs]);
+  const activeTabId = activeUtilityTab === RELEASE_NOTES_UTILITY_TAB_ID ? RELEASE_NOTES_WORKSPACE_TAB_ID : activeImageId || activeDocumentId || (activeProject ? AI_CONVERSATION_TAB_ID : "");
   const activeSession = activeDocumentId ? documentSessions[activeDocumentId] : undefined;
   useEffect(() => {
     if (!activeDocumentId || !activeSession?.document) return;
@@ -589,6 +601,17 @@ export function App() {
         : [...currentTabs, { id: documentId, name }]
     ));
     setActiveDocumentId(documentId);
+    setActiveImageId("");
+    setActiveUtilityTab(null);
+  }
+
+  function handleOpenImage(assetId: string, name: string, path: string) {
+    setImageTabs((currentTabs) => (
+      currentTabs.some((tab) => tab.id === assetId)
+        ? currentTabs.map((tab) => (tab.id === assetId ? { id: assetId, name, path } : tab))
+        : [...currentTabs, { id: assetId, name, path }]
+    ));
+    setActiveImageId(assetId);
     setActiveUtilityTab(null);
   }
 
@@ -634,6 +657,13 @@ export function App() {
       return;
     }
 
+    if (imageTabs.some((tab) => tab.id === tabId)) {
+      const nextImageTabs = imageTabs.filter((tab) => tab.id !== tabId);
+      setImageTabs(nextImageTabs);
+      if (activeImageId === tabId) setActiveImageId(nextImageTabs[0]?.id ?? "");
+      return;
+    }
+
     const documentId = tabId;
     if (documentSessions[documentId]?.isDirty) {
       setCloseDocumentId(documentId);
@@ -661,6 +691,7 @@ export function App() {
         void persistDraft(activeDocumentId, documentSessions[activeDocumentId]);
       }
       setActiveUtilityTab(null);
+      setActiveImageId("");
       setActiveDocumentId("");
       return;
     }
@@ -668,6 +699,16 @@ export function App() {
     if (tabId === RELEASE_NOTES_WORKSPACE_TAB_ID) {
       setOpenUtilityTabs((currentTabs) => ensureReleaseNotesTab(currentTabs));
       setActiveUtilityTab(RELEASE_NOTES_UTILITY_TAB_ID);
+      setActiveImageId("");
+      return;
+    }
+
+    if (imageTabs.some((tab) => tab.id === tabId)) {
+      if (activeDocumentId && documentSessions[activeDocumentId]) {
+        void persistDraft(activeDocumentId, documentSessions[activeDocumentId]);
+      }
+      setActiveUtilityTab(null);
+      setActiveImageId(tabId);
       return;
     }
 
@@ -676,6 +717,7 @@ export function App() {
       void persistDraft(activeDocumentId, documentSessions[activeDocumentId]);
     }
     setActiveUtilityTab(null);
+    setActiveImageId("");
     setActiveDocumentId(documentId);
   }
 
@@ -758,10 +800,24 @@ export function App() {
   async function handleAddProjectDocumentContext(documentId: string) {
     if (!activeProject) return;
     try {
-      await addProjectDocumentAiContextSource(activeProject.id, documentId);
+      if (documentId.startsWith("fs_") && findNodeById(tree, documentId)?.type === "image") {
+        await addProjectImageAiContextSource(activeProject.id, documentId);
+      } else {
+        await addProjectDocumentAiContextSource(activeProject.id, documentId);
+      }
       await refreshAiContextSources(activeProject.id);
     } catch (error) {
       showError(error, "No se pudo añadir el documento al contexto IA.", { source: "app.aiContext.addDocument" });
+    }
+  }
+
+  async function handleAddProjectImageContext(assetId: string) {
+    if (!activeProject) return;
+    try {
+      await addProjectImageAiContextSource(activeProject.id, assetId);
+      await refreshAiContextSources(activeProject.id);
+    } catch (error) {
+      showError(error, "No se pudo añadir la imagen al contexto IA.", { source: "app.aiContext.addImage" });
     }
   }
 
@@ -1063,6 +1119,8 @@ export function App() {
       setTree(nextTree);
       setTabs(nextProjectTabs.openTabs);
       setActiveDocumentId(nextProjectTabs.activeDocumentId);
+      setImageTabs([]);
+      setActiveImageId("");
       if (!nextVersioningStatus.enabled) setHistoryOpen(false);
     } catch (error) {
       showError(error, "No se pudo cambiar de proyecto.");
@@ -1089,8 +1147,18 @@ export function App() {
     }
 
     try {
+      if (previousNode?.type === "image") {
+        const usage = await getProjectImageUsage(activeProject.id, previousNode.id);
+        if (usage.references.length > 0) {
+          const proceed = window.confirm(`La imagen "${previousNode.name}" esta enlazada en ${usage.references.length} documento(s).\n\nKnowNext.ai actualizara las referencias relativas para que sigan apuntando a la imagen renombrada.`);
+          if (!proceed) {
+            setTree(markNodeEditing(tree, null));
+            return;
+          }
+        }
+      }
       const result = await renameTreeNode(activeProject.id, nodeId, nextName);
-      applyFileOperationResult(result);
+      applyFileOperationResult(result, previousNode);
     } catch (error) {
       showError(error, "No se pudo renombrar el elemento.");
       setTree(markNodeEditing(tree, null));
@@ -1528,6 +1596,7 @@ export function App() {
       model: nextAiConfig.model,
       permissions: nextAiConfig.permissions,
       rag: nextAiConfig.rag,
+      vision: nextAiConfig.vision,
       agentic: nextAiConfig.agentic,
     })
       .then((savedAiConfig) => {
@@ -1561,6 +1630,21 @@ export function App() {
       await refreshAiState(activeProject.id);
     } catch (error) {
       showError(error, "No se pudo reindexar la documentación para IA.", { source: "app.aiIndex" });
+    }
+  }
+
+  async function handleReindexProjectImages() {
+    if (!activeProject) return;
+    try {
+      const result = await reindexProjectImages(activeProject.id);
+      await refreshAiState(activeProject.id);
+      setNotice({
+        title: "Imagenes reindexadas",
+        message: `Se procesaron ${result.indexedImageCount} de ${result.imageCount} imagen(es) del proyecto.`,
+        tone: "info",
+      });
+    } catch (error) {
+      showError(error, "No se pudo reindexar las imagenes para IA.", { source: "app.aiImageIndex" });
     }
   }
 
@@ -1664,6 +1748,36 @@ export function App() {
       return;
     }
 
+    if (action === "import-image") {
+      void promptImportImage(node.id);
+      return;
+    }
+
+    if (action === "open-image" && node.path) {
+      handleOpenImage(node.id, node.name, node.path);
+      return;
+    }
+
+    if (action === "add-image-context") {
+      void handleAddProjectImageContext(node.id);
+      return;
+    }
+
+    if (action === "copy-image-reference" && node.path) {
+      void navigator.clipboard?.writeText(`![${node.name.replace(/\.[^.]+$/, "")}](${node.path})`);
+      setNotice({ title: "Referencia copiada", message: node.path, tone: "info" });
+      return;
+    }
+
+    if (action === "insert-image") {
+      if (!activeDocumentId) {
+        setNotice({ title: "Abre un documento", message: "Necesitas un documento activo para insertar una imagen.", tone: "info" });
+        return;
+      }
+      void insertImageIntoActiveDocument(node.id);
+      return;
+    }
+
     if (action === "delete") {
       void handleDeleteNode(node);
       return;
@@ -1681,14 +1795,26 @@ export function App() {
 
   async function handleDeleteNode(node: DocumentTreeNode) {
     if (!activeProject) return;
-    const message = node.type === "folder"
+    let message = node.type === "folder"
       ? `Se eliminará la carpeta "${node.name}" y su contenido del disco. Esta acción no se puede deshacer.`
-      : `Se eliminará el documento "${node.name}" del disco. Esta acción no se puede deshacer.`;
+      : node.type === "image"
+        ? `Se eliminará la imagen "${node.name}" del disco. Esta acción no se puede deshacer.`
+        : `Se eliminará el documento "${node.name}" del disco. Esta acción no se puede deshacer.`;
+    if (node.type === "image") {
+      try {
+        const usage = await getProjectImageUsage(activeProject.id, node.id);
+        if (usage.references.length > 0) {
+          message = `${message}\n\nEsta imagen esta enlazada en ${usage.references.length} documento(s). Si la eliminas, esas referencias quedaran rotas.`;
+        }
+      } catch {
+        message = `${message}\n\nNo se pudo comprobar si otros documentos la enlazan.`;
+      }
+    }
     if (!window.confirm(message)) return;
 
     try {
       const result = await deleteTreeNode(activeProject.id, node.id);
-      applyFileOperationResult(result);
+      applyFileOperationResult(result, node);
     } catch (error) {
       showError(error, "No se pudo eliminar el elemento.");
     }
@@ -1720,8 +1846,23 @@ export function App() {
   async function moveTreeNodeToFolder(node: DocumentTreeNode, targetFolderId: string | null) {
     if (!activeProject) return false;
     try {
+      if (node.type === "document") {
+        const impact = await getDocumentMoveImpact(activeProject.id, node.id);
+        if (impact.references.length > 0) {
+          const shared = impact.sharedAssetPaths.length > 0 ? ` ${impact.sharedAssetPaths.length} imagen(es) tambien se usan en otros documentos.` : "";
+          const proceed = window.confirm(`${impact.message}${shared}\n\nKnowNext.ai actualizara las referencias relativas para mantener las imagenes enlazadas.`);
+          if (!proceed) return false;
+        }
+      }
+      if (node.type === "image") {
+        const usage = await getProjectImageUsage(activeProject.id, node.id);
+        if (usage.references.length > 0) {
+          const proceed = window.confirm(`La imagen "${node.name}" esta enlazada en ${usage.references.length} documento(s).\n\nKnowNext.ai actualizara esas referencias para que sigan apuntando a la imagen movida.`);
+          if (!proceed) return false;
+        }
+      }
       const result = await moveTreeNode(activeProject.id, node.id, targetFolderId);
-      applyFileOperationResult(result);
+      applyFileOperationResult(result, node);
       const targetFolder = targetFolderId ? findNodeById(result.tree, targetFolderId) : null;
       setNotice({
         title: "Elemento movido",
@@ -1742,11 +1883,110 @@ export function App() {
         : [...currentTabs, { id: documentId, name }]
     ));
     setActiveDocumentId(documentId);
+    setActiveImageId("");
     setActiveUtilityTab(null);
   }
 
-  function applyFileOperationResult(result: FileOperationResult) {
+  async function promptImportImage(parentId: string | null) {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/png,image/jpeg,image/webp,image/gif";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file || !activeProject) return;
+      try {
+        const result = await importProjectImage(activeProject.id, parentId, file);
+        setTree(result.tree);
+        handleOpenImage(result.asset.id, result.asset.name, result.asset.path);
+      } catch (error) {
+        showError(error, "No se pudo importar la imagen.");
+      }
+    };
+    input.click();
+  }
+
+  async function promptImportProjectFile(parentId: string | null = null) {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".md,.markdown,text/markdown,image/png,image/jpeg,image/webp,image/gif";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file || !activeProject) return;
+      const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+
+      try {
+        if (["png", "jpg", "jpeg", "webp", "gif"].includes(extension)) {
+          const result = await importProjectImage(activeProject.id, parentId, file);
+          setTree(result.tree);
+          handleOpenImage(result.asset.id, result.asset.name, result.asset.path);
+          return;
+        }
+
+        if (["md", "markdown"].includes(extension)) {
+          const markdown = await file.text();
+          const result = await createProjectDocument(activeProject.id, parentId, file.name, markdown);
+          applyFileOperationResult(result);
+          if (result.node?.type === "document") openOrReplaceTab(result.node.id, result.node.name);
+          return;
+        }
+
+        setNotice({
+          title: "Formato no admitido",
+          message: "Solo se pueden importar documentos Markdown e imágenes compatibles.",
+          tone: "info",
+        });
+      } catch (error) {
+        showError(error, "No se pudo importar el archivo.");
+      }
+    };
+    input.click();
+  }
+
+  async function handleImportProjectImage(parentId: string | null, file: File): Promise<AssetImportResponse> {
+    if (!activeProject) throw new Error("No active project");
+    const result = await importProjectImage(activeProject.id, parentId, file);
     setTree(result.tree);
+    return result;
+  }
+
+  async function handleBuildImageReference(documentId: string, assetId: string, altText?: string | null): Promise<InsertImageReferenceResponse> {
+    if (!activeProject) throw new Error("No active project");
+    return buildImageReference(activeProject.id, documentId, assetId, altText);
+  }
+
+  async function insertImageIntoActiveDocument(assetId: string) {
+    if (!activeProject || !activeDocumentId) return;
+    try {
+      const reference = await buildImageReference(activeProject.id, activeDocumentId, assetId, null);
+      const session = documentSessions[activeDocumentId];
+      if (!session) return;
+      const nextMarkdown = `${session.markdown.trimEnd()}\n\n${reference.markdown}\n`;
+      handleMarkdownChange(activeDocumentId, nextMarkdown);
+      setNotice({ title: "Imagen insertada", message: reference.asset.name, tone: "info" });
+    } catch (error) {
+      showError(error, "No se pudo insertar la imagen.");
+    }
+  }
+
+  function applyFileOperationResult(result: FileOperationResult, sourceNode?: DocumentTreeNode | null) {
+    setTree(result.tree);
+
+    if (sourceNode?.type === "image") {
+      if (result.node?.type === "image") {
+        setImageTabs((currentTabs) => currentTabs.map((tab) => (
+          tab.id === sourceNode.id
+            ? { id: result.node!.id, name: result.node!.name, path: result.node!.path ?? tab.path }
+            : tab
+        )));
+        setActiveImageId((currentImageId) => (currentImageId === sourceNode.id ? result.node!.id : currentImageId));
+      } else {
+        setImageTabs((currentTabs) => {
+          const nextTabs = currentTabs.filter((tab) => tab.id !== sourceNode.id);
+          setActiveImageId((currentImageId) => (currentImageId === sourceNode.id ? nextTabs[0]?.id ?? "" : currentImageId));
+          return nextTabs;
+        });
+      }
+    }
 
     if (result.affectedDocuments.length === 0) return;
 
@@ -1828,6 +2068,7 @@ export function App() {
         tabs={workspaceTabs}
         activeTabId={activeTabId}
         activeDocumentId={activeDocumentId}
+        activeImageId={activeImageId}
         editorSessions={editorSessions}
         releaseNotesMarkdown={RELEASE_NOTES_MARKDOWN}
         activeDocument={activeSession?.document ?? null}
@@ -1852,6 +2093,7 @@ export function App() {
         }}
         onOpenAppSettings={() => setAppSettingsOpen(true)}
         onCreateFolder={() => void handleCreateFolder()}
+        onImportProjectFile={() => void promptImportProjectFile(null)}
         onRenameNode={handleRenameNode}
         onToggleNode={handleToggleNode}
         onExpandTree={handleExpandTree}
@@ -1875,6 +2117,7 @@ export function App() {
         onClearAiSelectionFocus={() => setAiSelectionFocus(null)}
         onSearchAiContextDocuments={handleSearchAiContextDocuments}
         onAddProjectDocumentContext={handleAddProjectDocumentContext}
+        onAddProjectImageContext={handleAddProjectImageContext}
         onUploadAiContextFiles={handleUploadAiContextFiles}
         onRemoveAiContextSource={handleRemoveAiContextSource}
         onExtendAiContextSource={handleExtendAiContextSource}
@@ -1886,10 +2129,14 @@ export function App() {
         onOpenAiConversation={() => handleSelectTab(AI_CONVERSATION_TAB_ID)}
         isSyncingProject={syncState !== "idle"}
         onOpenDocument={handleOpenDocument}
+        onOpenImage={handleOpenImage}
         onSelectTab={handleSelectTab}
         onCloseTab={handleCloseTab}
         onTreeContextAction={handleTreeContextAction}
         onMoveTreeNode={handleMoveTreeNodeDrop}
+        onImportProjectImage={handleImportProjectImage}
+        onBuildImageReference={handleBuildImageReference}
+        onInsertImageIntoActiveDocument={(assetId) => void insertImageIntoActiveDocument(assetId)}
         onMarkdownChange={handleMarkdownChange}
         onEditorOperationApplied={handleEditorOperationApplied}
         onEditorOperationFailed={handleEditorOperationFailed}
@@ -1903,6 +2150,7 @@ export function App() {
         onCloseHistory={() => setHistoryOpen(false)}
         onLayoutConfigChange={handleLayoutConfigChange}
       />
+      <GlobalTooltip />
       <StartupOverlay loading={!configLoaded} />
       <AppNoticeBanner notice={notice} onClose={() => setNotice(null)} />
       <AppSettingsDialog
@@ -1921,6 +2169,7 @@ export function App() {
         onSaveOpenAiKey={(apiKey) => void handleSaveOpenAiKey(apiKey)}
         onDeleteOpenAiKey={() => void handleDeleteOpenAiKey()}
         onRebuildAiIndex={() => void handleRebuildAiIndex()}
+        onReindexImages={() => void handleReindexProjectImages()}
         onDeleteAiIndex={() => void handleDeleteAiIndex()}
         onOpenTraceLogFolder={() => void handleOpenTraceLogFolder()}
         onRefreshRuntimeServices={() => void refreshRuntimeServiceStatus()}

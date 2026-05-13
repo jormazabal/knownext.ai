@@ -78,6 +78,8 @@ class TreeNode(BaseModel):
     name: str
     type: str
     path: str | None = None
+    mimeType: str | None = None
+    sizeBytes: int | None = None
     children: list["TreeNode"] | None = None
     open: bool = False
 
@@ -112,3 +114,70 @@ class FileOperationResult(BaseModel):
     tree: list[TreeNode]
     node: TreeNode | None = None
     affectedDocuments: list[AffectedDocument] = []
+
+
+class AssetMetadata(BaseModel):
+    id: str
+    projectId: str
+    name: str
+    path: str
+    mimeType: str
+    sizeBytes: int
+    width: int | None = None
+    height: int | None = None
+    updatedAt: str
+    usageCount: int = 0
+    indexed: bool = False
+    indexStatus: str = "not-indexed"
+    visualDescription: str | None = None
+
+
+class AssetReference(BaseModel):
+    id: str
+    projectId: str
+    documentId: str
+    documentName: str
+    documentPath: str
+    rawTarget: str
+    resolvedAssetPath: str | None = None
+    kind: str = "markdown_image"
+    status: str = "valid"
+    altText: str | None = None
+    title: str | None = None
+    line: int | None = None
+    column: int | None = None
+
+
+class AssetUsageResponse(BaseModel):
+    asset: AssetMetadata
+    references: list[AssetReference]
+
+
+class AssetImportResponse(BaseModel):
+    tree: list[TreeNode]
+    asset: AssetMetadata
+
+
+class AssetMoveImpact(BaseModel):
+    asset: AssetMetadata
+    references: list[AssetReference]
+    canUpdateReferences: bool = True
+    message: str
+
+
+class DocumentMoveImpact(BaseModel):
+    documentId: str
+    documentPath: str
+    references: list[AssetReference]
+    sharedAssetPaths: list[str] = []
+    message: str
+
+
+class InsertImageReferenceRequest(BaseModel):
+    assetId: str
+    altText: str | None = None
+
+
+class InsertImageReferenceResponse(BaseModel):
+    markdown: str
+    asset: AssetMetadata

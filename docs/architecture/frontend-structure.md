@@ -37,7 +37,8 @@ Any remaining mock fixtures must be limited to tests, Storybook/demo surfaces, o
 - AI settings also go through `src/lib/api/config.ts` and `src/lib/api/ai.ts`. The OpenAI key status is visible to React, but the secret value is never returned to the frontend after save.
 - Runtime trace logging helpers live under `src/lib/runtime/logging.ts`. React can request log status, record frontend errors, and ask the runtime to open the dedicated log folder, but it does not write log files directly.
 - Runtime service helpers live under `src/lib/runtime/services.ts`. React can request local service health and ask the installed Tauri runtime to restart the backend, but it does not spawn or kill processes directly.
-- The document tree goes through `src/lib/api/projects.ts` and reflects the Markdown files and folders under the active project's local folder.
+- The document tree goes through `src/lib/api/projects.ts` and reflects folders, Markdown files, and supported image assets under the active project's local folder.
+- Project image upload, metadata, usage checks, Markdown reference creation, and visual reindex actions also go through `src/lib/api/projects.ts`; React never reads or writes project image files directly.
 - Open documents are tracked as per-tab editing sessions in the root app state. Each session owns its own Markdown content, dirty state, draft metadata, and Milkdown instance while the tab remains open.
 - Unsaved document changes are autosaved through `src/lib/api/documents.ts` to FastAPI-managed internal drafts. React must not write draft files directly.
 - Open document sessions are checked with backend sync-status polling and window focus refreshes so external disk changes become visible without replacing local editor content.
@@ -46,6 +47,7 @@ Any remaining mock fixtures must be limited to tests, Storybook/demo surfaces, o
 - AI edits update the in-memory document session and leave the document dirty; React does not write the AI result to disk until the normal document save flow runs.
 - AI project operations are dispatched through `src/lib/api/ai.ts`. Folder/document creation, move, duplicate, and delete results refresh the backend tree when app IA permissions allow them; blocked actions are rendered from structured `permission_blocked` responses.
 - AI prompt context is rendered as chips inside `AiPromptInput`. If a source chip is visible, it is active and its id is sent with the next AI interaction. React owns only source presentation and user intent; FastAPI owns file upload, extraction, expiry, preview, source resolution, and conversion into project documents.
+- Project image context uses the same visible chip model as document context. Search results can include images, and selecting one creates a backend-owned image context source for the next prompt.
 - The project assistant supports local files, local Git with manual sync, and GitHub API projects. Versioned modes remain disabled until GitHub login is active.
 - The history button is enabled only when the active project has a versioning provider and the user is authenticated.
 - UI components receive persisted values as props and dispatch user intent back to the root app state.
@@ -77,7 +79,7 @@ Any remaining mock fixtures must be limited to tests, Storybook/demo surfaces, o
 - The modal has a left settings list and a right detail pane.
 - `Servicios` is the first section and shows local backend health, version/profile details, last error, manual refresh, and backend restart where supported by the installed desktop runtime.
 - `Apariencia` owns the persisted locale, zoom percentage, and Markdown compatibility preferences such as extended underline visibility.
-- `IA` owns OpenAI provider status, action permissions, and project documentation indexing controls. RAG status from FastAPI includes semantic index state, indexed/failed document counts, and whether the local exact-search index is ready; React only renders those values and never indexes files itself.
+- `IA` owns OpenAI provider status, action permissions, project documentation indexing controls, and vision controls for image context/indexing. RAG status from FastAPI includes semantic index state, indexed/failed document counts, and whether the local exact-search index is ready; React only renders those values and never indexes files itself.
 - `Trazas` owns the persisted trace logging toggle and the action to open the dedicated log folder.
 - The settings component remains visual: persistence goes through root app state and FastAPI config updates, while folder opening and log writes go through runtime/API helpers.
 

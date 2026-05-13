@@ -7,9 +7,10 @@ KnowNext.ai is a desktop workspace for project documentation written in Markdown
 The first version focuses on the core editing surface:
 
 - Project selection.
-- Folder and Markdown document tree.
+- Folder, Markdown document, and project image tree.
 - Document tabs.
 - Visual Markdown editing through Milkdown.
+- Project image management for PNG, JPEG, WEBP, and GIF assets, including upload, preview, Markdown linking, and AI context use.
 - Document status and save feedback.
 - Mock Git commit history for the active document.
 - Contextual AI prompt input for the active document.
@@ -23,6 +24,7 @@ KnowNext.ai includes a project-scoped AI assistant mediated by the local FastAPI
 - When text is selected in the active document, focusing the AI prompt keeps that selection visually highlighted and adds it as a removable focus context. This focus supplements the full document context; it does not replace it.
 - Prompts include a short backend-built recent conversation context to resolve references like `eso`, `lo anterior`, or `ahora`, filtered to the active document when applicable. The active document and current prompt remain higher priority than conversation history.
 - AI provider responses are interpreted as a structured plan with separate conversational `answer`, optional document change, optional project operations, and optional task plan. Conversational text must never be promoted into document content by backend keyword heuristics.
+- Project images can be attached as explicit AI prompt context. When image context is active and vision is enabled, the backend sends image inputs through OpenAI Responses with the configured vision model/detail instead of React calling providers directly.
 - The prompt has two execution modes. `Rápido` is the default: one direct call, no automatic agentic task, no automatic IA-tab routing. `Razonar` performs a short structured preflight before execution and can choose direct action, a real clarification, a blocked-permission response, or an agentic task.
 - Reasoning depth is selected per prompt (`Ligero`, `Medio`, `Profundo`) so token use is explicit and task-specific instead of a global app default.
 - Requests that need delayed execution create a project-scoped pending intent with a preserved target document. Follow-up prompts from the `IA` tab or from project mode still apply to that target when the LLM returns a structured execution decision.
@@ -34,6 +36,7 @@ KnowNext.ai includes a project-scoped AI assistant mediated by the local FastAPI
 - OpenAI is the first supported provider. API keys are configured in app settings, stored locally through backend credential storage, and never exposed to React after save.
 - App settings include web research, action permissions, and max step/document/source/cost limits for agentic work. Task depth is selected from the prompt when using `Razonar`.
 - Project-wide RAG is opt-in. When enabled, Markdown documentation is indexed with a project manifest, incremental file hashing, OpenAI vector stores for semantic retrieval, and a local exact-search index for terms, acronyms, filenames, and code-like references. Responses should cite relevant paths when evidence comes from the project.
+- Image indexing is separately configurable. When enabled, project images are analyzed with the configured OpenAI vision model and local visual descriptions are stored for project asset metadata and future retrieval flows.
 - Prompts and document content must not be written to trace logs.
 
 ## Target User
@@ -42,7 +45,7 @@ Product engineers, technical leads, documentation owners, and teams that maintai
 
 ## Product Principles
 
-- Markdown remains the storage format.
+- Markdown remains the storage format for documents; image assets remain normal local project files referenced from Markdown.
 - The main editing experience is visual and document-like.
 - Version history is commit-based and simplified for non-Git-heavy workflows.
 - AI is contextual to the active document and mediated by the local backend.
@@ -141,7 +144,9 @@ The editor toolbar must remain compact, fixed under the document tabs, and align
 - Block formatting uses a dropdown with `Texto normal` and headings `Título 1` through `Título 6` instead of separate heading buttons.
 - Inline formatting exposes bold, italic, strikethrough, optional extended underline, inline code, and clear formatting.
 - Structure tools include bullet lists, ordered lists, checklists, quotes, code blocks, and horizontal separators.
-- Insert tools include links, images, and a table picker.
+- Insert tools include links, project images, uploaded images, external image URLs, and a table picker.
+- Inserting a project image writes a Markdown image reference. Uploading an image from the Markdown editor stores it beside the active Markdown document and inserts a relative reference.
+- Moving or renaming an image rewrites Markdown references across the project when possible. Moving a Markdown document rewrites that document's relative image references so links remain valid. Deleting a referenced image warns that Markdown links will become broken.
 - Table insertion opens a compact 5 x 5 visual grid with the hovered size and a secondary custom-size action.
 - The toolbar degrades by priority on narrower widths: primary actions remain visible and less frequent actions move into compact format/structure/insert menus.
 - The editor must not add free font colors, arbitrary font sizes, free alignment, or other non-Markdown word-processor controls.

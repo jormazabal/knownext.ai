@@ -14,16 +14,10 @@ describe("ProjectActions", () => {
       <ProjectActions
         appVersion="0.5.0"
         authStatus={{ isAuthenticated: false, provider: null, user: null, scopes: [] }}
-        hasActiveProject
         orphanDraftCount={0}
         isCheckingForUpdates={false}
         onLoginGithub={vi.fn()}
         onLogout={vi.fn()}
-        onCreateFolder={vi.fn()}
-        onCreateDocument={vi.fn()}
-        onExpandTree={vi.fn()}
-        onCollapseTree={vi.fn()}
-        onConfigureProject={vi.fn()}
         onOpenAppSettings={vi.fn()}
         onOpenRecoverableDrafts={vi.fn()}
         onCheckForUpdates={onCheckForUpdates}
@@ -45,16 +39,10 @@ describe("ProjectActions", () => {
       <ProjectActions
         appVersion="0.7.2"
         authStatus={{ isAuthenticated: false, provider: null, user: null, scopes: [] }}
-        hasActiveProject
         orphanDraftCount={0}
         isCheckingForUpdates={false}
         onLoginGithub={onLoginGithub}
         onLogout={onLogout}
-        onCreateFolder={vi.fn()}
-        onCreateDocument={vi.fn()}
-        onExpandTree={vi.fn()}
-        onCollapseTree={vi.fn()}
-        onConfigureProject={vi.fn()}
         onOpenAppSettings={vi.fn()}
         onOpenRecoverableDrafts={vi.fn()}
         onCheckForUpdates={vi.fn()}
@@ -81,16 +69,10 @@ describe("ProjectActions", () => {
       <ProjectActions
         appVersion="0.5.0"
         authStatus={{ isAuthenticated: false, provider: null, user: null, scopes: [] }}
-        hasActiveProject
         orphanDraftCount={0}
         isCheckingForUpdates={false}
         onLoginGithub={vi.fn()}
         onLogout={vi.fn()}
-        onCreateFolder={vi.fn()}
-        onCreateDocument={vi.fn()}
-        onExpandTree={vi.fn()}
-        onCollapseTree={vi.fn()}
-        onConfigureProject={vi.fn()}
         onOpenAppSettings={vi.fn()}
         onOpenRecoverableDrafts={vi.fn()}
         onCheckForUpdates={vi.fn()}
@@ -131,16 +113,10 @@ describe("ProjectActions", () => {
             },
           ],
         }}
-        hasActiveProject
         orphanDraftCount={0}
         isCheckingForUpdates={false}
         onLoginGithub={vi.fn()}
         onLogout={vi.fn()}
-        onCreateFolder={vi.fn()}
-        onCreateDocument={vi.fn()}
-        onExpandTree={vi.fn()}
-        onCollapseTree={vi.fn()}
-        onConfigureProject={vi.fn()}
         onOpenAppSettings={vi.fn()}
         onOpenRecoverableDrafts={vi.fn()}
         onCheckForUpdates={vi.fn()}
@@ -168,16 +144,10 @@ describe("ProjectActions", () => {
       <ProjectActions
         appVersion="0.5.0"
         authStatus={{ isAuthenticated: false, provider: null, user: null, scopes: [] }}
-        hasActiveProject
         orphanDraftCount={0}
         isCheckingForUpdates={false}
         onLoginGithub={vi.fn()}
         onLogout={vi.fn()}
-        onCreateFolder={vi.fn()}
-        onCreateDocument={vi.fn()}
-        onExpandTree={vi.fn()}
-        onCollapseTree={vi.fn()}
-        onConfigureProject={vi.fn()}
         onOpenAppSettings={onOpenAppSettings}
         onOpenRecoverableDrafts={vi.fn()}
         onCheckForUpdates={vi.fn()}

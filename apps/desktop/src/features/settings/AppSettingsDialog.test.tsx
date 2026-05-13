@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defaultAiConfig, defaultAppearanceConfig, defaultDiagnosticsConfig } from "../../lib/api/config";
+import type { AiConfigStatus } from "../../types/domain";
 import { AppSettingsDialog } from "./AppSettingsDialog";
 
 afterEach(() => {
@@ -23,6 +24,7 @@ const baseProps = {
   onSaveOpenAiKey: vi.fn(),
   onDeleteOpenAiKey: vi.fn(),
   onRebuildAiIndex: vi.fn(),
+  onReindexImages: vi.fn(),
   onDeleteAiIndex: vi.fn(),
   onOpenTraceLogFolder: vi.fn(),
   onRefreshRuntimeServices: vi.fn(),
@@ -71,6 +73,8 @@ describe("AppSettingsDialog", () => {
     expect(screen.getByText("Operativo")).toBeInTheDocument();
     expect(screen.getAllByText("0.6.13").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByRole("button", { name: /reiniciar backend/i })).toBeEnabled();
+    expect(screen.getByRole("tablist", { name: /apartados de configuración/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /servicios/i })).toHaveAttribute("aria-selected", "true");
   });
 
   it("allows checking and restarting runtime services", () => {
@@ -218,7 +222,7 @@ describe("AppSettingsDialog", () => {
       />,
     );
 
-    fireEvent.click(screen.getByText("IA"));
+    fireEvent.click(screen.getByRole("tab", { name: "IA" }));
     expect(screen.getByText("Modelo de respuesta")).toBeInTheDocument();
     expect(screen.getAllByText("Coste").length).toBeGreaterThanOrEqual(4);
     expect(screen.getByText("Crear, duplicar y mover documentos")).toBeInTheDocument();
@@ -228,6 +232,30 @@ describe("AppSettingsDialog", () => {
     fireEvent.click(screen.getByRole("radio", { name: /máxima inteligencia/i }));
 
     expect(onAiChange).toHaveBeenCalledWith(expect.objectContaining({ model: "gpt-5.5" }));
+  });
+
+  it("opens AI settings with legacy config missing image vision and agentic defaults", () => {
+    const legacyAi: Partial<AiConfigStatus> = {
+      ...defaultAiConfig,
+      openaiKeyConfigured: false,
+      openaiKeyPreview: null,
+    };
+    delete legacyAi.vision;
+    delete legacyAi.agentic;
+
+    render(
+      <AppSettingsDialog
+        {...baseProps}
+        ai={legacyAi as AiConfigStatus}
+        runtimeServicesStatus={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "IA" }));
+
+    expect(screen.getByText("Visión de imágenes")).toBeInTheDocument();
+    expect(screen.getByText("Tareas agénticas")).toBeInTheDocument();
+    expect(screen.getAllByDisplayValue(defaultAiConfig.vision.model).length).toBeGreaterThanOrEqual(1);
   });
 
   it("allows disabling the extended Markdown underline control from appearance settings", () => {
@@ -241,7 +269,7 @@ describe("AppSettingsDialog", () => {
       />,
     );
 
-    fireEvent.click(screen.getByText("Apariencia"));
+    fireEvent.click(screen.getByRole("tab", { name: "Apariencia" }));
 
     expect(screen.getByText("Compatibilidad Markdown")).toBeInTheDocument();
     expect(screen.getByText("Mostrar subrayado en el editor")).toBeInTheDocument();
@@ -264,7 +292,7 @@ describe("AppSettingsDialog", () => {
       />,
     );
 
-    fireEvent.click(screen.getByText("IA"));
+    fireEvent.click(screen.getByRole("tab", { name: "IA" }));
 
     expect(screen.getByText("Tareas agénticas")).toBeInTheDocument();
     expect(screen.getByText("Control desde el prompt")).toBeInTheDocument();

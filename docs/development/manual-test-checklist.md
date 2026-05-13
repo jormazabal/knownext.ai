@@ -46,7 +46,10 @@
 - [ ] Create a local Git project and confirm the status bar shows a versioning state instead of Sin historial.
 - [ ] Create a project from a folder that already has Git/GitHub configured, associate the matching GitHub repository, and confirm the project is registered as Git local + GitHub existente without moving files.
 - [ ] Inspect the folder/document tree levels and confirm they match the active project's local folder.
-- [ ] Confirm only Markdown documents and folders are shown in the navigation tree.
+- [ ] Confirm Markdown documents, supported image files, and folders are shown in the navigation tree with distinct document/image/folder icons.
+- [ ] Confirm the file toolbar sits directly below the project selector with `Archivos` on the left and Buscar, Añadir, Vista del árbol, and Ajustes del proyecto icons aligned to the right.
+- [ ] Open Añadir and confirm it offers Nueva carpeta, Nuevo Markdown, and Importar archivo for Markdown or image files.
+- [ ] Open Vista del árbol and confirm Ver todo, Solo Markdown, Solo imágenes, Expandir carpetas, and Contraer carpetas are grouped in one floating menu.
 - [ ] In desktop width, drag the divider next to the folder/document tree and confirm the left panel width changes with a visible vertical orange resize line.
 - [ ] In desktop width, focus the folder/document tree divider with the keyboard and confirm arrow keys resize the left panel within min/max limits.
 - [ ] Restart the app and confirm the folder/document tree width is restored from `config.json`.
@@ -56,7 +59,7 @@
 - [ ] In tablet/mobile width, open a document from the drawer and confirm the drawer closes while the selected document tab remains active.
 - [ ] In tablet/mobile width, confirm the drawer closes when clicking outside it or pressing Escape.
 - [ ] Expand and collapse individual folder nodes.
-- [ ] Use Expandir árbol and Contraer árbol from the compact icon actions.
+- [ ] Use Expandir carpetas and Contraer carpetas from Vista del árbol in the file toolbar.
 - [ ] Click Configurar proyecto and confirm the edit project dialog opens with the active project name, folder, icon, and color already filled.
 - [ ] Confirm the edit project dialog uses the full modal width, separates editable identity/location from read-only technical configuration, and does not show clipped icon or color controls.
 - [ ] Click Seleccionar in Carpeta local and confirm it opens the native folder selector, not a browser upload picker.
@@ -78,12 +81,20 @@
 - [ ] Confirm the empty workspace area is very light gray and shows the gray KnowNext.ai watermark logo.
 - [ ] Confirm the AI prompt remains visible with project documentation wording when no document tab is open.
 - [ ] Switch projects and confirm each project restores its own open tabs and active document.
-- [ ] Confirm folder context menu shows Nueva carpeta, Nuevo documento, Renombrar, Eliminar.
-- [ ] Confirm file context menu shows Renombrar, Duplicar, Mover, Eliminar.
+- [ ] Confirm folder context menu shows Nueva carpeta, Nuevo documento, Importar imagen, Renombrar, Eliminar.
+- [ ] Confirm document context menu shows Renombrar, Duplicar, Mover, Eliminar.
+- [ ] Confirm image context menu shows Abrir, Insertar en documento, Usar como contexto IA, Copiar referencia, Renombrar, Mover, Eliminar.
 - [ ] Use the folder context menu to create a folder and document, then confirm they exist on disk.
+- [ ] Use Importar imagen from a folder menu and confirm only supported image files can be selected, the image is copied to that folder, appears in the tree, and opens in the image viewer tab.
 - [ ] Rename a folder or document from the tree and confirm the disk item is renamed.
 - [ ] Duplicate, move, and delete a document from the file context menu and confirm the disk changes.
 - [ ] Edit content in Milkdown visual mode.
+- [ ] Use Insertar > Imagen in the Markdown toolbar, select an existing project image, and confirm Milkdown inserts a Markdown image reference and renders the image in document flow.
+- [ ] Use Insertar > Imagen > Subir from an active document in a nested folder and confirm the image is copied beside that Markdown file and inserted with a relative reference.
+- [ ] Use Insertar > Imagen > URL and confirm an external image URL is inserted without copying a file into the project.
+- [ ] Move a Markdown document that references one or more images and confirm the app warns about linked images and preserves valid relative references after the move.
+- [ ] Move or rename an image referenced from Markdown and confirm the app warns about linked documents and updates all detected Markdown references.
+- [ ] Delete an image referenced from Markdown and confirm the app warns that references will become broken.
 - [ ] Confirm the document tabs and editor toolbar stay fixed while only the document canvas scrolls vertically.
 - [ ] Confirm the toolbar uses a block-format dropdown with Texto normal and Título 1 through Título 6 instead of separate H1/H2/H3 buttons.
 - [ ] Confirm inline code and block code are separate toolbar actions.
@@ -134,6 +145,8 @@
 - [ ] Select text in the active document, focus the AI prompt, and confirm the document selection remains visually highlighted while a removable selected-text context chip appears in the prompt.
 - [ ] Remove the selected-text context chip and confirm the prompt can be sent without selected-text focus.
 - [ ] In the AI prompt, type `@` plus part of a filename and confirm a compact project-document picker opens above the prompt, filters results while typing, supports keyboard selection, and adds the selected document as a visible context chip.
+- [ ] In the AI prompt, type `@` plus part of an image filename and confirm project images appear with image icons, can be selected, and become visible image context chips.
+- [ ] Open an image from the project tree and use `Usar como contexto IA`; confirm the prompt receives the image context chip without leaving the image viewer.
 - [ ] Confirm every visible context chip in the prompt is treated as active context, remains visible after sending, and can be removed with its X button.
 - [ ] Add several context sources and confirm the prompt stays compact, shows `Fuentes · N · peso`, and opens a sources popover with status, origin, expiry, preview, remove, and extend actions.
 - [ ] Attach external `.md`, `.pdf`, `.docx`, `.pptx`, and image files to the AI prompt where available, and confirm each appears as a chip with clear `Listo`, `Procesando`, `Aviso`, or `No se pudo leer` state.
@@ -164,9 +177,11 @@
 - [ ] In IA, save an OpenAI API key and confirm only configured/preview status is shown, never the full key.
 - [ ] In the browser development build, save an OpenAI API key and confirm the request succeeds through the web backend profile without a CORS or `Failed to fetch` error.
 - [ ] In IA, confirm the model selector shows intelligence and cost indicators, select a different model, close/reopen settings, and confirm the selected model persists.
+- [ ] In IA, confirm Visión de imágenes exposes enable/disable, model, detail, max images, max image size, image RAG indexing, and visual-description storage controls; change them, close/reopen settings, and confirm they persist.
 - [ ] In IA settings, confirm task depth is not configured globally; enable Investigación web, adjust step/source/cost limits, close/reopen settings, and confirm the values persist.
 - [ ] In IA, toggle Editar documentos, Crear y mover carpetas, Crear, duplicar y mover documentos, and Eliminar documentos y carpetas and confirm permissions persist.
 - [ ] In IA, enable project indexing, run Reindexar ahora, and confirm status shows indexed document counts plus local exact-search readiness.
+- [ ] In IA, enable image indexing, run Reindexar imágenes with an OpenAI key configured, and confirm image metadata shows indexed visual descriptions.
 - [ ] Edit one Markdown file after indexing, run Reindexar ahora again, and confirm the index updates without forcing a full project reset from the user's perspective.
 - [ ] Ask an IA question using an exact term, acronym, filename, or code-like token that exists in the project and confirm the answer references the expected path.
 - [ ] From an active document, ask for a multi-step documentation task and confirm the app opens the `IA` tab, shows a guided task card with steps, limits, source/web status, and a checkpoint before applying document changes.

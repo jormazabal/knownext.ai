@@ -133,6 +133,18 @@ export type AiRagConfig = {
   error?: string | null;
 };
 
+export type AiVisionModelId = "gpt-5.4-mini" | "gpt-5.4" | "gpt-5.5";
+
+export type AiVisionConfig = {
+  enabled: boolean;
+  model: AiVisionModelId;
+  imageIndexingEnabled: boolean;
+  maxImagesPerPrompt: number;
+  maxImageSizeMb: number;
+  detail: "auto" | "low" | "high";
+  storeVisualDescriptions: boolean;
+};
+
 export type AiModelId = "gpt-5.5" | "gpt-5.4" | "gpt-5.4-mini" | "gpt-5.4-nano";
 export type AiAgenticDepth = "quick" | "guided" | "deep" | "bounded_autonomous";
 
@@ -151,6 +163,7 @@ export type AiConfig = {
   model: AiModelId;
   permissions: AiPermissionsConfig;
   rag: AiRagConfig;
+  vision: AiVisionConfig;
   agentic: AiAgenticConfig;
 };
 
@@ -200,8 +213,10 @@ export type AppConfigUpdate = {
 export type DocumentTreeNode = {
   id: string;
   name: string;
-  type: "folder" | "document";
+  type: "folder" | "document" | "image";
   path?: string;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
   children?: DocumentTreeNode[];
   open?: boolean;
   isEditing?: boolean;
@@ -263,6 +278,13 @@ export type ReleaseNotesWorkspaceTab = {
   readonly: true;
 };
 
+export type ImageWorkspaceTab = {
+  kind: "image";
+  id: string;
+  name: string;
+  path: string;
+};
+
 export type AiConversationWorkspaceTab = {
   kind: "ai-conversation";
   id: "project-ai-conversation";
@@ -270,7 +292,7 @@ export type AiConversationWorkspaceTab = {
   readonly: true;
 };
 
-export type WorkspaceTab = AiConversationWorkspaceTab | DocumentWorkspaceTab | ReleaseNotesWorkspaceTab;
+export type WorkspaceTab = AiConversationWorkspaceTab | DocumentWorkspaceTab | ImageWorkspaceTab | ReleaseNotesWorkspaceTab;
 
 export type VersionRecord = {
   id: string;
@@ -409,6 +431,63 @@ export type AiContextSearchResult = {
   documentId: string;
   name: string;
   path: string;
+  kind?: AiContextSourceKind;
+  mimeType?: string | null;
+};
+
+export type AssetMetadata = {
+  id: string;
+  projectId: string;
+  name: string;
+  path: string;
+  mimeType: string;
+  sizeBytes: number;
+  width?: number | null;
+  height?: number | null;
+  updatedAt: string;
+  usageCount: number;
+  indexed: boolean;
+  indexStatus: string;
+  visualDescription?: string | null;
+};
+
+export type AssetReference = {
+  id: string;
+  projectId: string;
+  documentId: string;
+  documentName: string;
+  documentPath: string;
+  rawTarget: string;
+  resolvedAssetPath?: string | null;
+  kind: string;
+  status: string;
+  altText?: string | null;
+  title?: string | null;
+  line?: number | null;
+  column?: number | null;
+};
+
+export type AssetUsageResponse = {
+  asset: AssetMetadata;
+  references: AssetReference[];
+};
+
+export type AssetImportResponse = {
+  tree: DocumentTreeNode[];
+  asset: AssetMetadata;
+};
+
+export type InsertImageReferenceResponse = {
+  markdown: string;
+  asset: AssetMetadata;
+};
+
+export type DocumentMoveImpact = {
+  documentId: string;
+  documentPath: string;
+  references: AssetReference[];
+  sharedAssetPaths: string[];
+  message: string;
 };
 
 export type AiContextSourceListResponse = {

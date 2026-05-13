@@ -135,7 +135,8 @@ class AiService:
             )
 
         ai_config = config_service.get_config().ai
-        selected_model = ai_config.model
+        has_image_context = any(isinstance(source, dict) and source.get("kind") == "image" for source in explicit_context_sources)
+        selected_model = ai_config.vision.model if ai_config.vision.enabled and has_image_context else ai_config.model
         rag_context = rag_service.query_context(project_id, payload.prompt, ai_config.rag.enabled)
         if payload.executionMode == "quick" and payload.intentAction is None and pending_intent is not None:
             self._write_project_pending_intent(project_id, None)
@@ -882,6 +883,7 @@ class AiService:
                 "rule": "quick never opens agentic task; reasoning may preflight then choose direct or agentic.",
             },
             "agentic": ai_config.agentic.model_dump(),
+            "vision": ai_config.vision.model_dump(),
             "permissions": {
                 "editDocuments": ai_config.permissions.editDocuments,
                 "createFolders": ai_config.permissions.createFolders,

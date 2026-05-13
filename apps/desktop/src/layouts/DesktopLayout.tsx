@@ -1,11 +1,12 @@
-import { lazy, Suspense, useCallback, useEffect, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { Image as ImageIcon, PanelLeftClose, PanelLeftOpen, Upload, X } from "lucide-react";
 import { AiConversationView } from "../features/assistant/AiConversationView";
 import { AiPromptInput, type AiPromptExecutionOptions } from "../features/assistant/AiPromptInput";
 import { AiResponseBubble } from "../features/assistant/AiResponseBubble";
 import { DocumentStatusBar } from "../features/documents/DocumentStatusBar";
 import { DocumentTabs } from "../features/documents/DocumentTabs";
 import { DocumentTree, type DocumentTreeAction } from "../features/documents/DocumentTree";
+import { ImageViewer } from "../features/documents/ImageViewer";
 import { MarkdownToolbar } from "../features/editor/MarkdownToolbar";
 import {
   emptyMarkdownEditorHistoryState,
@@ -23,7 +24,8 @@ import { ProjectSelector } from "../features/projects/ProjectSelector";
 import { ReleaseNotesViewer } from "../features/releaseNotes/ReleaseNotesViewer";
 import { VersionHistoryPanel } from "../features/versions/VersionHistoryPanel";
 import { TitleBar } from "../components/window/TitleBar";
-import type { AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiUsageSummaryResponse, AppearanceConfig, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentTreeNode, LayoutConfig, Project, ProjectVersioningStatus, WorkspaceTab } from "../types/domain";
+import { getProjectImageContentUrl } from "../lib/api/projects";
+import type { AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentTreeNode, InsertImageReferenceResponse, LayoutConfig, Project, ProjectVersioningStatus, WorkspaceTab } from "../types/domain";
 
 const sidebarWidthConfig = {
   defaultWidth: 338,
@@ -59,6 +61,7 @@ type DesktopLayoutProps = {
   tabs: WorkspaceTab[];
   activeTabId: string;
   activeDocumentId: string;
+  activeImageId: string;
   editorSessions: EditorDocumentSession[];
   releaseNotesMarkdown: string;
   activeDocument: DocumentRecord | null;
@@ -81,6 +84,7 @@ type DesktopLayoutProps = {
   onConfigureProject: () => void;
   onOpenAppSettings: () => void;
   onCreateFolder: () => void;
+  onImportProjectFile: () => void;
   onRenameNode: (nodeId: string, name: string) => void;
   onToggleNode: (nodeId: string) => void;
   onExpandTree: () => void;
@@ -98,6 +102,7 @@ type DesktopLayoutProps = {
   onClearAiSelectionFocus: () => void;
   onSearchAiContextDocuments: (query: string) => Promise<AiContextSearchResult[]>;
   onAddProjectDocumentContext: (documentId: string) => void | Promise<void>;
+  onAddProjectImageContext: (assetId: string) => void | Promise<void>;
   onUploadAiContextFiles: (files: File[]) => void | Promise<void>;
   onRemoveAiContextSource: (sourceId: string) => void | Promise<void>;
   onExtendAiContextSource: (sourceId: string) => void | Promise<void>;
@@ -109,10 +114,14 @@ type DesktopLayoutProps = {
   onOpenAiConversation: () => void;
   isSyncingProject: boolean;
   onOpenDocument: (documentId: string, name: string) => void;
+  onOpenImage: (assetId: string, name: string, path: string) => void;
   onSelectTab: (documentId: string) => void;
   onCloseTab: (documentId: string) => void;
   onTreeContextAction: (action: DocumentTreeAction, node: DocumentTreeNode) => void;
   onMoveTreeNode: (node: DocumentTreeNode, targetFolderId: string | null) => void | Promise<void>;
+  onImportProjectImage: (parentId: string | null, file: File) => Promise<AssetImportResponse>;
+  onBuildImageReference: (documentId: string, assetId: string, altText?: string | null) => Promise<InsertImageReferenceResponse>;
+  onInsertImageIntoActiveDocument: (assetId: string) => void | Promise<void>;
   onMarkdownChange: (documentId: string, markdown: string) => void;
   onEditorOperationApplied: (operationId: string) => void;
   onEditorOperationFailed: (operation: MarkdownEditorExternalOperation) => void;
@@ -140,9 +149,10 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   const [navigationOpen, setNavigationOpen] = useState(false);
   const activeWorkspaceTab = props.tabs.find((tab) => tab.id === props.activeTabId);
   const hasOpenDocument = activeWorkspaceTab?.kind === "document" && Boolean(props.activeDocumentId);
+  const hasOpenImage = activeWorkspaceTab?.kind === "image" && Boolean(props.activeImageId);
   const hasReleaseNotes = activeWorkspaceTab?.kind === "release-notes";
   const hasAiConversation = activeWorkspaceTab?.kind === "ai-conversation";
-  const hasOpenTab = hasOpenDocument || hasReleaseNotes || hasAiConversation;
+  const hasOpenTab = hasOpenDocument || hasOpenImage || hasReleaseNotes || hasAiConversation;
   const activeEditorController = editorControllers[props.activeDocumentId] ?? null;
   const activeEditorHistoryState = editorHistoryStates[props.activeDocumentId] ?? emptyMarkdownEditorHistoryState;
   const sidebar = useResizablePanelWidth({
@@ -160,6 +170,10 @@ export function DesktopLayout(props: DesktopLayoutProps) {
 
   const handleRunEditorAction = useCallback((action: MarkdownEditorAction, options?: MarkdownEditorActionOptions) => {
     if (!activeEditorController) return;
+    if (action === "image" && !options?.image) {
+      setImageInsertOpen(true);
+      return;
+    }
 
     activeEditorController.run(action, options);
     setEditorFormatState((currentFormatState) => keepStableFormatState(currentFormatState, activeEditorController.getFormatState()));
@@ -255,6 +269,8 @@ export function DesktopLayout(props: DesktopLayoutProps) {
     setNavigationOpen(false);
   }, [props.onOpenDocument]);
 
+  const [imageInsertOpen, setImageInsertOpen] = useState(false);
+
   const activeStatus = getDocumentStatus({
     saveState: props.saveState,
     isDirty: props.activeDocumentDirty,
@@ -306,7 +322,15 @@ export function DesktopLayout(props: DesktopLayoutProps) {
               <DocumentTree
                 nodes={props.tree}
                 activeDocumentId={props.activeDocumentId}
+                hasActiveProject={Boolean(props.activeProject)}
                 onOpenDocument={handleOpenDocument}
+                onOpenImage={props.onOpenImage}
+                onCreateFolder={props.onCreateFolder}
+                onCreateDocument={props.onCreateDocument}
+                onImportFile={props.onImportProjectFile}
+                onExpandTree={props.onExpandTree}
+                onCollapseTree={props.onCollapseTree}
+                onConfigureProject={props.onConfigureProject}
                 onRenameNode={props.onRenameNode}
                 onToggleNode={props.onToggleNode}
                 onContextAction={props.onTreeContextAction}
@@ -319,15 +343,9 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             language={props.appLanguage}
             authStatus={props.authStatus}
             aiUsageSummary={props.aiUsageSummary}
-            hasActiveProject={Boolean(props.activeProject)}
             orphanDraftCount={props.orphanDraftCount}
             onLoginGithub={props.onLoginGithub}
             onLogout={props.onLogout}
-            onCreateFolder={props.onCreateFolder}
-            onCreateDocument={props.onCreateDocument}
-            onExpandTree={props.onExpandTree}
-            onCollapseTree={props.onCollapseTree}
-            onConfigureProject={props.onConfigureProject}
             onOpenAppSettings={props.onOpenAppSettings}
             onOpenRecoverableDrafts={props.onOpenRecoverableDrafts}
             onCheckForUpdates={props.onCheckForUpdates}
@@ -358,7 +376,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             onSelectTab={props.onSelectTab}
             onCloseTab={props.onCloseTab}
           />
-              {hasReleaseNotes || hasAiConversation ? null : (
+              {hasReleaseNotes || hasAiConversation || hasOpenImage ? null : (
               <MarkdownToolbar
                 historyOpen={props.historyOpen}
                 historyEnabled={props.historyEnabled}
@@ -390,6 +408,16 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                           pendingIntent={props.aiPendingIntent}
                           onIntentAction={props.onAiIntentAction}
                         />
+                      ) : hasOpenImage && activeWorkspaceTab?.kind === "image" && props.activeProject ? (
+                        <ImageViewer
+                          project={props.activeProject}
+                          assetId={activeWorkspaceTab.id}
+                          name={activeWorkspaceTab.name}
+                          path={activeWorkspaceTab.path}
+                          activeDocumentId={props.activeDocumentId}
+                          onInsertIntoDocument={props.onInsertImageIntoActiveDocument}
+                          onAddToAiContext={props.onAddProjectImageContext}
+                        />
                       ) : (
                         <>
                       {props.activeDocumentDiskChanged || props.activeDocumentConflictStatus === "orphaned" ? (
@@ -406,8 +434,8 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                               <MarkdownEditor
                                 key={session.editorKey}
                                 documentKey={session.editorKey}
-                                markdown={session.markdown}
-                                onChange={(markdown) => props.onMarkdownChange(session.documentId, markdown)}
+                                markdown={materializeProjectImageReferences(session.markdown, props.activeProject?.id ?? "", session.document.path, props.tree)}
+                                onChange={(markdown) => props.onMarkdownChange(session.documentId, restoreProjectImageReferences(markdown, props.activeProject?.id ?? "", session.document!.path, props.tree))}
                                 onControllerChange={(controller) => handleEditorControllerChange(session.documentId, controller)}
                                 onFormatStateChange={(formatState) => {
                                   if (session.documentId === props.activeDocumentId) {
@@ -481,6 +509,20 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                   onIntentAction={props.onAiIntentAction}
                   onClose={props.onCloseAiBubble}
                   onOpenConversation={props.onOpenAiConversation}
+                />
+              ) : null}
+              {imageInsertOpen && props.activeProject && hasOpenDocument ? (
+                <InsertImageDialog
+                  activeDocumentId={props.activeDocumentId}
+                  activeDocumentPath={props.activeDocument?.path ?? null}
+                  tree={props.tree}
+                  onClose={() => setImageInsertOpen(false)}
+                  onImportImage={props.onImportProjectImage}
+                  onBuildReference={props.onBuildImageReference}
+                  onInsert={(markdown) => {
+                    activeEditorController?.run("image", parseImageMarkdown(markdown));
+                    setImageInsertOpen(false);
+                  }}
                 />
               ) : null}
               {hasOpenDocument ? (
@@ -603,6 +645,291 @@ function useResizablePanelWidth({ defaultWidth, minWidth, maxWidth, width, resiz
 
 function clamp(value: number, min: number, max: number) {
   return Math.round(Math.min(Math.max(value, min), max));
+}
+
+function InsertImageDialog({
+  activeDocumentId,
+  activeDocumentPath,
+  tree,
+  onClose,
+  onImportImage,
+  onBuildReference,
+  onInsert,
+}: {
+  activeDocumentId: string;
+  activeDocumentPath: string | null;
+  tree: DocumentTreeNode[];
+  onClose: () => void;
+  onImportImage: (parentId: string | null, file: File) => Promise<AssetImportResponse>;
+  onBuildReference: (documentId: string, assetId: string, altText?: string | null) => Promise<InsertImageReferenceResponse>;
+  onInsert: (markdown: string) => void;
+}) {
+  const images = useMemo(() => collectImages(tree), [tree]);
+  const uploadParentId = useMemo(() => resolveDocumentParentFolderId(tree, activeDocumentPath), [tree, activeDocumentPath]);
+  const [mode, setMode] = useState<"project" | "upload" | "url">("project");
+  const [query, setQuery] = useState("");
+  const [altText, setAltText] = useState("");
+  const [url, setUrl] = useState("https://");
+  const [busy, setBusy] = useState(false);
+  const [selectedAssetId, setSelectedAssetId] = useState(images[0]?.id ?? "");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const visibleImages = images.filter((image) => {
+    const value = `${image.name} ${image.path ?? ""}`.toLowerCase();
+    return value.includes(query.trim().toLowerCase());
+  });
+
+  useEffect(() => {
+    if (!selectedAssetId && visibleImages[0]) setSelectedAssetId(visibleImages[0].id);
+  }, [selectedAssetId, visibleImages]);
+
+  async function insertSelectedAsset(assetId = selectedAssetId) {
+    if (!assetId) return;
+    setBusy(true);
+    try {
+      const reference = await onBuildReference(activeDocumentId, assetId, altText || null);
+      onInsert(reference.markdown);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function uploadAndInsert(file: File) {
+    setBusy(true);
+    try {
+      const imported = await onImportImage(uploadParentId, file);
+      const reference = await onBuildReference(activeDocumentId, imported.asset.id, altText || imported.asset.name.replace(/\.[^.]+$/, ""));
+      onInsert(reference.markdown);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function insertUrl() {
+    if (!url.trim()) return;
+    const alt = altText.trim() || "Imagen";
+    onInsert(`![${alt}](${url.trim()})`);
+  }
+
+  return (
+    <div className="fixed inset-0 z-[98] grid place-items-center bg-black/20 px-4">
+      <section className="flex max-h-[min(620px,calc(100vh-48px))] w-[min(640px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu">
+        <header className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
+          <div>
+            <h2 className="text-[15px] font-semibold text-ink-primary">Insertar imagen</h2>
+            <p className="mt-1 text-[11px] text-ink-secondary">Usa una imagen del proyecto, sube una nueva o enlaza una URL externa.</p>
+          </div>
+          <button className="grid h-8 w-8 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </header>
+        <div className="flex border-b border-line px-5 pt-3">
+          {[
+            ["project", "Proyecto"],
+            ["upload", "Subir"],
+            ["url", "URL"],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              className={["h-8 border-b-2 px-3 text-[11px] font-semibold", mode === value ? "border-brand-orange text-brand-orange" : "border-transparent text-ink-secondary hover:text-ink-primary"].join(" ")}
+              onClick={() => setMode(value as typeof mode)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          <label className="block text-[11px] font-semibold text-ink-secondary">
+            Texto alternativo
+            <input
+              className="mt-1 h-9 w-full rounded-md border border-line px-3 text-[12px] text-ink-primary outline-none focus:border-brand-orange"
+              value={altText}
+              onChange={(event) => setAltText(event.target.value)}
+              placeholder="Descripcion breve de la imagen"
+            />
+          </label>
+          {mode === "project" ? (
+            <div className="mt-4">
+              <input
+                className="h-9 w-full rounded-md border border-line px-3 text-[12px] outline-none focus:border-brand-orange"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Buscar imagen del proyecto"
+              />
+              <div className="mt-3 max-h-72 space-y-1 overflow-y-auto">
+                {visibleImages.length === 0 ? (
+                  <p className="rounded-md border border-line bg-panel px-3 py-4 text-center text-[11px] text-ink-secondary">No hay imagenes que coincidan.</p>
+                ) : (
+                  visibleImages.map((image) => (
+                    <button
+                      key={image.id}
+                      className={["flex h-12 w-full items-center gap-3 rounded-md border px-3 text-left", selectedAssetId === image.id ? "border-orange-200 bg-brand-hover" : "border-line hover:bg-panel"].join(" ")}
+                      onClick={() => setSelectedAssetId(image.id)}
+                      onDoubleClick={() => void insertSelectedAsset(image.id)}
+                    >
+                      <ImageIcon size={15} className="text-brand-orange" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[12px] font-semibold text-ink-primary">{image.name}</span>
+                        <span className="block truncate text-[10px] text-ink-secondary">{image.path}</span>
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : mode === "upload" ? (
+            <div className="mt-4 rounded-md border border-dashed border-line bg-panel px-4 py-8 text-center">
+              <Upload size={22} className="mx-auto text-brand-orange" />
+              <p className="mt-2 text-[12px] font-semibold text-ink-primary">Subir imagen al proyecto</p>
+              <p className="mt-1 text-[11px] text-ink-secondary">Se copiara al proyecto y se insertara una referencia relativa.</p>
+              <button className="mt-4 h-8 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark" onClick={() => fileInputRef.current?.click()}>
+                Seleccionar imagen
+              </button>
+              <input
+                ref={fileInputRef}
+                className="hidden"
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0];
+                  event.currentTarget.value = "";
+                  if (file) void uploadAndInsert(file);
+                }}
+              />
+            </div>
+          ) : (
+            <label className="mt-4 block text-[11px] font-semibold text-ink-secondary">
+              URL de la imagen
+              <input className="mt-1 h-9 w-full rounded-md border border-line px-3 text-[12px] outline-none focus:border-brand-orange" value={url} onChange={(event) => setUrl(event.target.value)} />
+            </label>
+          )}
+        </div>
+        <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
+          <button className="h-9 rounded-md border border-line px-4 text-[11px] hover:bg-panel" onClick={onClose}>Cancelar</button>
+          <button
+            className="h-9 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={busy || (mode === "project" && !selectedAssetId)}
+            onClick={() => {
+              if (mode === "project") void insertSelectedAsset();
+              if (mode === "upload") fileInputRef.current?.click();
+              if (mode === "url") insertUrl();
+            }}
+          >
+            {busy ? "Insertando" : "Insertar"}
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function collectImages(nodes: DocumentTreeNode[]): DocumentTreeNode[] {
+  return nodes.flatMap((node) => {
+    if (node.type === "image") return [node];
+    return node.children ? collectImages(node.children) : [];
+  });
+}
+
+const markdownImageReferencePattern = /!\[([^\]]*)\]\(([^)\n]+)\)/g;
+
+function materializeProjectImageReferences(markdown: string, projectId: string, documentPath: string, tree: DocumentTreeNode[]) {
+  if (!projectId || !documentPath || !markdown.includes("](")) return markdown;
+  const images = collectImages(tree);
+  if (images.length === 0) return markdown;
+
+  return markdown.replace(markdownImageReferencePattern, (fullMatch, alt: string, body: string) => {
+    const parsed = splitMarkdownImageTarget(body);
+    if (!parsed || isExternalImageTarget(parsed.target)) return fullMatch;
+    const resolvedPath = resolveMarkdownAssetPath(documentPath, parsed.target);
+    const image = images.find((node) => node.path === resolvedPath);
+    if (!image) return fullMatch;
+    const titlePart = parsed.title ? ` "${parsed.title}"` : "";
+    return `![${alt}](${getProjectImageContentUrl(projectId, image.id)}${titlePart})`;
+  });
+}
+
+function restoreProjectImageReferences(markdown: string, projectId: string, documentPath: string, tree: DocumentTreeNode[]) {
+  if (!projectId || !documentPath || !markdown.includes("/assets/")) return markdown;
+  const images = collectImages(tree);
+  if (images.length === 0) return markdown;
+  const byContentUrl = new Map(images.map((image) => [getProjectImageContentUrl(projectId, image.id), image]));
+
+  return markdown.replace(markdownImageReferencePattern, (fullMatch, alt: string, body: string) => {
+    const parsed = splitMarkdownImageTarget(body);
+    if (!parsed) return fullMatch;
+    const image = byContentUrl.get(parsed.target);
+    if (!image?.path) return fullMatch;
+    const relativeTarget = relativeMarkdownTarget(image.path, documentPath);
+    const titlePart = parsed.title ? ` "${parsed.title}"` : "";
+    return `![${alt}](${relativeTarget}${titlePart})`;
+  });
+}
+
+function splitMarkdownImageTarget(body: string): { target: string; title: string | null } | null {
+  const value = body.trim();
+  if (!value) return null;
+  if (value.startsWith("<") && value.includes(">")) {
+    const end = value.indexOf(">");
+    return { target: value.slice(1, end), title: value.slice(end + 1).trim().replace(/^["']|["']$/g, "") || null };
+  }
+  if (!value.includes(" ")) return { target: value.replace(/^["']|["']$/g, ""), title: null };
+  const [target, ...titleParts] = value.split(" ");
+  return { target: target.replace(/^["']|["']$/g, ""), title: titleParts.join(" ").trim().replace(/^["']|["']$/g, "") || null };
+}
+
+function isExternalImageTarget(target: string) {
+  return /^(https?:|data:|mailto:|#)/i.test(target);
+}
+
+function resolveMarkdownAssetPath(documentPath: string, target: string) {
+  const cleanTarget = target.split("#", 1)[0].split("?", 1)[0];
+  const parentParts = documentPath.split("/").slice(0, -1);
+  return normalizePathParts([...parentParts, ...cleanTarget.split("/")]);
+}
+
+function relativeMarkdownTarget(assetPath: string, documentPath: string) {
+  const fromParts = documentPath.split("/").slice(0, -1);
+  const toParts = assetPath.split("/");
+  while (fromParts.length > 0 && toParts.length > 0 && fromParts[0] === toParts[0]) {
+    fromParts.shift();
+    toParts.shift();
+  }
+  const relative = [...fromParts.map(() => ".."), ...toParts].join("/") || ".";
+  return !relative.startsWith(".") && !relative.includes("/") ? `./${relative}` : relative;
+}
+
+function normalizePathParts(parts: string[]) {
+  const normalized: string[] = [];
+  for (const part of parts) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      normalized.pop();
+      continue;
+    }
+    normalized.push(part);
+  }
+  return normalized.join("/");
+}
+
+function resolveDocumentParentFolderId(nodes: DocumentTreeNode[], documentPath: string | null): string | null {
+  if (!documentPath || !documentPath.includes("/")) return null;
+  const parentPath = documentPath.split("/").slice(0, -1).join("/");
+  return findFolderByPath(nodes, parentPath)?.id ?? null;
+}
+
+function findFolderByPath(nodes: DocumentTreeNode[], path: string): DocumentTreeNode | null {
+  for (const node of nodes) {
+    if (node.type === "folder" && node.path === path) return node;
+    if (node.children) {
+      const found = findFolderByPath(node.children, path);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function parseImageMarkdown(markdown: string): MarkdownEditorActionOptions {
+  const match = markdown.match(/^!\[([^\]]*)\]\((.*)\)$/);
+  return { image: { alt: match?.[1] ?? "Imagen", src: match?.[2] ?? markdown } };
 }
 
 function toMarkdownEditorSelection(selectionFocus: AiSelectionFocus | null, documentId: string): MarkdownEditorSelection | null {

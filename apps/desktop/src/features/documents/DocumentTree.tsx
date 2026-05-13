@@ -1,33 +1,58 @@
 import {
   ChevronDown,
   ChevronRight,
+  ChevronUp,
+  Check,
   Copy,
+  FileImage,
   FileText,
   Folder,
   FolderPlus,
+  Eye,
+  Image,
   MoreVertical,
   Pencil,
+  Plus,
+  Search,
   Trash2,
   MoveRight,
   FilePlus2,
+  FileUp,
+  Settings,
+  type LucideIcon,
 } from "lucide-react";
-import { useRef, useState, type DragEvent, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { DocumentTreeNode } from "../../types/domain";
 
 type DocumentTreeProps = {
   nodes: DocumentTreeNode[];
   activeDocumentId: string;
+  hasActiveProject?: boolean;
   onOpenDocument: (documentId: string, name: string) => void;
+  onOpenImage?: (assetId: string, name: string, path: string) => void;
+  onCreateFolder: () => void;
+  onCreateDocument: () => void;
+  onImportFile?: () => void;
+  onExpandTree: () => void;
+  onCollapseTree: () => void;
+  onConfigureProject: () => void;
   onRenameNode: (nodeId: string, name: string) => void;
   onToggleNode: (nodeId: string) => void;
   onContextAction: (action: DocumentTreeAction, node: DocumentTreeNode) => void;
   onMoveNode: (node: DocumentTreeNode, targetFolderId: string | null) => void | Promise<void>;
 };
 
+type TreeFilter = "all" | "documents" | "images";
+
 export type DocumentTreeAction =
   | "create-folder"
   | "create-document"
+  | "import-image"
+  | "open-image"
+  | "insert-image"
+  | "add-image-context"
+  | "copy-image-reference"
   | "rename"
   | "delete"
   | "duplicate"
@@ -36,7 +61,15 @@ export type DocumentTreeAction =
 export function DocumentTree({
   nodes,
   activeDocumentId,
+  hasActiveProject = true,
   onOpenDocument,
+  onOpenImage,
+  onCreateFolder,
+  onCreateDocument,
+  onImportFile,
+  onExpandTree,
+  onCollapseTree,
+  onConfigureProject,
   onRenameNode,
   onToggleNode,
   onContextAction,
@@ -52,6 +85,8 @@ export function DocumentTree({
   } | null>(null);
   const [draggedNode, setDraggedNode] = useState<DocumentTreeNode | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string | null; valid: boolean; label: string } | null>(null);
+  const [filter, setFilter] = useState<TreeFilter>("all");
+  const visibleNodes = filterTree(nodes, filter);
 
   function clearCloseTimer() {
     if (closeTimer.current !== null) {
@@ -158,14 +193,26 @@ export function DocumentTree({
       onScroll={() => setOpenMenu(null)}
     >
       <div>
-        {nodes.length > 0 ? (
-          nodes.map((node) => (
+        <DocumentTreeToolbar
+          filter={filter}
+          disabled={!hasActiveProject}
+          onFilterChange={setFilter}
+          onCreateFolder={onCreateFolder}
+          onCreateDocument={onCreateDocument}
+          onImportFile={onImportFile}
+          onExpandTree={onExpandTree}
+          onCollapseTree={onCollapseTree}
+          onConfigureProject={onConfigureProject}
+        />
+        {visibleNodes.length > 0 ? (
+          visibleNodes.map((node) => (
             <TreeNode
               key={node.id}
               node={node}
               depth={0}
               activeDocumentId={activeDocumentId}
               onOpenDocument={onOpenDocument}
+              onOpenImage={onOpenImage}
               onRenameNode={onRenameNode}
               onToggleNode={onToggleNode}
               menuNodeId={openMenu?.node.id}
@@ -181,7 +228,7 @@ export function DocumentTree({
           ))
         ) : (
           <div className="px-3 py-2 text-[11px] leading-5 text-ink-secondary">
-            No hay documentos Markdown en esta carpeta.
+            {filter === "images" ? "No hay imágenes en este proyecto." : filter === "documents" ? "No hay documentos Markdown en este filtro." : "No hay documentos ni imágenes compatibles en esta carpeta."}
           </div>
         )}
       </div>
@@ -224,6 +271,7 @@ type TreeNodeProps = {
   depth: number;
   activeDocumentId: string;
   onOpenDocument: (documentId: string, name: string) => void;
+  onOpenImage?: (assetId: string, name: string, path: string) => void;
   onRenameNode: (nodeId: string, name: string) => void;
   onToggleNode: (nodeId: string) => void;
   menuNodeId?: string;
@@ -242,6 +290,7 @@ function TreeNode({
   depth,
   activeDocumentId,
   onOpenDocument,
+  onOpenImage,
   onRenameNode,
   onToggleNode,
   menuNodeId,
@@ -265,13 +314,17 @@ function TreeNode({
     <div>
       <div
         className={[
-          "tree-row group relative flex h-6 select-none items-center rounded-md pr-1.5 transition",
+          "tree-row group relative flex h-6 select-none items-center rounded-md border pr-1.5 transition",
           node.isEditing ? "cursor-default" : isDragging ? "cursor-grabbing" : "cursor-default",
           isDragging ? "opacity-45" : "",
-          isDropTarget && dropTarget?.valid ? "bg-brand-hover ring-1 ring-inset ring-brand-orange" : "",
-          isDropTarget && !dropTarget?.valid ? "bg-red-50 ring-1 ring-inset ring-red-200" : "",
-          !isDropTarget && (isActive || hasOpenMenu) ? "bg-brand-hover" : "",
+          isDropTarget && dropTarget?.valid ? "border-brand-orange bg-brand-hover ring-1 ring-inset ring-brand-orange" : "",
+          isDropTarget && !dropTarget?.valid ? "border-red-200 bg-red-50 ring-1 ring-inset ring-red-200" : "",
+          !isDropTarget && isActive
+            ? "border-orange-200 bg-white text-brand-orange shadow-[inset_0_0_0_1px_rgba(243,112,33,0.18)]"
+            : "",
+          !isDropTarget && !isActive && hasOpenMenu ? "border-transparent bg-brand-hover" : "",
           !isDropTarget && !isActive && !hasOpenMenu ? "hover:bg-brand-hover" : "",
+          !isDropTarget && !isActive ? "border-transparent" : "",
         ].join(" ")}
         style={{ paddingLeft: 6 + depth * 18 }}
         draggable={!node.isEditing}
@@ -282,7 +335,8 @@ function TreeNode({
         onClick={() => {
           if (node.isEditing) return;
           if (isFolder) onToggleNode(node.id);
-          if (!isFolder) onOpenDocument(node.id, node.name);
+          if (node.type === "document") onOpenDocument(node.id, node.name);
+          if (node.type === "image" && node.path) onOpenImage?.(node.id, node.name, node.path);
         }}
       >
         <span className="mr-0.5 grid h-5 w-4 place-items-center">
@@ -290,8 +344,10 @@ function TreeNode({
         </span>
         {isFolder ? (
           <Folder size={15} className="mr-1.5 text-brand-orange" />
+        ) : node.type === "image" ? (
+          <Image size={14} className={["mr-1.5", isActive ? "text-brand-orange" : "text-ink-secondary"].join(" ")} />
         ) : (
-          <FileText size={14} className="mr-1.5 text-ink-secondary" />
+          <FileText size={14} className={["mr-1.5", isActive ? "text-brand-orange" : "text-ink-secondary"].join(" ")} />
         )}
         {node.isEditing ? (
           <input
@@ -311,7 +367,7 @@ function TreeNode({
           />
         ) : (
           <>
-            <span className="min-w-0 flex-1 truncate">{node.name}</span>
+            <span className={["min-w-0 flex-1 truncate", isActive ? "font-semibold" : ""].join(" ")}>{node.name}</span>
             <button
               className="grid h-5 w-5 place-items-center rounded-md opacity-0 hover:bg-white group-hover:opacity-100"
               aria-label={`Abrir menú de ${node.name}`}
@@ -332,6 +388,7 @@ function TreeNode({
               depth={depth + 1}
               activeDocumentId={activeDocumentId}
               onOpenDocument={onOpenDocument}
+              onOpenImage={onOpenImage}
               onRenameNode={onRenameNode}
               onToggleNode={onToggleNode}
               menuNodeId={menuNodeId}
@@ -361,6 +418,190 @@ function getParentId(nodes: DocumentTreeNode[], nodeId: string, parentId: string
   return undefined;
 }
 
+function DocumentTreeToolbar({
+  filter,
+  disabled,
+  onFilterChange,
+  onCreateFolder,
+  onCreateDocument,
+  onImportFile,
+  onExpandTree,
+  onCollapseTree,
+  onConfigureProject,
+}: {
+  filter: TreeFilter;
+  disabled: boolean;
+  onFilterChange: (filter: TreeFilter) => void;
+  onCreateFolder: () => void;
+  onCreateDocument: () => void;
+  onImportFile?: () => void;
+  onExpandTree: () => void;
+  onCollapseTree: () => void;
+  onConfigureProject: () => void;
+}) {
+  const [openPanel, setOpenPanel] = useState<"create" | "view" | null>(null);
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!openPanel) return;
+
+    function closeToolbarMenu(event: globalThis.MouseEvent) {
+      if (toolbarRef.current?.contains(event.target as Node)) return;
+      setOpenPanel(null);
+    }
+
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") setOpenPanel(null);
+    }
+
+    window.addEventListener("mousedown", closeToolbarMenu);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("mousedown", closeToolbarMenu);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [openPanel]);
+
+  function runAction(action: () => void) {
+    setOpenPanel(null);
+    action();
+  }
+
+  return (
+    <div ref={toolbarRef} className="relative mb-2 flex h-8 items-center justify-between gap-2 px-1.5">
+      <span className="text-[10px] font-semibold uppercase text-ink-secondary">Archivos</span>
+      <div className="flex items-center gap-0.5">
+        <ToolbarIconButton label="Buscar en archivos (pendiente)" disabled icon={Search} />
+        <ToolbarIconButton
+          label="Añadir"
+          icon={Plus}
+          active={openPanel === "create"}
+          disabled={disabled}
+          onClick={() => setOpenPanel((currentPanel) => (currentPanel === "create" ? null : "create"))}
+        />
+        <ToolbarIconButton
+          label="Vista del árbol"
+          icon={Eye}
+          active={openPanel === "view"}
+          disabled={disabled}
+          onClick={() => setOpenPanel((currentPanel) => (currentPanel === "view" ? null : "view"))}
+        />
+        <ToolbarIconButton label="Ajustes del proyecto" icon={Settings} disabled={disabled} onClick={onConfigureProject} />
+      </div>
+      {openPanel === "create" ? (
+        <ToolbarMenu className="right-8 top-8 w-[214px]">
+          <ToolbarMenuItem icon={FolderPlus} label="Nueva carpeta" description="Crea una carpeta en la raíz" onClick={() => runAction(onCreateFolder)} />
+          <ToolbarMenuItem icon={FilePlus2} label="Nuevo Markdown" description="Crea un documento vacío" onClick={() => runAction(onCreateDocument)} />
+          <ToolbarMenuItem
+            icon={FileUp}
+            label="Importar archivo"
+            description="Markdown o imagen del disco"
+            disabled={!onImportFile}
+            onClick={() => onImportFile && runAction(onImportFile)}
+          />
+        </ToolbarMenu>
+      ) : null}
+      {openPanel === "view" ? (
+        <ToolbarMenu className="right-0 top-8 w-[218px]">
+          <ToolbarMenuItem icon={Check} label="Ver todo" active={filter === "all"} onClick={() => runAction(() => onFilterChange("all"))} />
+          <ToolbarMenuItem icon={FileText} label="Solo Markdown" active={filter === "documents"} onClick={() => runAction(() => onFilterChange("documents"))} />
+          <ToolbarMenuItem icon={Image} label="Solo imágenes" active={filter === "images"} onClick={() => runAction(() => onFilterChange("images"))} />
+          <div className="my-1 border-t border-line" />
+          <ToolbarMenuItem icon={ChevronDown} label="Expandir carpetas" onClick={() => runAction(onExpandTree)} />
+          <ToolbarMenuItem icon={ChevronUp} label="Contraer carpetas" onClick={() => runAction(onCollapseTree)} />
+        </ToolbarMenu>
+      ) : null}
+    </div>
+  );
+}
+
+function ToolbarIconButton({
+  label,
+  icon: Icon,
+  active = false,
+  disabled = false,
+  onClick,
+}: {
+  label: string;
+  icon: LucideIcon;
+  active?: boolean;
+  disabled?: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      className={[
+        "grid h-7 w-7 place-items-center rounded-md border border-transparent text-ink-secondary transition",
+        active ? "border-orange-100 bg-brand-hover text-brand-orange" : "hover:border-orange-100 hover:bg-brand-hover hover:text-brand-orange",
+        disabled ? "cursor-not-allowed opacity-40" : "",
+      ].join(" ")}
+      data-tooltip={label}
+      data-tooltip-placement="top"
+      aria-label={label}
+      aria-disabled={disabled}
+      onClick={() => {
+        if (!disabled) onClick?.();
+      }}
+    >
+      <Icon size={15} />
+    </button>
+  );
+}
+
+function ToolbarMenu({ className, children }: { className: string; children: ReactNode }) {
+  return (
+    <div className={["absolute z-40 rounded-md border border-line bg-white p-1 shadow-menu", className].join(" ")}>
+      {children}
+    </div>
+  );
+}
+
+function ToolbarMenuItem({
+  icon: Icon,
+  label,
+  description,
+  active = false,
+  disabled = false,
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  description?: string;
+  active?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={[
+        "flex min-h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] transition",
+        active ? "bg-brand-hover text-brand-orange" : "hover:bg-brand-hover",
+        disabled ? "cursor-not-allowed opacity-50" : "",
+      ].join(" ")}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      <Icon size={14} className="shrink-0" />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium">{label}</span>
+        {description ? <span className="block truncate text-[10px] font-normal text-ink-secondary">{description}</span> : null}
+      </span>
+    </button>
+  );
+}
+
+function filterTree(nodes: DocumentTreeNode[], filter: TreeFilter): DocumentTreeNode[] {
+  if (filter === "all") return nodes;
+  const acceptedType = filter === "documents" ? "document" : "image";
+  return nodes.flatMap((node) => {
+    if (node.type === acceptedType) return [node];
+    if (node.type !== "folder") return [];
+    const children = filterTree(node.children ?? [], filter);
+    if (children.length === 0) return [];
+    return [{ ...node, children }];
+  });
+}
+
 function isValidFolderDrop(nodes: DocumentTreeNode[], draggedNode: DocumentTreeNode, targetNode: DocumentTreeNode) {
   if (targetNode.type !== "folder") return false;
   if (draggedNode.id === targetNode.id) return false;
@@ -386,7 +627,7 @@ function ContextMenu({
   onMouseEnter,
   onMouseLeave,
 }: {
-  type: "folder" | "document";
+  type: "folder" | "document" | "image";
   x: number;
   y: number;
   onSelect: (action: DocumentTreeAction) => void;
@@ -396,6 +637,7 @@ function ContextMenu({
   const folderItems = [
     { label: "Nueva carpeta", icon: FolderPlus, action: "create-folder" },
     { label: "Nuevo documento", icon: FilePlus2, action: "create-document" },
+    { label: "Importar imagen", icon: FileImage, action: "import-image" },
     { label: "Renombrar", icon: Pencil, action: "rename" },
     { label: "Mover", icon: MoveRight, action: "move" },
     { label: "Eliminar", icon: Trash2, action: "delete" },
@@ -406,7 +648,16 @@ function ContextMenu({
     { label: "Mover", icon: MoveRight, action: "move" },
     { label: "Eliminar", icon: Trash2, action: "delete" },
   ];
-  const items = type === "folder" ? folderItems : documentItems;
+  const imageItems = [
+    { label: "Abrir", icon: Image, action: "open-image" },
+    { label: "Insertar en documento", icon: FileImage, action: "insert-image" },
+    { label: "Usar como contexto IA", icon: Copy, action: "add-image-context" },
+    { label: "Copiar referencia", icon: Copy, action: "copy-image-reference" },
+    { label: "Renombrar", icon: Pencil, action: "rename" },
+    { label: "Mover", icon: MoveRight, action: "move" },
+    { label: "Eliminar", icon: Trash2, action: "delete" },
+  ];
+  const items = type === "folder" ? folderItems : type === "image" ? imageItems : documentItems;
 
   return (
     <div

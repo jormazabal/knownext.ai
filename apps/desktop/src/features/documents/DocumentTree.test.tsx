@@ -39,6 +39,11 @@ describe("DocumentTree", () => {
         nodes={nodes}
         activeDocumentId=""
         onOpenDocument={onOpenDocument}
+        onCreateFolder={vi.fn()}
+        onCreateDocument={vi.fn()}
+        onExpandTree={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onConfigureProject={vi.fn()}
         onRenameNode={vi.fn()}
         onToggleNode={onToggleNode}
         onContextAction={vi.fn()}
@@ -61,6 +66,11 @@ describe("DocumentTree", () => {
         nodes={nodes}
         activeDocumentId=""
         onOpenDocument={vi.fn()}
+        onCreateFolder={vi.fn()}
+        onCreateDocument={vi.fn()}
+        onExpandTree={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onConfigureProject={vi.fn()}
         onRenameNode={vi.fn()}
         onToggleNode={vi.fn()}
         onContextAction={onContextAction}
@@ -84,6 +94,11 @@ describe("DocumentTree", () => {
         nodes={nodes}
         activeDocumentId=""
         onOpenDocument={vi.fn()}
+        onCreateFolder={vi.fn()}
+        onCreateDocument={vi.fn()}
+        onExpandTree={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onConfigureProject={vi.fn()}
         onRenameNode={vi.fn()}
         onToggleNode={vi.fn()}
         onContextAction={onContextAction}
@@ -107,6 +122,11 @@ describe("DocumentTree", () => {
         nodes={nodes}
         activeDocumentId=""
         onOpenDocument={vi.fn()}
+        onCreateFolder={vi.fn()}
+        onCreateDocument={vi.fn()}
+        onExpandTree={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onConfigureProject={vi.fn()}
         onRenameNode={vi.fn()}
         onToggleNode={vi.fn()}
         onContextAction={vi.fn()}
@@ -125,6 +145,61 @@ describe("DocumentTree", () => {
     fireEvent.drop(folderRow!, { dataTransfer });
 
     expect(onMoveNode).toHaveBeenCalledWith(documentNode, "folder-archive");
+  });
+
+  it("groups project commands and tree visibility controls in the file toolbar", async () => {
+    const onCreateFolder = vi.fn();
+    const onCreateDocument = vi.fn();
+    const onImportFile = vi.fn();
+    const onExpandTree = vi.fn();
+    const onCollapseTree = vi.fn();
+    const onConfigureProject = vi.fn();
+
+    render(
+      <DocumentTree
+        nodes={nodes}
+        activeDocumentId=""
+        onOpenDocument={vi.fn()}
+        onCreateFolder={onCreateFolder}
+        onCreateDocument={onCreateDocument}
+        onImportFile={onImportFile}
+        onExpandTree={onExpandTree}
+        onCollapseTree={onCollapseTree}
+        onConfigureProject={onConfigureProject}
+        onRenameNode={vi.fn()}
+        onToggleNode={vi.fn()}
+        onContextAction={vi.fn()}
+        onMoveNode={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Archivos")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Buscar en archivos (pendiente)" })).toHaveAttribute("aria-disabled", "true");
+
+    await userEvent.click(screen.getByRole("button", { name: "Añadir" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Nueva carpeta/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Añadir" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Nuevo Markdown/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Añadir" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Importar archivo/ }));
+
+    await userEvent.click(screen.getByRole("button", { name: "Vista del árbol" }));
+    await userEvent.click(screen.getByRole("button", { name: "Solo Markdown" }));
+    expect(screen.queryByText("Archivo")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Vista del árbol" }));
+    await userEvent.click(screen.getByRole("button", { name: "Ver todo" }));
+    await userEvent.click(screen.getByRole("button", { name: "Vista del árbol" }));
+    await userEvent.click(screen.getByRole("button", { name: "Expandir carpetas" }));
+    await userEvent.click(screen.getByRole("button", { name: "Vista del árbol" }));
+    await userEvent.click(screen.getByRole("button", { name: "Contraer carpetas" }));
+    await userEvent.click(screen.getByRole("button", { name: "Ajustes del proyecto" }));
+
+    expect(onCreateFolder).toHaveBeenCalledTimes(1);
+    expect(onCreateDocument).toHaveBeenCalledTimes(1);
+    expect(onImportFile).toHaveBeenCalledTimes(1);
+    expect(onExpandTree).toHaveBeenCalledTimes(1);
+    expect(onCollapseTree).toHaveBeenCalledTimes(1);
+    expect(onConfigureProject).toHaveBeenCalledTimes(1);
   });
 });
 

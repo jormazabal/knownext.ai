@@ -76,7 +76,7 @@ export function createMarkdownEditorController(editor: Editor, selectionFocusPlu
           case "link":
             return applyLink(ctx);
           case "image":
-            return applyImage(ctx);
+            return applyImage(ctx, options?.image);
           case "quote":
             return commands.call(wrapInBlockquoteCommand.key);
           case "horizontal-rule":
@@ -236,11 +236,11 @@ function applyLink(ctx: EditorCommandContext) {
   return true;
 }
 
-function applyImage(ctx: EditorCommandContext) {
-  const src = window.prompt("URL de la imagen", "https://");
+function applyImage(ctx: EditorCommandContext, image?: { src: string; alt: string }) {
+  const src = image?.src ?? window.prompt("URL de la imagen", "https://");
   if (!src) return false;
 
-  const alt = window.prompt("Texto alternativo", "Imagen") ?? "Imagen";
+  const alt = image?.alt ?? window.prompt("Texto alternativo", "Imagen") ?? "Imagen";
   return ctx.get(commandsCtx).call(insertImageCommand.key, { src, alt });
 }
 
