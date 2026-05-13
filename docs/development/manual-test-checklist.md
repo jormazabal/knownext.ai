@@ -133,6 +133,14 @@
 - [ ] In `Razonar`, choose a depth and confirm the task first classifies the work, then either executes directly, asks a real clarification, reports a disabled permission, or opens `IA` only for long work.
 - [ ] Select text in the active document, focus the AI prompt, and confirm the document selection remains visually highlighted while a removable selected-text context chip appears in the prompt.
 - [ ] Remove the selected-text context chip and confirm the prompt can be sent without selected-text focus.
+- [ ] In the AI prompt, type `@` plus part of a filename and confirm a compact project-document picker opens above the prompt, filters results while typing, supports keyboard selection, and adds the selected document as a visible context chip.
+- [ ] Confirm every visible context chip in the prompt is treated as active context, remains visible after sending, and can be removed with its X button.
+- [ ] Add several context sources and confirm the prompt stays compact, shows `Fuentes · N · peso`, and opens a sources popover with status, origin, expiry, preview, remove, and extend actions.
+- [ ] Attach external `.md`, `.pdf`, `.docx`, `.pptx`, and image files to the AI prompt where available, and confirm each appears as a chip with clear `Listo`, `Procesando`, `Aviso`, or `No se pudo leer` state.
+- [ ] Confirm external context sources show expiry timing, display an orange warning state when close to expiry, and disappear from active context after backend expiry or when removed by the user.
+- [ ] Open an external source preview from the prompt and confirm extracted text or image readiness is visible without leaving the editor.
+- [ ] Use `Añadir al proyecto` from an external text source and confirm KnowNext.ai creates a Markdown document in the project, refreshes the tree, and opens the new document.
+- [ ] Submit an AI prompt with multiple active sources and confirm the `IA` conversation message records the exact sources used, even if those chips are later removed or expire.
 - [ ] Submit an AI edit for the active document and confirm Milkdown content changes, the document remains `Cambios sin guardar`, and the AI change notice appears as a floating prompt-area bubble with only the summary and an X close button.
 - [ ] From an active document, disable `Editar documentos`, ask for a document edit, and confirm the AI does not modify the editor and tells the user the permission can be changed in `Configuración de la app > IA`.
 - [ ] In the pending-intent card, confirm Permitir búsqueda, Aplicar, and Cancelar perform structured actions and do not inject artificial user text into the conversation.

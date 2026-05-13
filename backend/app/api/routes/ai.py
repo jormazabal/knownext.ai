@@ -1,7 +1,14 @@
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, File, Response, UploadFile
 
 from app.schemas.ai import (
     AiConfirmDeleteRequest,
+    AiContextAddToProjectRequest,
+    AiContextAddToProjectResponse,
+    AiContextSearchResult,
+    AiContextSource,
+    AiContextSourceListResponse,
+    AiContextSourcePreviewResponse,
+    AiCreateProjectDocumentContextRequest,
     AiConversationResponse,
     AiIndexStatusResponse,
     AiInteractionRequest,
@@ -14,6 +21,7 @@ from app.schemas.ai import (
     OpenAiKeyUpdate,
 )
 from app.services.ai_service import ai_service
+from app.services.ai_context_service import ai_context_service
 from app.services.ai_usage_service import ai_usage_service
 from app.services.credential_service import credential_service
 
@@ -33,6 +41,46 @@ def prompt_project(project_id: str, payload: AiPromptRequest) -> AiPromptRespons
 @router.post("/projects/{project_id}/ai/interactions", response_model=AiInteractionResponse)
 def interact(project_id: str, payload: AiInteractionRequest) -> AiInteractionResponse:
     return ai_service.interact(project_id, payload)
+
+
+@router.get("/projects/{project_id}/ai/context/search", response_model=list[AiContextSearchResult])
+def search_context_documents(project_id: str, q: str = "") -> list[AiContextSearchResult]:
+    return ai_context_service.search_project_documents(project_id, q)
+
+
+@router.get("/projects/{project_id}/ai/context/sources", response_model=AiContextSourceListResponse)
+def list_context_sources(project_id: str) -> AiContextSourceListResponse:
+    return ai_context_service.list_sources(project_id)
+
+
+@router.post("/projects/{project_id}/ai/context/project-documents", response_model=AiContextSource)
+def create_project_document_context_source(project_id: str, payload: AiCreateProjectDocumentContextRequest) -> AiContextSource:
+    return ai_context_service.create_project_document_source(project_id, payload.documentId)
+
+
+@router.post("/projects/{project_id}/ai/context/files", response_model=AiContextSourceListResponse)
+async def upload_context_files(project_id: str, files: list[UploadFile] = File(...)) -> AiContextSourceListResponse:
+    return await ai_context_service.upload_files(project_id, files)
+
+
+@router.delete("/projects/{project_id}/ai/context/sources/{source_id}", response_model=AiContextSourceListResponse)
+def remove_context_source(project_id: str, source_id: str) -> AiContextSourceListResponse:
+    return ai_context_service.remove_source(project_id, source_id)
+
+
+@router.post("/projects/{project_id}/ai/context/sources/{source_id}/extend", response_model=AiContextSource)
+def extend_context_source(project_id: str, source_id: str) -> AiContextSource:
+    return ai_context_service.extend_source(project_id, source_id)
+
+
+@router.get("/projects/{project_id}/ai/context/sources/{source_id}/preview", response_model=AiContextSourcePreviewResponse)
+def preview_context_source(project_id: str, source_id: str) -> AiContextSourcePreviewResponse:
+    return ai_context_service.preview_source(project_id, source_id)
+
+
+@router.post("/projects/{project_id}/ai/context/sources/{source_id}/add-to-project", response_model=AiContextAddToProjectResponse)
+def add_context_source_to_project(project_id: str, source_id: str, payload: AiContextAddToProjectRequest) -> AiContextAddToProjectResponse:
+    return ai_context_service.add_source_to_project(project_id, source_id, payload)
 
 
 @router.get("/ai/usage/summary", response_model=AiUsageSummaryResponse)

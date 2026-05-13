@@ -109,6 +109,9 @@ class OpenAiService:
                         "Si el usuario pide crear documentos nuevos, usa operaciones create_document en la carpeta adecuada; no reemplaces el documento activo para explicar lo que falta. "
                         "Si context.selectionFocus existe, es el texto seleccionado por el usuario para este prompt: úsalo para resolver referencias como "
                         "'lo', 'este texto' o 'esto', pero no reemplaza al activeDocument completo. "
+                        "Si context.explicitSources.sources contiene fuentes visibles en el prompt, úsalas como contexto activo de alta prioridad y cita su name o path "
+                        "cuando la respuesta se base en ellas. No inventes contenido de fuentes que no estén incluidas. Si una fuente indica summary o contenido truncado, "
+                        "tenlo en cuenta al expresar límites de precisión. "
                         "Si el usuario pide transformar solo ese foco, devuelve documentChange con el Markdown completo y cambia solo esa parte cuando sea posible. "
                         "Si el usuario pide reescribir el documento pero dejar el foco sin tocar, conserva exactamente ese texto seleccionado. "
                         "Para borrar, devuelve solo una solicitud delete_node; la aplicación pedirá confirmación. "
@@ -131,12 +134,7 @@ class OpenAiService:
                 },
                 {
                     "role": "user",
-                "content": json.dumps({
-                        "request": payload,
-                        "context": context,
-                        "agentic": context.get("agentic"),
-                        "responseSchema": _interaction_plan_schema(),
-                    }, ensure_ascii=False),
+                    "content": _interaction_user_content(payload, context, _interaction_plan_schema()),
                 },
             ],
             tools=tools or None,
@@ -330,6 +328,46 @@ def _usage_int(container: Any, key: str) -> int:
 def _web_search_enabled(payload: dict[str, Any], context: dict[str, Any]) -> bool:
     agentic = context.get("agentic") if isinstance(context.get("agentic"), dict) else {}
     return bool(agentic.get("webResearchEnabled"))
+
+
+def _interaction_user_content(payload: dict[str, Any], context: dict[str, Any], schema: dict[str, Any]) -> Any:
+    body = {
+        "request": payload,
+        "context": _context_without_image_data(context),
+        "agentic": context.get("agentic"),
+        "responseSchema": schema,
+    }
+    text = json.dumps(body, ensure_ascii=False)
+    image_inputs = _image_inputs_from_context(context)
+    if not image_inputs:
+        return text
+    return [{"type": "input_text", "text": text}, *image_inputs]
+
+
+def _context_without_image_data(context: dict[str, Any]) -> dict[str, Any]:
+    sanitized = json.loads(json.dumps(context, ensure_ascii=False))
+    explicit_sources = sanitized.get("explicitSources") if isinstance(sanitized.get("explicitSources"), dict) else None
+    sources = explicit_sources.get("sources") if isinstance(explicit_sources, dict) else None
+    if isinstance(sources, list):
+        for source in sources:
+            if isinstance(source, dict):
+                source.pop("imageDataUrl", None)
+    return sanitized
+
+
+def _image_inputs_from_context(context: dict[str, Any]) -> list[dict[str, str]]:
+    explicit_sources = context.get("explicitSources") if isinstance(context.get("explicitSources"), dict) else {}
+    sources = explicit_sources.get("sources") if isinstance(explicit_sources, dict) else []
+    image_inputs: list[dict[str, str]] = []
+    if not isinstance(sources, list):
+        return image_inputs
+    for source in sources:
+        if not isinstance(source, dict) or source.get("kind") != "image":
+            continue
+        image_url = source.get("imageDataUrl")
+        if isinstance(image_url, str) and image_url.startswith("data:image/"):
+            image_inputs.append({"type": "input_image", "image_url": image_url})
+    return image_inputs
 
 
 def _extract_web_sources(response: Any) -> list[dict[str, str | None]]:

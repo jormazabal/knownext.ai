@@ -23,7 +23,7 @@ import { ProjectSelector } from "../features/projects/ProjectSelector";
 import { ReleaseNotesViewer } from "../features/releaseNotes/ReleaseNotesViewer";
 import { VersionHistoryPanel } from "../features/versions/VersionHistoryPanel";
 import { TitleBar } from "../components/window/TitleBar";
-import type { AiConfigStatus, AiConversationEvent, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiUsageSummaryResponse, AppearanceConfig, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentTreeNode, LayoutConfig, Project, ProjectVersioningStatus, WorkspaceTab } from "../types/domain";
+import type { AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiUsageSummaryResponse, AppearanceConfig, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentTreeNode, LayoutConfig, Project, ProjectVersioningStatus, WorkspaceTab } from "../types/domain";
 
 const sidebarWidthConfig = {
   defaultWidth: 338,
@@ -54,6 +54,7 @@ type DesktopLayoutProps = {
   aiBubble: { id: string; answer: string } | null;
   aiAppliedChange: { documentId: string; summary: string } | null;
   aiSelectionFocus: AiSelectionFocus | null;
+  aiContextSources: AiContextSource[];
   tree: DocumentTreeNode[];
   tabs: WorkspaceTab[];
   activeTabId: string;
@@ -95,6 +96,13 @@ type DesktopLayoutProps = {
   onCreateVersion: (title: string) => Promise<CreateVersionResponse | null>;
   onSendAiPrompt: (prompt: string, selectionFocus?: AiSelectionFocus | null, options?: AiPromptExecutionOptions) => void | Promise<void>;
   onClearAiSelectionFocus: () => void;
+  onSearchAiContextDocuments: (query: string) => Promise<AiContextSearchResult[]>;
+  onAddProjectDocumentContext: (documentId: string) => void | Promise<void>;
+  onUploadAiContextFiles: (files: File[]) => void | Promise<void>;
+  onRemoveAiContextSource: (sourceId: string) => void | Promise<void>;
+  onExtendAiContextSource: (sourceId: string) => void | Promise<void>;
+  onPreviewAiContextSource: (sourceId: string) => Promise<AiContextSourcePreviewResponse>;
+  onAddAiContextSourceToProject: (sourceId: string) => void | Promise<void>;
   onAiIntentAction: (action: AiIntentActionType, intentId: string) => void | Promise<void>;
   onCloseAiBubble: () => void;
   onDismissAiAppliedChange: () => void;
@@ -454,9 +462,17 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 providerReady={props.aiConfig.openaiKeyConfigured}
                 appliedChangeSummary={props.aiAppliedChange?.documentId === props.activeDocumentId ? props.aiAppliedChange.summary : null}
                 selectionFocus={props.aiSelectionFocus?.documentId === props.activeDocumentId ? props.aiSelectionFocus : null}
+                activeContextSources={props.aiContextSources}
                 onSubmit={props.onSendAiPrompt}
                 onClearSelectionFocus={props.onClearAiSelectionFocus}
                 onDismissAppliedChange={props.onDismissAiAppliedChange}
+                onSearchProjectDocuments={props.onSearchAiContextDocuments}
+                onAddProjectDocumentContext={props.onAddProjectDocumentContext}
+                onUploadContextFiles={props.onUploadAiContextFiles}
+                onRemoveContextSource={props.onRemoveAiContextSource}
+                onExtendContextSource={props.onExtendAiContextSource}
+                onPreviewContextSource={props.onPreviewAiContextSource}
+                onAddContextSourceToProject={props.onAddAiContextSourceToProject}
               />
               {hasOpenDocument ? (
                 <AiResponseBubble

@@ -1,5 +1,10 @@
-import { requestJson } from "./client";
+import { requestFormData, requestJson } from "./client";
 import type {
+  AiContextAddToProjectResponse,
+  AiContextSearchResult,
+  AiContextSource,
+  AiContextSourceListResponse,
+  AiContextSourcePreviewResponse,
   AiConversationResponse,
   AiIndexStatusResponse,
   AiInteractionRequest,
@@ -14,6 +19,7 @@ import type {
 const AI_PROMPT_TIMEOUT_MS = 60_000;
 const AI_INTERACTION_TIMEOUT_MS = 120_000;
 const AI_INDEX_TIMEOUT_MS = 120_000;
+const AI_CONTEXT_UPLOAD_TIMEOUT_MS = 120_000;
 
 export async function promptAssistant(request: AiPromptRequest): Promise<AiPromptResponse> {
   if (request.documentId) {
@@ -40,6 +46,54 @@ export async function sendAiInteraction(request: AiInteractionRequest): Promise<
     method: "POST",
     body: JSON.stringify(request),
     timeoutMs: AI_INTERACTION_TIMEOUT_MS,
+  });
+}
+
+export async function searchAiContextDocuments(projectId: string, query: string): Promise<AiContextSearchResult[]> {
+  const params = new URLSearchParams();
+  if (query.trim()) params.set("q", query.trim());
+  return requestJson<AiContextSearchResult[]>(`/api/projects/${projectId}/ai/context/search?${params.toString()}`);
+}
+
+export async function getAiContextSources(projectId: string): Promise<AiContextSourceListResponse> {
+  return requestJson<AiContextSourceListResponse>(`/api/projects/${projectId}/ai/context/sources`);
+}
+
+export async function addProjectDocumentAiContextSource(projectId: string, documentId: string): Promise<AiContextSource> {
+  return requestJson<AiContextSource>(`/api/projects/${projectId}/ai/context/project-documents`, {
+    method: "POST",
+    body: JSON.stringify({ documentId }),
+  });
+}
+
+export async function uploadAiContextFiles(projectId: string, files: File[]): Promise<AiContextSourceListResponse> {
+  const formData = new FormData();
+  for (const file of files) formData.append("files", file);
+  return requestFormData<AiContextSourceListResponse>(`/api/projects/${projectId}/ai/context/files`, formData, {
+    timeoutMs: AI_CONTEXT_UPLOAD_TIMEOUT_MS,
+  });
+}
+
+export async function removeAiContextSource(projectId: string, sourceId: string): Promise<AiContextSourceListResponse> {
+  return requestJson<AiContextSourceListResponse>(`/api/projects/${projectId}/ai/context/sources/${sourceId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function extendAiContextSource(projectId: string, sourceId: string): Promise<AiContextSource> {
+  return requestJson<AiContextSource>(`/api/projects/${projectId}/ai/context/sources/${sourceId}/extend`, {
+    method: "POST",
+  });
+}
+
+export async function previewAiContextSource(projectId: string, sourceId: string): Promise<AiContextSourcePreviewResponse> {
+  return requestJson<AiContextSourcePreviewResponse>(`/api/projects/${projectId}/ai/context/sources/${sourceId}/preview`);
+}
+
+export async function addAiContextSourceToProject(projectId: string, sourceId: string, request: { name?: string | null; parentId?: string | null }): Promise<AiContextAddToProjectResponse> {
+  return requestJson<AiContextAddToProjectResponse>(`/api/projects/${projectId}/ai/context/sources/${sourceId}/add-to-project`, {
+    method: "POST",
+    body: JSON.stringify(request),
   });
 }
 

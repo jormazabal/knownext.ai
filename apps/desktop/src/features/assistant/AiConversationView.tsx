@@ -109,6 +109,18 @@ function AiEventBubble({
       <div className="flex justify-end gap-2.5">
         <div className="max-w-[70%] rounded-[22px] rounded-br-lg bg-brand-orange px-4 py-2.5 text-[12px] leading-5 text-white shadow-[0_10px_24px_rgba(243,112,33,0.22)]">
           <p className="whitespace-pre-wrap">{event.content}</p>
+          {event.sourcesUsed?.length ? (
+            <div className="mt-2 flex flex-wrap gap-1 border-t border-white/20 pt-2">
+              {event.sourcesUsed.slice(0, 4).map((source) => (
+                <span key={source.id} className="max-w-full truncate rounded-full bg-white/15 px-2 py-0.5 text-[9px] font-medium text-white/90">
+                  {source.name}
+                </span>
+              ))}
+              {event.sourcesUsed.length > 4 ? (
+                <span className="rounded-full bg-white/15 px-2 py-0.5 text-[9px] font-medium text-white/90">+{event.sourcesUsed.length - 4}</span>
+              ) : null}
+            </div>
+          ) : null}
         </div>
         <span className="mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-brand-orange text-white shadow-[0_8px_20px_rgba(243,112,33,0.22)]">
           <User size={14} />
