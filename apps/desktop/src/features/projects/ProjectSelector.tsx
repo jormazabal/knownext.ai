@@ -1,4 +1,5 @@
 import { Check, ChevronDown, Plus } from "lucide-react";
+import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { AppearanceConfig, Project } from "../../types/domain";
 import { getProjectIcon } from "./projectVisuals";
@@ -7,6 +8,7 @@ type ProjectSelectorProps = {
   projects: Project[];
   activeProject: Project | null;
   language?: AppearanceConfig["language"];
+  headerAction?: ReactNode;
   onSelectProject: (project: Project) => void;
   onCreateProject: () => void;
 };
@@ -30,7 +32,7 @@ const copy = {
   },
 };
 
-export function ProjectSelector({ projects, activeProject, language = "es", onSelectProject, onCreateProject }: ProjectSelectorProps) {
+export function ProjectSelector({ projects, activeProject, language = "es", headerAction = null, onSelectProject, onCreateProject }: ProjectSelectorProps) {
   const [open, setOpen] = useState(false);
   const firstProjectButtonRef = useRef<HTMLButtonElement | null>(null);
   const ActiveProjectIcon = getProjectIcon(activeProject?.icon);
@@ -61,8 +63,11 @@ export function ProjectSelector({ projects, activeProject, language = "es", onSe
 
   return (
     <div className="relative w-full">
-      <div className="mb-1.5 text-[11px] font-medium uppercase tracking-normal text-ink-primary">
-        {text.currentProject}
+      <div className="mb-1.5 flex h-8 items-center justify-between gap-2">
+        <div className="text-[11px] font-medium uppercase tracking-normal text-ink-primary">
+          {text.currentProject}
+        </div>
+        {headerAction}
       </div>
       <button
         className="flex h-8 w-full items-center justify-between rounded-md border border-line bg-white px-2.5 text-[11px] shadow-[0_1px_2px_rgba(17,24,39,0.03)]"

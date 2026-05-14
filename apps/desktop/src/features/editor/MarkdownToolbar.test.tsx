@@ -27,7 +27,7 @@ describe("MarkdownToolbar", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Formato de bloque" })).toHaveTextContent("H2");
+    expect(screen.getByRole("button", { name: "Formato de bloque" })).toHaveTextContent("Título 2");
     expect(screen.getByRole("button", { name: "Negrita" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Subrayado" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Lista con viñetas" })).toHaveAttribute("aria-pressed", "true");

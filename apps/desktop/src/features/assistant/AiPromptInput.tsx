@@ -488,17 +488,17 @@ export function AiPromptInput({
               </div>
             ) : null}
           </div>
+          <button className="knownext-ai-mic-button grid h-8 w-8 shrink-0 place-items-center rounded-full bg-panel text-ink-primary opacity-50" data-tooltip="Micrófono no disponible" aria-label="Micrófono no disponible" disabled>
+            <Mic size={16} />
+          </button>
           <button
-            className="knownext-ai-send-button grid h-8 w-8 shrink-0 place-items-center rounded-full text-brand-orange transition hover:bg-brand-hover disabled:opacity-50"
+            className="knownext-ai-send-button grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-orange text-ink-primary transition hover:bg-brand-dark disabled:opacity-50"
             data-tooltip="Enviar"
             aria-label="Enviar"
             onClick={() => void handleSubmit()}
             disabled={loading || !canPrompt || hasBlockingContext}
           >
-            {loading ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-brand-orange border-t-transparent" /> : <SendHorizontal size={18} />}
-          </button>
-          <button className="knownext-ai-mic-button grid h-8 w-8 shrink-0 place-items-center rounded-full bg-panel text-ink-primary opacity-50" data-tooltip="Micrófono no disponible" aria-label="Micrófono no disponible" disabled>
-            <Mic size={16} />
+            {loading ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-ink-primary border-t-transparent" /> : <SendHorizontal size={18} />}
           </button>
         </div>
         {hasBlockingContext ? (

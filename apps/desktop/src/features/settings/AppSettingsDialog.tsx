@@ -78,7 +78,7 @@ export function AppSettingsDialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[95] grid place-items-center bg-black/20 px-4 py-6">
+    <div className="knownext-modal-overlay fixed inset-0 z-[95] grid place-items-center bg-black/20 px-4 py-6">
       <section
         className="flex max-h-[min(680px,calc(100vh-48px))] w-[min(760px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
         role="dialog"

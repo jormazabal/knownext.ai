@@ -79,6 +79,7 @@ import { getTraceLogStatus, openTraceLogFolder, recordTraceLog, type TraceLogSta
 import { openExternalUrl } from "../lib/runtime/links";
 import { getRuntimeServiceStatus, restartBackendService, updateBackendPortConfig, type BackendPortConfig, type RuntimeServicesStatus } from "../lib/runtime/services";
 import { applyAppearanceAttributes, useResolvedAppearanceTheme } from "../lib/theme/appearance";
+import { ArchiveRestore, FileWarning, RefreshCw, Trash2, X } from "lucide-react";
 import {
   createFolder,
   createProjectDocument,
@@ -2676,7 +2677,7 @@ function GithubLoginDialog({
 
   const busy = state === "starting";
   return (
-    <div className="fixed inset-0 z-[95] grid place-items-center bg-black/20">
+    <div className="knownext-modal-overlay fixed inset-0 z-[95] grid place-items-center bg-black/20">
       <section className="w-[460px] rounded-lg border border-line bg-white shadow-menu">
         <header className="border-b border-line px-5 py-4">
           <h2 className="text-[15px] font-semibold">Conectar GitHub</h2>
@@ -2765,7 +2766,7 @@ function UpdateAvailableDialog({
   const releaseDate = update.date ? formatDateTime(update.date) : null;
 
   return (
-    <div className="fixed inset-0 z-[95] grid place-items-center bg-black/20">
+    <div className="knownext-modal-overlay fixed inset-0 z-[95] grid place-items-center bg-black/20">
       <section className="w-[460px] rounded-lg border border-line bg-white shadow-menu">
         <header className="border-b border-line px-5 py-4">
           <h2 className="text-[15px] font-semibold">Actualización disponible</h2>
@@ -2841,7 +2842,7 @@ function CloseDirtyDocumentDialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[90] grid place-items-center bg-black/20">
+    <div className="knownext-modal-overlay fixed inset-0 z-[90] grid place-items-center bg-black/20">
       <section className="w-[430px] rounded-lg border border-line bg-white shadow-menu">
         <header className="border-b border-line px-5 py-4">
           <h2 className="text-[15px] font-semibold">Cerrar documento con cambios</h2>
@@ -2884,21 +2885,48 @@ function RecoverableDraftsDialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[90] grid place-items-center bg-black/20">
-      <section className="flex max-h-[72vh] w-[620px] flex-col rounded-lg border border-line bg-white shadow-menu">
+    <div className="knownext-modal-overlay fixed inset-0 z-[90] grid place-items-center bg-black/20">
+      <section
+        className="flex max-h-[min(620px,calc(100vh-48px))] w-[min(660px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="recoverable-drafts-title"
+      >
         <header className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
-          <div>
-            <h2 className="text-[15px] font-semibold">Borradores recuperables</h2>
-            <p className="mt-1 text-[11px] text-ink-secondary">Borradores internos cuyo archivo original ya no está disponible.</p>
+          <div className="flex min-w-0 gap-3">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-brand-hover text-brand-orange">
+              <ArchiveRestore size={18} />
+            </span>
+            <div className="min-w-0">
+              <h2 id="recoverable-drafts-title" className="text-[15px] font-semibold text-ink-primary">Borradores recuperables</h2>
+              <p className="mt-1 max-w-[500px] text-[11px] leading-5 text-ink-secondary">
+                Son copias locales de cambios sin guardar cuyo archivo original ya no está disponible. Puedes recrear el archivo desde el borrador o descartarlo si ya no lo necesitas.
+              </p>
+            </div>
           </div>
-          <button className="rounded px-2 py-1 text-[11px] text-ink-secondary hover:bg-panel" onClick={onClose}>
-            Cerrar
+          <button
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
+            data-tooltip="Cerrar"
+            aria-label="Cerrar borradores recuperables"
+            onClick={onClose}
+          >
+            <X size={16} />
           </button>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          <div className="mb-4 rounded-md border border-line bg-panel px-4 py-3 text-[11px] leading-5 text-ink-secondary">
+            <p className="font-semibold text-ink-primary">Cuándo aparece un borrador aquí</p>
+            <p className="mt-1">
+              Si editas un documento, quedan cambios pendientes y después el archivo se elimina, se mueve fuera del proyecto o deja de poder localizarse, KnowNext.ai conserva el contenido para evitar perder trabajo.
+            </p>
+          </div>
           {drafts.length === 0 ? (
-            <div className="rounded-md border border-line bg-panel px-4 py-6 text-center text-[11px] text-ink-secondary">
-              No hay borradores huérfanos pendientes.
+            <div className="grid place-items-center rounded-md border border-dashed border-line bg-white px-4 py-8 text-center">
+              <FileWarning size={24} className="text-ink-secondary" />
+              <p className="mt-3 text-[12px] font-semibold text-ink-primary">No hay borradores pendientes</p>
+              <p className="mt-1 max-w-[420px] text-[11px] leading-5 text-ink-secondary">
+                Todos los borradores locales siguen asociados a sus archivos o ya se han resuelto. Puedes actualizar para volver a comprobar el estado del disco.
+              </p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -2915,16 +2943,18 @@ function RecoverableDraftsDialog({
                     </div>
                     <div className="flex shrink-0 gap-2">
                       <button
-                        className="h-8 rounded-md border border-line px-3 text-[11px] text-red-700 hover:bg-red-50"
+                        className="flex h-8 items-center gap-2 rounded-md border border-line px-3 text-[11px] font-medium text-red-700 hover:bg-red-50"
                         onClick={() => onDiscard(draft.draftKey)}
                       >
+                        <Trash2 size={14} />
                         Descartar
                       </button>
                       <button
-                        className="h-8 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
+                        className="flex h-8 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
                         disabled={!draft.recoverable}
                         onClick={() => onRestore(draft)}
                       >
+                        <ArchiveRestore size={14} />
                         Recrear archivo
                       </button>
                     </div>
@@ -2935,7 +2965,11 @@ function RecoverableDraftsDialog({
           )}
         </div>
         <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
-          <button className="h-9 rounded-md border border-line px-4 text-[11px] hover:bg-panel" onClick={onRefresh}>
+          <button className="h-9 rounded-md border border-line px-4 text-[11px] hover:bg-panel" onClick={onClose}>
+            Cerrar
+          </button>
+          <button className="flex h-9 items-center gap-2 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark" onClick={onRefresh}>
+            <RefreshCw size={14} />
             Actualizar
           </button>
         </footer>
@@ -2956,7 +2990,7 @@ function AiDeleteConfirmationDialog({
   if (!pendingDelete) return null;
 
   return (
-    <div className="fixed inset-0 z-[96] grid place-items-center bg-black/20">
+    <div className="knownext-modal-overlay fixed inset-0 z-[96] grid place-items-center bg-black/20">
       <section className="w-[min(520px,calc(100vw-32px))] rounded-lg border border-line bg-white shadow-menu">
         <header className="border-b border-line px-5 py-4">
           <h2 className="text-[15px] font-semibold text-ink-primary">La IA quiere eliminar elementos</h2>
@@ -3111,7 +3145,7 @@ function MoveDocumentDialog({
   if (!open || !node) return null;
 
   return (
-    <div className="fixed inset-0 z-[80] grid place-items-center bg-black/20">
+    <div className="knownext-modal-overlay fixed inset-0 z-[80] grid place-items-center bg-black/20">
       <section className="w-[420px] rounded-lg border border-line bg-white shadow-menu">
         <header className="border-b border-line px-5 py-4">
           <h2 className="text-[15px] font-semibold">Mover elemento</h2>

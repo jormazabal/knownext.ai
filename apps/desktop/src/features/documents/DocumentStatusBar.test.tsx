@@ -10,6 +10,7 @@ const defaultProps = {
   versioningLabel: "Sin historial",
   gitEnabled: false,
   wordCount: 154,
+  characterCount: 1240,
   canSave: true,
   onSave: vi.fn(),
 };
@@ -29,17 +30,24 @@ describe("DocumentStatusBar", () => {
     expect(screen.getByRole("button", { name: "Guardar" })).toBeInTheDocument();
   });
 
-  it("keeps document metrics before status and history information", () => {
+  it("keeps document type and document metrics before local status", () => {
     const { container } = render(<DocumentStatusBar {...defaultProps} />);
     const footer = container.querySelector("footer");
     const groups = footer ? Array.from(footer.children) : [];
 
     expect(groups).toHaveLength(2);
-    expect(groups[0]).toHaveTextContent("154 palabras");
-    expect(groups[0]).toHaveTextContent("Línea 1, Columna 1");
     expect(groups[0]).toHaveTextContent("Markdown");
+    expect(groups[0]).toHaveTextContent("154 palabras");
+    expect(groups[0]).toHaveTextContent("1240 caracteres");
     expect(groups[1]).toHaveTextContent("Sin cambios");
-    expect(groups[1]).toHaveTextContent("Sin historial");
-    expect(groups[1]).toHaveTextContent("Historial no disponible");
+    expect(groups[1]).not.toHaveTextContent("Sin historial");
+    expect(groups[1]).not.toHaveTextContent("Historial no disponible");
+  });
+
+  it("shows Git history information only when versioning is enabled", () => {
+    render(<DocumentStatusBar {...defaultProps} gitEnabled versioningLabel="Sin historial" />);
+
+    expect(screen.getByText("Sin historial")).toBeInTheDocument();
+    expect(screen.getByText("Sin versiones todavía")).toBeInTheDocument();
   });
 });

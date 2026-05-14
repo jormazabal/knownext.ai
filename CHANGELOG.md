@@ -2,6 +2,15 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.12.1 - 2026-05-14
+
+- Refined the document workspace layout with resizable integrated side panels and an integrated collapsed left rail that preserves access to the application menu.
+- Improved desktop panel controls, project selector alignment, and collapsed account access for the document navigation panel.
+- Standardized modal overlays with a subtle backdrop blur and improved the recoverable drafts dialog copy, empty state, and action styling.
+- Refined the Markdown editor toolbar labels, AI prompt controls, document status bar, and Git/history visibility rules for projects without active versioning.
+- Reduced excessive editor empty space and prompt fade behavior so short documents do not show unnecessary scrollbars while long documents remain scrollable.
+- Continued dark-mode polish for tabs, toolbars, tooltips, prompt input, and theme-aware interface surfaces.
+
 ## 0.12.0 - 2026-05-14
 
 - Added global appearance personalization from `Configuración de la app > Apariencia`, including Light, Dark, and system-synchronized theme modes.

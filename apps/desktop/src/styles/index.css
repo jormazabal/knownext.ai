@@ -553,7 +553,7 @@ input[type="range"]::-moz-range-thumb {
   }
 
   .toolbar-select {
-    @apply inline-flex h-6 min-w-[92px] items-center justify-between gap-1.5 rounded-md border border-line bg-white px-2 text-[11px] font-semibold text-ink-primary hover:bg-brand-hover;
+    @apply inline-flex h-6 min-w-[104px] items-center justify-between gap-1.5 rounded-md border border-line bg-white px-2 text-[11px] font-semibold text-ink-primary hover:bg-brand-hover;
   }
 
 .toolbar-button-active {
@@ -595,6 +595,11 @@ input[type="range"]::-moz-range-thumb {
 
 [data-theme="dark"] .knownext-brand-watermark {
   opacity: 0.11;
+}
+
+.knownext-modal-overlay {
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
 }
 
 .knownext-editor-toolbar {
@@ -713,14 +718,21 @@ input[type="range"]::-moz-range-thumb {
 }
 
 [data-theme="dark"] .knownext-ai-context-button,
-[data-theme="dark"] .knownext-ai-send-button,
 [data-theme="dark"] .knownext-ai-mic-button {
   background-color: transparent !important;
 }
 
-[data-theme="dark"] .knownext-ai-context-button:hover,
-[data-theme="dark"] .knownext-ai-send-button:hover {
+[data-theme="dark"] .knownext-ai-context-button:hover {
   background-color: rgb(var(--app-panel-strong) / 0.86) !important;
+}
+
+[data-theme="dark"] .knownext-ai-send-button {
+  background-color: rgb(var(--accent)) !important;
+  color: rgb(17 24 39) !important;
+}
+
+[data-theme="dark"] .knownext-ai-send-button:hover {
+  background-color: rgb(var(--accent-hover)) !important;
 }
 
 [data-theme="dark"] .knownext-ai-mode-selector {
@@ -821,7 +833,7 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .knownext-editor .milkdown {
-  min-height: calc(100vh - 228px);
+  height: auto !important;
   background: transparent !important;
   color: rgb(var(--app-text)) !important;
   font-family: Inter, ui-sans-serif, system-ui, "Segoe UI", Arial, sans-serif !important;
@@ -829,7 +841,9 @@ input[type="range"]::-moz-range-thumb {
 
 .knownext-editor .milkdown .editor,
 .knownext-editor .milkdown .ProseMirror {
-  padding: 0 0 52px;
+  height: auto !important;
+  min-height: 144px;
+  padding: 0 0 12px;
   background: transparent !important;
   color: rgb(var(--app-text)) !important;
   caret-color: rgb(var(--accent));
@@ -930,6 +944,10 @@ input[type="range"]::-moz-range-thumb {
   font-family: Inter, ui-sans-serif, system-ui, "Segoe UI", Arial, sans-serif !important;
   font-size: 11px !important;
   line-height: 1.55;
+}
+
+.knownext-editor .ProseMirror p {
+  padding: 0 !important;
 }
 
 [data-theme="dark"] .knownext-editor p,
