@@ -1649,7 +1649,7 @@ function ModeTab({
       aria-disabled={disabled}
       className={[
         "min-h-[88px] rounded-md border px-3 py-3 text-left transition",
-        active ? "border-brand-orange bg-brand-hover text-ink-primary shadow-[inset_0_0_0_1px_rgba(243,112,33,0.18)]" : "border-line bg-white text-ink-primary hover:border-orange-200 hover:bg-brand-hover",
+        active ? "border-brand-orange bg-brand-hover text-ink-primary shadow-[inset_0_0_0_1px_rgb(var(--accent)/0.18)]" : "border-line bg-white text-ink-primary hover:border-orange-200 hover:bg-brand-hover",
         disabled ? "cursor-not-allowed bg-panel text-ink-secondary hover:border-line hover:bg-panel" : "",
       ].join(" ")}
       type="button"

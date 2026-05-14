@@ -5,6 +5,7 @@ import type { AiPromptExecutionOptions } from "../features/assistant/AiPromptInp
 import { CreateDocumentDialog } from "../features/documents/CreateDocumentDialog";
 import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
 import { AppSettingsDialog } from "../features/settings/AppSettingsDialog";
+import { BrandMark } from "../components/brand/BrandMark";
 import { GlobalTooltip } from "../components/ui/GlobalTooltip";
 import { DesktopLayout } from "../layouts/DesktopLayout";
 import {
@@ -77,6 +78,7 @@ import {
 import { getTraceLogStatus, openTraceLogFolder, recordTraceLog, type TraceLogStatus } from "../lib/runtime/logging";
 import { openExternalUrl } from "../lib/runtime/links";
 import { getRuntimeServiceStatus, restartBackendService, updateBackendPortConfig, type BackendPortConfig, type RuntimeServicesStatus } from "../lib/runtime/services";
+import { applyAppearanceAttributes, useResolvedAppearanceTheme } from "../lib/theme/appearance";
 import {
   createFolder,
   createProjectDocument,
@@ -217,6 +219,7 @@ export function App() {
   const lastTraceLogRef = useRef<{ fingerprint: string; timestamp: number } | null>(null);
   const githubLoginPollingRef = useRef(false);
   const lastDocumentContextRef = useRef<{ id: string | null; path: string | null }>({ id: null, path: null });
+  const resolvedTheme = useResolvedAppearanceTheme(appearanceConfig.themeMode);
 
   useEffect(() => {
     void (async () => {
@@ -357,7 +360,8 @@ export function App() {
   useEffect(() => {
     document.documentElement.lang = appearanceConfig.language;
     document.documentElement.style.setProperty("zoom", `${appearanceConfig.zoomPercent}%`);
-  }, [appearanceConfig.language, appearanceConfig.zoomPercent]);
+    applyAppearanceAttributes(appearanceConfig, resolvedTheme);
+  }, [appearanceConfig, resolvedTheme]);
 
   useEffect(() => {
     if (!configLoaded || !diagnosticsConfig.traceLoggingEnabled) {
@@ -2636,12 +2640,7 @@ function StartupOverlay({ loading }: { loading: boolean }) {
       aria-live="polite"
     >
       <div className="w-[min(320px,calc(100vw-48px))] text-center">
-        <img
-          className="mx-auto h-10 w-10 object-contain"
-          src="/brand/knownext-logo.png"
-          alt=""
-          aria-hidden="true"
-        />
+        <BrandMark className="mx-auto h-10 w-10" />
         <p className="mt-4 text-[13px] font-semibold text-ink-primary">Preparando espacio de trabajo</p>
         <p className="mt-1 text-[11px] text-ink-secondary">Cargando proyectos, configuración y estado local.</p>
         <div className="mt-4 h-1 overflow-hidden rounded-full bg-panel">

@@ -14,7 +14,7 @@ export function DocumentTabs({ tabs, activeTabId, dirtyDocumentIds, onOpenNaviga
   const dirtyIds = new Set(dirtyDocumentIds);
 
   return (
-    <div className="flex h-9 shrink-0 items-end overflow-y-hidden border-b border-line bg-white">
+    <div className="knownext-document-tabs flex h-9 shrink-0 items-end overflow-y-hidden border-b border-line bg-white">
       {onOpenNavigation ? (
         <button
           className="grid h-full w-10 shrink-0 place-items-center border-r border-line text-ink-secondary hover:bg-brand-hover hover:text-brand-orange lg:hidden"
@@ -39,9 +39,9 @@ export function DocumentTabs({ tabs, activeTabId, dirtyDocumentIds, onOpenNaviga
               data-tooltip={isAiTab ? "IA" : undefined}
               data-tooltip-placement={isAiTab ? "bottom" : undefined}
               className={[
-                "group relative flex h-full items-center gap-1.5 border-r border-line text-[11px]",
+                "knownext-document-tab group relative flex h-full items-center gap-1.5 border-r border-line text-[11px]",
                 isAiTab ? "w-12 min-w-12 max-w-12 justify-center px-0" : "min-w-[150px] max-w-[210px] px-2.5",
-                active ? "bg-white font-semibold" : "text-ink-primary hover:bg-panel",
+                active ? "knownext-document-tab-active bg-white font-semibold" : "text-ink-primary hover:bg-panel",
               ].join(" ")}
               onClick={() => onSelectTab(tab.id)}
             >
@@ -51,7 +51,7 @@ export function DocumentTabs({ tabs, activeTabId, dirtyDocumentIds, onOpenNaviga
                 null
               ) : (
                 <span
-                  className="ml-auto grid h-5 w-5 place-items-center rounded hover:bg-brand-hover"
+                  className="knownext-document-tab-close ml-auto grid h-5 w-5 place-items-center rounded hover:bg-brand-hover"
                   aria-label={dirty ? `Cerrar ${tab.name}, con cambios sin guardar` : `Cerrar ${tab.name}`}
                   onClick={(event) => {
                     event.stopPropagation();

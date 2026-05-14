@@ -237,7 +237,7 @@ export function AiPromptInput({
       ) : null}
       <div
         className={[
-          "pointer-events-auto relative flex min-h-11 w-[min(760px,100%)] flex-col rounded-[28px] border bg-white px-2.5 py-1.5 shadow-[0_10px_28px_rgba(17,24,39,0.12)] transition",
+          "knownext-ai-prompt pointer-events-auto relative flex min-h-11 w-[min(760px,100%)] flex-col rounded-[28px] border bg-white px-2.5 py-1.5 shadow-[0_10px_28px_rgba(17,24,39,0.12)] transition",
           dragActive ? "border-brand-orange bg-brand-hover/60" : "border-line/90",
         ].join(" ")}
         onDragEnter={(event) => {
@@ -296,11 +296,11 @@ export function AiPromptInput({
             ) : null}
           </div>
         ) : null}
-        <div className="flex items-center gap-1.5">
+        <div className="knownext-ai-prompt-row flex items-center gap-1.5">
           <div className="relative" ref={contextMenuRef}>
           <button
             type="button"
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-ink-primary transition hover:bg-panel disabled:opacity-60"
+            className="knownext-ai-context-button grid h-8 w-8 shrink-0 place-items-center rounded-full text-ink-primary transition hover:bg-panel disabled:opacity-60"
             data-tooltip="Añadir contexto"
             aria-label="Añadir contexto"
             aria-expanded={contextMenuOpen}
@@ -339,7 +339,7 @@ export function AiPromptInput({
           </div>
           <textarea
             ref={textareaRef}
-            className="max-h-20 min-h-7 min-w-0 flex-1 resize-none bg-transparent px-1 py-1.5 text-[13px] leading-5 text-ink-primary outline-none placeholder:text-ink-secondary/70"
+            className="knownext-ai-prompt-textarea max-h-20 min-h-7 min-w-0 flex-1 resize-none bg-transparent px-1 py-1.5 text-[13px] leading-5 text-ink-primary outline-none placeholder:text-ink-secondary/70"
             value={prompt}
             onChange={(event) => handlePromptChange(event.target.value)}
             onKeyDown={(event) => {
@@ -393,7 +393,7 @@ export function AiPromptInput({
           <div className="relative shrink-0" ref={modeMenuRef}>
             <button
               type="button"
-              className="flex h-7 items-center gap-1 rounded-full bg-panel px-2 text-[11px] font-normal text-ink-primary transition hover:bg-brand-hover"
+              className="knownext-ai-mode-selector flex h-7 items-center gap-1 rounded-full bg-panel px-2 text-[11px] font-normal text-ink-primary transition hover:bg-brand-hover"
               aria-expanded={modeMenuOpen}
               aria-haspopup="menu"
               aria-label="Selector de modo IA"
@@ -489,7 +489,7 @@ export function AiPromptInput({
             ) : null}
           </div>
           <button
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-brand-orange transition hover:bg-brand-hover disabled:opacity-50"
+            className="knownext-ai-send-button grid h-8 w-8 shrink-0 place-items-center rounded-full text-brand-orange transition hover:bg-brand-hover disabled:opacity-50"
             data-tooltip="Enviar"
             aria-label="Enviar"
             onClick={() => void handleSubmit()}
@@ -497,7 +497,7 @@ export function AiPromptInput({
           >
             {loading ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-brand-orange border-t-transparent" /> : <SendHorizontal size={18} />}
           </button>
-          <button className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-panel text-ink-primary opacity-50" data-tooltip="Micrófono no disponible" aria-label="Micrófono no disponible" disabled>
+          <button className="knownext-ai-mic-button grid h-8 w-8 shrink-0 place-items-center rounded-full bg-panel text-ink-primary opacity-50" data-tooltip="Micrófono no disponible" aria-label="Micrófono no disponible" disabled>
             <Mic size={16} />
           </button>
         </div>

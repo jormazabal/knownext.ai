@@ -41,7 +41,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.11.0"
+    assert payload["version"] == "0.12.0"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -563,7 +563,13 @@ def test_config_writes_config_json(tmp_path) -> None:
     config = client.get("/api/config")
     assert config.status_code == 200
     assert config.json()["layout"]["sidebarWidth"] == 338
-    assert config.json()["appearance"] == {"language": "es", "zoomPercent": 100, "markdownExtendedUnderlineEnabled": True}
+    assert config.json()["appearance"] == {
+        "language": "es",
+        "zoomPercent": 100,
+        "markdownExtendedUnderlineEnabled": True,
+        "themeMode": "system",
+        "primaryColor": "orange",
+    }
     assert config.json()["diagnostics"] == {"traceLoggingEnabled": False}
     assert config.json()["tabsByProject"] == {}
 
@@ -571,7 +577,13 @@ def test_config_writes_config_json(tmp_path) -> None:
         "/api/config",
         json={
             "layout": {"sidebarWidth": 420, "historyWidth": 360},
-            "appearance": {"language": "en", "zoomPercent": 115, "markdownExtendedUnderlineEnabled": False},
+            "appearance": {
+                "language": "en",
+                "zoomPercent": 115,
+                "markdownExtendedUnderlineEnabled": False,
+                "themeMode": "dark",
+                "primaryColor": "green",
+            },
             "diagnostics": {"traceLoggingEnabled": True},
             "tabsByProject": {
                 "project-alpha": {
@@ -586,14 +598,26 @@ def test_config_writes_config_json(tmp_path) -> None:
     )
     assert updated.status_code == 200
     assert updated.json()["layout"] == {"sidebarWidth": 420, "historyWidth": 360}
-    assert updated.json()["appearance"] == {"language": "en", "zoomPercent": 115, "markdownExtendedUnderlineEnabled": False}
+    assert updated.json()["appearance"] == {
+        "language": "en",
+        "zoomPercent": 115,
+        "markdownExtendedUnderlineEnabled": False,
+        "themeMode": "dark",
+        "primaryColor": "green",
+    }
     assert updated.json()["diagnostics"] == {"traceLoggingEnabled": True}
     assert updated.json()["tabsByProject"]["project-alpha"]["openTabs"][0]["id"] == "decision-tech"
 
     config_file = tmp_path / "config.json"
     persisted_config = json.loads(config_file.read_text(encoding="utf-8"))
     assert persisted_config["layout"] == {"sidebarWidth": 420, "historyWidth": 360}
-    assert persisted_config["appearance"] == {"language": "en", "zoomPercent": 115, "markdownExtendedUnderlineEnabled": False}
+    assert persisted_config["appearance"] == {
+        "language": "en",
+        "zoomPercent": 115,
+        "markdownExtendedUnderlineEnabled": False,
+        "themeMode": "dark",
+        "primaryColor": "green",
+    }
     assert persisted_config["diagnostics"] == {"traceLoggingEnabled": True}
     assert persisted_config["tabsByProject"]["project-alpha"]["activeDocumentId"] == "decision-tech"
 

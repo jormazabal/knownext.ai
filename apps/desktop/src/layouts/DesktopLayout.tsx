@@ -23,6 +23,7 @@ import { ProjectActions } from "../features/projects/ProjectActions";
 import { ProjectSelector } from "../features/projects/ProjectSelector";
 import { ReleaseNotesViewer } from "../features/releaseNotes/ReleaseNotesViewer";
 import { VersionHistoryPanel } from "../features/versions/VersionHistoryPanel";
+import { BrandMark } from "../components/brand/BrandMark";
 import { TitleBar } from "../components/window/TitleBar";
 import { getProjectImageContentUrl } from "../lib/api/projects";
 import type { AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentTreeNode, InsertImageReferenceResponse, LayoutConfig, Project, ProjectVersioningStatus, WorkspaceTab } from "../types/domain";
@@ -392,7 +393,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             </>
           ) : null}
           <div className="flex min-h-0 flex-1">
-            <section className={["relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", hasOpenTab ? "bg-white" : "bg-[#F7F7F7]"].join(" ")}>
+            <section className={["relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", hasOpenTab ? "bg-white" : "bg-panel"].join(" ")}>
               {hasOpenTab ? (
                 <>
                   <div className={hasAiConversation ? "min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1 overflow-y-auto px-8 pb-24 pt-4"}>
@@ -474,12 +475,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                     <PanelLeftOpen size={16} />
                   </button>
                   <div className="pointer-events-none absolute inset-0 grid place-items-center">
-                    <img
-                      className="w-[min(420px,44vw)] max-w-[62%] opacity-[0.18]"
-                      src="/brand/knownext-logo-watermark.png"
-                      alt=""
-                      aria-hidden="true"
-                    />
+                    <BrandMark variant="watermark" className="w-[min(420px,44vw)] max-w-[62%]" />
                   </div>
                 </>
               )}

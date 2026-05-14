@@ -173,6 +173,9 @@
 - [ ] Stop the packaged backend process and confirm KnowNext.ai records the failed health check and restart attempt in `knownext.log`.
 - [ ] In Apariencia, change Idioma and confirm the selection persists after closing and reopening the modal.
 - [ ] In Apariencia, adjust Zoom and confirm the interface scales immediately and persists after restart.
+- [ ] In Apariencia, switch Tema between Sistema, Claro, and Oscuro. Confirm the workspace, settings modal, document tree, editor canvas, Milkdown content, hover states, and dialogs update without reloading the app.
+- [ ] In Apariencia, select several Color principal options and confirm primary buttons, active states, focus rings, soft highlights, and the preview use the selected accent while project icon colors remain independent.
+- [ ] Restart the app after changing Tema and Color principal, then confirm both preferences are restored from `config.json`.
 - [ ] In Apariencia, confirm `Mostrar subrayado en el editor` is enabled by default, explains that underline is not standard Markdown and uses inline HTML, then disable and re-enable it to confirm the preference persists and the editor toolbar shows or hides `Subrayado` accordingly.
 - [ ] In IA, save an OpenAI API key and confirm only configured/preview status is shown, never the full key.
 - [ ] In the browser development build, save an OpenAI API key and confirm the request succeeds through the web backend profile without a CORS or `Failed to fetch` error.
@@ -202,6 +205,6 @@
 - [ ] Confirm projects, open tabs, local config, documents, and internal drafts remain intact after relaunch.
 - [ ] Temporarily break the updater signature or latest.json in a disposable release and confirm KnowNext.ai shows a recoverable update error without blocking editing.
 - [ ] Confirm no Git branch name is shown anywhere.
-- [ ] Confirm no blue primary action is present.
+- [ ] Confirm orange remains the default primary action color and blue only appears as a primary action accent when the user explicitly selects it in Apariencia.
 - [ ] Corrupt `config.json` in a disposable test profile, restart the backend, and confirm a `config.json.corrupt-*` backup is created.
 - [ ] Run the checklist against the packaged Tauri app before marking a build as 1.0.

@@ -107,7 +107,7 @@ function AiEventBubble({
   if (event.role === "user") {
     return (
       <div className="flex justify-end gap-2.5">
-        <div className="max-w-[70%] rounded-[22px] rounded-br-lg bg-brand-orange px-4 py-2.5 text-[12px] leading-5 text-white shadow-[0_10px_24px_rgba(243,112,33,0.22)]">
+        <div className="max-w-[70%] rounded-[22px] rounded-br-lg bg-brand-orange px-4 py-2.5 text-[12px] leading-5 text-white shadow-[0_10px_24px_rgb(var(--accent)/0.22)]">
           <p className="whitespace-pre-wrap">{event.content}</p>
           {event.sourcesUsed?.length ? (
             <div className="mt-2 flex flex-wrap gap-1 border-t border-white/20 pt-2">
@@ -122,7 +122,7 @@ function AiEventBubble({
             </div>
           ) : null}
         </div>
-        <span className="mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-brand-orange text-white shadow-[0_8px_20px_rgba(243,112,33,0.22)]">
+        <span className="mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-brand-orange text-white shadow-[0_8px_20px_rgb(var(--accent)/0.22)]">
           <User size={14} />
         </span>
       </div>

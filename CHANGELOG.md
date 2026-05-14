@@ -2,6 +2,16 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.12.0 - 2026-05-14
+
+- Added global appearance personalization from `Configuración de la app > Apariencia`, including Light, Dark, and system-synchronized theme modes.
+- Added configurable primary color support using the same project color range for navigation, active states, focus rings, controls, settings previews, and editor chrome.
+- Reworked the dark theme into a neutral graphite palette that keeps contrast, hierarchy, hover states, tooltips, tabs, editor controls, and the AI prompt visually integrated.
+- Added theme-aware accent tokens shared by frontend settings, Tailwind utilities, and persisted local appearance configuration.
+- Added a dynamic KnowNext.ai brand mark so the app logo, startup mark, and watermark adapt to the selected primary color without duplicating static logo assets.
+- Hardened backend appearance configuration defaults and migration behavior so older local configs can load without missing theme or color fields.
+- Updated product, frontend/backend architecture, and manual validation documentation for global appearance customization.
+
 ## 0.11.0 - 2026-05-14
 
 - Added project image asset management: image files now appear in the tree, can be imported into folders, opened in an image viewer, inserted into Markdown, and used as AI prompt context.
