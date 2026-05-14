@@ -24,7 +24,7 @@ import type { MarkdownEditorAction, MarkdownEditorController, MarkdownEditorForm
 import { emptyMarkdownEditorHistoryState } from "./editorTypes";
 import { toggleUnderlineCommand } from "./underlineExtension";
 
-export function createMarkdownEditorController(editor: Editor, selectionFocusPluginKey?: PluginKey): MarkdownEditorController {
+export function createMarkdownEditorController(editor: Editor, selectionFocusPluginKey?: PluginKey, transientTextPluginKey?: PluginKey): MarkdownEditorController {
   return {
     run(action, options) {
       return editor.action((ctx) => {
@@ -107,6 +107,61 @@ export function createMarkdownEditorController(editor: Editor, selectionFocusPlu
 
           view.dispatch(transaction);
           return true;
+        });
+      } catch {
+        return false;
+      }
+    },
+    insertText(text, options) {
+      if (!text) return true;
+      try {
+        return editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          view.focus();
+          let transaction = view.state.tr
+            .insertText(text)
+            .setMeta("addToHistory", options?.addToHistory !== false)
+            .scrollIntoView();
+          if (transientTextPluginKey) {
+            transaction = transaction.setMeta(transientTextPluginKey, null);
+          }
+          view.dispatch(transaction);
+          return true;
+        });
+      } catch {
+        return false;
+      }
+    },
+    setTransientTextPreview(text) {
+      if (!transientTextPluginKey) return false;
+      try {
+        return editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const position = view.state.selection.from;
+          view.dispatch(view.state.tr.setMeta(transientTextPluginKey, text ? { position, text } : null).setMeta("addToHistory", false));
+          return true;
+        });
+      } catch {
+        return false;
+      }
+    },
+    clearTransientTextPreview() {
+      if (!transientTextPluginKey) return false;
+      try {
+        return editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          view.dispatch(view.state.tr.setMeta(transientTextPluginKey, null).setMeta("addToHistory", false));
+          return true;
+        });
+      } catch {
+        return false;
+      }
+    },
+    canInsertText() {
+      try {
+        return editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          return Boolean(view.state.selection);
         });
       } catch {
         return false;

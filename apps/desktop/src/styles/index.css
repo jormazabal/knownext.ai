@@ -722,13 +722,32 @@ input[type="range"]::-moz-range-thumb {
   background-color: transparent !important;
 }
 
+[data-theme="dark"] .knownext-ai-mic-control {
+  border-color: rgb(var(--app-border) / 0.72) !important;
+  background-color: rgb(var(--app-panel-strong) / 0.72) !important;
+  color: rgb(var(--app-text) / 0.9) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.035);
+}
+
+[data-theme="dark"] .knownext-ai-mic-control:hover {
+  border-color: rgb(130 132 142 / 0.82) !important;
+  background-color: rgb(var(--app-panel-strong)) !important;
+}
+
+[data-theme="dark"] .knownext-ai-mic-control-active,
+[data-theme="dark"] .knownext-ai-mic-control-active:hover {
+  border-color: rgb(var(--accent) / 0.58) !important;
+  background-color: rgb(var(--accent) / 0.16) !important;
+  color: rgb(var(--accent)) !important;
+}
+
 [data-theme="dark"] .knownext-ai-context-button:hover {
   background-color: rgb(var(--app-panel-strong) / 0.86) !important;
 }
 
 [data-theme="dark"] .knownext-ai-send-button {
   background-color: rgb(var(--accent)) !important;
-  color: rgb(17 24 39) !important;
+  color: #fff !important;
 }
 
 [data-theme="dark"] .knownext-ai-send-button:hover {
@@ -876,6 +895,15 @@ input[type="range"]::-moz-range-thumb {
   border-radius: 3px;
   background: rgb(var(--accent) / 0.18);
   box-shadow: 0 0 0 1px rgb(var(--accent) / 0.22);
+}
+
+.knownext-editor .knownext-dictation-preview {
+  border-radius: 3px;
+  background: rgb(var(--accent) / 0.14);
+  color: rgb(var(--accent-hover));
+  opacity: 0.76;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 .knownext-readonly-editor .milkdown .editor,

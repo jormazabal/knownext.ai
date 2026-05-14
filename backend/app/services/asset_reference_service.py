@@ -29,8 +29,15 @@ def _split_markdown_target(body: str) -> tuple[str, str | None]:
         return target, title
     if " " not in value:
         return value.strip("\"'"), None
-    target, title = value.split(" ", 1)
-    return target.strip("\"'"), title.strip().strip("\"'") or None
+    quoted_title = re.match(r"^(.+?)\s+([\"'])(.*?)\2$", value)
+    if quoted_title:
+        return quoted_title.group(1).strip("\"'"), quoted_title.group(3) or None
+    return value.strip("\"'"), None
+
+
+def _format_markdown_target(target: str) -> str:
+    escaped = target.replace("<", "%3C").replace(">", "%3E").replace("(", "%28").replace(")", "%29")
+    return f"<{escaped}>" if re.search(r"\s", escaped) else escaped
 
 
 def _is_external_target(target: str) -> bool:
@@ -87,7 +94,7 @@ class AssetReferenceService:
             if not next_target.startswith(".") and "/" not in next_target:
                 next_target = f"./{next_target}"
             title_part = f' "{title}"' if title else ""
-            return f"![{alt}]({next_target}{title_part})"
+            return f"![{alt}]({_format_markdown_target(next_target)}{title_part})"
 
         document_path.write_text(MARKDOWN_IMAGE_RE.sub(replace, markdown), encoding="utf-8")
 
@@ -113,7 +120,7 @@ class AssetReferenceService:
                 if not next_target.startswith(".") and "/" not in next_target:
                     next_target = f"./{next_target}"
                 title_part = f' "{title}"' if title else ""
-                return f"![{match.group('alt')}]({next_target}{title_part})"
+                return f"![{match.group('alt')}]({_format_markdown_target(next_target)}{title_part})"
 
             document_path.write_text(MARKDOWN_IMAGE_RE.sub(replace, markdown), encoding="utf-8")
             affected.append(reference)

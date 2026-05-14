@@ -1,3 +1,5 @@
+import { APP_VERSION } from "../appVersion";
+
 type TauriWindow = Window & {
   __TAURI_INTERNALS__?: unknown;
 };
@@ -52,6 +54,15 @@ export async function initializeApiBaseUrl() {
   return API_BASE_URL;
 }
 
+export async function getApiWebSocketUrl(path: string) {
+  await initializeApiBaseUrl();
+  const baseUrl = new URL(API_BASE_URL);
+  baseUrl.protocol = baseUrl.protocol === "https:" ? "wss:" : "ws:";
+  baseUrl.pathname = `${baseUrl.pathname.replace(/\/+$/, "")}${path}`;
+  baseUrl.search = "";
+  return baseUrl.toString();
+}
+
 export function isBackendEnabled() {
   return true;
 }
@@ -74,7 +85,7 @@ export type ApiRequestInit = RequestInit & {
 };
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 7000;
-const BROWSER_BACKEND_DISCOVERY_PORTS = [8766, 8767, 8768, 8769, 8770];
+const BROWSER_BACKEND_DISCOVERY_PORTS = Array.from({ length: 34 }, (_, index) => 8766 + index);
 const BROWSER_BACKEND_DISCOVERY_TIMEOUT_MS = 450;
 
 export async function requestJson<T>(path: string, init?: ApiRequestInit): Promise<T> {
@@ -178,7 +189,7 @@ function buildBrowserBackendCandidates() {
 }
 
 function isCompatibleBackendHealth(health: BackendHealth) {
-  return health.app === "knownext" && health.status === "ok" && health.profile === expectedBackendProfile();
+  return health.app === "knownext" && health.status === "ok" && health.profile === expectedBackendProfile() && health.version === APP_VERSION;
 }
 
 async function requestJsonOnce<T>(path: string, init?: ApiRequestInit): Promise<T> {
@@ -253,12 +264,13 @@ export function validateBackendHealth(health: BackendHealth) {
   const problems: string[] = [];
   if (health.app !== "knownext") problems.push(`app=${health.app ?? "unknown"}`);
   if (health.status !== "ok") problems.push(`status=${health.status ?? "unknown"}`);
+  if (health.version !== APP_VERSION) problems.push(`version=${health.version ?? "unknown"}`);
   if (health.profile !== expectedProfile) problems.push(`profile=${health.profile ?? "unknown"}`);
   if (problems.length > 0) {
     throw new ApiError(
       409,
       "Backend incompatible",
-      `Backend local incompatible. Esperado profile=${expectedProfile}; detectado ${problems.join(", ")}.`,
+      `Backend local incompatible. Esperado version=${APP_VERSION}, profile=${expectedProfile}; detectado ${problems.join(", ")}.`,
     );
   }
 }

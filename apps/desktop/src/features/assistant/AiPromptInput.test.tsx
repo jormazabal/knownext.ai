@@ -114,4 +114,36 @@ describe("AiPromptInput", () => {
 
     expect(onSubmit).toHaveBeenCalledWith("Investiga y redacta", null, { executionMode: "reasoning", reasoningDepth: "deep" });
   });
+
+  it("lets the microphone menu choose transcription target and language", async () => {
+    const onTranscriptionConfigChange = vi.fn();
+
+    render(
+      <AiPromptInput
+        documentId="doc-1"
+        projectId="project-1"
+        markdown="Contenido"
+        providerReady
+        transcriptionConfig={{
+          enabled: true,
+          model: "gpt-realtime-whisper",
+          defaultTarget: "prompt",
+          defaultLanguage: "auto",
+          favoriteLanguages: ["es", "en"],
+        }}
+        onSubmit={vi.fn()}
+        onTranscriptionConfigChange={onTranscriptionConfigChange}
+      />,
+    );
+
+    await userEvent.click(screen.getByLabelText("Opciones de transcripción"));
+    await userEvent.click(screen.getByRole("menuitemradio", { name: "Dictar en documento" }));
+
+    expect(onTranscriptionConfigChange).toHaveBeenCalledWith({ defaultTarget: "document" });
+
+    await userEvent.click(screen.getByLabelText("Opciones de transcripción"));
+    await userEvent.click(screen.getByRole("menuitemradio", { name: "Español" }));
+
+    expect(onTranscriptionConfigChange).toHaveBeenCalledWith({ defaultLanguage: "es" });
+  });
 });

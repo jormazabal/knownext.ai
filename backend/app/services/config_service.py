@@ -58,6 +58,13 @@ DEFAULT_AI = {
         "maxEstimatedCostEur": 1.0,
         "maxSources": 6,
     },
+    "transcription": {
+        "enabled": True,
+        "model": "gpt-realtime-whisper",
+        "defaultTarget": "prompt",
+        "defaultLanguage": "auto",
+        "favoriteLanguages": ["es", "en"],
+    },
 }
 
 DEFAULT_TABS = {}
@@ -83,6 +90,7 @@ ACCENT_COLORS = {
     "rose",
     "red",
 }
+TRANSCRIPTION_LANGUAGES = {"auto", "es", "en", "fr", "de", "it", "pt", "ca", "eu", "gl"}
 
 
 def _now_iso() -> str:
@@ -178,6 +186,9 @@ def _normalize_ai(value: object) -> dict:
     vision = value.get("vision")
     if not isinstance(vision, dict):
         vision = {}
+    transcription = value.get("transcription")
+    if not isinstance(transcription, dict):
+        transcription = {}
 
     rag_status = rag.get("status")
     if rag_status not in {"not-indexed", "indexing", "updated", "error"}:
@@ -185,6 +196,24 @@ def _normalize_ai(value: object) -> dict:
     depth = agentic.get("depth")
     if depth not in {"quick", "guided", "deep", "bounded_autonomous"}:
         depth = DEFAULT_AI["agentic"]["depth"]
+    transcription_model = transcription.get("model")
+    if transcription_model != "gpt-realtime-whisper":
+        transcription_model = DEFAULT_AI["transcription"]["model"]
+    transcription_target = transcription.get("defaultTarget")
+    if transcription_target not in {"prompt", "document"}:
+        transcription_target = DEFAULT_AI["transcription"]["defaultTarget"]
+    transcription_language = transcription.get("defaultLanguage")
+    if transcription_language not in TRANSCRIPTION_LANGUAGES:
+        transcription_language = DEFAULT_AI["transcription"]["defaultLanguage"]
+    favorite_languages = transcription.get("favoriteLanguages")
+    if not isinstance(favorite_languages, list):
+        favorite_languages = DEFAULT_AI["transcription"]["favoriteLanguages"]
+    normalized_favorite_languages = []
+    for language in favorite_languages:
+        if language in TRANSCRIPTION_LANGUAGES and language not in normalized_favorite_languages:
+            normalized_favorite_languages.append(language)
+    if not normalized_favorite_languages:
+        normalized_favorite_languages = DEFAULT_AI["transcription"]["favoriteLanguages"]
 
     return {
         "provider": "openai",
@@ -219,6 +248,13 @@ def _normalize_ai(value: object) -> dict:
             "maxDocuments": _clamp_int(agentic.get("maxDocuments"), 1, 30, DEFAULT_AI["agentic"]["maxDocuments"]),
             "maxEstimatedCostEur": _clamp_float(agentic.get("maxEstimatedCostEur"), 0.1, 25.0, DEFAULT_AI["agentic"]["maxEstimatedCostEur"]),
             "maxSources": _clamp_int(agentic.get("maxSources"), 1, 20, DEFAULT_AI["agentic"]["maxSources"]),
+        },
+        "transcription": {
+            "enabled": bool(transcription.get("enabled", DEFAULT_AI["transcription"]["enabled"])),
+            "model": transcription_model,
+            "defaultTarget": transcription_target,
+            "defaultLanguage": transcription_language,
+            "favoriteLanguages": normalized_favorite_languages[:6],
         },
     }
 

@@ -44,6 +44,7 @@ export function MarkdownEditor(props: MarkdownEditorProps) {
 }
 
 const selectionFocusPluginKey = new PluginKey<SelectionFocusRange | null>("knownext-selection-focus");
+const transientTextPluginKey = new PluginKey<TransientTextPreview | null>("knownext-transient-text-preview");
 
 function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, selectionFocus }: MarkdownEditorProps) {
   const skipInitialUpdate = useRef(true);
@@ -71,7 +72,7 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
 
     crepe.editor.config((ctx) => {
       ctx.update(historyProviderConfig.key, (config) => ({ ...config, depth: 100, newGroupDelay: 500 }));
-      ctx.update(prosePluginsCtx, (plugins) => [...plugins, createSelectionFocusPlugin()]);
+      ctx.update(prosePluginsCtx, (plugins) => [...plugins, createSelectionFocusPlugin(), createTransientTextPreviewPlugin()]);
       configureUnderlineMarkdownSerialization(ctx);
     });
     crepe.editor.use(remarkUnderlineHtmlPlugin).use(underlineSchema).use(toggleUnderlineCommand);
@@ -117,7 +118,7 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
     const editor = get();
     if (editor) {
       controllerReadyRef.current = true;
-      const controller = createMarkdownEditorController(editor, selectionFocusPluginKey);
+      const controller = createMarkdownEditorController(editor, selectionFocusPluginKey, transientTextPluginKey);
       callbacksRef.current.onControllerChange(controller);
       notifyFormatState(controller.getFormatState());
       notifyHistoryState(controller.getHistoryState());
@@ -187,6 +188,11 @@ type SelectionFocusRange = {
   to: number;
 };
 
+type TransientTextPreview = {
+  position: number;
+  text: string;
+};
+
 function createSelectionFocusPlugin() {
   return new Plugin<SelectionFocusRange | null>({
     key: selectionFocusPluginKey,
@@ -209,6 +215,36 @@ function createSelectionFocusPlugin() {
         return DecorationSet.create(state.doc, [
           Decoration.inline(range.from, range.to, { class: "knownext-selection-focus" }),
         ]);
+      },
+    },
+  });
+}
+
+function createTransientTextPreviewPlugin() {
+  return new Plugin<TransientTextPreview | null>({
+    key: transientTextPluginKey,
+    state: {
+      init: () => null,
+      apply(transaction, value) {
+        const meta = transaction.getMeta(transientTextPluginKey);
+        if (meta !== undefined) return meta as TransientTextPreview | null;
+        if (!value || !transaction.docChanged) return value;
+
+        const position = transaction.mapping.map(value.position, 1);
+        return position >= 0 && position <= transaction.doc.content.size ? { ...value, position } : null;
+      },
+    },
+    props: {
+      decorations(state) {
+        const preview = transientTextPluginKey.getState(state);
+        if (!preview?.text) return null;
+        const widget = Decoration.widget(preview.position, () => {
+          const span = document.createElement("span");
+          span.className = "knownext-dictation-preview";
+          span.textContent = preview.text;
+          return span;
+        }, { side: 1 });
+        return DecorationSet.create(state.doc, [widget]);
       },
     },
   });

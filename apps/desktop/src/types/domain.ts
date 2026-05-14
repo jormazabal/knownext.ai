@@ -164,6 +164,9 @@ export type AiVisionConfig = {
 
 export type AiModelId = "gpt-5.5" | "gpt-5.4" | "gpt-5.4-mini" | "gpt-5.4-nano";
 export type AiAgenticDepth = "quick" | "guided" | "deep" | "bounded_autonomous";
+export type AiTranscriptionTarget = "prompt" | "document";
+export type AiTranscriptionLanguage = "auto" | "es" | "en" | "fr" | "de" | "it" | "pt" | "ca" | "eu" | "gl";
+export type AiTranscriptionModelId = "gpt-realtime-whisper";
 
 export type AiAgenticConfig = {
   depth: AiAgenticDepth;
@@ -175,6 +178,14 @@ export type AiAgenticConfig = {
   maxSources: number;
 };
 
+export type AiTranscriptionConfig = {
+  enabled: boolean;
+  model: AiTranscriptionModelId;
+  defaultTarget: AiTranscriptionTarget;
+  defaultLanguage: AiTranscriptionLanguage;
+  favoriteLanguages: AiTranscriptionLanguage[];
+};
+
 export type AiConfig = {
   provider: "openai";
   model: AiModelId;
@@ -182,6 +193,7 @@ export type AiConfig = {
   rag: AiRagConfig;
   vision: AiVisionConfig;
   agentic: AiAgenticConfig;
+  transcription: AiTranscriptionConfig;
 };
 
 export type AiConfigStatus = AiConfig & {
@@ -461,6 +473,7 @@ export type AssetMetadata = {
   sizeBytes: number;
   width?: number | null;
   height?: number | null;
+  colorDepthBits?: number | null;
   updatedAt: string;
   usageCount: number;
   indexed: boolean;

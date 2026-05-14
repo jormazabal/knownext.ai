@@ -2,6 +2,17 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.13.0 - 2026-05-15
+
+- Added realtime audio transcription controls to the AI prompt with selectable destination: prompt input or active Markdown document cursor.
+- Added configurable transcription settings for provider model, favorite languages, language selection, and local backend-mediated OpenAI Realtime WebSocket sessions.
+- Improved the microphone control UX with a compact split action/menu treatment, active recording feedback, and clearer local transcription connection errors.
+- Extended Milkdown integration so dictated text can be inserted at the current document selection while preserving editor focus and undo behavior.
+- Improved image asset viewing with compact metadata, pixel dimensions, color depth, zoom controls, fit-to-window behavior, and a cleaner right-side details panel.
+- Hardened Markdown image reference detection for filenames with spaces and added clickable image usage references back into Markdown documents.
+- Refined document workspace geometry around the prompt input, scroll area, status bar, light-mode send button, and global tooltip dismissal when opening menus.
+- Aligned frontend and FastAPI backend contracts for transcription, image metadata, backend discovery, and version compatibility.
+
 ## 0.12.1 - 2026-05-14
 
 - Refined the document workspace layout with resizable integrated side panels and an integrated collapsed left rail that preserves access to the application menu.
