@@ -148,6 +148,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   const [editorFormatState, setEditorFormatState] = useState<MarkdownEditorFormatState>(emptyMarkdownEditorFormatState);
   const [editorHistoryStates, setEditorHistoryStates] = useState<Record<string, MarkdownEditorHistoryState>>({});
   const [navigationOpen, setNavigationOpen] = useState(false);
+  const [desktopNavigationVisible, setDesktopNavigationVisible] = useState(true);
   const activeWorkspaceTab = props.tabs.find((tab) => tab.id === props.activeTabId);
   const hasOpenDocument = activeWorkspaceTab?.kind === "document" && Boolean(props.activeDocumentId);
   const hasOpenImage = activeWorkspaceTab?.kind === "image" && Boolean(props.activeImageId);
@@ -295,28 +296,40 @@ export function DesktopLayout(props: DesktopLayoutProps) {
           className={[
             "absolute inset-y-0 left-0 z-50 flex shrink-0 flex-col border-r border-line bg-panel shadow-menu transition-transform duration-200 ease-out lg:relative lg:translate-x-0 lg:shadow-none",
             navigationOpen ? "translate-x-0" : "-translate-x-full",
+            desktopNavigationVisible ? "" : "lg:hidden",
           ].join(" ")}
           style={{ width: sidebar.width, maxWidth: "calc(100vw - 48px)" }}
         >
-          <div className="flex items-start gap-2 px-4 pb-2 pt-3">
-            <div className="min-w-0 flex-1">
-              <ProjectSelector
-                projects={props.projects}
-                activeProject={props.activeProject}
-                language={props.appLanguage}
-                onSelectProject={props.onSelectProject}
-                onCreateProject={props.onCreateProject}
-              />
-            </div>
-            <button
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-line bg-white text-ink-secondary hover:bg-brand-hover hover:text-brand-orange lg:hidden"
-              data-tooltip="Ocultar documentos"
-              data-tooltip-placement="bottom"
-              aria-label="Ocultar panel de documentos"
-              onClick={() => setNavigationOpen(false)}
-            >
-              <PanelLeftClose size={16} />
-            </button>
+          <div className="px-4 pb-2 pt-3">
+            <ProjectSelector
+              projects={props.projects}
+              activeProject={props.activeProject}
+              language={props.appLanguage}
+              headerAction={
+                <>
+                  <button
+                    className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange lg:hidden"
+                    data-tooltip="Ocultar documentos"
+                    data-tooltip-placement="bottom"
+                    aria-label="Ocultar panel de documentos"
+                    onClick={() => setNavigationOpen(false)}
+                  >
+                    <PanelLeftClose size={16} />
+                  </button>
+                  <button
+                    className="hidden h-8 w-8 shrink-0 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange lg:grid"
+                    data-tooltip="Ocultar documentos"
+                    data-tooltip-placement="bottom"
+                    aria-label="Ocultar panel de documentos"
+                    onClick={() => setDesktopNavigationVisible(false)}
+                  >
+                    <PanelLeftClose size={16} />
+                  </button>
+                </>
+              }
+              onSelectProject={props.onSelectProject}
+              onCreateProject={props.onCreateProject}
+            />
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-1.5">
             {props.activeProject ? (
@@ -354,17 +367,48 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             isCheckingForUpdates={props.isCheckingForUpdates}
           />
         </aside>
-        <div className="hidden lg:block">
-          <PanelResizeHandle
-            label="Cambiar anchura del árbol de documentos"
-            minWidth={sidebarWidthConfig.minWidth}
-            maxWidth={sidebarWidthConfig.maxWidth}
-            value={sidebar.width}
-            isResizing={sidebar.isResizing}
-            onPointerDown={sidebar.startResize}
-            onKeyDown={sidebar.resizeWithKeyboard}
-          />
-        </div>
+        {desktopNavigationVisible ? (
+          <div className="hidden lg:block">
+            <PanelResizeHandle
+              label="Cambiar anchura del árbol de documentos"
+              minWidth={sidebarWidthConfig.minWidth}
+              maxWidth={sidebarWidthConfig.maxWidth}
+              value={sidebar.width}
+              isResizing={sidebar.isResizing}
+              onPointerDown={sidebar.startResize}
+              onKeyDown={sidebar.resizeWithKeyboard}
+            />
+          </div>
+        ) : (
+          <div className="hidden w-11 shrink-0 border-r border-line bg-panel px-1.5 py-3 lg:flex lg:flex-col lg:items-center">
+            <button
+              className="grid h-8 w-8 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
+              data-tooltip="Mostrar documentos"
+              data-tooltip-placement="right"
+              aria-label="Mostrar panel de documentos"
+              onClick={() => setDesktopNavigationVisible(true)}
+            >
+              <PanelLeftOpen size={16} />
+            </button>
+            <div className="mt-auto">
+              <ProjectActions
+                compact
+                appVersion={props.appVersion}
+                language={props.appLanguage}
+                authStatus={props.authStatus}
+                aiUsageSummary={props.aiUsageSummary}
+                orphanDraftCount={props.orphanDraftCount}
+                onLoginGithub={props.onLoginGithub}
+                onLogout={props.onLogout}
+                onOpenAppSettings={props.onOpenAppSettings}
+                onOpenRecoverableDrafts={props.onOpenRecoverableDrafts}
+                onCheckForUpdates={props.onCheckForUpdates}
+                onOpenReleaseNotes={props.onOpenReleaseNotes}
+                isCheckingForUpdates={props.isCheckingForUpdates}
+              />
+            </div>
+          </div>
+        )}
 
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white">
           {hasOpenTab ? (
@@ -396,7 +440,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             <section className={["relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", hasOpenTab ? "bg-white" : "bg-panel"].join(" ")}>
               {hasOpenTab ? (
                 <>
-                  <div className={hasAiConversation ? "min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1 overflow-y-auto px-8 pb-24 pt-4"}>
+                  <div className={hasAiConversation ? "min-h-0 flex-1 overflow-hidden" : "mb-[72px] min-h-0 flex-1 overflow-y-auto px-8 pb-6 pt-4"}>
                     <div className={hasAiConversation ? "h-full min-h-0" : "mx-auto max-w-[900px]"}>
                       {hasReleaseNotes ? (
                         <ReleaseNotesViewer markdown={props.releaseNotesMarkdown} />
@@ -461,7 +505,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                       )}
                     </div>
                   </div>
-                  <div className="pointer-events-none absolute inset-x-0 bottom-9 h-28 bg-gradient-to-t from-white via-white/95 to-transparent" />
+                  <div className="pointer-events-none absolute inset-x-0 bottom-[108px] h-2.5 bg-gradient-to-t from-[rgb(var(--app-surface))] to-transparent" />
                 </>
               ) : (
                 <>
@@ -528,6 +572,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                   isDirty={props.activeDocumentDirty}
                   saveState={props.saveState}
                   wordCount={props.activeDocument?.wordCount ?? countWords(props.activeMarkdown)}
+                  characterCount={countCharacters(props.activeMarkdown)}
                   gitEnabled={props.historyEnabled}
                   versioningLabel={props.versioningStatus?.statusLabel ?? "Sin historial"}
                   lastVersionHash={props.versioningStatus?.lastVersionHash}
@@ -707,7 +752,7 @@ function InsertImageDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-[98] grid place-items-center bg-black/20 px-4">
+    <div className="knownext-modal-overlay fixed inset-0 z-[98] grid place-items-center bg-black/20 px-4">
       <section className="flex max-h-[min(620px,calc(100vh-48px))] w-[min(640px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu">
         <header className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
           <div>
@@ -978,6 +1023,10 @@ function countWords(markdown: string) {
   return markdown.trim().split(/\s+/).filter(Boolean).length;
 }
 
+function countCharacters(markdown: string) {
+  return markdown.length;
+}
+
 function getDocumentStatus({
   saveState,
   isDirty,
@@ -1059,14 +1108,20 @@ function PanelResizeHandle({
       aria-valuemax={maxWidth}
       aria-valuenow={value}
       tabIndex={0}
-      className="group relative z-20 -mx-1 w-2 shrink-0 cursor-col-resize select-none outline-none"
+      className="group relative z-30 -mx-1 h-full w-2 shrink-0 cursor-col-resize touch-none select-none outline-none"
       onPointerDown={onPointerDown}
       onKeyDown={onKeyDown}
     >
       <div
         className={[
-          "absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-brand-orange transition-opacity",
-          isResizing ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100",
+          "absolute inset-y-0 left-1/2 w-2 -translate-x-1/2 transition-colors",
+          isResizing ? "bg-brand-hover/60" : "bg-transparent group-hover:bg-brand-hover/60 group-focus-visible:bg-brand-hover/60",
+        ].join(" ")}
+      />
+      <div
+        className={[
+          "absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-line transition-[background-color,opacity,width]",
+          isResizing ? "w-0.5 bg-brand-orange opacity-100" : "opacity-100 group-hover:w-0.5 group-hover:bg-brand-orange group-focus-visible:w-0.5 group-focus-visible:bg-brand-orange",
         ].join(" ")}
       />
     </div>

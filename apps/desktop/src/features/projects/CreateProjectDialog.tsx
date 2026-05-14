@@ -266,7 +266,7 @@ export function CreateProjectDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-[80] grid place-items-center bg-black/20 p-4">
+    <div className="knownext-modal-overlay fixed inset-0 z-[80] grid place-items-center bg-black/20 p-4">
       <section
         className={[
           "flex max-h-[calc(100vh-32px)] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu",
@@ -476,7 +476,7 @@ export function CreateProjectDialog({
         </footer>
       </section>
       {deleteConfirmationOpen && project ? (
-        <div className="fixed inset-0 z-[90] grid place-items-center bg-black/25">
+        <div className="knownext-modal-overlay fixed inset-0 z-[90] grid place-items-center bg-black/25">
           <section className="w-[min(440px,calc(100vw-32px))] rounded-lg border border-line bg-white shadow-menu">
             <header className="flex items-start gap-3 border-b border-line px-5 py-4">
               <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-red-50 text-red-700">

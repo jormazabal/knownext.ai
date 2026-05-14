@@ -37,14 +37,14 @@ type ToolbarAction = {
 };
 
 const blockFormats = [
-  { label: "Texto normal", shortLabel: "Normal", action: "paragraph", icon: Pilcrow },
-  { label: "Título 1", shortLabel: "H1", action: "heading-1", icon: Heading1 },
-  { label: "Título 2", shortLabel: "H2", action: "heading-2", icon: Heading2 },
-  { label: "Título 3", shortLabel: "H3", action: "heading-3", icon: Heading3 },
-  { label: "Título 4", shortLabel: "H4", action: "heading-4", icon: Heading3 },
-  { label: "Título 5", shortLabel: "H5", action: "heading-5", icon: Heading3 },
-  { label: "Título 6", shortLabel: "H6", action: "heading-6", icon: Heading3 },
-] satisfies Array<{ label: string; shortLabel: string; action: MarkdownEditorAction; icon: LucideIcon }>;
+  { label: "Normal", action: "paragraph", icon: Pilcrow },
+  { label: "Título 1", action: "heading-1", icon: Heading1 },
+  { label: "Título 2", action: "heading-2", icon: Heading2 },
+  { label: "Título 3", action: "heading-3", icon: Heading3 },
+  { label: "Título 4", action: "heading-4", icon: Heading3 },
+  { label: "Título 5", action: "heading-5", icon: Heading3 },
+  { label: "Título 6", action: "heading-6", icon: Heading3 },
+] satisfies Array<{ label: string; action: MarkdownEditorAction; icon: LucideIcon }>;
 
 const primaryInlineTools = [
   { label: "Negrita", icon: Bold, action: "bold" },
@@ -121,7 +121,6 @@ export function MarkdownToolbar({
 
   const visibleSecondaryInlineTools = secondaryInlineTools.filter((tool) => !tool.extended || extendedUnderlineEnabled);
   const currentBlockFormat = blockFormats.find((format) => activeActions[format.action]) ?? blockFormats[0];
-  const CurrentBlockIcon = currentBlockFormat.icon;
 
   function keepEditorSelection(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
@@ -153,14 +152,13 @@ export function MarkdownToolbar({
           onMouseDown={keepEditorSelection}
           onClick={(event) => toggleMenu("block", event)}
         >
-          <CurrentBlockIcon size={14} />
-          <span className="toolbar-select-label">{currentBlockFormat.shortLabel}</span>
+          <span className="toolbar-select-label">{currentBlockFormat.label}</span>
           <ChevronDown size={13} />
         </button>
         {openMenu === "block" ? (
           <ToolbarMenu align="left">
             {blockFormats.map((format) => (
-              <MenuAction
+              <BlockMenuAction
                 key={format.action}
                 action={format}
                 active={Boolean(activeActions[format.action])}
@@ -466,6 +464,27 @@ function MenuAction({
     >
       <action.icon size={14} />
       <span className="min-w-0 flex-1 truncate">{action.compactLabel ?? action.label}</span>
+    </button>
+  );
+}
+
+function BlockMenuAction({
+  action,
+  active,
+  onRun,
+}: {
+  action: { label: string };
+  active: boolean;
+  onRun: () => void;
+}) {
+  return (
+    <button
+      className={`flex h-8 w-full items-center rounded px-2 text-left text-[11px] hover:bg-brand-hover ${active ? "bg-brand-hover font-semibold text-brand-orange" : "text-ink-primary"}`}
+      role="menuitem"
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onRun}
+    >
+      <span className="min-w-0 flex-1 truncate">{action.label}</span>
     </button>
   );
 }
