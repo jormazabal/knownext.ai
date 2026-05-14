@@ -6,20 +6,20 @@ export default {
     extend: {
       colors: {
         brand: {
-          orange: "#F37021",
-          dark: "#D85A12",
-          hover: "#FFF1E8",
+          orange: "rgb(var(--accent) / <alpha-value>)",
+          dark: "rgb(var(--accent-hover) / <alpha-value>)",
+          hover: "rgb(var(--accent-soft) / <alpha-value>)",
         },
         ink: {
-          primary: "#111827",
-          secondary: "#6B7280",
+          primary: "rgb(var(--app-text) / <alpha-value>)",
+          secondary: "rgb(var(--app-muted) / <alpha-value>)",
         },
-        line: "#E5E7EB",
-        panel: "#FAFAFA",
+        line: "rgb(var(--app-border) / <alpha-value>)",
+        panel: "rgb(var(--app-panel) / <alpha-value>)",
       },
       boxShadow: {
-        menu: "0 14px 40px rgba(17, 24, 39, 0.12)",
-        subtle: "0 8px 24px rgba(17, 24, 39, 0.06)",
+        menu: "var(--shadow-menu)",
+        subtle: "var(--shadow-subtle)",
       },
       fontFamily: {
         sans: ["Inter", "ui-sans-serif", "system-ui", "Segoe UI", "Arial", "sans-serif"],
@@ -28,4 +28,3 @@ export default {
   },
   plugins: [],
 } satisfies Config;
-

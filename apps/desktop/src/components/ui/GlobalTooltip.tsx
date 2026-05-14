@@ -129,7 +129,7 @@ export function GlobalTooltip() {
   return (
     <div
       ref={tooltipRef}
-      className="pointer-events-none fixed z-[9999] max-w-[240px] rounded-[5px] bg-ink-primary px-2 py-1.5 text-center text-[11px] font-medium leading-tight text-white shadow-menu"
+      className="knownext-tooltip pointer-events-none fixed z-[9999] max-w-[260px] px-2.5 py-1.5 text-center text-[11px] font-medium leading-tight"
       style={{
         left: layout?.left ?? 0,
         top: layout?.top ?? 0,
@@ -142,8 +142,8 @@ export function GlobalTooltip() {
         className="absolute h-0 w-0 -translate-x-1/2 border-x-[5px] border-x-transparent"
         style={
           (layout?.placement ?? tooltip.preferredPlacement) === "bottom"
-            ? { top: -5, left: layout?.arrowLeft ?? 0, borderBottom: "5px solid #111827" }
-            : { bottom: -5, left: layout?.arrowLeft ?? 0, borderTop: "5px solid #111827" }
+            ? { top: -5, left: layout?.arrowLeft ?? 0, borderBottom: "5px solid rgb(var(--tooltip-bg))" }
+            : { bottom: -5, left: layout?.arrowLeft ?? 0, borderTop: "5px solid rgb(var(--tooltip-bg))" }
         }
       />
     </div>

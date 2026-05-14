@@ -33,7 +33,7 @@ Any remaining mock fixtures must be limited to tests, Storybook/demo surfaces, o
 - GitHub auth status and device-flow login go through `src/lib/api/auth.ts`; tokens are never exposed to arbitrary UI components.
 - Project capabilities and versioning status are fetched per project so the assistant can show disabled Git/GitHub options without hiding them.
 - Layout widths and per-project open document tabs go through `src/lib/api/config.ts` and are persisted by FastAPI in `config.json`.
-- Application settings for appearance and diagnostics also go through `src/lib/api/config.ts`; UI components receive these values as props and dispatch setting changes to the root app state.
+- Application settings for appearance and diagnostics also go through `src/lib/api/config.ts`; UI components receive these values as props and dispatch setting changes to the root app state. Global appearance includes locale, zoom, Markdown compatibility, theme mode, and primary accent color.
 - AI settings also go through `src/lib/api/config.ts` and `src/lib/api/ai.ts`. The OpenAI key status is visible to React, but the secret value is never returned to the frontend after save.
 - Runtime trace logging helpers live under `src/lib/runtime/logging.ts`. React can request log status, record frontend errors, and ask the runtime to open the dedicated log folder, but it does not write log files directly.
 - Runtime service helpers live under `src/lib/runtime/services.ts`. React can request local service health and ask the installed Tauri runtime to restart the backend, but it does not spawn or kill processes directly.
@@ -78,7 +78,8 @@ Any remaining mock fixtures must be limited to tests, Storybook/demo surfaces, o
 - `Configuración de la app` opens a modal settings surface over the current workspace.
 - The modal has a left settings list and a right detail pane.
 - `Servicios` is the first section and shows local backend health, version/profile details, last error, manual refresh, and backend restart where supported by the installed desktop runtime.
-- `Apariencia` owns the persisted locale, zoom percentage, and Markdown compatibility preferences such as extended underline visibility.
+- `Apariencia` owns the persisted locale, zoom percentage, theme mode (`Sistema`, `Claro`, `Oscuro`), primary accent color, and Markdown compatibility preferences such as extended underline visibility.
+- Runtime theme application belongs to `src/lib/theme/appearance.ts`. It resolves the system color scheme when requested and writes `data-theme`, `data-theme-preference`, and `data-accent` attributes on the root document so Tailwind/CSS tokens can update the full workspace without remounting React state.
 - `IA` owns OpenAI provider status, action permissions, project documentation indexing controls, and vision controls for image context/indexing. RAG status from FastAPI includes semantic index state, indexed/failed document counts, and whether the local exact-search index is ready; React only renders those values and never indexes files itself.
 - `Trazas` owns the persisted trace logging toggle and the action to open the dedicated log folder.
 - The settings component remains visual: persistence goes through root app state and FastAPI config updates, while folder opening and log writes go through runtime/API helpers.

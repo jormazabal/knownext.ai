@@ -14,7 +14,7 @@ Backend code lives in `backend/app`.
 
 - `project_service`: project list and document tree.
 - `filesystem_service`: local project folder scanning and Markdown file operations for the navigation tree.
-- `config_service`: application configuration, including persisted layout widths, appearance preferences, diagnostics settings, AI provider/model settings, RAG settings, and agentic task permission/limit settings. Per-task reasoning depth is carried on AI interaction requests, not stored as the primary app-level control.
+- `config_service`: application configuration, including persisted layout widths, appearance preferences such as locale, zoom, theme mode, and primary accent color, diagnostics settings, AI provider/model settings, RAG settings, and agentic task permission/limit settings. Per-task reasoning depth is carried on AI interaction requests, not stored as the primary app-level control.
 - `logging_service`: trace logging to a dedicated local log folder. Error and critical entries are always written; informational entries require diagnostics logging to be enabled.
 - `app_storage`: shared JSON file storage rooted in the KnowNext.ai application data directory, with per-file locking and atomic temporary-file replacement for concurrent API requests.
 - `document_service`: document loading and saving.
@@ -33,7 +33,7 @@ Backend code lives in `backend/app`.
 The local API owns application metadata files. React must access them through API contracts, not by reading files directly.
 
 - `projects.json`: known projects, local/cache folder paths, visual metadata, per-project storage/versioning/sync modes, optional GitHub repository metadata, and the active project id.
-- `config.json`: user-level application configuration such as sidebar and history panel widths, appearance settings, diagnostics settings, AI model/RAG/agentic-task limits, plus the open document tabs per project, active document id, and tab order.
+- `config.json`: user-level application configuration such as sidebar and history panel widths, appearance settings including theme mode and primary accent color, diagnostics settings, AI model/RAG/agentic-task limits, plus the open document tabs per project, active document id, and tab order.
 - `ai-conversations/*.json`: project-scoped AI conversation events, including user prompts, assistant responses, and file-operation events.
 - `ai-context/<project-id>/sources.json`: active AI prompt-context source metadata, expiry timestamps, processing state, source type, warnings, and file references. External source originals and extracted previews live under sibling `files/` and `extracted/` folders and are temporary app data, not project documentation.
 - `ai-pending-deletes.json`: legacy short-lived AI delete requests retained for backward-compatible confirmation cleanup.

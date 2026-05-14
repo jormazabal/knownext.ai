@@ -1,4 +1,4 @@
-import type { AiConfig, AiConfigStatus, AiModelId, AppConfig, AppConfigUpdate, AppearanceConfig, DiagnosticsConfig, LayoutConfig, ProjectTabsConfig } from "../../types/domain";
+import type { AiConfig, AiConfigStatus, AiModelId, AppConfig, AppConfigUpdate, AppearanceAccentColor, AppearanceConfig, AppearanceThemeMode, DiagnosticsConfig, LayoutConfig, ProjectTabsConfig } from "../../types/domain";
 import { requestJson } from "./client";
 
 export const defaultLayoutConfig: LayoutConfig = {
@@ -10,6 +10,8 @@ export const defaultAppearanceConfig: AppearanceConfig = {
   language: "es",
   zoomPercent: 100,
   markdownExtendedUnderlineEnabled: true,
+  themeMode: "system",
+  primaryColor: "orange",
 };
 
 export const defaultDiagnosticsConfig: DiagnosticsConfig = {
@@ -72,14 +74,14 @@ export const defaultAppConfig: AppConfig = {
 };
 
 export async function getAppConfig(): Promise<AppConfig> {
-  return requestJson<AppConfig>("/api/config");
+  return normalizeAppConfig(await requestJson<AppConfig>("/api/config"));
 }
 
 export async function updateAppConfig(payload: AppConfigUpdate): Promise<AppConfig> {
-  return requestJson<AppConfig>("/api/config", {
+  return normalizeAppConfig(await requestJson<AppConfig>("/api/config", {
     method: "PUT",
     body: JSON.stringify(payload),
-  });
+  }));
 }
 
 export async function getAiConfig(): Promise<AiConfigStatus> {
@@ -136,7 +138,37 @@ function normalizeAppearance(appearance: AppearanceConfig | undefined): Appearan
     language: appearance.language === "en" ? "en" : "es",
     zoomPercent: Math.min(Math.max(Number(appearance.zoomPercent) || 100, 85), 125),
     markdownExtendedUnderlineEnabled: appearance.markdownExtendedUnderlineEnabled !== false,
+    themeMode: normalizeThemeMode(appearance.themeMode),
+    primaryColor: normalizeAccentColor(appearance.primaryColor),
   };
+}
+
+function normalizeAppConfig(config: AppConfig): AppConfig {
+  const normalizedConfig = { ...defaultAppConfig, ...config };
+  return {
+    ...normalizedConfig,
+    layout: config.layout ?? defaultLayoutConfig,
+    appearance: normalizeAppearance(config.appearance) ?? defaultAppearanceConfig,
+    diagnostics: normalizeDiagnostics(config.diagnostics) ?? defaultDiagnosticsConfig,
+    ai: normalizeAi(config.ai) ?? defaultAiConfig,
+    tabsByProject: config.tabsByProject ?? {},
+    openUtilityTabs: config.openUtilityTabs ?? [],
+    activeUtilityTab: config.activeUtilityTab ?? null,
+    lastRunAppVersion: config.lastRunAppVersion ?? null,
+    lastSeenReleaseNotesVersion: config.lastSeenReleaseNotesVersion ?? null,
+  };
+}
+
+function normalizeThemeMode(themeMode: unknown): AppearanceThemeMode {
+  return ["system", "light", "dark"].includes(String(themeMode))
+    ? themeMode as AppearanceThemeMode
+    : defaultAppearanceConfig.themeMode;
+}
+
+function normalizeAccentColor(primaryColor: unknown): AppearanceAccentColor {
+  return ["orange", "amber", "yellow", "lime", "olive", "green", "cyan", "blue", "indigo", "wine", "rose", "red"].includes(String(primaryColor))
+    ? primaryColor as AppearanceAccentColor
+    : defaultAppearanceConfig.primaryColor;
 }
 
 function normalizeDiagnostics(diagnostics: DiagnosticsConfig | undefined): DiagnosticsConfig | undefined {

@@ -108,10 +108,27 @@ export type LayoutConfig = {
   historyWidth: number;
 };
 
+export type AppearanceThemeMode = "system" | "light" | "dark";
+export type AppearanceAccentColor =
+  | "orange"
+  | "amber"
+  | "yellow"
+  | "lime"
+  | "olive"
+  | "green"
+  | "cyan"
+  | "blue"
+  | "indigo"
+  | "wine"
+  | "rose"
+  | "red";
+
 export type AppearanceConfig = {
   language: "es" | "en";
   zoomPercent: number;
   markdownExtendedUnderlineEnabled: boolean;
+  themeMode: AppearanceThemeMode;
+  primaryColor: AppearanceAccentColor;
 };
 
 export type DiagnosticsConfig = {

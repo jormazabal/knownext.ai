@@ -16,6 +16,8 @@ DEFAULT_APPEARANCE = {
     "language": "es",
     "zoomPercent": 100,
     "markdownExtendedUnderlineEnabled": True,
+    "themeMode": "system",
+    "primaryColor": "orange",
 }
 
 DEFAULT_DIAGNOSTICS = {
@@ -66,6 +68,21 @@ LAYOUT_LIMITS = {
 }
 
 ZOOM_LIMITS = (85, 125)
+THEME_MODES = {"system", "light", "dark"}
+ACCENT_COLORS = {
+    "orange",
+    "amber",
+    "yellow",
+    "lime",
+    "olive",
+    "green",
+    "cyan",
+    "blue",
+    "indigo",
+    "wine",
+    "rose",
+    "red",
+}
 
 
 def _now_iso() -> str:
@@ -113,11 +130,21 @@ def _normalize_appearance(value: object) -> dict:
     except (TypeError, ValueError):
         zoom_percent = DEFAULT_APPEARANCE["zoomPercent"]
 
+    theme_mode = value.get("themeMode")
+    if theme_mode not in THEME_MODES:
+        theme_mode = DEFAULT_APPEARANCE["themeMode"]
+
+    primary_color = value.get("primaryColor")
+    if primary_color not in ACCENT_COLORS:
+        primary_color = DEFAULT_APPEARANCE["primaryColor"]
+
     min_zoom, max_zoom = ZOOM_LIMITS
     return {
         "language": language,
         "zoomPercent": min(max(zoom_percent, min_zoom), max_zoom),
         "markdownExtendedUnderlineEnabled": bool(value.get("markdownExtendedUnderlineEnabled", DEFAULT_APPEARANCE["markdownExtendedUnderlineEnabled"])),
+        "themeMode": theme_mode,
+        "primaryColor": primary_color,
     }
 
 

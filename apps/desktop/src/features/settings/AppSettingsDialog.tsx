@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Activity, Brain, ChevronDown, Copy, Eye, FolderOpen, Gauge, Globe2, Image as ImageIcon, KeyRound, Languages, ListChecks, RefreshCw, RotateCcw, Server, ShieldCheck, Trash2, Underline, X } from "lucide-react";
+import { Activity, Brain, Check, ChevronDown, Copy, Eye, FolderOpen, Gauge, Globe2, Image as ImageIcon, KeyRound, Languages, ListChecks, Monitor, Moon, Paintbrush, RefreshCw, RotateCcw, Server, ShieldCheck, Sun, Trash2, Underline, X } from "lucide-react";
 import { defaultAiConfig } from "../../lib/api/config";
-import type { AiConfigStatus, AiIndexStatusResponse, AiModelId, AiVisionModelId, AppearanceConfig, DiagnosticsConfig } from "../../types/domain";
+import { accentPalettes } from "../../lib/theme/appearance";
+import type { AiConfigStatus, AiIndexStatusResponse, AiModelId, AiVisionModelId, AppearanceAccentColor, AppearanceConfig, AppearanceThemeMode, DiagnosticsConfig } from "../../types/domain";
 import type { TraceLogStatus } from "../../lib/runtime/logging";
 import type { BackendPortConfig, RuntimeServicesStatus } from "../../lib/runtime/services";
 
@@ -552,6 +553,20 @@ function AppearanceSettings({
   text: SettingsCopy;
   onAppearanceChange: (appearance: Partial<AppearanceConfig>) => void;
 }) {
+  const themeOptions: Array<{ value: AppearanceThemeMode; label: string; icon: typeof Monitor }> = [
+    { value: "system", label: text.themeSystem, icon: Monitor },
+    { value: "light", label: text.themeLight, icon: Sun },
+    { value: "dark", label: text.themeDark, icon: Moon },
+  ];
+
+  function resetAppearance() {
+    onAppearanceChange({
+      themeMode: "system",
+      primaryColor: "orange",
+      zoomPercent: 100,
+    });
+  }
+
   return (
     <div className="space-y-5">
       <section>
@@ -562,6 +577,110 @@ function AppearanceSettings({
         <p className="mt-1 text-[11px] leading-5 text-ink-secondary">
           {text.appearanceDescription}
         </p>
+      </section>
+
+      <section className="rounded-md border border-line px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <Monitor size={14} className="text-brand-orange" />
+              <p className="text-[11px] font-semibold text-ink-primary">{text.themeHeading}</p>
+            </div>
+            <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.themeDescription}</p>
+          </div>
+        </div>
+        <div className="mt-3 grid grid-cols-3 gap-1 rounded-md border border-line bg-panel p-1">
+          {themeOptions.map((option) => {
+            const Icon = option.icon;
+            const selected = appearance.themeMode === option.value;
+            return (
+              <button
+                key={option.value}
+                className={[
+                  "inline-flex h-8 items-center justify-center gap-2 rounded border px-2 text-[11px] font-semibold transition",
+                  selected ? "border-brand-orange bg-white text-brand-orange shadow-subtle" : "border-transparent text-ink-secondary hover:bg-white hover:text-ink-primary",
+                ].join(" ")}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => onAppearanceChange({ themeMode: option.value })}
+              >
+                <Icon size={14} />
+                <span>{option.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="rounded-md border border-line px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <Paintbrush size={14} className="text-brand-orange" />
+              <p className="text-[11px] font-semibold text-ink-primary">{text.primaryColorHeading}</p>
+            </div>
+            <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.primaryColorDescription}</p>
+          </div>
+          <span className="shrink-0 rounded bg-brand-hover px-2 py-1 text-[10px] font-semibold text-brand-orange">
+            {accentPalettes.find((palette) => palette.id === appearance.primaryColor)?.label ?? text.primaryColorDefault}
+          </span>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2" role="radiogroup" aria-label={text.primaryColorHeading}>
+          {accentPalettes.map((palette) => {
+            const selected = palette.id === appearance.primaryColor;
+            return (
+              <button
+                key={palette.id}
+                className={[
+                  "grid h-8 w-8 place-items-center rounded-full border transition",
+                  selected ? "border-ink-primary bg-white shadow-subtle" : "border-line bg-white hover:border-brand-orange",
+                ].join(" ")}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                aria-label={`${text.primaryColorOption} ${palette.label}`}
+                data-tooltip={palette.label}
+                data-tooltip-placement="bottom"
+                onClick={() => onAppearanceChange({ primaryColor: palette.id as AppearanceAccentColor })}
+              >
+                <span className="grid h-5 w-5 place-items-center rounded-full" style={{ backgroundColor: palette.projectColor }}>
+                  {selected ? <Check size={12} className="text-white drop-shadow" strokeWidth={3} /> : null}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="rounded-md border border-line px-4 py-3">
+        <div className="mb-3 flex items-center gap-2">
+          <Eye size={14} className="text-brand-orange" />
+          <p className="text-[11px] font-semibold text-ink-primary">{text.previewHeading}</p>
+        </div>
+        <div className="grid gap-3 rounded-md border border-line bg-panel p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <button className="h-8 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white shadow-subtle" type="button">
+              {text.previewPrimaryButton}
+            </button>
+            <button className="h-8 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary" type="button">
+              {text.previewSecondaryButton}
+            </button>
+            <span className="rounded border border-brand-orange bg-brand-hover px-2 py-1 text-[10px] font-semibold text-brand-orange">
+              {text.previewActiveState}
+            </span>
+          </div>
+          <div className="grid gap-1.5">
+            <div className="flex h-8 items-center gap-2 rounded-md border border-brand-orange bg-white px-2 text-[11px] text-ink-primary shadow-[inset_0_0_0_1px_rgb(var(--accent)/0.18)]">
+              <span className="h-2 w-2 shrink-0 rounded-full bg-brand-orange" />
+              <span className="min-w-0 flex-1 truncate">{text.previewDocumentName}</span>
+              <span className="text-[10px] text-ink-secondary">{text.previewStatus}</span>
+            </div>
+            <div className="rounded-md border border-line bg-white px-3 py-2">
+              <p className="text-[11px] font-semibold text-ink-primary">{text.previewTextTitle}</p>
+              <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{text.previewTextDescription}</p>
+            </div>
+          </div>
+        </div>
       </section>
 
       <label className="block">
@@ -626,6 +745,17 @@ function AppearanceSettings({
             <p className="text-[10px] leading-4 text-ink-secondary">{text.markdownCompatibilityNote}</p>
           </div>
         </div>
+      </div>
+
+      <div className="flex justify-end border-t border-line pt-4">
+        <button
+          className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
+          type="button"
+          onClick={resetAppearance}
+        >
+          <RotateCcw size={14} />
+          {text.resetAppearance}
+        </button>
       </div>
     </div>
   );
@@ -1269,6 +1399,24 @@ const settingsCopy = {
     no: "No",
     appearanceHeading: "Apariencia",
     appearanceDescription: "Ajusta cómo se presenta la interfaz en este equipo.",
+    themeHeading: "Tema",
+    themeDescription: "Elige un modo claro, oscuro o sincronizado con el sistema.",
+    themeSystem: "Sistema",
+    themeLight: "Claro",
+    themeDark: "Oscuro",
+    primaryColorHeading: "Color principal",
+    primaryColorDescription: "Usa la misma gama visual que los proyectos para acentos, estados activos y acciones principales.",
+    primaryColorDefault: "Naranja",
+    primaryColorOption: "Color",
+    previewHeading: "Vista previa",
+    previewPrimaryButton: "Guardar",
+    previewSecondaryButton: "Cancelar",
+    previewActiveState: "Activo",
+    previewDocumentName: "documentacion-producto.md",
+    previewStatus: "Editando",
+    previewTextTitle: "Superficie de trabajo",
+    previewTextDescription: "La navegación, acciones y selección usan el color principal sin cambiar los colores semánticos.",
+    resetAppearance: "Restablecer apariencia",
     languageLabel: "Idioma",
     zoomLabel: "Zoom de la interfaz",
     zoomReduce: "Reducir",
@@ -1433,6 +1581,24 @@ const settingsCopy = {
     no: "No",
     appearanceHeading: "Appearance",
     appearanceDescription: "Adjust how the interface is presented on this computer.",
+    themeHeading: "Theme",
+    themeDescription: "Choose a light, dark, or system-synced mode.",
+    themeSystem: "System",
+    themeLight: "Light",
+    themeDark: "Dark",
+    primaryColorHeading: "Primary color",
+    primaryColorDescription: "Use the same visual range as projects for accents, active states, and primary actions.",
+    primaryColorDefault: "Orange",
+    primaryColorOption: "Color",
+    previewHeading: "Preview",
+    previewPrimaryButton: "Save",
+    previewSecondaryButton: "Cancel",
+    previewActiveState: "Active",
+    previewDocumentName: "product-documentation.md",
+    previewStatus: "Editing",
+    previewTextTitle: "Workspace surface",
+    previewTextDescription: "Navigation, actions, and selection use the primary color without changing semantic colors.",
+    resetAppearance: "Reset appearance",
     languageLabel: "Language",
     zoomLabel: "Interface zoom",
     zoomReduce: "Reduce",

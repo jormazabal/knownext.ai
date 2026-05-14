@@ -6,6 +6,21 @@ from app.schemas.ai import AiConfig
 
 
 AppUtilityTabId = Literal["release-notes"]
+AppearanceThemeMode = Literal["system", "light", "dark"]
+AppearanceAccentColor = Literal[
+    "orange",
+    "amber",
+    "yellow",
+    "lime",
+    "olive",
+    "green",
+    "cyan",
+    "blue",
+    "indigo",
+    "wine",
+    "rose",
+    "red",
+]
 
 
 class LayoutConfig(BaseModel):
@@ -17,6 +32,8 @@ class AppearanceConfig(BaseModel):
     language: Literal["es", "en"] = "es"
     zoomPercent: int = 100
     markdownExtendedUnderlineEnabled: bool = True
+    themeMode: AppearanceThemeMode = "system"
+    primaryColor: AppearanceAccentColor = "orange"
 
 
 class DiagnosticsConfig(BaseModel):

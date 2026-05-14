@@ -281,6 +281,53 @@ describe("AppSettingsDialog", () => {
     expect(onAppearanceChange).toHaveBeenCalledWith({ markdownExtendedUnderlineEnabled: false });
   });
 
+  it("allows changing theme mode and primary color from appearance settings", () => {
+    const onAppearanceChange = vi.fn();
+
+    render(
+      <AppSettingsDialog
+        {...baseProps}
+        runtimeServicesStatus={null}
+        onAppearanceChange={onAppearanceChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Apariencia" }));
+    fireEvent.click(screen.getByRole("button", { name: "Oscuro" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Color Verde" }));
+
+    expect(onAppearanceChange).toHaveBeenCalledWith({ themeMode: "dark" });
+    expect(onAppearanceChange).toHaveBeenCalledWith({ primaryColor: "green" });
+    expect(screen.getByText("Vista previa")).toBeInTheDocument();
+  });
+
+  it("resets appearance without changing language or Markdown compatibility", () => {
+    const onAppearanceChange = vi.fn();
+
+    render(
+      <AppSettingsDialog
+        {...baseProps}
+        runtimeServicesStatus={null}
+        appearance={{
+          ...defaultAppearanceConfig,
+          themeMode: "dark",
+          primaryColor: "rose",
+          zoomPercent: 115,
+        }}
+        onAppearanceChange={onAppearanceChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Apariencia" }));
+    fireEvent.click(screen.getByRole("button", { name: "Restablecer apariencia" }));
+
+    expect(onAppearanceChange).toHaveBeenCalledWith({
+      themeMode: "system",
+      primaryColor: "orange",
+      zoomPercent: 100,
+    });
+  });
+
   it("shows agentic limits and web research controls", () => {
     const onAiChange = vi.fn();
 

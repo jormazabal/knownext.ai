@@ -320,7 +320,7 @@ function TreeNode({
           isDropTarget && dropTarget?.valid ? "border-brand-orange bg-brand-hover ring-1 ring-inset ring-brand-orange" : "",
           isDropTarget && !dropTarget?.valid ? "border-red-200 bg-red-50 ring-1 ring-inset ring-red-200" : "",
           !isDropTarget && isActive
-            ? "border-orange-200 bg-white text-brand-orange shadow-[inset_0_0_0_1px_rgba(243,112,33,0.18)]"
+            ? "border-orange-200 bg-white text-brand-orange shadow-[inset_0_0_0_1px_rgb(var(--accent)/0.18)]"
             : "",
           !isDropTarget && !isActive && hasOpenMenu ? "border-transparent bg-brand-hover" : "",
           !isDropTarget && !isActive && !hasOpenMenu ? "hover:bg-brand-hover" : "",

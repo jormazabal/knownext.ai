@@ -124,9 +124,12 @@ The modal requirements are:
 - The right side shows the options for the selected section.
 - `Servicios` is the first section and shows the health of local runtime services, including the backend endpoint, active/expected version, app data profile, and the latest diagnostic error.
 - In the installed desktop app, `Servicios` includes a manual backend restart action. The runtime also monitors the backend and attempts to restart it automatically when the health check fails.
-- `Apariencia` includes a language selector, an interface zoom control, and Markdown compatibility controls.
+- `Apariencia` includes a language selector, an interface zoom control, global theme controls, primary color controls, and Markdown compatibility controls.
 - The language selector persists the selected locale and applies it to the application document language.
 - The zoom control persists a percentage between 85% and 125% and applies it to the current interface immediately.
+- The theme control supports `Sistema`, `Claro`, and `Oscuro`. `Sistema` follows the operating system preference, while explicit light and dark choices override it immediately and persist in `config.json`.
+- The primary color control uses the same eligible color family as project customization, defaults to orange, and updates global interactive accents, active states, focus highlights, and soft emphasis surfaces without changing project-specific icon colors.
+- The appearance panel includes a compact live preview so users can evaluate the selected theme and accent before leaving settings.
 - `Subrayado extendido` is enabled by default. It controls whether the editor may expose underline as an extended formatting option and must explain that underline is not standard Markdown and is saved as inline HTML such as `<u>texto</u>`.
 - `Trazas` includes a toggle for local trace logging.
 - When trace logging is enabled, KnowNext.ai writes user-visible errors and unhandled runtime failures to `knownext.log`.
