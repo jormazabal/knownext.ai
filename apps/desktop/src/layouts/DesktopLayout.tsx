@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { Image as ImageIcon, PanelLeftClose, PanelLeftOpen, Upload, X } from "lucide-react";
+import { Image as ImageIcon, Maximize2, Minus, PanelLeftClose, PanelLeftOpen, Plus, Upload, X } from "lucide-react";
 import { AiConversationView } from "../features/assistant/AiConversationView";
 import { AiPromptInput, type AiPromptExecutionOptions } from "../features/assistant/AiPromptInput";
 import { AiResponseBubble } from "../features/assistant/AiResponseBubble";
@@ -26,7 +26,7 @@ import { VersionHistoryPanel } from "../features/versions/VersionHistoryPanel";
 import { BrandMark } from "../components/brand/BrandMark";
 import { TitleBar } from "../components/window/TitleBar";
 import { getProjectImageContentUrl } from "../lib/api/projects";
-import type { AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentTreeNode, InsertImageReferenceResponse, LayoutConfig, Project, ProjectVersioningStatus, WorkspaceTab } from "../types/domain";
+import type { AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentTreeNode, InsertImageReferenceResponse, LayoutConfig, Project, ProjectVersioningStatus, WorkspaceTab } from "../types/domain";
 
 const sidebarWidthConfig = {
   defaultWidth: 338,
@@ -100,6 +100,7 @@ type DesktopLayoutProps = {
   onPushProject: () => void;
   onCreateVersion: (title: string) => Promise<CreateVersionResponse | null>;
   onSendAiPrompt: (prompt: string, selectionFocus?: AiSelectionFocus | null, options?: AiPromptExecutionOptions) => void | Promise<void>;
+  onAiTranscriptionChange: (transcription: Partial<AiConfigStatus["transcription"]>) => void;
   onClearAiSelectionFocus: () => void;
   onSearchAiContextDocuments: (query: string) => Promise<AiContextSearchResult[]>;
   onAddProjectDocumentContext: (documentId: string) => void | Promise<void>;
@@ -149,6 +150,9 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   const [editorHistoryStates, setEditorHistoryStates] = useState<Record<string, MarkdownEditorHistoryState>>({});
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [desktopNavigationVisible, setDesktopNavigationVisible] = useState(true);
+  const [imageZoomPercent, setImageZoomPercent] = useState(100);
+  const [imageFitToWindow, setImageFitToWindow] = useState(true);
+  const [activeImageAsset, setActiveImageAsset] = useState<AssetMetadata | null>(null);
   const activeWorkspaceTab = props.tabs.find((tab) => tab.id === props.activeTabId);
   const hasOpenDocument = activeWorkspaceTab?.kind === "document" && Boolean(props.activeDocumentId);
   const hasOpenImage = activeWorkspaceTab?.kind === "image" && Boolean(props.activeImageId);
@@ -170,6 +174,12 @@ export function DesktopLayout(props: DesktopLayoutProps) {
     onWidthChange: (historyWidth) => props.onLayoutConfigChange({ historyWidth }),
   });
 
+  useEffect(() => {
+    setActiveImageAsset(null);
+    setImageFitToWindow(true);
+    setImageZoomPercent(100);
+  }, [props.activeImageId]);
+
   const handleRunEditorAction = useCallback((action: MarkdownEditorAction, options?: MarkdownEditorActionOptions) => {
     if (!activeEditorController) return;
     if (action === "image" && !options?.image) {
@@ -181,6 +191,22 @@ export function DesktopLayout(props: DesktopLayoutProps) {
     setEditorFormatState((currentFormatState) => keepStableFormatState(currentFormatState, activeEditorController.getFormatState()));
     setEditorHistoryStates((currentHistoryStates) => keepStableHistoryStateForDocument(currentHistoryStates, props.activeDocumentId, activeEditorController.getHistoryState()));
   }, [activeEditorController, props.activeDocumentId]);
+
+  const handlePreviewDocumentDictation = useCallback((text: string) => {
+    activeEditorController?.setTransientTextPreview(text);
+  }, [activeEditorController]);
+
+  const handleCommitDocumentDictation = useCallback((text: string) => {
+    if (!activeEditorController || !text) return;
+    activeEditorController.clearTransientTextPreview();
+    activeEditorController.insertText(text, { addToHistory: true });
+    setEditorFormatState((currentFormatState) => keepStableFormatState(currentFormatState, activeEditorController.getFormatState()));
+    setEditorHistoryStates((currentHistoryStates) => keepStableHistoryStateForDocument(currentHistoryStates, props.activeDocumentId, activeEditorController.getHistoryState()));
+  }, [activeEditorController, props.activeDocumentId]);
+
+  const handleClearDocumentDictationPreview = useCallback(() => {
+    activeEditorController?.clearTransientTextPreview();
+  }, [activeEditorController]);
 
   const handleEditorControllerChange = useCallback((documentId: string, controller: MarkdownEditorController | null) => {
     setEditorControllers((currentControllers) => {
@@ -440,8 +466,8 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             <section className={["relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", hasOpenTab ? "bg-white" : "bg-panel"].join(" ")}>
               {hasOpenTab ? (
                 <>
-                  <div className={hasAiConversation ? "min-h-0 flex-1 overflow-hidden" : "mb-[72px] min-h-0 flex-1 overflow-y-auto px-8 pb-6 pt-4"}>
-                    <div className={hasAiConversation ? "h-full min-h-0" : "mx-auto max-w-[900px]"}>
+                  <div className={hasAiConversation || hasOpenImage ? "mb-[54px] min-h-0 flex-1 overflow-hidden" : "mb-[54px] min-h-0 flex-1 overflow-y-auto px-8 pb-6 pt-4"}>
+                    <div className={hasAiConversation || hasOpenImage ? "h-full min-h-0 w-full" : "mx-auto max-w-[900px]"}>
                       {hasReleaseNotes ? (
                         <ReleaseNotesViewer markdown={props.releaseNotesMarkdown} />
                       ) : hasAiConversation ? (
@@ -459,9 +485,11 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                           assetId={activeWorkspaceTab.id}
                           name={activeWorkspaceTab.name}
                           path={activeWorkspaceTab.path}
-                          activeDocumentId={props.activeDocumentId}
-                          onInsertIntoDocument={props.onInsertImageIntoActiveDocument}
+                          zoomPercent={imageZoomPercent}
+                          fitToWindow={imageFitToWindow}
                           onAddToAiContext={props.onAddProjectImageContext}
+                          onAssetMetadataChange={setActiveImageAsset}
+                          onOpenReference={handleOpenDocument}
                         />
                       ) : (
                         <>
@@ -505,7 +533,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                       )}
                     </div>
                   </div>
-                  <div className="pointer-events-none absolute inset-x-0 bottom-[108px] h-2.5 bg-gradient-to-t from-[rgb(var(--app-surface))] to-transparent" />
+                  <div className="pointer-events-none absolute inset-x-0 bottom-[90px] h-4 bg-gradient-to-t from-[rgb(var(--app-surface))] to-transparent" />
                 </>
               ) : (
                 <>
@@ -528,10 +556,16 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 projectId={props.activeProject?.id}
                 markdown={hasOpenDocument ? props.activeMarkdown : ""}
                 providerReady={props.aiConfig.openaiKeyConfigured}
+                transcriptionConfig={props.aiConfig.transcription}
+                documentDictationReady={Boolean(hasOpenDocument && activeEditorController?.canInsertText())}
                 appliedChangeSummary={props.aiAppliedChange?.documentId === props.activeDocumentId ? props.aiAppliedChange.summary : null}
                 selectionFocus={props.aiSelectionFocus?.documentId === props.activeDocumentId ? props.aiSelectionFocus : null}
                 activeContextSources={props.aiContextSources}
                 onSubmit={props.onSendAiPrompt}
+                onTranscriptionConfigChange={props.onAiTranscriptionChange}
+                onPreviewDocumentDictation={handlePreviewDocumentDictation}
+                onCommitDocumentDictation={handleCommitDocumentDictation}
+                onClearDocumentDictationPreview={handleClearDocumentDictationPreview}
                 onClearSelectionFocus={props.onClearAiSelectionFocus}
                 onDismissAppliedChange={props.onDismissAiAppliedChange}
                 onSearchProjectDocuments={props.onSearchAiContextDocuments}
@@ -560,7 +594,13 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                   onImportImage={props.onImportProjectImage}
                   onBuildReference={props.onBuildImageReference}
                   onInsert={(markdown) => {
-                    activeEditorController?.run("image", parseImageMarkdown(markdown));
+                    const materializedMarkdown = materializeProjectImageReferences(
+                      markdown,
+                      props.activeProject?.id ?? "",
+                      props.activeDocument?.path ?? "",
+                      props.tree,
+                    );
+                    activeEditorController?.run("image", parseImageMarkdown(materializedMarkdown));
                     setImageInsertOpen(false);
                   }}
                 />
@@ -579,6 +619,24 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                   lastVersionRelativeTime={props.versioningStatus?.lastVersionRelativeTime}
                   canSave={Boolean(props.activeDocument && props.activeDocumentId)}
                   onSave={props.onSave}
+                />
+              ) : hasOpenImage && activeWorkspaceTab?.kind === "image" ? (
+                <ImageWorkspaceStatusBar
+                  name={activeWorkspaceTab.name}
+                  asset={activeImageAsset}
+                  zoomPercent={imageZoomPercent}
+                  fitToWindow={imageFitToWindow}
+                  onZoomChange={(nextZoom) => {
+                    setImageFitToWindow(false);
+                    setImageZoomPercent(clamp(Math.round(nextZoom), 10, 200));
+                  }}
+                  onFitToWindow={() => setImageFitToWindow(true)}
+                />
+              ) : hasOpenTab ? (
+                <WorkspaceStatusBar
+                  kind={getWorkspaceStatusKind(activeWorkspaceTab?.kind)}
+                  title={getWorkspaceStatusTitle(activeWorkspaceTab, props.aiConfig.openaiKeyConfigured)}
+                  detail={getWorkspaceStatusDetail(activeWorkspaceTab, props.activeProject?.name)}
                 />
               ) : null}
             </section>
@@ -882,8 +940,11 @@ function materializeProjectImageReferences(markdown: string, projectId: string, 
     if (!parsed || isExternalImageTarget(parsed.target)) return fullMatch;
     const resolvedPath = resolveMarkdownAssetPath(documentPath, parsed.target);
     const image = images.find((node) => node.path === resolvedPath);
-    if (!image) return fullMatch;
     const titlePart = parsed.title ? ` "${parsed.title}"` : "";
+    if (!image) {
+      const safeBody = `${formatMarkdownImageTarget(parsed.target)}${titlePart}`;
+      return safeBody !== body.trim() ? `![${alt}](${safeBody})` : fullMatch;
+    }
     return `![${alt}](${getProjectImageContentUrl(projectId, image.id)}${titlePart})`;
   });
 }
@@ -901,7 +962,7 @@ function restoreProjectImageReferences(markdown: string, projectId: string, docu
     if (!image?.path) return fullMatch;
     const relativeTarget = relativeMarkdownTarget(image.path, documentPath);
     const titlePart = parsed.title ? ` "${parsed.title}"` : "";
-    return `![${alt}](${relativeTarget}${titlePart})`;
+    return `![${alt}](${formatMarkdownImageTarget(relativeTarget)}${titlePart})`;
   });
 }
 
@@ -913,8 +974,9 @@ function splitMarkdownImageTarget(body: string): { target: string; title: string
     return { target: value.slice(1, end), title: value.slice(end + 1).trim().replace(/^["']|["']$/g, "") || null };
   }
   if (!value.includes(" ")) return { target: value.replace(/^["']|["']$/g, ""), title: null };
-  const [target, ...titleParts] = value.split(" ");
-  return { target: target.replace(/^["']|["']$/g, ""), title: titleParts.join(" ").trim().replace(/^["']|["']$/g, "") || null };
+  const quotedTitle = value.match(/^(.+?)\s+(["'])(.*?)\2$/);
+  if (quotedTitle) return { target: quotedTitle[1].replace(/^["']|["']$/g, ""), title: quotedTitle[3] || null };
+  return { target: value.replace(/^["']|["']$/g, ""), title: null };
 }
 
 function isExternalImageTarget(target: string) {
@@ -936,6 +998,11 @@ function relativeMarkdownTarget(assetPath: string, documentPath: string) {
   }
   const relative = [...fromParts.map(() => ".."), ...toParts].join("/") || ".";
   return !relative.startsWith(".") && !relative.includes("/") ? `./${relative}` : relative;
+}
+
+function formatMarkdownImageTarget(target: string) {
+  const escaped = target.replace(/</g, "%3C").replace(/>/g, "%3E").replace(/\(/g, "%28").replace(/\)/g, "%29");
+  return /\s/.test(escaped) ? `<${escaped}>` : escaped;
 }
 
 function normalizePathParts(parts: string[]) {
@@ -970,7 +1037,8 @@ function findFolderByPath(nodes: DocumentTreeNode[], path: string): DocumentTree
 
 function parseImageMarkdown(markdown: string): MarkdownEditorActionOptions {
   const match = markdown.match(/^!\[([^\]]*)\]\((.*)\)$/);
-  return { image: { alt: match?.[1] ?? "Imagen", src: match?.[2] ?? markdown } };
+  const parsed = match ? splitMarkdownImageTarget(match[2]) : null;
+  return { image: { alt: match?.[1] ?? "Imagen", src: parsed?.target ?? markdown } };
 }
 
 function toMarkdownEditorSelection(selectionFocus: AiSelectionFocus | null, documentId: string): MarkdownEditorSelection | null {
@@ -1046,6 +1114,132 @@ function getDocumentStatus({
   if (hasRecoveredDraft) return { label: "Borrador recuperado", tone: "warning" as const };
   if (isDirty) return { label: "Cambios sin guardar", tone: "warning" as const };
   return { label: "Sin cambios", tone: "success" as const };
+}
+
+function ImageWorkspaceStatusBar({
+  name,
+  asset,
+  zoomPercent,
+  fitToWindow,
+  onZoomChange,
+  onFitToWindow,
+}: {
+  name: string;
+  asset: AssetMetadata | null;
+  zoomPercent: number;
+  fitToWindow: boolean;
+  onZoomChange: (zoomPercent: number) => void;
+  onFitToWindow: () => void;
+}) {
+  return (
+    <footer className="z-10 flex h-9 shrink-0 items-center justify-between gap-4 border-t border-line bg-white px-3 text-[11px] text-ink-secondary">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="inline-flex items-center gap-1.5 font-semibold text-ink-primary">
+          <ImageIcon size={14} className="text-brand-orange" />
+          Imagen
+        </span>
+        <span className="h-5 border-l border-line" />
+        <span className="truncate font-medium text-ink-primary">{asset?.name ?? name}</span>
+        <span className="hidden h-5 border-l border-line sm:block" />
+        <span className="hidden truncate sm:block">{formatImageTechnicalDetails(asset)}</span>
+      </div>
+      <div className="flex shrink-0 items-center justify-end gap-1.5">
+        <button
+          className={[
+            "grid h-6 w-6 place-items-center rounded-md border text-ink-secondary transition",
+            fitToWindow ? "border-orange-200 bg-brand-hover text-brand-orange" : "border-line bg-white hover:bg-brand-hover hover:text-brand-orange",
+          ].join(" ")}
+          type="button"
+          data-tooltip="Ajustar al espacio"
+          aria-label="Ajustar imagen al espacio disponible"
+          onClick={onFitToWindow}
+        >
+          <Maximize2 size={13} />
+        </button>
+        <div className="flex h-6 items-center gap-1 rounded-md border border-line bg-white px-1">
+          <button
+            className="grid h-5 w-5 place-items-center rounded text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
+            type="button"
+            data-tooltip="Reducir zoom"
+            aria-label="Reducir zoom"
+            onClick={() => onZoomChange(zoomPercent - 10)}
+          >
+            <Minus size={12} />
+          </button>
+          <input
+            className="h-1.5 w-24 accent-brand-orange"
+            aria-label="Zoom de visualización"
+            type="range"
+            min={10}
+            max={200}
+            step={10}
+            value={zoomPercent}
+            onChange={(event) => onZoomChange(Number(event.target.value))}
+          />
+          <button
+            className="grid h-5 w-5 place-items-center rounded text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
+            type="button"
+            data-tooltip="Aumentar zoom"
+            aria-label="Aumentar zoom"
+            onClick={() => onZoomChange(zoomPercent + 10)}
+          >
+            <Plus size={12} />
+          </button>
+        </div>
+        <button
+          className="h-6 min-w-12 rounded-md border border-line bg-white px-2 text-[10px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange"
+          type="button"
+          onClick={() => onZoomChange(100)}
+        >
+          {fitToWindow ? "Auto" : `${zoomPercent}%`}
+        </button>
+      </div>
+    </footer>
+  );
+}
+
+function formatImageTechnicalDetails(asset: AssetMetadata | null) {
+  if (!asset) return "Cargando datos";
+  const dimensions = asset.width && asset.height ? `${asset.width} x ${asset.height} px` : null;
+  const colorDepth = asset.colorDepthBits ? `${asset.colorDepthBits} bits` : null;
+  const type = asset.mimeType?.split("/")[1]?.toUpperCase() ?? null;
+  return [dimensions, colorDepth, type].filter(Boolean).join(" · ") || "Sin metadatos de imagen";
+}
+
+function WorkspaceStatusBar({ kind, title, detail }: { kind: string; title: string; detail: string }) {
+  return (
+    <footer className="z-10 flex h-9 shrink-0 items-center justify-between gap-4 border-t border-line bg-white px-3 text-[11px] text-ink-secondary">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="font-semibold text-ink-primary">{kind}</span>
+        <span className="h-5 border-l border-line" />
+        <span className="truncate">{title}</span>
+      </div>
+      <div className="flex min-w-0 shrink-0 items-center justify-end gap-3">
+        <span className="truncate">{detail}</span>
+      </div>
+    </footer>
+  );
+}
+
+function getWorkspaceStatusKind(kind: WorkspaceTab["kind"] | undefined) {
+  if (kind === "release-notes") return "Notas";
+  if (kind === "ai-conversation") return "IA";
+  if (kind === "image") return "Imagen";
+  return "Workspace";
+}
+
+function getWorkspaceStatusTitle(tab: WorkspaceTab | undefined, openaiKeyConfigured: boolean) {
+  if (tab?.kind === "release-notes") return "Notas de release";
+  if (tab?.kind === "ai-conversation") return openaiKeyConfigured ? "Asistente documental activo" : "Asistente sin clave OpenAI";
+  if (tab?.kind === "image") return tab.name;
+  return tab?.name ?? "Vista activa";
+}
+
+function getWorkspaceStatusDetail(tab: WorkspaceTab | undefined, projectName?: string) {
+  if (tab?.kind === "release-notes") return "Solo lectura";
+  if (tab?.kind === "ai-conversation") return projectName ? `Proyecto: ${projectName}` : "Conversación del proyecto";
+  if (tab?.kind === "image") return tab.path || "Activo del proyecto";
+  return "Listo";
 }
 
 function DocumentConflictBanner({

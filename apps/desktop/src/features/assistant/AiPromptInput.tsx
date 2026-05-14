@@ -1,6 +1,7 @@
-import { AlertCircle, Brain, Check, ChevronDown, Clock3, File, FileText, Image, Mic, Plus, Search, SendHorizontal, SlidersHorizontal, Sparkles, X, Zap } from "lucide-react";
+import { AlertCircle, Brain, Check, ChevronDown, Clock3, File, FileText, Image, Mic, Plus, Search, SendHorizontal, SlidersHorizontal, Sparkles, Square, X, Zap } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type RefObject } from "react";
-import type { AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiExecutionMode, AiReasoningDepth, AiSelectionFocus } from "../../types/domain";
+import type { AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiExecutionMode, AiReasoningDepth, AiSelectionFocus, AiTranscriptionLanguage, AiTranscriptionTarget } from "../../types/domain";
+import { useRealtimeTranscription } from "../transcription/useRealtimeTranscription";
 
 export type AiPromptExecutionOptions = {
   executionMode: AiExecutionMode;
@@ -12,10 +13,16 @@ type AiPromptInputProps = {
   projectId?: string;
   markdown: string;
   providerReady: boolean;
+  transcriptionConfig?: AiConfigStatus["transcription"];
+  documentDictationReady?: boolean;
   appliedChangeSummary?: string | null;
   selectionFocus?: AiSelectionFocus | null;
   activeContextSources?: AiContextSource[];
   onSubmit: (prompt: string, selectionFocus?: AiSelectionFocus | null, options?: AiPromptExecutionOptions) => void | Promise<void>;
+  onTranscriptionConfigChange?: (transcription: Partial<AiConfigStatus["transcription"]>) => void;
+  onPreviewDocumentDictation?: (text: string) => void;
+  onCommitDocumentDictation?: (text: string) => void;
+  onClearDocumentDictationPreview?: () => void;
   onClearSelectionFocus?: () => void;
   onDismissAppliedChange?: () => void;
   onSearchProjectDocuments?: (query: string) => Promise<AiContextSearchResult[]>;
@@ -31,10 +38,16 @@ export function AiPromptInput({
   documentId,
   projectId,
   providerReady,
+  transcriptionConfig,
+  documentDictationReady = false,
   appliedChangeSummary,
   selectionFocus,
   activeContextSources = [],
   onSubmit,
+  onTranscriptionConfigChange,
+  onPreviewDocumentDictation,
+  onCommitDocumentDictation,
+  onClearDocumentDictationPreview,
   onClearSelectionFocus,
   onDismissAppliedChange,
   onSearchProjectDocuments,
@@ -59,15 +72,26 @@ export function AiPromptInput({
   const [referenceIndex, setReferenceIndex] = useState(0);
   const [preview, setPreview] = useState<AiContextSourcePreviewResponse | null>(null);
   const [previewLoadingId, setPreviewLoadingId] = useState<string | null>(null);
+  const [transcriptionMenuOpen, setTranscriptionMenuOpen] = useState(false);
+  const [transcriptionTarget, setTranscriptionTarget] = useState<AiTranscriptionTarget>(transcriptionConfig?.defaultTarget ?? "prompt");
+  const [transcriptionLanguage, setTranscriptionLanguage] = useState<AiTranscriptionLanguage>(transcriptionConfig?.defaultLanguage ?? "auto");
+  const [transcriptionNotice, setTranscriptionNotice] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const sourcesRef = useRef<HTMLDivElement | null>(null);
+  const transcriptionMenuRef = useRef<HTMLDivElement | null>(null);
+  const promptPartialRef = useRef<{ start: number; end: number; itemId?: string | null } | null>(null);
+  const transcriptionItemBuffersRef = useRef<Record<string, string>>({});
   const hasContext = Boolean(documentId || projectId);
   const canPrompt = hasContext && providerReady;
   const hasBlockingContext = activeContextSources.some((source) => source.status === "processing");
-  const selectedModeLabel = executionMode === "quick" ? "Rápido" : "Razonar";
+  const transcription = transcriptionConfig ?? defaultTranscriptionConfig;
+  const transcriptionState = useRealtimeTranscription();
+  const transcribing = transcriptionState.status === "connecting" || transcriptionState.status === "listening" || transcriptionState.status === "stopping";
+  const transcriptionAvailable = canPrompt && transcription.enabled;
+  const canStartTranscription = transcriptionAvailable && !loading && !hasBlockingContext;
   const selectedDepthLabel = reasoningDepthLabels[reasoningDepth];
   const visibleSources = activeContextSources.slice(0, 4);
   const hiddenSourceCount = Math.max(0, activeContextSources.length - visibleSources.length);
@@ -93,6 +117,32 @@ export function AiPromptInput({
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [modeMenuOpen]);
+
+  useEffect(() => {
+    if (transcribing) return;
+    setTranscriptionTarget(transcription.defaultTarget);
+    setTranscriptionLanguage(transcription.defaultLanguage);
+  }, [transcribing, transcription.defaultLanguage, transcription.defaultTarget]);
+
+  useEffect(() => {
+    if (!transcriptionMenuOpen) return;
+
+    function handlePointerDown(event: PointerEvent) {
+      if (transcriptionMenuRef.current?.contains(event.target as Node)) return;
+      setTranscriptionMenuOpen(false);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setTranscriptionMenuOpen(false);
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [transcriptionMenuOpen]);
 
   useEffect(() => {
     if (!contextMenuOpen && !sourcesOpen) return;
@@ -166,9 +216,114 @@ export function AiPromptInput({
   }
 
   function handlePromptChange(value: string) {
+    promptPartialRef.current = null;
     setPrompt(value);
     const mention = getActiveMention(value);
     setReferenceQuery(mention);
+  }
+
+  async function toggleTranscription() {
+    setTranscriptionNotice(null);
+    transcriptionState.resetError();
+    if (transcribing) {
+      await transcriptionState.stop();
+      return;
+    }
+    if (!canStartTranscription) {
+      setTranscriptionNotice(getTranscriptionUnavailableMessage(canPrompt, transcription.enabled, hasBlockingContext));
+      return;
+    }
+    if (transcriptionTarget === "document" && !documentDictationReady) {
+      setTranscriptionNotice("Coloca el cursor en el documento para dictar.");
+      return;
+    }
+
+    await transcriptionState.start({
+      target: transcriptionTarget,
+      language: transcriptionLanguage,
+      handlers: {
+        onDelta: ({ itemId, delta }) => {
+          const bufferedDelta = appendTranscriptionDelta(itemId, delta);
+          if (transcriptionTarget === "document") {
+            onPreviewDocumentDictation?.(bufferedDelta);
+            return;
+          }
+          applyPromptPartial(bufferedDelta, itemId);
+        },
+        onCompleted: ({ transcript }) => {
+          clearTranscriptionBuffer();
+          if (transcriptionTarget === "document") {
+            onClearDocumentDictationPreview?.();
+            if (transcript) onCommitDocumentDictation?.(withTrailingSpace(transcript));
+            return;
+          }
+          commitPromptPartial(withTrailingSpace(transcript));
+        },
+        onStopped: () => {
+          promptPartialRef.current = null;
+          clearTranscriptionBuffer();
+          onClearDocumentDictationPreview?.();
+        },
+        onError: (message) => {
+          setTranscriptionNotice(message);
+          promptPartialRef.current = null;
+          clearTranscriptionBuffer();
+          onClearDocumentDictationPreview?.();
+        },
+      },
+    });
+  }
+
+  function appendTranscriptionDelta(itemId: string | null | undefined, delta: string) {
+    const key = itemId ?? "active";
+    const nextValue = `${transcriptionItemBuffersRef.current[key] ?? ""}${delta}`;
+    transcriptionItemBuffersRef.current = {
+      ...transcriptionItemBuffersRef.current,
+      [key]: nextValue,
+    };
+    return nextValue;
+  }
+
+  function clearTranscriptionBuffer() {
+    transcriptionItemBuffersRef.current = {};
+  }
+
+  function applyPromptPartial(delta: string, itemId?: string | null) {
+    const textarea = textareaRef.current;
+    setPrompt((currentPrompt) => {
+      const currentPartial = promptPartialRef.current;
+      const reusePartial = currentPartial !== null && currentPartial.itemId === itemId;
+      const insertionStart = reusePartial ? currentPartial.start : textarea?.selectionStart ?? currentPrompt.length;
+      const insertionEnd = reusePartial ? currentPartial.end : textarea?.selectionEnd ?? insertionStart;
+      const nextPrompt = `${currentPrompt.slice(0, insertionStart)}${delta}${currentPrompt.slice(insertionEnd)}`;
+      promptPartialRef.current = { start: insertionStart, end: insertionStart + delta.length, itemId };
+      return nextPrompt;
+    });
+  }
+
+  function commitPromptPartial(transcript: string) {
+    setPrompt((currentPrompt) => {
+      const currentPartial = promptPartialRef.current;
+      const insertionStart = currentPartial?.start ?? textareaRef.current?.selectionStart ?? currentPrompt.length;
+      const insertionEnd = currentPartial?.end ?? textareaRef.current?.selectionEnd ?? insertionStart;
+      const nextPrompt = `${currentPrompt.slice(0, insertionStart)}${transcript}${currentPrompt.slice(insertionEnd)}`;
+      promptPartialRef.current = null;
+      return nextPrompt;
+    });
+  }
+
+  function chooseTranscriptionTarget(target: AiTranscriptionTarget) {
+    if (transcribing) return;
+    setTranscriptionTarget(target);
+    onTranscriptionConfigChange?.({ defaultTarget: target });
+    setTranscriptionMenuOpen(false);
+  }
+
+  function chooseTranscriptionLanguage(language: AiTranscriptionLanguage) {
+    if (transcribing) return;
+    setTranscriptionLanguage(language);
+    onTranscriptionConfigChange?.({ defaultLanguage: language });
+    setTranscriptionMenuOpen(false);
   }
 
   async function addReference(result: AiContextSearchResult) {
@@ -393,7 +548,7 @@ export function AiPromptInput({
           <div className="relative shrink-0" ref={modeMenuRef}>
             <button
               type="button"
-              className="knownext-ai-mode-selector flex h-7 items-center gap-1 rounded-full bg-panel px-2 text-[11px] font-normal text-ink-primary transition hover:bg-brand-hover"
+              className="knownext-ai-mode-selector grid h-8 w-12 grid-cols-[1fr_auto] items-center rounded-full bg-panel pl-2.5 pr-1.5 text-ink-primary transition hover:bg-brand-hover"
               aria-expanded={modeMenuOpen}
               aria-haspopup="menu"
               aria-label="Selector de modo IA"
@@ -403,8 +558,9 @@ export function AiPromptInput({
                 setDepthMenuOpen(executionMode === "reasoning");
               }}
             >
-              <span>{selectedModeLabel}</span>
-              {executionMode === "reasoning" ? <span className="text-[11px] text-ink-secondary">· {selectedDepthLabel}</span> : null}
+              <span className="grid h-5 w-5 place-items-center rounded-full">
+                {executionMode === "quick" ? <Zap size={14} /> : <Brain size={14} />}
+              </span>
               <ChevronDown size={12} className={modeMenuOpen ? "rotate-180 transition" : "transition"} />
             </button>
             {modeMenuOpen ? (
@@ -488,21 +644,96 @@ export function AiPromptInput({
               </div>
             ) : null}
           </div>
-          <button className="knownext-ai-mic-button grid h-8 w-8 shrink-0 place-items-center rounded-full bg-panel text-ink-primary opacity-50" data-tooltip="Micrófono no disponible" aria-label="Micrófono no disponible" disabled>
-            <Mic size={16} />
-          </button>
+          <div ref={transcriptionMenuRef} className="relative shrink-0">
+            <div
+              className={[
+                "knownext-ai-mic-control flex h-8 items-center overflow-hidden rounded-full border transition",
+                transcribing ? "knownext-ai-mic-control-active border-brand-orange bg-brand-hover text-brand-orange" : "border-line bg-panel text-ink-primary hover:border-orange-200 hover:bg-brand-hover hover:text-brand-orange",
+                transcriptionAvailable ? "" : "opacity-50",
+              ].join(" ")}
+            >
+              <button
+                type="button"
+                className="grid h-8 w-8 place-items-center"
+                data-tooltip={transcribing ? "Detener transcripción" : getTranscriptionTargetLabel(transcriptionTarget)}
+                aria-label={transcribing ? "Detener transcripción" : "Iniciar transcripción"}
+                disabled={!transcriptionAvailable && !transcribing}
+                onClick={() => void toggleTranscription()}
+              >
+                {transcribing ? <Square size={13} fill="currentColor" /> : <Mic size={15} />}
+              </button>
+              <button
+                type="button"
+                className="grid h-8 w-7 -ml-1 place-items-center text-ink-secondary transition hover:text-brand-orange"
+                data-tooltip="Opciones de transcripción"
+                aria-label="Opciones de transcripción"
+                aria-expanded={transcriptionMenuOpen}
+                onClick={() => setTranscriptionMenuOpen((open) => !open)}
+              >
+                <ChevronDown size={13} />
+              </button>
+            </div>
+            {transcriptionMenuOpen ? (
+              <div className="absolute bottom-full right-0 mb-2 w-56 rounded-xl border border-line bg-white p-1.5 shadow-menu" role="menu" aria-label="Opciones de transcripción">
+                {transcribing ? <p className="px-2 py-1.5 text-[10px] leading-4 text-ink-secondary">Detén la transcripción para cambiar estas opciones.</p> : null}
+                <button
+                  type="button"
+                  className={getTranscriptionMenuItemClass(transcriptionTarget === "prompt", transcribing)}
+                  role="menuitemradio"
+                  aria-checked={transcriptionTarget === "prompt"}
+                  disabled={transcribing}
+                  onClick={() => chooseTranscriptionTarget("prompt")}
+                >
+                  <span>Transcribir al prompt</span>
+                  {transcriptionTarget === "prompt" ? <Check size={12} /> : null}
+                </button>
+                <button
+                  type="button"
+                  className={getTranscriptionMenuItemClass(transcriptionTarget === "document", transcribing)}
+                  role="menuitemradio"
+                  aria-checked={transcriptionTarget === "document"}
+                  disabled={transcribing}
+                  onClick={() => chooseTranscriptionTarget("document")}
+                >
+                  <span>Dictar en documento</span>
+                  {transcriptionTarget === "document" ? <Check size={12} /> : null}
+                </button>
+                <div className="my-1 border-t border-line" />
+                <p className="px-2 py-1 text-[9px] font-semibold uppercase text-ink-secondary">Idioma</p>
+                {getTranscriptionMenuLanguages(transcription.favoriteLanguages, transcriptionLanguage).map((language) => (
+                  <button
+                    key={language}
+                    type="button"
+                    className={getTranscriptionMenuItemClass(transcriptionLanguage === language, transcribing)}
+                    role="menuitemradio"
+                    aria-checked={transcriptionLanguage === language}
+                    disabled={transcribing}
+                    onClick={() => chooseTranscriptionLanguage(language)}
+                  >
+                    <span>{transcriptionLanguageLabels[language]}</span>
+                    {transcriptionLanguage === language ? <Check size={12} /> : null}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
           <button
-            className="knownext-ai-send-button grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-orange text-ink-primary transition hover:bg-brand-dark disabled:opacity-50"
+            className="knownext-ai-send-button grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-orange text-white transition hover:bg-brand-dark disabled:opacity-50"
             data-tooltip="Enviar"
             aria-label="Enviar"
             onClick={() => void handleSubmit()}
             disabled={loading || !canPrompt || hasBlockingContext}
           >
-            {loading ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-ink-primary border-t-transparent" /> : <SendHorizontal size={18} />}
+            {loading ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> : <SendHorizontal size={18} />}
           </button>
         </div>
         {hasBlockingContext ? (
           <p className="mx-10 mt-1 text-[10px] text-ink-secondary">Esperando a que las fuentes terminen de procesarse.</p>
+        ) : null}
+        {transcribing || transcriptionNotice ? (
+          <p className="mx-10 mt-1 text-[10px] text-ink-secondary" role={transcriptionNotice ? "alert" : "status"} aria-live="polite">
+            {transcriptionNotice ?? getTranscriptionStatusLabel(transcriptionState.status, transcriptionState.activeTarget ?? transcriptionTarget)}
+          </p>
         ) : null}
         {dragActive ? (
           <div className="pointer-events-none absolute inset-1 grid place-items-center rounded-[24px] border border-dashed border-brand-orange bg-brand-hover/90 text-[11px] font-semibold text-brand-orange">
@@ -531,6 +762,62 @@ const reasoningDepthLabels: Record<AiReasoningDepth, string> = {
   medium: "Medio",
   deep: "Profundo",
 };
+
+const defaultTranscriptionConfig: AiConfigStatus["transcription"] = {
+  enabled: true,
+  model: "gpt-realtime-whisper",
+  defaultTarget: "prompt",
+  defaultLanguage: "auto",
+  favoriteLanguages: ["es", "en"],
+};
+
+const transcriptionLanguageLabels: Record<AiTranscriptionLanguage, string> = {
+  auto: "Automático",
+  es: "Español",
+  en: "Inglés",
+  fr: "Francés",
+  de: "Alemán",
+  it: "Italiano",
+  pt: "Portugués",
+  ca: "Catalán",
+  eu: "Euskera",
+  gl: "Gallego",
+};
+
+function getTranscriptionTargetLabel(target: AiTranscriptionTarget) {
+  return target === "document" ? "Dictar en documento" : "Transcribir al prompt";
+}
+
+function getTranscriptionStatusLabel(status: string, target: AiTranscriptionTarget) {
+  if (status === "connecting") return "Conectando micrófono...";
+  if (status === "stopping") return "Finalizando transcripción...";
+  return `Escuchando · ${target === "document" ? "Documento" : "Prompt"}`;
+}
+
+function getTranscriptionUnavailableMessage(canPrompt: boolean, enabled: boolean, hasBlockingContext: boolean) {
+  if (!canPrompt) return "Configura OpenAI en Ajustes > IA para usar transcripción.";
+  if (!enabled) return "Activa Audio y transcripción en Ajustes > IA.";
+  if (hasBlockingContext) return "Espera a que las fuentes terminen de procesarse.";
+  return "No se pudo iniciar la transcripción.";
+}
+
+function getTranscriptionMenuLanguages(favoriteLanguages: AiTranscriptionLanguage[], selectedLanguage: AiTranscriptionLanguage) {
+  return Array.from(new Set<AiTranscriptionLanguage>(["auto", ...favoriteLanguages.filter((language) => language !== "auto"), selectedLanguage]));
+}
+
+function getTranscriptionMenuItemClass(selected: boolean, disabled: boolean) {
+  return [
+    "flex h-7 w-full items-center justify-between rounded-lg border px-2 text-left text-[10px] transition",
+    selected ? "border-orange-200 bg-brand-hover font-semibold text-brand-orange" : "border-transparent text-ink-primary hover:bg-brand-hover",
+    disabled ? "cursor-not-allowed opacity-50" : "",
+  ].join(" ");
+}
+
+function withTrailingSpace(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed) return "";
+  return /[\s\n]$/.test(text) ? text : `${trimmed} `;
+}
 
 function ContextSourceChip({ source, onOpen, onRemove }: { source: AiContextSource; onOpen: () => void; onRemove?: () => void }) {
   const expiring = source.status === "expiring";

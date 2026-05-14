@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { requestJson } from "./client";
+import { APP_VERSION } from "../appVersion";
+import { ApiError, requestJson, validateBackendHealth } from "./client";
 
 describe("requestJson", () => {
   afterEach(() => {
@@ -32,5 +33,25 @@ describe("requestJson", () => {
 
     await vi.advanceTimersByTimeAsync(18_000);
     await expect(request).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
+describe("API client backend compatibility", () => {
+  it("accepts a matching browser-development backend", () => {
+    expect(() => validateBackendHealth({
+      app: "knownext",
+      status: "ok",
+      profile: "web-dev",
+      version: APP_VERSION,
+    })).not.toThrow();
+  });
+
+  it("rejects a stale backend with the right profile but a different version", () => {
+    expect(() => validateBackendHealth({
+      app: "knownext",
+      status: "ok",
+      profile: "web-dev",
+      version: "0.11.0",
+    })).toThrow(ApiError);
   });
 });

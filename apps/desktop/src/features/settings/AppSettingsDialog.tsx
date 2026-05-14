@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Activity, Brain, Check, ChevronDown, Copy, Eye, FolderOpen, Gauge, Globe2, Image as ImageIcon, KeyRound, Languages, ListChecks, Monitor, Moon, Paintbrush, RefreshCw, RotateCcw, Server, ShieldCheck, Sun, Trash2, Underline, X } from "lucide-react";
+import { Activity, Brain, Check, ChevronDown, Copy, Eye, FolderOpen, Gauge, Globe2, Image as ImageIcon, KeyRound, Languages, ListChecks, Mic, Monitor, Moon, Paintbrush, RefreshCw, RotateCcw, Server, ShieldCheck, Sun, Trash2, Underline, X } from "lucide-react";
 import { defaultAiConfig } from "../../lib/api/config";
 import { accentPalettes } from "../../lib/theme/appearance";
-import type { AiConfigStatus, AiIndexStatusResponse, AiModelId, AiVisionModelId, AppearanceAccentColor, AppearanceConfig, AppearanceThemeMode, DiagnosticsConfig } from "../../types/domain";
+import type { AiConfigStatus, AiIndexStatusResponse, AiModelId, AiTranscriptionLanguage, AiVisionModelId, AppearanceAccentColor, AppearanceConfig, AppearanceThemeMode, DiagnosticsConfig } from "../../types/domain";
 import type { TraceLogStatus } from "../../lib/runtime/logging";
 import type { BackendPortConfig, RuntimeServicesStatus } from "../../lib/runtime/services";
 
@@ -35,6 +35,7 @@ type AppSettingsDialogProps = {
 
 const aiModelIds: AiModelId[] = ["gpt-5.4-mini", "gpt-5.4", "gpt-5.5", "gpt-5.4-nano"];
 const aiVisionModelIds: AiVisionModelId[] = ["gpt-5.4-mini", "gpt-5.4", "gpt-5.5"];
+const transcriptionLanguages: AiTranscriptionLanguage[] = ["auto", "es", "en", "fr", "de", "it", "pt", "ca", "eu", "gl"];
 
 const aiModelMeter: Record<AiModelId, { intelligence: number; cost: number }> = {
   "gpt-5.5": { intelligence: 4, cost: 4 },
@@ -181,6 +182,7 @@ function normalizeAiStatus(ai: Partial<AiConfigStatus> | null | undefined): AiCo
   const rag = ai?.rag as Partial<AiConfigStatus["rag"]> | undefined;
   const vision = ai?.vision as Partial<AiConfigStatus["vision"]> | undefined;
   const agentic = ai?.agentic as Partial<AiConfigStatus["agentic"]> | undefined;
+  const transcription = ai?.transcription as Partial<AiConfigStatus["transcription"]> | undefined;
 
   return {
     provider: "openai",
@@ -216,6 +218,7 @@ function normalizeAiStatus(ai: Partial<AiConfigStatus> | null | undefined): AiCo
       maxEstimatedCostEur: clampSettingsNumber(agentic?.maxEstimatedCostEur, 0.1, 25, defaultAiConfig.agentic.maxEstimatedCostEur),
       maxSources: clampSettingsNumber(agentic?.maxSources, 1, 20, defaultAiConfig.agentic.maxSources),
     },
+    transcription: normalizeTranscription(transcription),
     openaiKeyConfigured: Boolean(ai?.openaiKeyConfigured),
     openaiKeyPreview: ai?.openaiKeyPreview ?? null,
   };
@@ -245,6 +248,24 @@ function normalizeAgenticDepth(depth: unknown): AiConfigStatus["agentic"]["depth
   return ["quick", "guided", "deep", "bounded_autonomous"].includes(String(depth))
     ? depth as AiConfigStatus["agentic"]["depth"]
     : defaultAiConfig.agentic.depth;
+}
+
+function normalizeTranscription(transcription: Partial<AiConfigStatus["transcription"]> | undefined): AiConfigStatus["transcription"] {
+  const favorites = Array.isArray(transcription?.favoriteLanguages)
+    ? transcription.favoriteLanguages.filter(isTranscriptionLanguage)
+    : defaultAiConfig.transcription.favoriteLanguages;
+  const uniqueFavorites = Array.from(new Set(favorites.length ? favorites : defaultAiConfig.transcription.favoriteLanguages));
+  return {
+    enabled: transcription?.enabled ?? defaultAiConfig.transcription.enabled,
+    model: transcription?.model === "gpt-realtime-whisper" ? transcription.model : defaultAiConfig.transcription.model,
+    defaultTarget: transcription?.defaultTarget === "document" ? "document" : "prompt",
+    defaultLanguage: isTranscriptionLanguage(transcription?.defaultLanguage) ? transcription.defaultLanguage : defaultAiConfig.transcription.defaultLanguage,
+    favoriteLanguages: uniqueFavorites.slice(0, 6),
+  };
+}
+
+function isTranscriptionLanguage(language: unknown): language is AiTranscriptionLanguage {
+  return transcriptionLanguages.includes(language as AiTranscriptionLanguage);
 }
 
 function clampSettingsNumber(value: unknown, minimum: number, maximum: number, fallback: number) {
@@ -863,6 +884,25 @@ function AiSettings({
     commitAi(nextAi);
   }
 
+  function updateTranscription(nextTranscription: Partial<AiConfigStatus["transcription"]>) {
+    const currentAi = localAiRef.current;
+    commitAi({
+      ...currentAi,
+      transcription: normalizeTranscription({
+        ...currentAi.transcription,
+        ...nextTranscription,
+      }),
+    });
+  }
+
+  function toggleFavoriteLanguage(language: AiTranscriptionLanguage) {
+    const currentFavorites = settingsAi.transcription.favoriteLanguages;
+    const nextFavorites = currentFavorites.includes(language)
+      ? currentFavorites.filter((favoriteLanguage) => favoriteLanguage !== language)
+      : [...currentFavorites, language];
+    updateTranscription({ favoriteLanguages: nextFavorites.filter((favoriteLanguage) => favoriteLanguage !== "auto") });
+  }
+
   return (
     <div className="space-y-5">
       <section>
@@ -1025,6 +1065,78 @@ function AiSettings({
           >
             {text.reindexImages}
           </button>
+        </div>
+      </section>
+
+      <section className="rounded-md border border-line px-3 py-3">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <Mic size={15} className="text-brand-orange" />
+              <p className="text-[11px] font-semibold text-ink-primary">{text.transcriptionHeading}</p>
+            </div>
+            <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.transcriptionDescription}</p>
+          </div>
+          <Switch enabled={settingsAi.transcription.enabled} label={text.transcriptionHeading} onToggle={() => updateTranscription({ enabled: !settingsAi.transcription.enabled })} />
+        </div>
+
+        <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2">
+          <label className="block min-w-0">
+            <span className="block text-[9px] font-semibold uppercase text-ink-secondary">{text.transcriptionModelHeading}</span>
+            <select
+              className="mt-1 h-8 w-full rounded-md border border-line bg-white px-2 text-[11px] font-semibold text-ink-primary outline-none focus:border-brand-orange"
+              value={settingsAi.transcription.model}
+              onChange={(event) => updateTranscription({ model: event.target.value as AiConfigStatus["transcription"]["model"] })}
+            >
+              <option value="gpt-realtime-whisper">gpt-realtime-whisper</option>
+            </select>
+          </label>
+          <label className="block min-w-0">
+            <span className="block text-[9px] font-semibold uppercase text-ink-secondary">{text.transcriptionDefaultTarget}</span>
+            <select
+              className="mt-1 h-8 w-full rounded-md border border-line bg-white px-2 text-[11px] font-semibold text-ink-primary outline-none focus:border-brand-orange"
+              value={settingsAi.transcription.defaultTarget}
+              onChange={(event) => updateTranscription({ defaultTarget: event.target.value as AiConfigStatus["transcription"]["defaultTarget"] })}
+            >
+              <option value="prompt">{text.transcriptionTargetPrompt}</option>
+              <option value="document">{text.transcriptionTargetDocument}</option>
+            </select>
+          </label>
+          <label className="block min-w-0">
+            <span className="block text-[9px] font-semibold uppercase text-ink-secondary">{text.transcriptionDefaultLanguage}</span>
+            <select
+              className="mt-1 h-8 w-full rounded-md border border-line bg-white px-2 text-[11px] font-semibold text-ink-primary outline-none focus:border-brand-orange"
+              value={settingsAi.transcription.defaultLanguage}
+              onChange={(event) => updateTranscription({ defaultLanguage: event.target.value as AiTranscriptionLanguage })}
+            >
+              {transcriptionLanguages.map((language) => (
+                <option key={language} value={language}>{text.transcriptionLanguages[language]}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="mt-3 border-t border-line pt-3">
+          <p className="text-[9px] font-semibold uppercase text-ink-secondary">{text.transcriptionFavoriteLanguages}</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {transcriptionLanguages.filter((language) => language !== "auto").map((language) => {
+              const selected = settingsAi.transcription.favoriteLanguages.includes(language);
+              return (
+                <button
+                  key={language}
+                  type="button"
+                  className={[
+                    "inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[10px] font-semibold transition",
+                    selected ? "border-brand-orange bg-brand-hover text-brand-orange" : "border-line text-ink-secondary hover:bg-panel hover:text-ink-primary",
+                  ].join(" ")}
+                  onClick={() => toggleFavoriteLanguage(language)}
+                >
+                  {selected ? <Check size={12} /> : null}
+                  {text.transcriptionLanguages[language]}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </section>
 
@@ -1459,6 +1571,26 @@ const settingsCopy = {
     visionStoreHeading: "Guardar descripciones visuales",
     visionStoreDescription: "Conserva metadatos locales para reutilizar contexto sin volver a analizar cada imagen.",
     reindexImages: "Reindexar imágenes",
+    transcriptionHeading: "Audio y transcripción",
+    transcriptionDescription: "Controla el dictado realtime usado por el micrófono del prompt. React captura el audio, pero OpenAI se invoca solo desde el backend local.",
+    transcriptionModelHeading: "Modelo",
+    transcriptionDefaultTarget: "Destino por defecto",
+    transcriptionDefaultLanguage: "Idioma por defecto",
+    transcriptionFavoriteLanguages: "Idiomas favoritos del micrófono",
+    transcriptionTargetPrompt: "Prompt",
+    transcriptionTargetDocument: "Documento",
+    transcriptionLanguages: {
+      auto: "Automático",
+      es: "Español",
+      en: "Inglés",
+      fr: "Francés",
+      de: "Alemán",
+      it: "Italiano",
+      pt: "Portugués",
+      ca: "Catalán",
+      eu: "Euskera",
+      gl: "Gallego",
+    },
     aiModels: {
       "gpt-5.4-mini": {
         name: "Equilibrado",
@@ -1641,6 +1773,26 @@ const settingsCopy = {
     visionStoreHeading: "Store visual descriptions",
     visionStoreDescription: "Keep local metadata to reuse context without analyzing each image again.",
     reindexImages: "Reindex images",
+    transcriptionHeading: "Audio and transcription",
+    transcriptionDescription: "Controls realtime dictation from the prompt microphone. React captures audio, but OpenAI is invoked only by the local backend.",
+    transcriptionModelHeading: "Model",
+    transcriptionDefaultTarget: "Default target",
+    transcriptionDefaultLanguage: "Default language",
+    transcriptionFavoriteLanguages: "Microphone favorite languages",
+    transcriptionTargetPrompt: "Prompt",
+    transcriptionTargetDocument: "Document",
+    transcriptionLanguages: {
+      auto: "Automatic",
+      es: "Spanish",
+      en: "English",
+      fr: "French",
+      de: "German",
+      it: "Italian",
+      pt: "Portuguese",
+      ca: "Catalan",
+      eu: "Basque",
+      gl: "Galician",
+    },
     aiModels: {
       "gpt-5.4-mini": {
         name: "Balanced",

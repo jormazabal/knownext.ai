@@ -1603,11 +1603,22 @@ export function App() {
       rag: nextAiConfig.rag,
       vision: nextAiConfig.vision,
       agentic: nextAiConfig.agentic,
+      transcription: nextAiConfig.transcription,
     })
       .then((savedAiConfig) => {
         if (aiConfigSaveSequence.current === saveSequence) setAiConfig(savedAiConfig);
       })
       .catch((error) => showError(error, "No se pudo guardar la configuración de IA.", { source: "app.aiConfig" }));
+  }
+
+  function handleAiTranscriptionChange(transcription: Partial<AiConfigStatus["transcription"]>) {
+    handleAiConfigChange({
+      ...aiConfig,
+      transcription: {
+        ...aiConfig.transcription,
+        ...transcription,
+      },
+    });
   }
 
   async function handleSaveOpenAiKey(apiKey: string) {
@@ -2119,6 +2130,7 @@ export function App() {
         onPushProject={() => void handlePushProject()}
         onCreateVersion={handleCreateActiveVersion}
         onSendAiPrompt={handleSendAiPrompt}
+        onAiTranscriptionChange={handleAiTranscriptionChange}
         onClearAiSelectionFocus={() => setAiSelectionFocus(null)}
         onSearchAiContextDocuments={handleSearchAiContextDocuments}
         onAddProjectDocumentContext={handleAddProjectDocumentContext}

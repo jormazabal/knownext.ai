@@ -15,6 +15,9 @@ AiExecutionScope = Literal["direct_action", "needs_permission", "needs_clarifica
 AiModelId = Literal["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"]
 AiVisionModelId = Literal["gpt-5.4-mini", "gpt-5.4", "gpt-5.5"]
 AiAgenticDepth = Literal["quick", "guided", "deep", "bounded_autonomous"]
+AiTranscriptionTarget = Literal["prompt", "document"]
+AiTranscriptionLanguage = Literal["auto", "es", "en", "fr", "de", "it", "pt", "ca", "eu", "gl"]
+AiTranscriptionModelId = Literal["gpt-realtime-whisper"]
 AiPendingIntentStatus = Literal["awaiting_decision", "awaiting_web_permission", "ready", "running", "completed", "cancelled"]
 AiPendingIntentAction = Literal["replace_document", "edit_document", "create_document", "project_operation", "research_then_write"]
 AiIntentDecision = Literal["create_intent", "confirm_intent", "update_intent", "cancel_intent", "needs_clarification", "execute_now"]
@@ -94,6 +97,14 @@ class AiAgenticConfig(BaseModel):
     maxSources: int = 6
 
 
+class AiTranscriptionConfig(BaseModel):
+    enabled: bool = True
+    model: AiTranscriptionModelId = "gpt-realtime-whisper"
+    defaultTarget: AiTranscriptionTarget = "prompt"
+    defaultLanguage: AiTranscriptionLanguage = "auto"
+    favoriteLanguages: list[AiTranscriptionLanguage] = Field(default_factory=lambda: ["es", "en"])
+
+
 class AiConfig(BaseModel):
     provider: Literal["openai"] = "openai"
     model: AiModelId = "gpt-5.4-mini"
@@ -101,6 +112,7 @@ class AiConfig(BaseModel):
     rag: AiRagConfig = Field(default_factory=AiRagConfig)
     vision: AiVisionConfig = Field(default_factory=AiVisionConfig)
     agentic: AiAgenticConfig = Field(default_factory=AiAgenticConfig)
+    transcription: AiTranscriptionConfig = Field(default_factory=AiTranscriptionConfig)
 
 
 class AiConfigStatus(AiConfig):

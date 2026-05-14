@@ -52,6 +52,13 @@ export const defaultAiConfig: AiConfig = {
     maxEstimatedCostEur: 1,
     maxSources: 6,
   },
+  transcription: {
+    enabled: true,
+    model: "gpt-realtime-whisper",
+    defaultTarget: "prompt",
+    defaultLanguage: "auto",
+    favoriteLanguages: ["es", "en"],
+  },
 };
 
 export const defaultProjectTabsConfig: ProjectTabsConfig = {
@@ -214,6 +221,7 @@ function normalizeAi(ai: AiConfig | undefined): AiConfig | undefined {
       maxEstimatedCostEur: clampNumber(ai.agentic?.maxEstimatedCostEur, 0.1, 25, defaultAiConfig.agentic.maxEstimatedCostEur),
       maxSources: clampNumber(ai.agentic?.maxSources, 1, 20, defaultAiConfig.agentic.maxSources),
     },
+    transcription: normalizeTranscription(ai.transcription),
   };
 }
 
@@ -227,6 +235,25 @@ function normalizeAgenticDepth(depth: unknown) {
   return ["quick", "guided", "deep", "bounded_autonomous"].includes(String(depth))
     ? depth as AiConfig["agentic"]["depth"]
     : defaultAiConfig.agentic.depth;
+}
+
+function normalizeTranscription(transcription: AiConfig["transcription"] | undefined): AiConfig["transcription"] {
+  const favoriteLanguages = Array.isArray(transcription?.favoriteLanguages)
+    ? transcription.favoriteLanguages.filter(isTranscriptionLanguage)
+    : defaultAiConfig.transcription.favoriteLanguages;
+  const uniqueFavoriteLanguages = Array.from(new Set(favoriteLanguages.length ? favoriteLanguages : defaultAiConfig.transcription.favoriteLanguages));
+
+  return {
+    enabled: transcription?.enabled !== false,
+    model: transcription?.model === "gpt-realtime-whisper" ? transcription.model : defaultAiConfig.transcription.model,
+    defaultTarget: transcription?.defaultTarget === "document" ? "document" : "prompt",
+    defaultLanguage: isTranscriptionLanguage(transcription?.defaultLanguage) ? transcription.defaultLanguage : defaultAiConfig.transcription.defaultLanguage,
+    favoriteLanguages: uniqueFavoriteLanguages.slice(0, 6),
+  };
+}
+
+function isTranscriptionLanguage(language: unknown): language is AiConfig["transcription"]["defaultLanguage"] {
+  return ["auto", "es", "en", "fr", "de", "it", "pt", "ca", "eu", "gl"].includes(String(language));
 }
 
 function clampNumber(value: unknown, minimum: number, maximum: number, fallback: number) {

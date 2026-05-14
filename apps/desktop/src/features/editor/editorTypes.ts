@@ -27,6 +27,10 @@ export type MarkdownEditorAction =
 export type MarkdownEditorController = {
   run: (action: MarkdownEditorAction, options?: MarkdownEditorActionOptions) => boolean;
   replaceMarkdown: (markdown: string, options?: MarkdownEditorReplaceOptions) => boolean;
+  insertText: (text: string, options?: MarkdownEditorInsertTextOptions) => boolean;
+  setTransientTextPreview: (text: string) => boolean;
+  clearTransientTextPreview: () => boolean;
+  canInsertText: () => boolean;
   getFormatState: () => MarkdownEditorFormatState;
   getHistoryState: () => MarkdownEditorHistoryState;
   setSelectionFocus: (selection: MarkdownEditorSelection | null) => boolean;
@@ -44,6 +48,10 @@ export type MarkdownEditorActionOptions = {
 };
 
 export type MarkdownEditorReplaceOptions = {
+  addToHistory?: boolean;
+};
+
+export type MarkdownEditorInsertTextOptions = {
   addToHistory?: boolean;
 };
 

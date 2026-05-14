@@ -4,6 +4,7 @@ import base64
 import json
 import mimetypes
 import shutil
+import struct
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -22,7 +23,7 @@ from app.schemas.project import (
     TreeNode,
 )
 from app.services.app_storage import JsonFileStore
-from app.services.asset_reference_service import asset_reference_service
+from app.services.asset_reference_service import _format_markdown_target, asset_reference_service
 from app.services.filesystem_service import IMAGE_SUFFIXES, decode_node_id, encode_node_id, filesystem_service
 from app.services.openai_service import openai_service
 from app.services.project_service import project_service
@@ -143,7 +144,7 @@ class AssetService:
         relative_from_document = _relative_target(relative_asset, Path(document_relative_path).parent)
         asset = self._metadata(project_id, root, asset_path)
         alt = (alt_text or asset_path.stem).replace("[", "").replace("]", "").strip() or "Imagen"
-        return InsertImageReferenceResponse(markdown=f"![{alt}]({relative_from_document})", asset=asset)
+        return InsertImageReferenceResponse(markdown=f"![{alt}]({_format_markdown_target(relative_from_document)})", asset=asset)
 
     def create_project_image_context_source(self, project_id: str, asset_id: str):
         from app.services.ai_context_service import ai_context_service
@@ -206,6 +207,7 @@ class AssetService:
         relative_path = _normalize_relative_path(path.relative_to(root.resolve()))
         usage_count = len(asset_reference_service.get_asset_usage(project_id, root, relative_path))
         visual_record = self._visual_record(project_id, relative_path)
+        image_info = _inspect_image(path)
         return AssetMetadata(
             id=encode_node_id(project_id, relative_path),
             projectId=project_id,
@@ -213,6 +215,9 @@ class AssetService:
             path=relative_path,
             mimeType=mimetypes.guess_type(path.name)[0] or "image/*",
             sizeBytes=stat.st_size,
+            width=image_info.get("width"),
+            height=image_info.get("height"),
+            colorDepthBits=image_info.get("colorDepthBits"),
             updatedAt=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
             usageCount=usage_count,
             indexed=visual_record is not None and visual_record.get("status") == "updated",
@@ -265,6 +270,87 @@ def _relative_target(asset_path: str, document_parent: Path) -> str:
     if not relative.startswith(".") and "/" not in relative:
         return f"./{relative}"
     return relative
+
+
+def _inspect_image(path: Path) -> dict[str, int | None]:
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return {"width": None, "height": None, "colorDepthBits": None}
+
+    if data.startswith(b"\x89PNG\r\n\x1a\n") and len(data) >= 33:
+        width, height = struct.unpack(">II", data[16:24])
+        bit_depth = data[24]
+        color_type = data[25]
+        channels_by_color_type = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
+        channels = channels_by_color_type.get(color_type)
+        return {"width": width, "height": height, "colorDepthBits": bit_depth * channels if channels else bit_depth}
+
+    if data.startswith((b"GIF87a", b"GIF89a")) and len(data) >= 11:
+        width, height = struct.unpack("<HH", data[6:10])
+        packed = data[10]
+        return {"width": width, "height": height, "colorDepthBits": (packed & 0b00000111) + 1}
+
+    if data.startswith(b"\xff\xd8"):
+        jpeg_info = _inspect_jpeg(data)
+        if jpeg_info:
+            return jpeg_info
+
+    if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        webp_info = _inspect_webp(data)
+        if webp_info:
+            return webp_info
+
+    return {"width": None, "height": None, "colorDepthBits": None}
+
+
+def _inspect_jpeg(data: bytes) -> dict[str, int | None] | None:
+    offset = 2
+    start_of_frame_markers = {*range(0xC0, 0xC4), *range(0xC5, 0xC8), *range(0xC9, 0xCC), *range(0xCD, 0xD0)}
+    while offset + 4 <= len(data):
+        if data[offset] != 0xFF:
+            offset += 1
+            continue
+        marker = data[offset + 1]
+        offset += 2
+        if marker in {0xD8, 0xD9} or 0xD0 <= marker <= 0xD7:
+            continue
+        if offset + 2 > len(data):
+            break
+        segment_length = struct.unpack(">H", data[offset : offset + 2])[0]
+        if segment_length < 2 or offset + segment_length > len(data):
+            break
+        if marker in start_of_frame_markers and offset + 8 <= len(data):
+            precision = data[offset + 2]
+            height, width = struct.unpack(">HH", data[offset + 3 : offset + 7])
+            components = data[offset + 7]
+            return {"width": width, "height": height, "colorDepthBits": precision * components}
+        offset += segment_length
+    return None
+
+
+def _inspect_webp(data: bytes) -> dict[str, int | None] | None:
+    if len(data) < 30:
+        return None
+    chunk_type = data[12:16]
+    if chunk_type == b"VP8X" and len(data) >= 30:
+        flags = data[20]
+        width = int.from_bytes(data[24:27], "little") + 1
+        height = int.from_bytes(data[27:30], "little") + 1
+        return {"width": width, "height": height, "colorDepthBits": 32 if flags & 0b00010000 else 24}
+    if chunk_type == b"VP8 " and len(data) >= 30:
+        start = 20
+        if data[start + 3 : start + 6] != b"\x9d\x01\x2a":
+            return None
+        width = struct.unpack("<H", data[start + 6 : start + 8])[0] & 0x3FFF
+        height = struct.unpack("<H", data[start + 8 : start + 10])[0] & 0x3FFF
+        return {"width": width, "height": height, "colorDepthBits": 24}
+    if chunk_type == b"VP8L" and len(data) >= 25 and data[20] == 0x2F:
+        bits = int.from_bytes(data[21:25], "little")
+        width = (bits & 0x3FFF) + 1
+        height = ((bits >> 14) & 0x3FFF) + 1
+        return {"width": width, "height": height, "colorDepthBits": 32}
+    return None
 
 
 asset_service = AssetService()

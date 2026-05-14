@@ -125,6 +125,7 @@ class AssetMetadata(BaseModel):
     sizeBytes: int
     width: int | None = None
     height: int | None = None
+    colorDepthBits: int | None = None
     updatedAt: str
     usageCount: int = 0
     indexed: bool = False

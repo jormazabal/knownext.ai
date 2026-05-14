@@ -41,7 +41,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.12.1"
+    assert payload["version"] == "0.13.0"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -311,6 +311,10 @@ def test_project_tree_imports_and_exposes_image_assets(tmp_path) -> None:
     assert image_node["type"] == "image"
     assert image_node["mimeType"] == "image/png"
     assert image_node["sizeBytes"] > 0
+    asset = client.get(f"/api/projects/{project_id}/assets/{image_node['id']}").json()
+    assert asset["width"] == 1
+    assert asset["height"] == 1
+    assert asset["colorDepthBits"] is not None
 
     imported = client.post(
         f"/api/projects/{project_id}/assets/images",
@@ -360,6 +364,35 @@ def test_image_references_are_built_tracked_and_rewritten_when_image_moves(tmp_p
 
     moved_usage = client.get(f"/api/projects/{project_id}/assets/{moved_image_id}/usage").json()
     assert moved_usage["references"][0]["resolvedAssetPath"] == "Media/diagram.png"
+
+
+def test_image_references_preserve_asset_paths_with_spaces(tmp_path) -> None:
+    docs_root = tmp_path / "docs-image-references-with-spaces"
+    docs_root.mkdir()
+    image_name = "ChatGPT Image 4 may 2026, 22_18_18.png"
+    (docs_root / "scope.md").write_text(f"# Scope\n\n![0.53](./{image_name})\n", encoding="utf-8")
+    (docs_root / image_name).write_bytes(TINY_PNG)
+
+    created = client.post(
+        "/api/projects",
+        json={"name": "Referencias con espacios", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    tree = client.get(f"/api/projects/{project_id}/tree").json()
+    document_id = _find_tree_node(tree, "scope.md")["id"]
+    image_id = _find_tree_node(tree, image_name)["id"]
+
+    reference = client.post(
+        f"/api/projects/{project_id}/documents/{document_id}/image-reference",
+        json={"assetId": image_id, "altText": "0.53"},
+    )
+    assert reference.status_code == 200
+    assert reference.json()["markdown"] == f"![0.53](<./{image_name}>)"
+
+    usage = client.get(f"/api/projects/{project_id}/assets/{image_id}/usage")
+    assert usage.status_code == 200
+    assert usage.json()["references"][0]["status"] == "valid"
+    assert usage.json()["references"][0]["resolvedAssetPath"] == image_name
 
 
 def test_document_move_impact_and_move_preserve_image_links(tmp_path) -> None:
@@ -620,6 +653,24 @@ def test_config_writes_config_json(tmp_path) -> None:
     }
     assert persisted_config["diagnostics"] == {"traceLoggingEnabled": True}
     assert persisted_config["tabsByProject"]["project-alpha"]["activeDocumentId"] == "decision-tech"
+
+
+def test_realtime_whisper_session_update_omits_turn_detection() -> None:
+    from app.services.transcription_service import _build_session_update
+
+    session_update = _build_session_update("gpt-realtime-whisper", "es")
+    audio_input = session_update["session"]["audio"]["input"]
+
+    assert audio_input["transcription"] == {"model": "gpt-realtime-whisper", "language": "es"}
+    assert "turn_detection" not in audio_input
+
+
+def test_realtime_whisper_session_update_omits_auto_language_hint() -> None:
+    from app.services.transcription_service import _build_session_update
+
+    session_update = _build_session_update("gpt-realtime-whisper", "auto")
+
+    assert session_update["session"]["audio"]["input"]["transcription"] == {"model": "gpt-realtime-whisper"}
 
 
 def test_trace_logging_writes_only_when_enabled(tmp_path) -> None:

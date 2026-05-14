@@ -155,6 +155,13 @@ const config: AiConfigStatus = {
     maxEstimatedCostEur: 1,
     maxSources: 4,
   },
+  transcription: {
+    enabled: true,
+    model: "gpt-realtime-whisper",
+    defaultTarget: "prompt",
+    defaultLanguage: "auto",
+    favoriteLanguages: ["es", "en"],
+  },
   openaiKeyConfigured: true,
   openaiKeyPreview: "sk-...",
 };

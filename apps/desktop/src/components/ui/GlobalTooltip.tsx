@@ -53,6 +53,7 @@ export function GlobalTooltip() {
 
   useEffect(() => {
     let activeElement: HTMLElement | null = null;
+    let suppressedElement: HTMLElement | null = null;
 
     function resolveTooltipElement(target: EventTarget | null) {
       if (!(target instanceof Element)) return null;
@@ -60,6 +61,7 @@ export function GlobalTooltip() {
     }
 
     function showTooltip(element: HTMLElement) {
+      if (suppressedElement === element) return;
       const text = element.dataset.tooltip;
       if (!text) return;
       const rect = element.getBoundingClientRect();
@@ -82,6 +84,11 @@ export function GlobalTooltip() {
       setLayout(null);
     }
 
+    function suppressTooltip(element: HTMLElement | null) {
+      suppressedElement = element;
+      hideTooltip(element);
+    }
+
     function handleMouseOver(event: MouseEvent) {
       const element = resolveTooltipElement(event.target);
       if (element) showTooltip(element);
@@ -92,6 +99,7 @@ export function GlobalTooltip() {
       if (!element) return;
       const nextTarget = event.relatedTarget instanceof Element ? event.relatedTarget : null;
       if (nextTarget && element.contains(nextTarget)) return;
+      if (suppressedElement === element) suppressedElement = null;
       hideTooltip(element);
     }
 
@@ -101,13 +109,38 @@ export function GlobalTooltip() {
     }
 
     function handleFocusOut(event: FocusEvent) {
-      hideTooltip(resolveTooltipElement(event.target));
+      const element = resolveTooltipElement(event.target);
+      if (suppressedElement === element) suppressedElement = null;
+      hideTooltip(element);
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      const element = resolveTooltipElement(event.target);
+      if (element) {
+        suppressTooltip(element);
+        return;
+      }
+      hideTooltip();
+    }
+
+    function handleClick(event: MouseEvent) {
+      const element = resolveTooltipElement(event.target);
+      if (element) suppressTooltip(element);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      const element = resolveTooltipElement(event.target);
+      if (element) suppressTooltip(element);
     }
 
     function handleViewportChange() {
-      if (activeElement) showTooltip(activeElement);
+      if (activeElement && suppressedElement !== activeElement) showTooltip(activeElement);
     }
 
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("click", handleClick, true);
+    document.addEventListener("keydown", handleKeyDown, true);
     document.addEventListener("mouseover", handleMouseOver);
     document.addEventListener("mouseout", handleMouseOut);
     document.addEventListener("focusin", handleFocusIn);
@@ -115,6 +148,9 @@ export function GlobalTooltip() {
     window.addEventListener("scroll", handleViewportChange, true);
     window.addEventListener("resize", handleViewportChange);
     return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("click", handleClick, true);
+      document.removeEventListener("keydown", handleKeyDown, true);
       document.removeEventListener("mouseover", handleMouseOver);
       document.removeEventListener("mouseout", handleMouseOut);
       document.removeEventListener("focusin", handleFocusIn);

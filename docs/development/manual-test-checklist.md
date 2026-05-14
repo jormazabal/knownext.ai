@@ -181,6 +181,10 @@
 - [ ] In the browser development build, save an OpenAI API key and confirm the request succeeds through the web backend profile without a CORS or `Failed to fetch` error.
 - [ ] In IA, confirm the model selector shows intelligence and cost indicators, select a different model, close/reopen settings, and confirm the selected model persists.
 - [ ] In IA, confirm Visión de imágenes exposes enable/disable, model, detail, max images, max image size, image RAG indexing, and visual-description storage controls; change them, close/reopen settings, and confirm they persist.
+- [ ] In IA, confirm Audio y transcripción exposes enable/disable, `gpt-realtime-whisper`, default target, default language, and favorite languages; change them, close/reopen settings, and confirm they persist.
+- [ ] Open the microphone chevron in the prompt and confirm only destination plus configured favorite languages appear, with the split microphone/stop action separate from the options chevron.
+- [ ] Use Transcribir al prompt and confirm speech appears in the prompt input, is editable, and does not submit until Enviar is clicked.
+- [ ] Use Dictar en documento with the cursor in Milkdown and confirm final transcript text is inserted as unsaved document content with normal undo/redo behavior.
 - [ ] In IA settings, confirm task depth is not configured globally; enable Investigación web, adjust step/source/cost limits, close/reopen settings, and confirm the values persist.
 - [ ] In IA, toggle Editar documentos, Crear y mover carpetas, Crear, duplicar y mover documentos, and Eliminar documentos y carpetas and confirm permissions persist.
 - [ ] In IA, enable project indexing, run Reindexar ahora, and confirm status shows indexed document counts plus local exact-search readiness.
