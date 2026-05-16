@@ -1,4 +1,4 @@
-import { AlertCircle, Brain, Check, ChevronDown, Clock3, File, FileText, Image, Mic, Plus, Search, SendHorizontal, SlidersHorizontal, Sparkles, Square, X, Zap } from "lucide-react";
+import { AlertCircle, Brain, Check, ChevronDown, Clock3, File, FileText, Image, MessageSquare, Mic, Plus, Search, SendHorizontal, SlidersHorizontal, Sparkles, Square, X, Zap } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type RefObject } from "react";
 import type { AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiExecutionMode, AiReasoningDepth, AiSelectionFocus, AiTranscriptionLanguage, AiTranscriptionTarget } from "../../types/domain";
 import { useRealtimeTranscription } from "../transcription/useRealtimeTranscription";
@@ -7,6 +7,9 @@ export type AiPromptExecutionOptions = {
   executionMode: AiExecutionMode;
   reasoningDepth: AiReasoningDepth;
 };
+
+const promptControlClass =
+  "border border-line bg-panel shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:border-orange-200 hover:bg-brand-hover hover:text-brand-orange disabled:cursor-not-allowed disabled:opacity-50";
 
 type AiPromptInputProps = {
   documentId?: string;
@@ -455,7 +458,7 @@ export function AiPromptInput({
           <div className="relative" ref={contextMenuRef}>
           <button
             type="button"
-            className="knownext-ai-context-button grid h-8 w-8 shrink-0 place-items-center rounded-full text-ink-primary transition hover:bg-panel disabled:opacity-60"
+            className={`knownext-ai-context-button grid h-8 w-8 shrink-0 place-items-center rounded-full text-ink-primary ${promptControlClass}`}
             data-tooltip="Añadir contexto"
             aria-label="Añadir contexto"
             aria-expanded={contextMenuOpen}
@@ -548,7 +551,7 @@ export function AiPromptInput({
           <div className="relative shrink-0" ref={modeMenuRef}>
             <button
               type="button"
-              className="knownext-ai-mode-selector grid h-8 w-12 grid-cols-[1fr_auto] items-center rounded-full bg-panel pl-2.5 pr-1.5 text-ink-primary transition hover:bg-brand-hover"
+              className={`knownext-ai-mode-selector grid h-8 w-12 grid-cols-[1fr_auto] items-center rounded-full pl-2.5 pr-1.5 text-ink-primary ${promptControlClass}`}
               aria-expanded={modeMenuOpen}
               aria-haspopup="menu"
               aria-label="Selector de modo IA"
@@ -647,8 +650,8 @@ export function AiPromptInput({
           <div ref={transcriptionMenuRef} className="relative shrink-0">
             <div
               className={[
-                "knownext-ai-mic-control flex h-8 items-center overflow-hidden rounded-full border transition",
-                transcribing ? "knownext-ai-mic-control-active border-brand-orange bg-brand-hover text-brand-orange" : "border-line bg-panel text-ink-primary hover:border-orange-200 hover:bg-brand-hover hover:text-brand-orange",
+                `knownext-ai-mic-control flex h-8 items-center overflow-hidden rounded-full text-ink-primary ${promptControlClass}`,
+                transcribing ? "knownext-ai-mic-control-active border-brand-orange bg-brand-hover text-brand-orange" : "",
                 transcriptionAvailable ? "" : "opacity-50",
               ].join(" ")}
             >
@@ -660,7 +663,7 @@ export function AiPromptInput({
                 disabled={!transcriptionAvailable && !transcribing}
                 onClick={() => void toggleTranscription()}
               >
-                {transcribing ? <Square size={13} fill="currentColor" /> : <Mic size={15} />}
+                {transcribing ? <Square size={13} fill="currentColor" /> : <TranscriptionTargetIcon target={transcriptionTarget} />}
               </button>
               <button
                 type="button"
@@ -684,7 +687,10 @@ export function AiPromptInput({
                   disabled={transcribing}
                   onClick={() => chooseTranscriptionTarget("prompt")}
                 >
-                  <span>Transcribir al prompt</span>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <TranscriptionTargetIcon target="prompt" />
+                    <span>Transcribir al prompt</span>
+                  </span>
                   {transcriptionTarget === "prompt" ? <Check size={12} /> : null}
                 </button>
                 <button
@@ -695,7 +701,10 @@ export function AiPromptInput({
                   disabled={transcribing}
                   onClick={() => chooseTranscriptionTarget("document")}
                 >
-                  <span>Dictar en documento</span>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <TranscriptionTargetIcon target="document" />
+                    <span>Dictar en documento</span>
+                  </span>
                   {transcriptionTarget === "document" ? <Check size={12} /> : null}
                 </button>
                 <div className="my-1 border-t border-line" />
@@ -718,13 +727,13 @@ export function AiPromptInput({
             ) : null}
           </div>
           <button
-            className="knownext-ai-send-button grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-orange text-white transition hover:bg-brand-dark disabled:opacity-50"
+            className={`knownext-ai-send-button grid h-8 w-8 shrink-0 place-items-center rounded-full text-brand-orange ${promptControlClass}`}
             data-tooltip="Enviar"
             aria-label="Enviar"
             onClick={() => void handleSubmit()}
             disabled={loading || !canPrompt || hasBlockingContext}
           >
-            {loading ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> : <SendHorizontal size={18} />}
+            {loading ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-brand-orange border-t-transparent" /> : <SendHorizontal size={18} />}
           </button>
         </div>
         {hasBlockingContext ? (
@@ -811,6 +820,23 @@ function getTranscriptionMenuItemClass(selected: boolean, disabled: boolean) {
     selected ? "border-orange-200 bg-brand-hover font-semibold text-brand-orange" : "border-transparent text-ink-primary hover:bg-brand-hover",
     disabled ? "cursor-not-allowed opacity-50" : "",
   ].join(" ");
+}
+
+function TranscriptionTargetIcon({ target }: { target: AiTranscriptionTarget }) {
+  const TargetIcon = target === "document" ? FileText : MessageSquare;
+  return (
+    <span className="relative grid h-5 w-5 shrink-0 place-items-center" aria-hidden="true">
+      <Mic size={15} />
+      <span
+        className={[
+          "knownext-transcription-target-badge absolute -bottom-0.5 -right-1 grid h-3.5 w-3.5 place-items-center rounded-full border border-line bg-white shadow-[0_1px_2px_rgba(17,24,39,0.12)]",
+          target === "document" ? "text-brand-orange" : "text-ink-secondary",
+        ].join(" ")}
+      >
+        <TargetIcon size={8} strokeWidth={2.2} />
+      </span>
+    </span>
+  );
 }
 
 function withTrailingSpace(text: string) {
