@@ -32,6 +32,10 @@ DEFAULT_AI = {
         "createFolders": False,
         "createDocuments": False,
         "deleteDocumentsAndFolders": False,
+        "generateImages": True,
+        "createImageAssets": True,
+        "insertImagesIntoDocuments": True,
+        "useDocumentContextForImageGeneration": True,
     },
     "rag": {
         "enabled": False,
@@ -48,6 +52,19 @@ DEFAULT_AI = {
         "maxImageSizeMb": 12,
         "detail": "auto",
         "storeVisualDescriptions": True,
+    },
+    "imageGeneration": {
+        "enabled": True,
+        "model": "gpt-image-2",
+        "size": "auto",
+        "quality": "auto",
+        "outputFormat": "png",
+        "defaultFolder": "document_folder",
+        "customFolderPath": "assets/generated",
+        "maxImagesPerPrompt": 1,
+        "confirmBeforeDocumentInsert": False,
+        "confirmBeforeUsingMultipleSources": True,
+        "storePromptMetadata": True,
     },
     "agentic": {
         "depth": "guided",
@@ -186,6 +203,9 @@ def _normalize_ai(value: object) -> dict:
     vision = value.get("vision")
     if not isinstance(vision, dict):
         vision = {}
+    image_generation = value.get("imageGeneration")
+    if not isinstance(image_generation, dict):
+        image_generation = {}
     transcription = value.get("transcription")
     if not isinstance(transcription, dict):
         transcription = {}
@@ -223,6 +243,10 @@ def _normalize_ai(value: object) -> dict:
             "createFolders": bool(permissions.get("createFolders", DEFAULT_AI["permissions"]["createFolders"])),
             "createDocuments": bool(permissions.get("createDocuments", DEFAULT_AI["permissions"]["createDocuments"])),
             "deleteDocumentsAndFolders": bool(permissions.get("deleteDocumentsAndFolders", DEFAULT_AI["permissions"]["deleteDocumentsAndFolders"])),
+            "generateImages": bool(permissions.get("generateImages", DEFAULT_AI["permissions"]["generateImages"])),
+            "createImageAssets": bool(permissions.get("createImageAssets", DEFAULT_AI["permissions"]["createImageAssets"])),
+            "insertImagesIntoDocuments": bool(permissions.get("insertImagesIntoDocuments", DEFAULT_AI["permissions"]["insertImagesIntoDocuments"])),
+            "useDocumentContextForImageGeneration": bool(permissions.get("useDocumentContextForImageGeneration", DEFAULT_AI["permissions"]["useDocumentContextForImageGeneration"])),
         },
         "rag": {
             "enabled": bool(rag.get("enabled", DEFAULT_AI["rag"]["enabled"])),
@@ -239,6 +263,19 @@ def _normalize_ai(value: object) -> dict:
             "maxImageSizeMb": _clamp_int(vision.get("maxImageSizeMb"), 1, 50, DEFAULT_AI["vision"]["maxImageSizeMb"]),
             "detail": vision.get("detail") if vision.get("detail") in {"auto", "low", "high"} else DEFAULT_AI["vision"]["detail"],
             "storeVisualDescriptions": bool(vision.get("storeVisualDescriptions", DEFAULT_AI["vision"]["storeVisualDescriptions"])),
+        },
+        "imageGeneration": {
+            "enabled": bool(image_generation.get("enabled", DEFAULT_AI["imageGeneration"]["enabled"])),
+            "model": image_generation.get("model") if image_generation.get("model") in {"gpt-image-2", "gpt-image-1.5", "gpt-image-1", "gpt-image-1-mini"} else DEFAULT_AI["imageGeneration"]["model"],
+            "size": image_generation.get("size") if image_generation.get("size") in {"auto", "1024x1024", "1536x1024", "1024x1536"} else DEFAULT_AI["imageGeneration"]["size"],
+            "quality": image_generation.get("quality") if image_generation.get("quality") in {"auto", "low", "medium", "high"} else DEFAULT_AI["imageGeneration"]["quality"],
+            "outputFormat": image_generation.get("outputFormat") if image_generation.get("outputFormat") in {"png", "webp", "jpeg"} else DEFAULT_AI["imageGeneration"]["outputFormat"],
+            "defaultFolder": image_generation.get("defaultFolder") if image_generation.get("defaultFolder") in {"document_folder", "generated_assets", "custom_folder"} else DEFAULT_AI["imageGeneration"]["defaultFolder"],
+            "customFolderPath": _normalize_relative_folder_path(image_generation.get("customFolderPath"), DEFAULT_AI["imageGeneration"]["customFolderPath"]),
+            "maxImagesPerPrompt": _clamp_int(image_generation.get("maxImagesPerPrompt"), 1, 4, DEFAULT_AI["imageGeneration"]["maxImagesPerPrompt"]),
+            "confirmBeforeDocumentInsert": bool(image_generation.get("confirmBeforeDocumentInsert", DEFAULT_AI["imageGeneration"]["confirmBeforeDocumentInsert"])),
+            "confirmBeforeUsingMultipleSources": bool(image_generation.get("confirmBeforeUsingMultipleSources", DEFAULT_AI["imageGeneration"]["confirmBeforeUsingMultipleSources"])),
+            "storePromptMetadata": bool(image_generation.get("storePromptMetadata", DEFAULT_AI["imageGeneration"]["storePromptMetadata"])),
         },
         "agentic": {
             "depth": depth,
@@ -308,6 +345,16 @@ def _normalize_optional_string(value: object) -> str | None:
         return None
     normalized = value.strip()
     return normalized or None
+
+
+def _normalize_relative_folder_path(value: object, fallback: str) -> str:
+    if not isinstance(value, str):
+        return fallback
+    normalized = value.strip().replace("\\", "/")
+    parts = [part.strip() for part in normalized.split("/") if part.strip()]
+    if normalized.startswith("/") or ":" in normalized or not parts or any(part in {".", ".."} for part in parts):
+        return fallback
+    return "/".join(parts)[:160]
 
 
 def _clamp_int(value: object, minimum: int, maximum: int, default: int) -> int:

@@ -2,6 +2,16 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.14.0 - 2026-05-16
+
+- Added AI-generated project images from the prompt: structured image-generation plans create normal image assets, open generated image tabs, and can insert relative Markdown image references into the active Milkdown document.
+- Added separate image-generation settings and permissions for GPT Image model, size, quality, output format, prompt metadata, image asset creation, and document insertion.
+- Redesigned the application settings modal with document-style tabs, a configuration summary, a richer Interface tab, a complete Capabilities tab, and updated IA documental plus system diagnostics sections.
+- Added a reusable AI model selector with capacity, cost, recommendation tags, compact and full variants, and combobox-style option behavior.
+- Added multimodel AI usage accounting and UI summaries by capability and by model, including generated image, vision, audio, document AI, and agentic task buckets.
+- Added backend usage events for image generation, image vision indexing, realtime audio transcription, and agentic tasks, plus compatibility for generated images created before image usage events existed.
+- Improved generated image asset organization with configurable default project folders and clearer settings copy for custom storage preferences.
+
 ## 0.13.0 - 2026-05-15
 
 - Added realtime audio transcription controls to the AI prompt with selectable destination: prompt input or active Markdown document cursor.

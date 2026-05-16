@@ -92,6 +92,7 @@
 - [ ] Use Insertar > Imagen in the Markdown toolbar, select an existing project image, and confirm Milkdown inserts a Markdown image reference and renders the image in document flow.
 - [ ] Use Insertar > Imagen > Subir from an active document in a nested folder and confirm the image is copied beside that Markdown file and inserted with a relative reference.
 - [ ] Use Insertar > Imagen > URL and confirm an external image URL is inserted without copying a file into the project.
+- [ ] Open a generated image tab and confirm the details panel shows the project image metadata and offers Copiar referencia, Contexto IA, and Insertar.
 - [ ] Move a Markdown document that references one or more images and confirm the app warns about linked images and preserves valid relative references after the move.
 - [ ] Move or rename an image referenced from Markdown and confirm the app warns about linked documents and updates all detected Markdown references.
 - [ ] Delete an image referenced from Markdown and confirm the app warns that references will become broken.
@@ -155,6 +156,9 @@
 - [ ] Use `Añadir al proyecto` from an external text source and confirm KnowNext.ai creates a Markdown document in the project, refreshes the tree, and opens the new document.
 - [ ] Submit an AI prompt with multiple active sources and confirm the `IA` conversation message records the exact sources used, even if those chips are later removed or expire.
 - [ ] Submit an AI edit for the active document and confirm Milkdown content changes, the document remains `Cambios sin guardar`, and the AI change notice appears as a floating prompt-area bubble with only the summary and an X close button.
+- [ ] Select text in an active document, ask IA in natural language to create an infographic from the selection, and confirm a generated image file appears in the project tree and opens in an image tab without requiring exact command wording.
+- [ ] Select text in an active document, ask IA to create an infographic and put it in the document, and confirm the generated image file appears in the tree while Milkdown renders the inserted image in the document flow.
+- [ ] Disable the image-generation or image-asset permissions in IA settings, repeat an image-generation prompt, and confirm the action is blocked with settings guidance instead of creating files.
 - [ ] From an active document, disable `Editar documentos`, ask for a document edit, and confirm the AI does not modify the editor and tells the user the permission can be changed in `Configuración de la app > IA`.
 - [ ] In the pending-intent card, confirm Permitir búsqueda, Aplicar, and Cancelar perform structured actions and do not inject artificial user text into the conversation.
 - [ ] Continue the pending task from the `IA` tab or with no document active and confirm the preserved target document receives the unsaved buffer update.
@@ -181,6 +185,7 @@
 - [ ] In the browser development build, save an OpenAI API key and confirm the request succeeds through the web backend profile without a CORS or `Failed to fetch` error.
 - [ ] In IA, confirm the model selector shows intelligence and cost indicators, select a different model, close/reopen settings, and confirm the selected model persists.
 - [ ] In IA, confirm Visión de imágenes exposes enable/disable, model, detail, max images, max image size, image RAG indexing, and visual-description storage controls; change them, close/reopen settings, and confirm they persist.
+- [ ] In IA, confirm Generación de imágenes exposes enable/disable, GPT Image model, size, quality, output format, prompt metadata, and insertion confirmation controls; change them, close/reopen settings, and confirm they persist.
 - [ ] In IA, confirm Audio y transcripción exposes enable/disable, `gpt-realtime-whisper`, default target, default language, and favorite languages; change them, close/reopen settings, and confirm they persist.
 - [ ] Open the microphone chevron in the prompt and confirm only destination plus configured favorite languages appear, with the split microphone/stop action separate from the options chevron.
 - [ ] Use Transcribir al prompt and confirm speech appears in the prompt input, is editable, and does not submit until Enviar is clicked.

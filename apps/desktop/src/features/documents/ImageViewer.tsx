@@ -1,4 +1,4 @@
-import { Copy, FileText, Sparkles } from "lucide-react";
+import { Copy, FileImage, FileText, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { AssetMetadata, AssetReference, AssetUsageResponse, Project } from "../../types/domain";
 import { getProjectImageContentUrl, getProjectImageUsage } from "../../lib/api/projects";
@@ -11,6 +11,7 @@ type ImageViewerProps = {
   zoomPercent: number;
   fitToWindow: boolean;
   onAddToAiContext?: (assetId: string) => void;
+  onInsertIntoActiveDocument?: (assetId: string) => void;
   onAssetMetadataChange?: (asset: AssetMetadata | null) => void;
   onOpenReference?: (documentId: string, documentName: string) => void;
 };
@@ -23,6 +24,7 @@ export function ImageViewer({
   zoomPercent,
   fitToWindow,
   onAddToAiContext,
+  onInsertIntoActiveDocument,
   onAssetMetadataChange,
   onOpenReference,
 }: ImageViewerProps) {
@@ -129,6 +131,10 @@ export function ImageViewer({
             <button className="inline-flex h-7 items-center justify-center gap-1.5 rounded-md border border-orange-200 bg-brand-hover px-2 text-[10px] font-semibold text-brand-orange hover:bg-white" onClick={() => onAddToAiContext?.(assetId)}>
               <Sparkles size={13} />
               Contexto IA
+            </button>
+            <button className="inline-flex h-7 items-center justify-center gap-1.5 rounded-md border border-line bg-white px-2 text-[10px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange" onClick={() => onInsertIntoActiveDocument?.(assetId)}>
+              <FileImage size={13} />
+              Insertar
             </button>
           </section>
           <section className="min-w-0">

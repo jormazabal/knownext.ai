@@ -25,6 +25,7 @@ from app.schemas.project import (
 from app.services.app_storage import JsonFileStore
 from app.services.asset_reference_service import _format_markdown_target, asset_reference_service
 from app.services.filesystem_service import IMAGE_SUFFIXES, decode_node_id, encode_node_id, filesystem_service
+from app.services.ai_usage_service import ai_usage_service
 from app.services.openai_service import openai_service
 from app.services.project_service import project_service
 
@@ -81,6 +82,29 @@ class AssetService:
                     target.unlink(missing_ok=True)
                     raise HTTPException(status_code=413, detail="Image is too large")
                 output.write(chunk)
+        asset = self.get_asset(project_id, encode_node_id(project_id, _normalize_relative_path(target.relative_to(root.resolve()))))
+        return AssetImportResponse(tree=filesystem_service.get_tree(project_id, root), asset=asset)
+
+    def create_generated_image(
+        self,
+        project_id: str,
+        parent_id: str | None,
+        filename: str,
+        content: bytes,
+        metadata: dict[str, Any] | None = None,
+    ) -> AssetImportResponse:
+        root = project_service._get_project_root(project_id)
+        parent = filesystem_service._resolve_parent_folder(project_id, root, parent_id)
+        safe_filename = _safe_filename(filename)
+        if len(content) > MAX_IMAGE_BYTES:
+            raise HTTPException(status_code=413, detail="Generated image is too large")
+        if not content:
+            raise HTTPException(status_code=400, detail="Generated image is empty")
+        target = _unique_path(parent, safe_filename)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+        if metadata:
+            self._write_generated_metadata(project_id, target, root.resolve(), metadata)
         asset = self.get_asset(project_id, encode_node_id(project_id, _normalize_relative_path(target.relative_to(root.resolve()))))
         return AssetImportResponse(tree=filesystem_service.get_tree(project_id, root), asset=asset)
 
@@ -178,6 +202,14 @@ class AssetService:
                     model=str(vision.get("model") or "gpt-5.4-mini"),
                     detail=str(vision.get("detail") or "auto"),
                 )
+                ai_usage_service.record_vision_event(
+                    project_id=project_id,
+                    request_id=f"vision-index:{relative_path}:{image_path.stat().st_mtime_ns}",
+                    model=str(vision.get("model") or "gpt-5.4-mini"),
+                    detail=str(vision.get("detail") or "auto"),
+                    image_count=1,
+                    metadata={"assetPath": relative_path, "source": "visual_reindex"},
+                )
             except Exception as exc:
                 status = "error"
                 error = str(exc)
@@ -241,6 +273,28 @@ class AssetService:
     def _visual_store(self, project_id: str) -> JsonFileStore:
         safe_project = "".join(char if char.isalnum() or char in "._-" else "_" for char in project_id)
         return JsonFileStore(f"ai-image-index/{safe_project}.json")
+
+    def _generated_store(self, project_id: str) -> JsonFileStore:
+        safe_project = "".join(char if char.isalnum() or char in "._-" else "_" for char in project_id)
+        return JsonFileStore(f"ai-generated-images/{safe_project}.json")
+
+    def _write_generated_metadata(self, project_id: str, image_path: Path, root: Path, metadata: dict[str, Any]) -> None:
+        relative_path = _normalize_relative_path(image_path.relative_to(root))
+        store = self._generated_store(project_id)
+        data = store.read({"schemaVersion": 1, "images": []})
+        images = data.get("images") if isinstance(data.get("images"), list) else []
+        next_record = {
+            "path": relative_path,
+            "updatedAt": _now(),
+            **{
+                key: value
+                for key, value in metadata.items()
+                if isinstance(key, str) and value is not None and isinstance(value, str | int | float | bool | dict | list)
+            },
+        }
+        images = [record for record in images if not (isinstance(record, dict) and record.get("path") == relative_path)]
+        images.append(next_record)
+        store.write({"schemaVersion": 1, "images": images, "updatedAt": _now()})
 
     def _visual_record(self, project_id: str, relative_path: str) -> dict[str, Any] | None:
         data = self._visual_store(project_id).read({"schemaVersion": 1, "images": []})

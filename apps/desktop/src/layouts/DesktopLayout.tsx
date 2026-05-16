@@ -248,7 +248,11 @@ export function DesktopLayout(props: DesktopLayoutProps) {
       const controller = editorControllers[operation.documentId];
       if (!controller) continue;
 
-      const applied = controller.replaceMarkdown(operation.markdown, { addToHistory: operation.addToHistory ?? true });
+      const session = props.editorSessions.find((candidate) => candidate.documentId === operation.documentId);
+      const markdown = session?.document
+        ? materializeProjectImageReferences(operation.markdown, props.activeProject?.id ?? "", session.document.path, props.tree)
+        : operation.markdown;
+      const applied = controller.replaceMarkdown(markdown, { addToHistory: operation.addToHistory ?? true });
       if (!applied) {
         props.onEditorOperationFailed(operation);
         continue;
@@ -265,9 +269,12 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   }, [
     editorControllers,
     props.activeDocumentId,
+    props.activeProject?.id,
+    props.editorSessions,
     props.onEditorOperationApplied,
     props.onEditorOperationFailed,
     props.pendingEditorOperations,
+    props.tree,
   ]);
 
   useEffect(() => {
@@ -488,6 +495,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                           zoomPercent={imageZoomPercent}
                           fitToWindow={imageFitToWindow}
                           onAddToAiContext={props.onAddProjectImageContext}
+                          onInsertIntoActiveDocument={props.onInsertImageIntoActiveDocument}
                           onAssetMetadataChange={setActiveImageAsset}
                           onOpenReference={handleOpenDocument}
                         />
@@ -984,9 +992,17 @@ function isExternalImageTarget(target: string) {
 }
 
 function resolveMarkdownAssetPath(documentPath: string, target: string) {
-  const cleanTarget = target.split("#", 1)[0].split("?", 1)[0];
+  const cleanTarget = decodeMarkdownTargetPath(target.split("#", 1)[0].split("?", 1)[0]);
   const parentParts = documentPath.split("/").slice(0, -1);
   return normalizePathParts([...parentParts, ...cleanTarget.split("/")]);
+}
+
+function decodeMarkdownTargetPath(target: string) {
+  try {
+    return decodeURIComponent(target);
+  } catch {
+    return target;
+  }
 }
 
 function relativeMarkdownTarget(assetPath: string, documentPath: string) {

@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import io
 import json
+import base64
+import urllib.request
 from typing import Any
 
 from app.services.credential_service import credential_service
 
 
 DEFAULT_OPENAI_MODEL = "gpt-5.4-mini"
+DEFAULT_OPENAI_IMAGE_MODEL = "gpt-image-2"
 
 
 class OpenAiService:
@@ -33,6 +36,7 @@ class OpenAiService:
                     "content": (
                         "Eres el analizador de ejecución de KnowNext.ai. Devuelve solo JSON válido y mínimo. "
                         "No resuelvas todavía la tarea ni redactes contenido final. Clasifica semánticamente, sin palabras clave, idioma, regex ni listas de frases. "
+                        "Si el usuario pide una salida visual raster, infografía, portada, diagrama visual o recurso similar, clasifícalo como direct_action salvo que falte destino o contexto imprescindible. "
                         "direct_action significa que basta una ejecución directa. needs_permission significa que falta permiso web u otro permiso explícito. "
                         "needs_clarification significa que falta información imprescindible. agentic_task se reserva para trabajo largo con varios pasos, fuentes, documentos o checkpoints. "
                         "too_expensive_or_unclear significa que el coste o alcance no son razonables para ejecutar sin que el usuario reformule. "
@@ -90,6 +94,9 @@ class OpenAiService:
                     "content": (
                         "Eres el asistente documental de KnowNext.ai. Devuelve solo JSON válido con el esquema pedido. "
                         "Separa siempre la respuesta conversacional de los cambios aplicables. "
+                        "Puedes generar imágenes como assets del proyecto usando imageGeneration: detecta esa intención semánticamente sin depender de idioma, palabras clave, regex ni frases fijas. "
+                        "Si el usuario pide crear una imagen sin destino claro, usa imageGeneration.intent=generate_image_asset. Si pide ponerla, añadirla, insertarla o usarla dentro del documento activo, usa generate_and_insert_image. "
+                        "Las imágenes generadas siempre se guardan como archivo del proyecto antes de insertarse. No uses documentChange para inventar una imagen; usa imageGeneration. "
                         "Respeta request.executionMode: en quick nunca devuelvas interactionType=agentic_task, task ni uiPlacement=conversation_tab. "
                         "En quick resuelve en una sola ejecución directa; si requiere trabajo largo, responde que el usuario debe cambiar a Razonar. "
                         "Usa context.permissions como fuente de verdad: si el permiso necesario está activo, ejecuta con documentChange u operations sin pedir confirmación; "
@@ -179,6 +186,68 @@ class OpenAiService:
             ],
         )
         return (getattr(response, "output_text", None) or _extract_output_text(response)).strip()
+
+    def generate_image(
+        self,
+        prompt: str,
+        model: str = DEFAULT_OPENAI_IMAGE_MODEL,
+        size: str = "auto",
+        quality: str = "auto",
+        output_format: str = "png",
+    ) -> dict[str, Any]:
+        api_key = credential_service.get_openai_key()
+        if not api_key:
+            raise OpenAiUnavailableError("OpenAI API key is not configured")
+
+        try:
+            from openai import OpenAI
+        except ImportError as error:
+            raise OpenAiUnavailableError("OpenAI SDK is not installed") from error
+
+        client = OpenAI(api_key=api_key)
+        try:
+            response = client.images.generate(
+                model=model or DEFAULT_OPENAI_IMAGE_MODEL,
+                prompt=prompt,
+                size=size or "auto",
+                quality=quality or "auto",
+                output_format=output_format or "png",
+                n=1,
+            )
+        except TypeError:
+            response = client.images.generate(
+                model=model or DEFAULT_OPENAI_IMAGE_MODEL,
+                prompt=prompt,
+                size=size or "auto",
+                quality=quality or "auto",
+                n=1,
+            )
+
+        data = (getattr(response, "data", None) or [None])[0]
+        if data is None:
+            raise OpenAiProviderError("OpenAI did not return an image.")
+        b64_json = getattr(data, "b64_json", None) or (data.get("b64_json") if isinstance(data, dict) else None)
+        image_url = getattr(data, "url", None) or (data.get("url") if isinstance(data, dict) else None)
+        revised_prompt = getattr(data, "revised_prompt", None) or (data.get("revised_prompt") if isinstance(data, dict) else None)
+        if isinstance(b64_json, str) and b64_json.strip():
+            try:
+                image_bytes = base64.b64decode(b64_json)
+            except Exception as error:
+                raise OpenAiProviderError("OpenAI returned an invalid image payload.") from error
+        elif isinstance(image_url, str) and image_url.startswith(("http://", "https://")):
+            with urllib.request.urlopen(image_url, timeout=60) as image_response:
+                image_bytes = image_response.read(16 * 1024 * 1024)
+        else:
+            raise OpenAiProviderError("OpenAI did not return image bytes.")
+
+        return {
+            "bytes": image_bytes,
+            "revisedPrompt": revised_prompt if isinstance(revised_prompt, str) else None,
+            "model": model or DEFAULT_OPENAI_IMAGE_MODEL,
+            "size": size or "auto",
+            "quality": quality or "auto",
+            "format": output_format or "png",
+        }
 
     def create_vector_store(self, project_id: str) -> str:
         api_key = credential_service.get_openai_key()
@@ -505,7 +574,7 @@ def _interaction_plan_schema() -> dict[str, Any]:
         "properties": {
             "display": {"type": "string", "enum": ["bubble", "conversation", "none"]},
             "uiPlacement": {"type": "string", "enum": ["document_bubble", "conversation_tab", "none"]},
-            "interactionType": {"type": "string", "enum": ["chat", "document_edit", "project_operation", "agentic_task", "clarification", "mixed"]},
+            "interactionType": {"type": "string", "enum": ["chat", "document_edit", "project_operation", "agentic_task", "image_generation", "clarification", "mixed"]},
             "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
             "executionScope": {
                 "type": ["string", "null"],
@@ -559,6 +628,39 @@ def _interaction_plan_schema() -> dict[str, Any]:
                     "summary": {"type": "string"},
                 },
                 "required": ["targetDocumentId", "updatedMarkdown", "summary"],
+            },
+            "imageGeneration": {
+                "type": ["object", "null"],
+                "additionalProperties": False,
+                "properties": {
+                    "intent": {
+                        "type": "string",
+                        "enum": ["none", "generate_image_asset", "generate_and_insert_image", "ask_clarification"],
+                    },
+                    "prompt": {"type": ["string", "null"]},
+                    "altText": {"type": ["string", "null"]},
+                    "filename": {"type": ["string", "null"]},
+                    "insertIntoDocument": {"type": "boolean"},
+                    "targetDocumentId": {"type": ["string", "null"]},
+                    "placement": {"type": "string", "enum": ["after_selection", "cursor", "end"]},
+                    "model": {"type": ["string", "null"], "enum": ["gpt-image-2", "gpt-image-1.5", "gpt-image-1", "gpt-image-1-mini", None]},
+                    "size": {"type": ["string", "null"], "enum": ["auto", "1024x1024", "1536x1024", "1024x1536", None]},
+                    "quality": {"type": ["string", "null"], "enum": ["auto", "low", "medium", "high", None]},
+                    "format": {"type": ["string", "null"], "enum": ["png", "webp", "jpeg", None]},
+                },
+                "required": [
+                    "intent",
+                    "prompt",
+                    "altText",
+                    "filename",
+                    "insertIntoDocument",
+                    "targetDocumentId",
+                    "placement",
+                    "model",
+                    "size",
+                    "quality",
+                    "format",
+                ],
             },
             "task": {
                 "type": ["object", "null"],
@@ -650,6 +752,7 @@ def _interaction_plan_schema() -> dict[str, Any]:
             "answer",
             "pendingIntent",
             "documentChange",
+            "imageGeneration",
             "task",
             "operations",
         ],

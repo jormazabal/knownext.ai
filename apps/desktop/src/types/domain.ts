@@ -140,6 +140,10 @@ export type AiPermissionsConfig = {
   createFolders: boolean;
   createDocuments: boolean;
   deleteDocumentsAndFolders: boolean;
+  generateImages: boolean;
+  createImageAssets: boolean;
+  insertImagesIntoDocuments: boolean;
+  useDocumentContextForImageGeneration: boolean;
 };
 
 export type AiRagConfig = {
@@ -160,6 +164,22 @@ export type AiVisionConfig = {
   maxImageSizeMb: number;
   detail: "auto" | "low" | "high";
   storeVisualDescriptions: boolean;
+};
+
+export type AiImageGenerationModelId = "gpt-image-2" | "gpt-image-1.5" | "gpt-image-1" | "gpt-image-1-mini";
+
+export type AiImageGenerationConfig = {
+  enabled: boolean;
+  model: AiImageGenerationModelId;
+  size: "auto" | "1024x1024" | "1536x1024" | "1024x1536";
+  quality: "auto" | "low" | "medium" | "high";
+  outputFormat: "png" | "webp" | "jpeg";
+  defaultFolder: "document_folder" | "generated_assets" | "custom_folder";
+  customFolderPath: string;
+  maxImagesPerPrompt: number;
+  confirmBeforeDocumentInsert: boolean;
+  confirmBeforeUsingMultipleSources: boolean;
+  storePromptMetadata: boolean;
 };
 
 export type AiModelId = "gpt-5.5" | "gpt-5.4" | "gpt-5.4-mini" | "gpt-5.4-nano";
@@ -192,6 +212,7 @@ export type AiConfig = {
   permissions: AiPermissionsConfig;
   rag: AiRagConfig;
   vision: AiVisionConfig;
+  imageGeneration: AiImageGenerationConfig;
   agentic: AiAgenticConfig;
   transcription: AiTranscriptionConfig;
 };
@@ -353,7 +374,7 @@ export type AiInteractionMode = "document" | "project";
 export type AiInteractionStatus = "completed" | "blocked" | "error";
 export type AiInteractionDisplay = "bubble" | "conversation" | "none";
 export type AiUiPlacement = "document_bubble" | "conversation_tab" | "none";
-export type AiInteractionType = "chat" | "document_edit" | "project_operation" | "agentic_task" | "clarification" | "mixed";
+export type AiInteractionType = "chat" | "document_edit" | "project_operation" | "agentic_task" | "image_generation" | "clarification" | "mixed";
 export type AiConfidence = "high" | "medium" | "low";
 export type AiExecutionMode = "quick" | "reasoning";
 export type AiReasoningDepth = "light" | "medium" | "deep";
@@ -374,7 +395,9 @@ export type AiOperationType =
   | "provider_error"
   | "task_planned"
   | "task_checkpoint"
-  | "source_found";
+  | "source_found"
+  | "image_generated"
+  | "image_inserted";
 
 export type AiConversationEventType =
   | "user_message"
@@ -391,7 +414,9 @@ export type AiConversationEventType =
   | "provider_error"
   | "task_planned"
   | "task_checkpoint"
-  | "source_found";
+  | "source_found"
+  | "image_generated"
+  | "image_inserted";
 
 export type AiInteractionRequest = {
   projectId: string;
@@ -559,6 +584,21 @@ export type AiUpdatedDocument = {
   summary: string;
 };
 
+export type AiGeneratedImage = {
+  asset: AssetMetadata;
+  prompt: string;
+  revisedPrompt?: string | null;
+  altText: string;
+  markdownReference?: string | null;
+  insertedIntoDocumentId?: string | null;
+  sourceDocumentId?: string | null;
+  sourceSelection?: Record<string, unknown> | null;
+  model: string;
+  size: string;
+  quality: string;
+  format: string;
+};
+
 export type AiPendingDelete = {
   confirmationId: string;
   nodeIds: string[];
@@ -644,6 +684,7 @@ export type AiInteractionResponse = {
   conversationEvents: AiConversationEvent[];
   operations: AiOperation[];
   updatedDocument?: AiUpdatedDocument | null;
+  generatedImages?: AiGeneratedImage[];
   task?: AiAgenticTask | null;
   tree?: DocumentTreeNode[] | null;
   affectedDocuments: AffectedDocument[];
@@ -681,12 +722,28 @@ export type AiUsageModelSummary = {
   usageSource: "provider" | "estimated" | "unknown" | "mixed";
 };
 
+export type AiUsageCapabilitySummary = {
+  capability: "document_ai" | "image_generation" | "vision" | "audio" | "agentic_tasks";
+  label: string;
+  interactions: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  embeddingTokens: number;
+  totalTokens: number;
+  estimatedCost: number;
+  currency: "EUR";
+  usageSource: "provider" | "estimated" | "unknown" | "mixed";
+};
+
 export type AiUsageSummaryResponse = {
   month: string;
   currency: "EUR";
   estimated: boolean;
   totalEstimatedCost: number;
   generatedAt: string;
+  capabilities: AiUsageCapabilitySummary[];
   models: AiUsageModelSummary[];
 };
 
