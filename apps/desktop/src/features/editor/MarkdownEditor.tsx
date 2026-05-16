@@ -45,6 +45,7 @@ export function MarkdownEditor(props: MarkdownEditorProps) {
 
 const selectionFocusPluginKey = new PluginKey<SelectionFocusRange | null>("knownext-selection-focus");
 const transientTextPluginKey = new PluginKey<TransientTextPreview | null>("knownext-transient-text-preview");
+const persistentCaretPluginKey = new PluginKey<PersistentCaretState>("knownext-persistent-caret");
 
 function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, selectionFocus }: MarkdownEditorProps) {
   const skipInitialUpdate = useRef(true);
@@ -72,7 +73,7 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
 
     crepe.editor.config((ctx) => {
       ctx.update(historyProviderConfig.key, (config) => ({ ...config, depth: 100, newGroupDelay: 500 }));
-      ctx.update(prosePluginsCtx, (plugins) => [...plugins, createSelectionFocusPlugin(), createTransientTextPreviewPlugin()]);
+      ctx.update(prosePluginsCtx, (plugins) => [...plugins, createSelectionFocusPlugin(), createTransientTextPreviewPlugin(), createPersistentCaretPlugin()]);
       configureUnderlineMarkdownSerialization(ctx);
     });
     crepe.editor.use(remarkUnderlineHtmlPlugin).use(underlineSchema).use(toggleUnderlineCommand);
@@ -193,6 +194,12 @@ type TransientTextPreview = {
   text: string;
 };
 
+type PersistentCaretState = {
+  focused: boolean;
+  collapsed: boolean;
+  position: number | null;
+};
+
 function createSelectionFocusPlugin() {
   return new Plugin<SelectionFocusRange | null>({
     key: selectionFocusPluginKey,
@@ -248,6 +255,76 @@ function createTransientTextPreviewPlugin() {
       },
     },
   });
+}
+
+function createPersistentCaretPlugin() {
+  return new Plugin<PersistentCaretState>({
+    key: persistentCaretPluginKey,
+    state: {
+      init: (_config, state) => ({
+        focused: false,
+        collapsed: state.selection.empty,
+        position: state.selection.empty ? state.selection.from : null,
+      }),
+      apply(transaction, value) {
+        const meta = transaction.getMeta(persistentCaretPluginKey) as { focused?: boolean } | undefined;
+        const mappedPosition = value.position === null ? null : clampDocumentPosition(transaction.mapping.map(value.position, -1), transaction.doc.content.size);
+        const nextState: PersistentCaretState = {
+          focused: meta?.focused ?? value.focused,
+          collapsed: value.collapsed,
+          position: mappedPosition,
+        };
+
+        if (transaction.selectionSet) {
+          nextState.collapsed = transaction.selection.empty;
+          nextState.position = transaction.selection.empty ? transaction.selection.from : null;
+        }
+
+        return nextState;
+      },
+    },
+    props: {
+      handleDOMEvents: {
+        focus(view) {
+          view.dispatch(view.state.tr.setMeta(persistentCaretPluginKey, { focused: true }));
+          return false;
+        },
+        focusin(view) {
+          view.dispatch(view.state.tr.setMeta(persistentCaretPluginKey, { focused: true }));
+          return false;
+        },
+        blur(view) {
+          view.dispatch(view.state.tr.setMeta(persistentCaretPluginKey, { focused: false }));
+          return false;
+        },
+        focusout(view) {
+          view.dispatch(view.state.tr.setMeta(persistentCaretPluginKey, { focused: false }));
+          return false;
+        },
+      },
+      decorations(state) {
+        const caret = persistentCaretPluginKey.getState(state);
+        if (!caret || caret.focused || !caret.collapsed || caret.position === null) return null;
+
+        const widget = Decoration.widget(
+          caret.position,
+          () => {
+            const span = document.createElement("span");
+            span.className = "knownext-editor-static-caret";
+            span.setAttribute("aria-hidden", "true");
+            return span;
+          },
+          { side: -1 },
+        );
+
+        return DecorationSet.create(state.doc, [widget]);
+      },
+    },
+  });
+}
+
+function clampDocumentPosition(position: number, maxPosition: number) {
+  return Math.max(0, Math.min(position, maxPosition));
 }
 
 function readEditorSelection(state: EditorState): MarkdownEditorSelection | null {

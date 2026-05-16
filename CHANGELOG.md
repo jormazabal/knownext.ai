@@ -2,6 +2,13 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.15.1 - 2026-05-17
+
+- Unified the embedded AI prompt controls so context, mode, microphone, transcription menu, and send actions share the same background, border, and hover treatment.
+- Added differentiated microphone target icons for prompt transcription and document transcription, including the target selection menu.
+- Improved the Markdown editor cursor UX with an orange focused caret and a persistent fixed orange caret when focus moves to another control such as the AI prompt.
+- Hardened the editor caret behavior across focus changes so the document keeps visible insertion context without showing a blinking editor caret while another input is active.
+
 ## 0.15.0 - 2026-05-16
 
 - Added a compact document-tree search modal from the sidebar search icon for folder and Markdown document names.

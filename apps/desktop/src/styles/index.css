@@ -718,20 +718,22 @@ input[type="range"]::-moz-range-thumb {
 }
 
 [data-theme="dark"] .knownext-ai-context-button,
-[data-theme="dark"] .knownext-ai-mic-button {
-  background-color: transparent !important;
-}
-
-[data-theme="dark"] .knownext-ai-mic-control {
+[data-theme="dark"] .knownext-ai-mode-selector,
+[data-theme="dark"] .knownext-ai-mic-control,
+[data-theme="dark"] .knownext-ai-send-button {
   border-color: rgb(var(--app-border) / 0.72) !important;
   background-color: rgb(var(--app-panel-strong) / 0.72) !important;
   color: rgb(var(--app-text) / 0.9) !important;
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.035);
 }
 
-[data-theme="dark"] .knownext-ai-mic-control:hover {
+[data-theme="dark"] .knownext-ai-context-button:hover,
+[data-theme="dark"] .knownext-ai-mode-selector:hover,
+[data-theme="dark"] .knownext-ai-mic-control:hover,
+[data-theme="dark"] .knownext-ai-send-button:hover {
   border-color: rgb(130 132 142 / 0.82) !important;
   background-color: rgb(var(--app-panel-strong)) !important;
+  color: rgb(var(--accent)) !important;
 }
 
 [data-theme="dark"] .knownext-ai-mic-control-active,
@@ -741,38 +743,20 @@ input[type="range"]::-moz-range-thumb {
   color: rgb(var(--accent)) !important;
 }
 
-[data-theme="dark"] .knownext-ai-context-button:hover {
-  background-color: rgb(var(--app-panel-strong) / 0.86) !important;
-}
-
 [data-theme="dark"] .knownext-ai-send-button {
-  background-color: rgb(var(--accent)) !important;
-  color: #fff !important;
+  color: rgb(var(--accent)) !important;
 }
 
-[data-theme="dark"] .knownext-ai-send-button:hover {
-  background-color: rgb(var(--accent-hover)) !important;
-}
-
-[data-theme="dark"] .knownext-ai-mode-selector {
-  border: 1px solid rgb(var(--app-border) / 0.72);
-  background-color: rgb(var(--app-panel-strong) / 0.72) !important;
-  color: rgb(var(--app-text) / 0.9) !important;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.035);
-}
-
-[data-theme="dark"] .knownext-ai-mode-selector:hover,
 [data-theme="dark"] .knownext-ai-mode-selector[aria-expanded="true"] {
   background-color: rgb(var(--app-panel-strong)) !important;
-  color: rgb(var(--app-text)) !important;
+  border-color: rgb(var(--accent) / 0.42) !important;
+  color: rgb(var(--accent)) !important;
 }
 
-[data-theme="dark"] .knownext-ai-mode-selector:hover {
-  border-color: rgb(130 132 142 / 0.82);
-}
-
-[data-theme="dark"] .knownext-ai-mode-selector[aria-expanded="true"] {
-  border-color: rgb(var(--accent) / 0.42);
+[data-theme="dark"] .knownext-transcription-target-badge {
+  border-color: rgb(var(--app-border) / 0.72) !important;
+  background-color: rgb(var(--app-panel) / 0.96) !important;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.32) !important;
 }
 
 .knownext-toolbar-compact-menu {
@@ -873,6 +857,21 @@ input[type="range"]::-moz-range-thumb {
 
 .knownext-editor .ProseMirror * {
   border-color: rgb(var(--app-border));
+}
+
+.knownext-editor .knownext-editor-static-caret {
+  display: inline-block;
+  width: 0;
+  height: 1.18em;
+  margin-left: -1px;
+  border-left: 2px solid rgb(var(--accent));
+  vertical-align: -0.18em;
+  pointer-events: none;
+}
+
+.knownext-editor .ProseMirror:focus .knownext-editor-static-caret,
+.knownext-editor .ProseMirror:focus-within .knownext-editor-static-caret {
+  display: none;
 }
 
 [data-theme="dark"] .knownext-editor {
