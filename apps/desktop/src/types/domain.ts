@@ -272,6 +272,15 @@ export type DocumentTreeNode = {
   isEditing?: boolean;
 };
 
+export type DocumentNameSearchResult = {
+  id: string;
+  name: string;
+  type: "folder" | "document";
+  path: string[];
+  parentIds: string[];
+  matchRanges: Array<{ start: number; end: number }>;
+};
+
 export type AffectedDocument = {
   oldId: string;
   newId?: string | null;

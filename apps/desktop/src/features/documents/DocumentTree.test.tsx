@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DocumentTree } from "./DocumentTree";
@@ -33,12 +33,15 @@ describe("DocumentTree", () => {
   it("opens documents and toggles folders from the tree", async () => {
     const onOpenDocument = vi.fn();
     const onToggleNode = vi.fn();
+    const onActivateTreeNode = vi.fn();
 
     render(
       <DocumentTree
         nodes={nodes}
         activeDocumentId=""
         onOpenDocument={onOpenDocument}
+        onActivateTreeNode={onActivateTreeNode}
+        onSelectTreeNode={vi.fn()}
         onCreateFolder={vi.fn()}
         onCreateDocument={vi.fn()}
         onExpandTree={vi.fn()}
@@ -52,6 +55,7 @@ describe("DocumentTree", () => {
     );
 
     await userEvent.click(screen.getByText("Requisitos"));
+    expect(onActivateTreeNode).toHaveBeenCalledWith("folder-requirements");
     expect(onToggleNode).toHaveBeenCalledWith("folder-requirements");
 
     await userEvent.click(screen.getByText("requisitos-funcionales.md"));
@@ -66,6 +70,8 @@ describe("DocumentTree", () => {
         nodes={nodes}
         activeDocumentId=""
         onOpenDocument={vi.fn()}
+        onActivateTreeNode={vi.fn()}
+        onSelectTreeNode={vi.fn()}
         onCreateFolder={vi.fn()}
         onCreateDocument={vi.fn()}
         onExpandTree={vi.fn()}
@@ -94,6 +100,8 @@ describe("DocumentTree", () => {
         nodes={nodes}
         activeDocumentId=""
         onOpenDocument={vi.fn()}
+        onActivateTreeNode={vi.fn()}
+        onSelectTreeNode={vi.fn()}
         onCreateFolder={vi.fn()}
         onCreateDocument={vi.fn()}
         onExpandTree={vi.fn()}
@@ -122,6 +130,8 @@ describe("DocumentTree", () => {
         nodes={nodes}
         activeDocumentId=""
         onOpenDocument={vi.fn()}
+        onActivateTreeNode={vi.fn()}
+        onSelectTreeNode={vi.fn()}
         onCreateFolder={vi.fn()}
         onCreateDocument={vi.fn()}
         onExpandTree={vi.fn()}
@@ -160,6 +170,8 @@ describe("DocumentTree", () => {
         nodes={nodes}
         activeDocumentId=""
         onOpenDocument={vi.fn()}
+        onActivateTreeNode={vi.fn()}
+        onSelectTreeNode={vi.fn()}
         onCreateFolder={onCreateFolder}
         onCreateDocument={onCreateDocument}
         onImportFile={onImportFile}
@@ -174,7 +186,7 @@ describe("DocumentTree", () => {
     );
 
     expect(screen.getByText("Archivos")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Buscar en archivos (pendiente)" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "Buscar carpetas y documentos" })).toBeEnabled();
 
     await userEvent.click(screen.getByRole("button", { name: "Añadir" }));
     await userEvent.click(screen.getByRole("button", { name: /^Nueva carpeta/ }));
@@ -200,6 +212,69 @@ describe("DocumentTree", () => {
     expect(onExpandTree).toHaveBeenCalledTimes(1);
     expect(onCollapseTree).toHaveBeenCalledTimes(1);
     expect(onConfigureProject).toHaveBeenCalledTimes(1);
+  });
+
+  it("searches folders and documents by name fragments", async () => {
+    const onSelectTreeNode = vi.fn();
+
+    render(
+      <DocumentTree
+        nodes={nodes}
+        activeDocumentId=""
+        onOpenDocument={vi.fn()}
+        onActivateTreeNode={vi.fn()}
+        onSelectTreeNode={onSelectTreeNode}
+        onCreateFolder={vi.fn()}
+        onCreateDocument={vi.fn()}
+        onExpandTree={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onConfigureProject={vi.fn()}
+        onRenameNode={vi.fn()}
+        onToggleNode={vi.fn()}
+        onContextAction={vi.fn()}
+        onMoveNode={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Buscar carpetas y documentos" }));
+    await userEvent.type(screen.getByPlaceholderText("Buscar carpetas y documentos"), "func");
+
+    const dialog = screen.getByRole("dialog");
+    expect(screen.getByText("requisitos-funcionales.md")).toBeInTheDocument();
+    expect(within(dialog).getByText("Requisitos")).toBeInTheDocument();
+
+    await userEvent.keyboard("{Enter}");
+    expect(onSelectTreeNode).toHaveBeenCalledWith("doc-functional", "document", "requisitos-funcionales.md");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("selects the first folder match with tab when the query is inside the name", async () => {
+    const onSelectTreeNode = vi.fn();
+
+    render(
+      <DocumentTree
+        nodes={nodes}
+        activeDocumentId=""
+        onOpenDocument={vi.fn()}
+        onActivateTreeNode={vi.fn()}
+        onSelectTreeNode={onSelectTreeNode}
+        onCreateFolder={vi.fn()}
+        onCreateDocument={vi.fn()}
+        onExpandTree={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onConfigureProject={vi.fn()}
+        onRenameNode={vi.fn()}
+        onToggleNode={vi.fn()}
+        onContextAction={vi.fn()}
+        onMoveNode={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Buscar carpetas y documentos" }));
+    await userEvent.type(screen.getByPlaceholderText("Buscar carpetas y documentos"), "quis");
+    await userEvent.keyboard("{Tab}");
+
+    expect(onSelectTreeNode).toHaveBeenCalledWith("folder-requirements", "folder", "Requisitos");
   });
 });
 

@@ -48,6 +48,12 @@
 - [ ] Inspect the folder/document tree levels and confirm they match the active project's local folder.
 - [ ] Confirm Markdown documents, supported image files, and folders are shown in the navigation tree with distinct document/image/folder icons.
 - [ ] Confirm the file toolbar sits directly below the project selector with `Archivos` on the left and Buscar, Añadir, Vista del árbol, and Ajustes del proyecto icons aligned to the right.
+- [ ] Click Buscar and confirm a compact modal opens with the input focused, a close X, and no search field permanently added to the sidebar.
+- [ ] Type a middle or ending fragment of a folder name, for example `quis` for `Requisitos`, and confirm matching folders/documents appear even when the fragment is not at the start.
+- [ ] Type a middle or ending fragment of a document name, select the result with Enter, and confirm the modal closes, the document opens, parent folders expand, and the document is selected in the tree.
+- [ ] Select a folder result from search and confirm the modal closes, parent folders expand, that folder expands and is selected, while the current document remains open.
+- [ ] Confirm document search results show the document name plus a secondary parent-folder route for disambiguation, and that the route is not itself searched as content/name.
+- [ ] Confirm Up/Down changes the active search result, Tab and Enter select the active result, and Escape closes the search modal.
 - [ ] Open Añadir and confirm it offers Nueva carpeta, Nuevo Markdown, and Importar archivo for Markdown or image files.
 - [ ] Open Vista del árbol and confirm Ver todo, Solo Markdown, Solo imágenes, Expandir carpetas, and Contraer carpetas are grouped in one floating menu.
 - [ ] In desktop width, drag the divider next to the folder/document tree and confirm the left panel width changes with a visible vertical orange resize line.

@@ -19,18 +19,23 @@ import {
   FilePlus2,
   FileUp,
   Settings,
+  X,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState, type DragEvent, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { DocumentTreeNode } from "../../types/domain";
+import type { DocumentNameSearchResult, DocumentTreeNode } from "../../types/domain";
+import { getInlineNameCompletion, searchDocumentTreeByName } from "./documentNameSearch";
 
 type DocumentTreeProps = {
   nodes: DocumentTreeNode[];
   activeDocumentId: string;
+  activeTreeNodeId?: string;
   hasActiveProject?: boolean;
   onOpenDocument: (documentId: string, name: string) => void;
   onOpenImage?: (assetId: string, name: string, path: string) => void;
+  onActivateTreeNode: (nodeId: string) => void;
+  onSelectTreeNode: (nodeId: string, type: "folder" | "document", name: string) => void;
   onCreateFolder: () => void;
   onCreateDocument: () => void;
   onImportFile?: () => void;
@@ -61,9 +66,12 @@ export type DocumentTreeAction =
 export function DocumentTree({
   nodes,
   activeDocumentId,
+  activeTreeNodeId,
   hasActiveProject = true,
   onOpenDocument,
   onOpenImage,
+  onActivateTreeNode,
+  onSelectTreeNode,
   onCreateFolder,
   onCreateDocument,
   onImportFile,
@@ -86,7 +94,20 @@ export function DocumentTree({
   const [draggedNode, setDraggedNode] = useState<DocumentTreeNode | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string | null; valid: boolean; label: string } | null>(null);
   const [filter, setFilter] = useState<TreeFilter>("all");
+  const [searchOpen, setSearchOpen] = useState(false);
   const visibleNodes = filterTree(nodes, filter);
+  const selectedNodeId = activeTreeNodeId || activeDocumentId;
+
+  useEffect(() => {
+    if (!selectedNodeId) return;
+    const frame = window.requestAnimationFrame(() => {
+      const selectedRow = document.querySelector(`[data-tree-node-id="${escapeCssAttributeValue(selectedNodeId)}"]`);
+      if (selectedRow instanceof HTMLElement && typeof selectedRow.scrollIntoView === "function") {
+        selectedRow.scrollIntoView({ block: "nearest" });
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [selectedNodeId, filter]);
 
   function clearCloseTimer() {
     if (closeTimer.current !== null) {
@@ -200,6 +221,7 @@ export function DocumentTree({
           onCreateFolder={onCreateFolder}
           onCreateDocument={onCreateDocument}
           onImportFile={onImportFile}
+          onSearch={() => setSearchOpen(true)}
           onExpandTree={onExpandTree}
           onCollapseTree={onCollapseTree}
           onConfigureProject={onConfigureProject}
@@ -210,9 +232,10 @@ export function DocumentTree({
               key={node.id}
               node={node}
               depth={0}
-              activeDocumentId={activeDocumentId}
+              activeNodeId={selectedNodeId}
               onOpenDocument={onOpenDocument}
               onOpenImage={onOpenImage}
+              onActivateTreeNode={onActivateTreeNode}
               onRenameNode={onRenameNode}
               onToggleNode={onToggleNode}
               menuNodeId={openMenu?.node.id}
@@ -262,6 +285,20 @@ export function DocumentTree({
             document.body,
           )
         : null}
+      {searchOpen
+        ? createPortal(
+            <DocumentNameSearchDialog
+              nodes={nodes}
+              onClose={() => setSearchOpen(false)}
+              onSelect={(result) => {
+                setFilter("all");
+                setSearchOpen(false);
+                onSelectTreeNode(result.id, result.type, result.name);
+              }}
+            />,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
@@ -269,9 +306,10 @@ export function DocumentTree({
 type TreeNodeProps = {
   node: DocumentTreeNode;
   depth: number;
-  activeDocumentId: string;
+  activeNodeId: string;
   onOpenDocument: (documentId: string, name: string) => void;
   onOpenImage?: (assetId: string, name: string, path: string) => void;
+  onActivateTreeNode: (nodeId: string) => void;
   onRenameNode: (nodeId: string, name: string) => void;
   onToggleNode: (nodeId: string) => void;
   menuNodeId?: string;
@@ -288,9 +326,10 @@ type TreeNodeProps = {
 function TreeNode({
   node,
   depth,
-  activeDocumentId,
+  activeNodeId,
   onOpenDocument,
   onOpenImage,
+  onActivateTreeNode,
   onRenameNode,
   onToggleNode,
   menuNodeId,
@@ -304,7 +343,7 @@ function TreeNode({
   onFolderDrop,
 }: TreeNodeProps) {
   const isFolder = node.type === "folder";
-  const isActive = node.id === activeDocumentId;
+  const isActive = node.id === activeNodeId;
   const hasOpenMenu = node.id === menuNodeId;
   const isDragging = node.id === draggedNodeId;
   const isDropTarget = node.id === dropTarget?.id;
@@ -332,9 +371,13 @@ function TreeNode({
         onDragEnd={onDragEnd}
         onDragOver={isFolder ? (event) => onFolderDragOver(node, event) : undefined}
         onDrop={isFolder ? (event) => onFolderDrop(node, event) : undefined}
+        data-tree-node-id={node.id}
         onClick={() => {
           if (node.isEditing) return;
-          if (isFolder) onToggleNode(node.id);
+          if (isFolder) {
+            onActivateTreeNode(node.id);
+            onToggleNode(node.id);
+          }
           if (node.type === "document") onOpenDocument(node.id, node.name);
           if (node.type === "image" && node.path) onOpenImage?.(node.id, node.name, node.path);
         }}
@@ -386,9 +429,10 @@ function TreeNode({
               key={child.id}
               node={child}
               depth={depth + 1}
-              activeDocumentId={activeDocumentId}
+              activeNodeId={activeNodeId}
               onOpenDocument={onOpenDocument}
               onOpenImage={onOpenImage}
+              onActivateTreeNode={onActivateTreeNode}
               onRenameNode={onRenameNode}
               onToggleNode={onToggleNode}
               menuNodeId={menuNodeId}
@@ -405,6 +449,172 @@ function TreeNode({
         : null}
     </div>
   );
+}
+
+function DocumentNameSearchDialog({
+  nodes,
+  onClose,
+  onSelect,
+}: {
+  nodes: DocumentTreeNode[];
+  onClose: () => void;
+  onSelect: (result: DocumentNameSearchResult) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [query, setQuery] = useState("");
+  const [activeIndex, setActiveIndex] = useState(0);
+  const results = useMemo(() => searchDocumentTreeByName(nodes, query), [nodes, query]);
+  const activeResult = results[activeIndex] ?? results[0];
+  const completion = getInlineNameCompletion(query, results[0]);
+  const hasMore = query.trim().length > 0 && searchDocumentTreeByName(nodes, query, 11).length > results.length;
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [query]);
+
+  function selectResult(result = activeResult) {
+    if (result) onSelect(result);
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveIndex((currentIndex) => (results.length === 0 ? 0 : (currentIndex + 1) % results.length));
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveIndex((currentIndex) => (results.length === 0 ? 0 : (currentIndex - 1 + results.length) % results.length));
+      return;
+    }
+    if (event.key === "Enter" || event.key === "Tab") {
+      if (!activeResult) return;
+      event.preventDefault();
+      selectResult(activeResult);
+    }
+  }
+
+  return (
+    <div className="knownext-modal-overlay fixed inset-0 z-[90] flex items-start justify-center bg-black/20 px-4 pt-[11vh]" onMouseDown={onClose}>
+      <section
+        className="w-[min(560px,calc(100vw-32px))] overflow-hidden rounded-lg border border-line bg-white shadow-menu"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="document-name-search-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center gap-2 border-b border-line px-3 py-2.5">
+          <Search size={16} className="shrink-0 text-ink-secondary" />
+          <label id="document-name-search-title" className="sr-only">
+            Buscar carpetas y documentos
+          </label>
+          <div className="relative min-w-0 flex-1">
+            {completion ? (
+              <div className="pointer-events-none absolute inset-0 z-0 flex h-9 items-center overflow-hidden whitespace-pre px-1 text-[13px] text-ink-secondary/35" aria-hidden="true">
+                {query}
+                {completion}
+              </div>
+            ) : null}
+            <input
+              ref={inputRef}
+              className="relative z-10 h-9 w-full bg-transparent px-1 text-[13px] text-ink-primary caret-brand-orange outline-none placeholder:text-ink-secondary/70"
+              value={query}
+              placeholder="Buscar carpetas y documentos"
+              aria-autocomplete="list"
+              aria-controls="document-name-search-results"
+              onChange={(event) => setQuery(event.currentTarget.value)}
+              onKeyDown={handleKeyDown}
+            />
+          </div>
+          <button
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
+            type="button"
+            data-tooltip="Cerrar"
+            aria-label="Cerrar búsqueda"
+            onClick={onClose}
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <div id="document-name-search-results" className="max-h-[360px] overflow-y-auto p-1.5" role="listbox">
+          {query.trim().length === 0 ? (
+            <div className="px-3 py-8 text-center text-[11px] text-ink-secondary">Empieza a escribir un nombre.</div>
+          ) : results.length === 0 ? (
+            <div className="px-3 py-8 text-center text-[11px] text-ink-secondary">No hay carpetas ni documentos con ese nombre.</div>
+          ) : (
+            <>
+              {results.map((result, index) => (
+                <button
+                  key={result.id}
+                  className={[
+                    "flex min-h-[48px] w-full items-center gap-3 rounded-md px-2.5 py-2 text-left transition",
+                    index === activeIndex ? "bg-brand-hover text-brand-orange" : "hover:bg-panel",
+                  ].join(" ")}
+                  role="option"
+                  aria-selected={index === activeIndex}
+                  onMouseEnter={() => setActiveIndex(index)}
+                  onClick={() => selectResult(result)}
+                >
+                  <span
+                    className={[
+                      "grid h-8 w-8 shrink-0 place-items-center rounded-md border",
+                      result.type === "folder" ? "border-orange-200 bg-brand-hover text-brand-orange" : "border-line bg-white text-ink-secondary",
+                    ].join(" ")}
+                  >
+                    {result.type === "folder" ? <Folder size={15} /> : <FileText size={15} />}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[12px] font-semibold text-ink-primary">
+                      <HighlightedName name={result.name} ranges={result.matchRanges} />
+                    </span>
+                    <span className="mt-0.5 block truncate text-[10px] text-ink-secondary">{formatSearchPath(result.path)}</span>
+                  </span>
+                </button>
+              ))}
+              {hasMore ? <div className="px-3 pb-2 pt-1 text-[10px] text-ink-secondary">Sigue escribiendo para afinar.</div> : null}
+            </>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function HighlightedName({ name, ranges }: { name: string; ranges: Array<{ start: number; end: number }> }) {
+  if (ranges.length === 0) return <>{name}</>;
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  ranges.forEach((range) => {
+    if (range.start > cursor) parts.push(<span key={`${cursor}-${range.start}`}>{name.slice(cursor, range.start)}</span>);
+    parts.push(
+      <mark key={`${range.start}-${range.end}`} className="bg-transparent text-brand-orange">
+        {name.slice(range.start, range.end)}
+      </mark>,
+    );
+    cursor = range.end;
+  });
+  if (cursor < name.length) parts.push(<span key={`${cursor}-end`}>{name.slice(cursor)}</span>);
+  return <>{parts}</>;
+}
+
+function formatSearchPath(path: string[]) {
+  const parents = path.slice(0, -1);
+  if (parents.length === 0) return "Raíz del proyecto";
+  if (parents.length <= 3) return parents.join(" / ");
+  return `... / ${parents.slice(-3).join(" / ")}`;
+}
+
+function escapeCssAttributeValue(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 function getParentId(nodes: DocumentTreeNode[], nodeId: string, parentId: string | null = null): string | null | undefined {
@@ -425,6 +635,7 @@ function DocumentTreeToolbar({
   onCreateFolder,
   onCreateDocument,
   onImportFile,
+  onSearch,
   onExpandTree,
   onCollapseTree,
   onConfigureProject,
@@ -435,6 +646,7 @@ function DocumentTreeToolbar({
   onCreateFolder: () => void;
   onCreateDocument: () => void;
   onImportFile?: () => void;
+  onSearch: () => void;
   onExpandTree: () => void;
   onCollapseTree: () => void;
   onConfigureProject: () => void;
@@ -471,7 +683,7 @@ function DocumentTreeToolbar({
     <div ref={toolbarRef} className="relative mb-2 flex h-8 items-center justify-between gap-2 px-1.5">
       <span className="text-[10px] font-semibold uppercase text-ink-secondary">Archivos</span>
       <div className="flex items-center gap-0.5">
-        <ToolbarIconButton label="Buscar en archivos (pendiente)" disabled icon={Search} />
+        <ToolbarIconButton label="Buscar carpetas y documentos" disabled={disabled} icon={Search} onClick={() => runAction(onSearch)} />
         <ToolbarIconButton
           label="Añadir"
           icon={Plus}

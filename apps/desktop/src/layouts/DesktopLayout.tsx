@@ -62,6 +62,7 @@ type DesktopLayoutProps = {
   tabs: WorkspaceTab[];
   activeTabId: string;
   activeDocumentId: string;
+  activeTreeNodeId: string;
   activeImageId: string;
   editorSessions: EditorDocumentSession[];
   releaseNotesMarkdown: string;
@@ -117,6 +118,8 @@ type DesktopLayoutProps = {
   isSyncingProject: boolean;
   onOpenDocument: (documentId: string, name: string) => void;
   onOpenImage: (assetId: string, name: string, path: string) => void;
+  onActivateTreeNode: (nodeId: string) => void;
+  onSelectTreeNode: (nodeId: string, type: "folder" | "document", name: string) => void;
   onSelectTab: (documentId: string) => void;
   onCloseTab: (documentId: string) => void;
   onTreeContextAction: (action: DocumentTreeAction, node: DocumentTreeNode) => void;
@@ -369,9 +372,12 @@ export function DesktopLayout(props: DesktopLayoutProps) {
               <DocumentTree
                 nodes={props.tree}
                 activeDocumentId={props.activeDocumentId}
+                activeTreeNodeId={props.activeTreeNodeId}
                 hasActiveProject={Boolean(props.activeProject)}
                 onOpenDocument={handleOpenDocument}
                 onOpenImage={props.onOpenImage}
+                onActivateTreeNode={props.onActivateTreeNode}
+                onSelectTreeNode={props.onSelectTreeNode}
                 onCreateFolder={props.onCreateFolder}
                 onCreateDocument={props.onCreateDocument}
                 onImportFile={props.onImportProjectFile}
