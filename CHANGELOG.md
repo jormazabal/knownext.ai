@@ -2,6 +2,16 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.15.0 - 2026-05-16
+
+- Added a compact document-tree search modal from the sidebar search icon for folder and Markdown document names.
+- Added incremental name matching for fragments at the start, middle, or end of folder and document names, including multi-token queries and diacritic-insensitive matching.
+- Added contextual parent-folder paths in search results so documents can be distinguished without searching document content.
+- Added keyboard-first search behavior: focused input on open, Up/Down navigation, Tab/Enter selection, Escape close, and click-outside dismissal.
+- Added inline first-result completion in the search input with a softer suggestion layer that avoids visual gaps between typed text and completion.
+- Selecting a document now closes search, opens the document, expands parent folders, and scrolls the tree selection into view; selecting a folder expands and selects it without changing the current document.
+- Added focused frontend tests and manual acceptance coverage for name-only search behavior.
+
 ## 0.14.0 - 2026-05-16
 
 - Added AI-generated project images from the prompt: structured image-generation plans create normal image assets, open generated image tabs, and can insert relative Markdown image references into the active Milkdown document.
