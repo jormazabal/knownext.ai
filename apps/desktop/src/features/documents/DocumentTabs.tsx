@@ -1,4 +1,5 @@
 import { FileText, Image, PanelLeftOpen, ScrollText, Sparkles, X } from "lucide-react";
+import type { ReactNode } from "react";
 import type { WorkspaceTab } from "../../types/domain";
 
 type DocumentTabsProps = {
@@ -8,9 +9,10 @@ type DocumentTabsProps = {
   onOpenNavigation?: () => void;
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
+  rightSlot?: ReactNode;
 };
 
-export function DocumentTabs({ tabs, activeTabId, dirtyDocumentIds, onOpenNavigation, onSelectTab, onCloseTab }: DocumentTabsProps) {
+export function DocumentTabs({ tabs, activeTabId, dirtyDocumentIds, onOpenNavigation, onSelectTab, onCloseTab, rightSlot }: DocumentTabsProps) {
   const dirtyIds = new Set(dirtyDocumentIds);
 
   return (
@@ -66,6 +68,7 @@ export function DocumentTabs({ tabs, activeTabId, dirtyDocumentIds, onOpenNaviga
           );
         })}
       </div>
+      {rightSlot}
     </div>
   );
 }

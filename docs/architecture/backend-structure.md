@@ -23,6 +23,7 @@ Backend code lives in `backend/app`.
 - `git_service`: local Git operations mediated by FastAPI; React never executes Git.
 - `github_service`: GitHub REST API access for repository discovery, cache hydration, history, and commit creation.
 - `version_service`: provider abstraction for local Git and GitHub API histories. Development fakes must not be exposed as production history.
+- `external_changes_service`: project-scoped detection and import of files changed outside KnowNext.ai. It classifies local Git working-tree changes into safe, review, and blocked groups, creates a local version for selected safe paths, and optionally attempts remote sync through backend Git services.
 - `ai_service`: project-scoped AI orchestration for prompts, active document and containing-folder context, optional selected-text focus context, short recent conversation context, conversation events, structured interaction plans, document edit plans, image-generation plans, permission-gated project file operations including create, duplicate, move, and delete flows, guided task plans, configured task limits, and RAG query context. It must only apply document changes from explicit structured document-change fields or validated image insertion plans, never by inferring edits from conversational text.
 - `ai_context_service`: project-scoped active prompt context. It owns visible prompt sources, `@` project-document lookup, external file upload, text extraction, image payload preparation, one-hour inactivity expiry, source previews, source removal/extension, and conversion of extracted external text into project Markdown documents. React sends source ids; this service resolves current content at interaction time.
 - `transcription_service`: realtime microphone transcription proxy. React streams local PCM audio to FastAPI over a local WebSocket; this service opens the OpenAI Realtime transcription session with the configured model, normalizes delta/completed/error events, and never writes audio or transcript contents to trace logs.
@@ -82,6 +83,11 @@ AI-generated images use the same asset path as uploaded images. `ai_service` exe
 ## Draft and Sync Contracts
 
 - `POST /api/documents/sync-status` checks open document fingerprints for active external changes without loading full document content.
+- `GET /api/projects/{project_id}/external-changes` returns the current external-change set for the project.
+- `POST /api/projects/{project_id}/external-changes/scan` forces a rescan of external filesystem/Git changes.
+- `POST /api/projects/{project_id}/external-changes/import` imports selected external changes as a local version and returns the refreshed tree plus human sync state. React sends item decisions only; Git add/commit/push remains backend-owned.
 - `GET /api/drafts/orphans` lists recoverable drafts whose original file is missing.
 - `POST /api/drafts/{draftKey}/restore` recreates the original Markdown file only when it does not already exist.
 - `DELETE /api/drafts/{draftKey}` discards an internal draft by internal draft key.
+
+External-change detection is implemented for `local-files + local-git` projects using Git porcelain status. The backend treats Markdown and supported images as safe when small, attachments as review, deletions as review, and private/technical paths such as `.env`, key/certificate files, `.git`, `node_modules`, `dist`, and `build` as blocked or omitted. `local-cache + github-api` projects currently return an unsupported detection message until a cache baseline strategy is defined.

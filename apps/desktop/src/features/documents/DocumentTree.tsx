@@ -46,6 +46,7 @@ type DocumentTreeProps = {
   onToggleNode: (nodeId: string) => void;
   onContextAction: (action: DocumentTreeAction, node: DocumentTreeNode) => void;
   onMoveNode: (node: DocumentTreeNode, targetFolderId: string | null) => void | Promise<void>;
+  changeBadges?: Record<string, string>;
 };
 
 type TreeFilter = "all" | "documents" | "images";
@@ -82,6 +83,7 @@ export function DocumentTree({
   onToggleNode,
   onContextAction,
   onMoveNode,
+  changeBadges = {},
 }: DocumentTreeProps) {
   const closeTimer = useRef<number | null>(null);
   const expandTimer = useRef<number | null>(null);
@@ -247,6 +249,7 @@ export function DocumentTree({
               onDragEnd={finishDrag}
               onFolderDragOver={handleFolderDragOver}
               onFolderDrop={handleFolderDrop}
+              changeBadges={changeBadges}
             />
           ))
         ) : (
@@ -321,6 +324,7 @@ type TreeNodeProps = {
   onDragEnd: () => void;
   onFolderDragOver: (node: DocumentTreeNode, event: DragEvent<HTMLDivElement>) => void;
   onFolderDrop: (node: DocumentTreeNode, event: DragEvent<HTMLDivElement>) => void;
+  changeBadges: Record<string, string>;
 };
 
 function TreeNode({
@@ -341,6 +345,7 @@ function TreeNode({
   onDragEnd,
   onFolderDragOver,
   onFolderDrop,
+  changeBadges,
 }: TreeNodeProps) {
   const isFolder = node.type === "folder";
   const isActive = node.id === activeNodeId;
@@ -348,6 +353,7 @@ function TreeNode({
   const isDragging = node.id === draggedNodeId;
   const isDropTarget = node.id === dropTarget?.id;
   const shouldRenderChildren = isFolder && node.open && node.children?.length;
+  const changeBadge = node.path ? changeBadges[node.path] : undefined;
 
   return (
     <div>
@@ -411,6 +417,11 @@ function TreeNode({
         ) : (
           <>
             <span className={["min-w-0 flex-1 truncate", isActive ? "font-semibold" : ""].join(" ")}>{node.name}</span>
+            {changeBadge ? (
+              <span className="ml-1 max-w-[72px] shrink-0 truncate rounded bg-brand-hover px-1.5 py-0.5 text-[9px] font-semibold text-brand-orange">
+                {changeBadge}
+              </span>
+            ) : null}
             <button
               className="grid h-5 w-5 place-items-center rounded-md opacity-0 hover:bg-white group-hover:opacity-100"
               aria-label={`Abrir menú de ${node.name}`}
@@ -444,6 +455,7 @@ function TreeNode({
               onDragEnd={onDragEnd}
               onFolderDragOver={onFolderDragOver}
               onFolderDrop={onFolderDrop}
+              changeBadges={changeBadges}
             />
           ))
         : null}

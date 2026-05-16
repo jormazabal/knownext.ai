@@ -42,6 +42,7 @@ Any remaining mock fixtures must be limited to tests, Storybook/demo surfaces, o
 - Open documents are tracked as per-tab editing sessions in the root app state. Each session owns its own Markdown content, dirty state, draft metadata, and Milkdown instance while the tab remains open.
 - Unsaved document changes are autosaved through `src/lib/api/documents.ts` to FastAPI-managed internal drafts. React must not write draft files directly.
 - Open document sessions are checked with backend sync-status polling and window focus refreshes so external disk changes become visible without replacing local editor content.
+- Project-level external changes go through `src/lib/api/externalChanges.ts`. React polls the backend, renders a compact status indicator, a contextual banner, a review drawer, and tree badges, then sends explicit import decisions back to FastAPI. React never inspects the project folder or executes Git.
 - Recoverable orphan drafts are exposed through the account actions menu as a discrete maintenance panel.
 - The project AI conversation is a fixed first workspace tab whenever a project is active. It is project-scoped, not closable, and renders persisted conversation events from FastAPI.
 - AI edits update the in-memory document session and leave the document dirty; React does not write the AI result to disk until the normal document save flow runs.
@@ -102,3 +103,11 @@ Any remaining mock fixtures must be limited to tests, Storybook/demo surfaces, o
 - Table insertion passes explicit row/column options to the editor controller instead of relying on a fixed table size.
 - Extended underline visibility is driven by `AppearanceConfig.markdownExtendedUnderlineEnabled`; when enabled, Milkdown serializes underline as inline HTML.
 - Responsive compaction is CSS-driven so the toolbar remains one fixed row and moves lower-priority actions into menus instead of creating structural scroll.
+
+## External Changes UX
+
+- The global sync indicator lives at the right edge of the document tab row and uses product states: `Sincronizado`, `Cambios externos detectados`, `Revisión necesaria`, `Guardando versión`, `Sincronizando con GitHub`, `Pendiente de sincronizar`, and `Error de sincronización`.
+- When the active project has external changes, the document canvas shows a compact banner above the editor. Safe batches can be imported directly; risky batches route to review.
+- Review opens as a right drawer so the user keeps document context. The drawer groups files by folders, Markdown documents, images, attachments, private files, ignored files, and unsupported files. Safe items are preselected; review items need user selection; blocked items cannot be included.
+- Newly detected tree items receive temporary badges such as `Nuevo`, `Modificado`, `Eliminado`, or `Revisar`. Badges disappear after the external-change set is imported and the backend reports a clean state.
+- Copy must stay human and non-Git-heavy. The UI can say `versión local`, `GitHub`, `pendiente`, and `sincronizado`; it must not expose branch names, `git add`, `commit hash`, `origin`, or `main`.

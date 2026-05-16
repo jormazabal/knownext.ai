@@ -41,7 +41,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.15.1"
+    assert payload["version"] == "0.16.0"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -291,6 +291,62 @@ def test_project_tree_reads_local_folder_and_manages_files(tmp_path) -> None:
     deleted = client.delete(f"/api/projects/{project_id}/nodes/{renamed_id}")
     assert deleted.status_code == 200
     assert not (docs_root / "Guides" / "notes-renamed.md").exists()
+
+
+def test_external_changes_scan_classifies_and_imports_safe_git_changes(tmp_path) -> None:
+    docs_root = tmp_path / "external-docs"
+    docs_root.mkdir()
+    (docs_root / "intro.md").write_text("# Intro\n", encoding="utf-8")
+
+    device = client.post("/api/auth/github/device/start").json()
+    client.post("/api/auth/github/device/poll", json={"deviceCode": device["deviceCode"]})
+    created = client.post(
+        "/api/projects",
+        json={
+            "name": "External Docs",
+            "folderPath": str(docs_root),
+            "icon": "folder",
+            "iconColor": "#F37021",
+            "storageMode": "local-files",
+            "versioningMode": "local-git",
+            "syncMode": "none",
+        },
+    )
+    project_id = created.json()["id"]
+    os.system(f'git -C "{docs_root}" add intro.md')
+    os.system(f'git -C "{docs_root}" commit -m "Initial"')
+
+    (docs_root / "Documentacion API").mkdir()
+    (docs_root / "Documentacion API" / "overview.md").write_text("# API\n", encoding="utf-8")
+    (docs_root / ".env").write_text("SECRET=value\n", encoding="utf-8")
+
+    scanned = client.post(f"/api/projects/{project_id}/external-changes/scan")
+    assert scanned.status_code == 200
+    payload = scanned.json()
+    assert payload["summary"]["total"] >= 2
+    assert payload["summary"]["safe"] >= 1
+    assert payload["summary"]["blocked"] >= 1
+    assert payload["requiresReview"] is True
+    assert any(item["path"] == "Documentacion API/overview.md" and item["decision"] == "include" for item in payload["items"])
+    assert any(item["path"] == ".env" and item["decision"] == "omit" for item in payload["items"])
+
+    imported = client.post(
+        f"/api/projects/{project_id}/external-changes/import",
+        json={
+            "syncRemote": False,
+            "decisions": [
+                {
+                    "itemId": item["id"],
+                    "decision": "include" if item["risk"] == "safe" else "omit",
+                }
+                for item in payload["items"]
+            ],
+        },
+    )
+    assert imported.status_code == 200
+    assert imported.json()["status"] == "synced"
+    assert _find_tree_node(imported.json()["tree"], "overview.md")["type"] == "document"
+    assert ".env" not in os.popen(f'git -C "{docs_root}" ls-files').read()
 
 
 def test_project_tree_imports_and_exposes_image_assets(tmp_path) -> None:

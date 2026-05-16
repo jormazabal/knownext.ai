@@ -6,6 +6,9 @@ import { AiResponseBubble } from "../features/assistant/AiResponseBubble";
 import { DocumentStatusBar } from "../features/documents/DocumentStatusBar";
 import { DocumentTabs } from "../features/documents/DocumentTabs";
 import { DocumentTree, type DocumentTreeAction } from "../features/documents/DocumentTree";
+import { ExternalChangesBanner } from "../features/externalChanges/ExternalChangesBanner";
+import { ExternalChangesDrawer } from "../features/externalChanges/ExternalChangesDrawer";
+import { SyncStatusIndicator } from "../features/externalChanges/SyncStatusIndicator";
 import { ImageViewer } from "../features/documents/ImageViewer";
 import { MarkdownToolbar } from "../features/editor/MarkdownToolbar";
 import {
@@ -26,7 +29,7 @@ import { VersionHistoryPanel } from "../features/versions/VersionHistoryPanel";
 import { BrandMark } from "../components/brand/BrandMark";
 import { TitleBar } from "../components/window/TitleBar";
 import { getProjectImageContentUrl } from "../lib/api/projects";
-import type { AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentTreeNode, InsertImageReferenceResponse, LayoutConfig, Project, ProjectVersioningStatus, WorkspaceTab } from "../types/domain";
+import type { AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentTreeNode, ExternalChangeDecision, ExternalChangeSet, InsertImageReferenceResponse, LayoutConfig, Project, ProjectSyncState, ProjectVersioningStatus, WorkspaceTab } from "../types/domain";
 
 const sidebarWidthConfig = {
   defaultWidth: 338,
@@ -80,6 +83,12 @@ type DesktopLayoutProps = {
   historyOpen: boolean;
   historyEnabled: boolean;
   versioningStatus: ProjectVersioningStatus | null;
+  externalChangeSet: ExternalChangeSet | null;
+  externalChangeDecisions: Record<string, ExternalChangeDecision>;
+  externalChangesOpen: boolean;
+  externalChangesBusy: boolean;
+  projectSyncState: ProjectSyncState;
+  externalChangesMessage?: string | null;
   layoutConfig: LayoutConfig;
   onSelectProject: (project: Project) => void;
   onCreateProject: () => void;
@@ -99,6 +108,13 @@ type DesktopLayoutProps = {
   onLogout: () => void;
   onPullProject: () => void;
   onPushProject: () => void;
+  onOpenExternalChanges: () => void;
+  onCloseExternalChanges: () => void;
+  onRefreshExternalChanges: () => void;
+  onExternalChangeDecision: (itemId: string, decision: ExternalChangeDecision) => void;
+  onImportExternalChanges: () => void;
+  onImportSafeExternalChanges: () => void;
+  onOmitExternalChanges: () => void;
   onCreateVersion: (title: string) => Promise<CreateVersionResponse | null>;
   onSendAiPrompt: (prompt: string, selectionFocus?: AiSelectionFocus | null, options?: AiPromptExecutionOptions) => void | Promise<void>;
   onAiTranscriptionChange: (transcription: Partial<AiConfigStatus["transcription"]>) => void;
@@ -316,6 +332,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
     conflictStatus: props.activeDocumentConflictStatus,
     diskChanged: props.activeDocumentDiskChanged || props.activeDocumentConflictStatus === "disk-changed",
   });
+  const externalChangeBadges = useMemo(() => buildExternalChangeBadges(props.externalChangeSet), [props.externalChangeSet]);
 
   return (
     <div className="h-screen overflow-hidden bg-white text-ink-primary">
@@ -388,6 +405,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 onToggleNode={props.onToggleNode}
                 onContextAction={props.onTreeContextAction}
                 onMoveNode={props.onMoveTreeNode}
+                changeBadges={externalChangeBadges}
               />
             ) : null}
           </div>
@@ -459,6 +477,14 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             onOpenNavigation={() => setNavigationOpen(true)}
             onSelectTab={props.onSelectTab}
             onCloseTab={props.onCloseTab}
+            rightSlot={
+              <SyncStatusIndicator
+                changeSet={props.externalChangeSet}
+                syncState={props.projectSyncState}
+                busy={props.externalChangesBusy}
+                onOpen={props.onOpenExternalChanges}
+              />
+            }
           />
               {hasReleaseNotes || hasAiConversation || hasOpenImage ? null : (
               <MarkdownToolbar
@@ -507,6 +533,13 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                         />
                       ) : (
                         <>
+                      <ExternalChangesBanner
+                        changeSet={props.externalChangeSet}
+                        syncState={props.projectSyncState}
+                        busy={props.externalChangesBusy}
+                        onReview={props.onOpenExternalChanges}
+                        onImportSafe={props.onImportSafeExternalChanges}
+                      />
                       {props.activeDocumentDiskChanged || props.activeDocumentConflictStatus === "orphaned" ? (
                         <DocumentConflictBanner
                           conflictStatus={props.activeDocumentConflictStatus}
@@ -619,6 +652,20 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                   }}
                 />
               ) : null}
+              <ExternalChangesDrawer
+                open={props.externalChangesOpen}
+                changeSet={props.externalChangeSet}
+                decisions={props.externalChangeDecisions}
+                syncState={props.projectSyncState}
+                busy={props.externalChangesBusy}
+                message={props.externalChangesMessage}
+                onDecisionChange={props.onExternalChangeDecision}
+                onImport={props.onImportExternalChanges}
+                onImportSafe={props.onImportSafeExternalChanges}
+                onOmitAll={props.onOmitExternalChanges}
+                onRefresh={props.onRefreshExternalChanges}
+                onClose={props.onCloseExternalChanges}
+              />
               {hasOpenDocument ? (
                 <DocumentStatusBar
                   statusLabel={activeStatus.label}
@@ -1136,6 +1183,15 @@ function getDocumentStatus({
   if (hasRecoveredDraft) return { label: "Borrador recuperado", tone: "warning" as const };
   if (isDirty) return { label: "Cambios sin guardar", tone: "warning" as const };
   return { label: "Sin cambios", tone: "success" as const };
+}
+
+function buildExternalChangeBadges(changeSet: ExternalChangeSet | null): Record<string, string> {
+  if (!changeSet?.items.length) return {};
+  return changeSet.items.reduce<Record<string, string>>((badges, item) => {
+    if (item.risk === "blocked") return badges;
+    badges[item.path] = item.risk === "review" ? "Revisar" : item.changeType === "modified" ? "Modificado" : item.changeType === "deleted" ? "Eliminado" : "Nuevo";
+    return badges;
+  }, {});
 }
 
 function ImageWorkspaceStatusBar({
