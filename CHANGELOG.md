@@ -2,6 +2,14 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.16.0 - 2026-05-17
+
+- Added external-change detection for local Git projects so pasted folders and files from Windows Explorer are surfaced inside KnowNext.ai instead of silently waiting in Git status.
+- Added a compact sync indicator, document banner, review drawer, and temporary tree badges for external changes, using product language instead of Git internals.
+- Classified external changes into safe, review, and blocked groups, with Markdown/images preselected, attachments/deletions requiring review, and private or technical files omitted.
+- Added backend-mediated import of selected external changes into a local version, with optional GitHub sync handled outside React.
+- Updated product, architecture, and manual acceptance documentation for the external-change import workflow.
+
 ## 0.15.1 - 2026-05-17
 
 - Unified the embedded AI prompt controls so context, mode, microphone, transcription menu, and send actions share the same background, border, and hover treatment.

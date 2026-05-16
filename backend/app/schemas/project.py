@@ -36,6 +36,73 @@ class ProjectVersioningStatus(BaseModel):
     lastVersionRelativeTime: str | None = None
 
 
+ExternalChangeType = Literal["added", "modified", "deleted", "renamed"]
+ExternalChangeKind = Literal["folder", "document", "image", "attachment", "private", "ignored", "unsupported"]
+ExternalChangeRisk = Literal["safe", "review", "blocked"]
+ExternalChangeDecision = Literal["include", "omit", "review"]
+ExternalChangeSetStatus = Literal["none", "safe", "needs-review", "blocked"]
+ProjectSyncState = Literal["synced", "saving", "syncing", "pending", "review-required", "error", "unsupported"]
+
+
+class ExternalChangeItem(BaseModel):
+    id: str
+    path: str
+    name: str
+    changeType: ExternalChangeType
+    kind: ExternalChangeKind
+    risk: ExternalChangeRisk
+    decision: ExternalChangeDecision
+    sizeBytes: int | None = None
+    reason: str | None = None
+
+
+class ExternalChangeSummary(BaseModel):
+    total: int = 0
+    safe: int = 0
+    review: int = 0
+    blocked: int = 0
+    added: int = 0
+    modified: int = 0
+    deleted: int = 0
+    folders: int = 0
+    documents: int = 0
+    images: int = 0
+    omitted: int = 0
+    totalBytes: int = 0
+
+
+class ExternalChangeSet(BaseModel):
+    id: str
+    projectId: str
+    title: str
+    source: Literal["filesystem", "git", "github-api-cache"] = "filesystem"
+    status: ExternalChangeSetStatus
+    detectedAt: str
+    requiresReview: bool
+    summary: ExternalChangeSummary
+    items: list[ExternalChangeItem]
+    message: str | None = None
+
+
+class ExternalChangeImportDecision(BaseModel):
+    itemId: str
+    decision: ExternalChangeDecision
+
+
+class ExternalChangeImportRequest(BaseModel):
+    decisions: list[ExternalChangeImportDecision] = []
+    syncRemote: bool = True
+
+
+class ExternalChangeImportResult(BaseModel):
+    status: ProjectSyncState
+    message: str
+    tree: list["TreeNode"]
+    versionTitle: str | None = None
+    syncedAt: str | None = None
+    pendingRemoteSync: bool = False
+
+
 class ProjectCapabilities(BaseModel):
     canCreateLocalProject: bool = True
     canOpenLocalFolder: bool = True

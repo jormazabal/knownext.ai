@@ -68,6 +68,72 @@ export type ProjectVersioningStatus = {
   lastVersionRelativeTime?: string | null;
 };
 
+export type ExternalChangeType = "added" | "modified" | "deleted" | "renamed";
+export type ExternalChangeKind = "folder" | "document" | "image" | "attachment" | "private" | "ignored" | "unsupported";
+export type ExternalChangeRisk = "safe" | "review" | "blocked";
+export type ExternalChangeDecision = "include" | "omit" | "review";
+export type ExternalChangeSetStatus = "none" | "safe" | "needs-review" | "blocked";
+export type ProjectSyncState = "synced" | "saving" | "syncing" | "pending" | "review-required" | "error" | "unsupported";
+
+export type ExternalChangeItem = {
+  id: string;
+  path: string;
+  name: string;
+  changeType: ExternalChangeType;
+  kind: ExternalChangeKind;
+  risk: ExternalChangeRisk;
+  decision: ExternalChangeDecision;
+  sizeBytes?: number | null;
+  reason?: string | null;
+};
+
+export type ExternalChangeSummary = {
+  total: number;
+  safe: number;
+  review: number;
+  blocked: number;
+  added: number;
+  modified: number;
+  deleted: number;
+  folders: number;
+  documents: number;
+  images: number;
+  omitted: number;
+  totalBytes: number;
+};
+
+export type ExternalChangeSet = {
+  id: string;
+  projectId: string;
+  title: string;
+  source: "filesystem" | "git" | "github-api-cache";
+  status: ExternalChangeSetStatus;
+  detectedAt: string;
+  requiresReview: boolean;
+  summary: ExternalChangeSummary;
+  items: ExternalChangeItem[];
+  message?: string | null;
+};
+
+export type ExternalChangeImportDecision = {
+  itemId: string;
+  decision: ExternalChangeDecision;
+};
+
+export type ExternalChangeImportRequest = {
+  decisions: ExternalChangeImportDecision[];
+  syncRemote: boolean;
+};
+
+export type ExternalChangeImportResult = {
+  status: ProjectSyncState;
+  message: string;
+  tree: DocumentTreeNode[];
+  versionTitle?: string | null;
+  syncedAt?: string | null;
+  pendingRemoteSync: boolean;
+};
+
 export type AuthUser = {
   login: string;
   name?: string | null;

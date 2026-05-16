@@ -130,6 +130,14 @@
 - [ ] With GitHub login, open the version history panel on a versioned project.
 - [ ] Click Crear versión and confirm either a new version is created or a clear no-changes/provider error appears.
 - [ ] In a Git local + sync project, use Traer cambios and Subir cambios from the history panel and confirm status feedback is visible.
+- [ ] In a local Git project, paste a small folder with Markdown files into the project from Windows Explorer and confirm KnowNext.ai detects external changes without stealing editor focus.
+- [ ] Confirm the document tab row shows a compact sync indicator and the editor shows a contextual banner with Revisar and Importar seguros.
+- [ ] Open Revisar and confirm the right drawer groups folders, Markdown documents, images, attachments, private files, omitted files, and unsupported files with clear counts and decisions.
+- [ ] Confirm safe Markdown/image items are preselected, review items can be included or omitted, and private files such as `.env`, `.pem`, or `.key` cannot be included.
+- [ ] Confirm newly detected files/folders appear in the tree with temporary Nuevo/Revisar/Modificado badges and no permanent action icons.
+- [ ] Import selected safe changes and confirm a local version is created, the tree refreshes, badges disappear after clean scan, and the UI reports either Sincronizado or Pendiente de sincronizar with GitHub.
+- [ ] Paste a large or mixed folder and confirm KnowNext.ai requires review instead of importing immediately.
+- [ ] Modify or delete a file externally and confirm the change is classified as Modificado or Eliminado, with deletions requiring review.
 - [ ] In desktop width, drag the divider next to the version history panel and confirm the right panel width changes with a visible vertical orange resize line.
 - [ ] In desktop width, focus the version history divider with the keyboard and confirm arrow keys resize the right panel within min/max limits.
 - [ ] Restart the app, open history, and confirm the history panel width is restored from `config.json`.

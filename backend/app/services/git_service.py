@@ -79,6 +79,29 @@ class GitService:
             raise HTTPException(status_code=409, detail="Project is not a Git repository")
         return self._run(root, ["git", "push"], allow_empty=True)
 
+    def porcelain_status(self, root: Path) -> str:
+        if not self.is_repository(root):
+            return ""
+        return self._run(root, ["git", "status", "--porcelain", "-uall"], allow_empty=True)
+
+    def has_remote_origin(self, root: Path) -> bool:
+        if not self.is_repository(root):
+            return False
+        remotes = {remote.strip() for remote in self._run(root, ["git", "remote"], allow_empty=True).splitlines()}
+        return "origin" in remotes
+
+    def create_project_version(self, root: Path, relative_paths: list[str], title: str) -> str | None:
+        self.ensure_repository(root)
+        paths = [path for path in relative_paths if path.strip()]
+        if not paths:
+            raise HTTPException(status_code=400, detail="No paths selected for version")
+        self._run(root, ["git", "add", "--", *paths])
+        status = self._run(root, ["git", "status", "--porcelain", "--", *paths], allow_empty=True)
+        if not status.strip():
+            raise HTTPException(status_code=409, detail="No selected changes to version")
+        self._run(root, ["git", "commit", "-m", title.strip() or "Importa cambios externos"])
+        return self._run(root, ["git", "rev-parse", "--short", "HEAD"], allow_empty=True).strip() or None
+
     def set_remote_origin(self, root: Path, remote_url: str) -> None:
         self.ensure_repository(root)
         remotes = {remote.strip() for remote in self._run(root, ["git", "remote"], allow_empty=True).splitlines()}

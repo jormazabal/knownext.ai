@@ -63,6 +63,7 @@ import {
   saveDocument,
   saveDocumentDraft,
 } from "../lib/api/documents";
+import { getExternalChanges, importExternalChanges, scanExternalChanges } from "../lib/api/externalChanges";
 import { APP_VERSION } from "../lib/appVersion";
 import { RELEASE_NOTES_MARKDOWN } from "../lib/releaseNotes";
 import { getAuthStatus, logout as logoutGithub, pollGithubDeviceFlow, startGithubDeviceFlow } from "../lib/api/auth";
@@ -136,6 +137,10 @@ import type {
   GithubDeviceStartResponse,
   GithubRepositorySummary,
   CreateVersionResponse,
+  ExternalChangeDecision,
+  ExternalChangeSet,
+  ExternalChangeImportRequest,
+  ProjectSyncState,
   WorkspaceTab,
 } from "../types/domain";
 import {
@@ -218,6 +223,13 @@ export function App() {
   const [githubRepositories, setGithubRepositories] = useState<GithubRepositorySummary[]>([]);
   const [githubRepositoriesLoading, setGithubRepositoriesLoading] = useState(false);
   const [syncState, setSyncState] = useState<"idle" | "pulling" | "pushing">("idle");
+  const [externalChangeSet, setExternalChangeSet] = useState<ExternalChangeSet | null>(null);
+  const [externalChangeDecisions, setExternalChangeDecisions] = useState<Record<string, ExternalChangeDecision>>({});
+  const [externalChangesOpen, setExternalChangesOpen] = useState(false);
+  const [externalChangesBusy, setExternalChangesBusy] = useState(false);
+  const [projectSyncState, setProjectSyncState] = useState<ProjectSyncState>("synced");
+  const [externalChangesMessage, setExternalChangesMessage] = useState<string | null>(null);
+  const [mutedExternalChangeSetId, setMutedExternalChangeSetId] = useState<string | null>(null);
   const lastTraceLogRef = useRef<{ fingerprint: string; timestamp: number } | null>(null);
   const githubLoginPollingRef = useRef(false);
   const lastDocumentContextRef = useRef<{ id: string | null; path: string | null }>({ id: null, path: null });
@@ -422,6 +434,21 @@ export function App() {
     if (!configLoaded || !activeProject) return;
     void refreshProjectCapabilityState(activeProject.id);
   }, [authStatus.isAuthenticated, activeProject?.id, configLoaded]);
+
+  useEffect(() => {
+    if (!configLoaded || !activeProject) {
+      setExternalChangeSet(null);
+      setExternalChangeDecisions({});
+      setMutedExternalChangeSetId(null);
+      setProjectSyncState("synced");
+      return;
+    }
+    void refreshExternalChangeSet(activeProject.id, { refreshTreeOnChanges: true, silent: true });
+    const interval = window.setInterval(() => {
+      void refreshExternalChangeSet(activeProject.id, { refreshTreeOnChanges: true, silent: true });
+    }, 8000);
+    return () => window.clearInterval(interval);
+  }, [activeProject?.id, configLoaded]);
 
   useEffect(() => {
     if (!configLoaded || !activeProject) {
@@ -648,6 +675,71 @@ export function App() {
       if (!status?.enabled) setHistoryOpen(false);
     } catch (error) {
       showError(error, "No se pudo actualizar el estado de versionado del proyecto.");
+    }
+  }
+
+  async function refreshExternalChangeSet(projectId = activeProject?.id, options: { refreshTreeOnChanges?: boolean; silent?: boolean } = {}) {
+    if (!projectId) return;
+    try {
+      const changeSet = options.silent ? await getExternalChanges(projectId) : await scanExternalChanges(projectId);
+      if (changeSet.summary.total > 0 && changeSet.id === mutedExternalChangeSetId) {
+        setExternalChangeSet(null);
+        setExternalChangeDecisions({});
+        setExternalChangesMessage(null);
+        if (projectSyncState !== "pending") setProjectSyncState("synced");
+        return;
+      }
+      setExternalChangeSet(changeSet);
+      setExternalChangeDecisions(buildDefaultExternalChangeDecisions(changeSet));
+      if (changeSet.summary.total > 0) {
+        setProjectSyncState(changeSet.requiresReview ? "review-required" : "pending");
+        if (options.refreshTreeOnChanges) {
+          setTree(await getProjectTree(projectId));
+        }
+      } else if (projectSyncState !== "pending") {
+        setProjectSyncState(changeSet.status === "none" && changeSet.message ? "unsupported" : "synced");
+      }
+      setExternalChangesMessage(changeSet.message ?? null);
+    } catch (error) {
+      if (!options.silent) showError(error, "No se pudieron revisar los cambios externos.");
+    }
+  }
+
+  function handleExternalChangeDecision(itemId: string, decision: ExternalChangeDecision) {
+    setExternalChangeDecisions((currentDecisions) => ({ ...currentDecisions, [itemId]: decision }));
+  }
+
+  function handleOmitExternalChanges() {
+    if (externalChangeSet) setMutedExternalChangeSetId(externalChangeSet.id);
+    setExternalChangeSet(null);
+    setExternalChangeDecisions({});
+    setExternalChangesOpen(false);
+    setExternalChangesMessage("Cambios omitidos en esta revisión.");
+    if (projectSyncState !== "pending") setProjectSyncState("synced");
+  }
+
+  async function handleImportExternalChanges(options: { safeOnly?: boolean } = {}) {
+    if (!activeProject || !externalChangeSet) return;
+    const decisions = buildExternalImportDecisions(externalChangeSet, externalChangeDecisions, options.safeOnly);
+    setExternalChangesBusy(true);
+    setProjectSyncState("saving");
+    setExternalChangesMessage("Guardando versión local antes de sincronizar con GitHub.");
+    try {
+      const payload: ExternalChangeImportRequest = { decisions, syncRemote: true };
+      const result = await importExternalChanges(activeProject.id, payload);
+      setTree(result.tree);
+      setProjectSyncState(result.status);
+      setExternalChangesMessage(result.message);
+      await refreshProjectCapabilityState(activeProject.id);
+      await refreshExternalChangeSet(activeProject.id, { silent: true });
+      setProjectSyncState(result.status);
+      setExternalChangesMessage(result.message);
+      if (!result.pendingRemoteSync) setExternalChangesOpen(false);
+    } catch (error) {
+      setProjectSyncState("error");
+      showError(error, "No se pudieron importar los cambios externos.");
+    } finally {
+      setExternalChangesBusy(false);
     }
   }
 
@@ -1162,6 +1254,12 @@ export function App() {
       setActiveTreeNodeId(nextProjectTabs.activeDocumentId);
       setImageTabs([]);
       setActiveImageId("");
+      setExternalChangeSet(null);
+      setExternalChangeDecisions({});
+      setExternalChangesMessage(null);
+      setMutedExternalChangeSetId(null);
+      setProjectSyncState("synced");
+      void refreshExternalChangeSet(active.id, { refreshTreeOnChanges: true, silent: true });
       if (!nextVersioningStatus.enabled) setHistoryOpen(false);
     } catch (error) {
       showError(error, "No se pudo cambiar de proyecto.");
@@ -1311,6 +1409,11 @@ export function App() {
         setActiveTreeNodeId("");
         setDocumentSessions({});
         setHistoryOpen(false);
+        setExternalChangeSet(null);
+        setExternalChangeDecisions({});
+        setExternalChangesMessage(null);
+        setMutedExternalChangeSetId(null);
+        setProjectSyncState("synced");
         return;
       }
 
@@ -1406,6 +1509,7 @@ export function App() {
       const response = await pullProject(activeProject.id);
       setTree(await getProjectTree(activeProject.id));
       await refreshProjectCapabilityState(activeProject.id);
+      await refreshExternalChangeSet(activeProject.id, { silent: true });
       setNotice({ title: "Sincronización completada", message: response.message, tone: "info" });
     } catch (error) {
       showError(error, "No se pudo traer cambios del proveedor remoto.");
@@ -1420,6 +1524,8 @@ export function App() {
     try {
       const response = await pushProject(activeProject.id);
       await refreshProjectCapabilityState(activeProject.id);
+      setProjectSyncState("synced");
+      setExternalChangesMessage(response.message);
       setNotice({ title: "Sincronización completada", message: response.message, tone: "info" });
     } catch (error) {
       showError(error, "No se pudieron enviar cambios al proveedor remoto.");
@@ -2146,6 +2252,12 @@ export function App() {
         historyOpen={historyOpen}
         historyEnabled={historyEnabled}
         versioningStatus={versioningStatus}
+        externalChangeSet={externalChangeSet}
+        externalChangeDecisions={externalChangeDecisions}
+        externalChangesOpen={externalChangesOpen}
+        externalChangesBusy={externalChangesBusy}
+        projectSyncState={projectSyncState}
+        externalChangesMessage={externalChangesMessage}
         layoutConfig={layoutConfig}
         onSelectProject={handleSelectProject}
         onCreateProject={() => setCreateProjectOpen(true)}
@@ -2173,6 +2285,13 @@ export function App() {
         onLogout={() => void handleLogoutGithub()}
         onPullProject={() => void handlePullProject()}
         onPushProject={() => void handlePushProject()}
+        onOpenExternalChanges={() => setExternalChangesOpen(true)}
+        onCloseExternalChanges={() => setExternalChangesOpen(false)}
+        onRefreshExternalChanges={() => void refreshExternalChangeSet(activeProject?.id, { refreshTreeOnChanges: true })}
+        onExternalChangeDecision={handleExternalChangeDecision}
+        onImportExternalChanges={() => void handleImportExternalChanges()}
+        onImportSafeExternalChanges={() => void handleImportExternalChanges({ safeOnly: true })}
+        onOmitExternalChanges={handleOmitExternalChanges}
         onCreateVersion={handleCreateActiveVersion}
         onSendAiPrompt={handleSendAiPrompt}
         onAiTranscriptionChange={handleAiTranscriptionChange}
@@ -3133,6 +3252,28 @@ function areProjectTabsEqual(first: ProjectTabsConfig | undefined, second: Proje
     const otherTab = second.openTabs[index];
     return tab.id === otherTab.id && tab.name === otherTab.name;
   });
+}
+
+function buildDefaultExternalChangeDecisions(changeSet: ExternalChangeSet): Record<string, ExternalChangeDecision> {
+  return changeSet.items.reduce<Record<string, ExternalChangeDecision>>((decisions, item) => {
+    decisions[item.id] = item.decision;
+    return decisions;
+  }, {});
+}
+
+function buildExternalImportDecisions(
+  changeSet: ExternalChangeSet,
+  currentDecisions: Record<string, ExternalChangeDecision>,
+  safeOnly = false,
+) {
+  return changeSet.items.map((item) => ({
+    itemId: item.id,
+    decision: safeOnly
+      ? item.risk === "safe"
+        ? "include" as const
+        : "omit" as const
+      : currentDecisions[item.id] ?? item.decision,
+  }));
 }
 
 function findNodeById(nodes: DocumentTreeNode[], nodeId: string): DocumentTreeNode | null {

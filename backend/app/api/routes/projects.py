@@ -9,6 +9,9 @@ from app.schemas.project import (
     AssetMoveImpact,
     AssetUsageResponse,
     DocumentMoveImpact,
+    ExternalChangeImportRequest,
+    ExternalChangeImportResult,
+    ExternalChangeSet,
     InsertImageReferenceRequest,
     InsertImageReferenceResponse,
     MoveNodeRequest,
@@ -21,6 +24,7 @@ from app.schemas.project import (
 )
 from app.schemas.github import SyncResponse
 from app.services.asset_service import asset_service
+from app.services.external_changes_service import external_changes_service
 from app.services.project_service import project_service
 
 router = APIRouter()
@@ -79,6 +83,21 @@ def pull_project(project_id: str) -> SyncResponse:
 @router.post("/projects/{project_id}/sync/push", response_model=SyncResponse)
 def push_project(project_id: str) -> SyncResponse:
     return SyncResponse(**project_service.sync_push(project_id))
+
+
+@router.get("/projects/{project_id}/external-changes", response_model=ExternalChangeSet)
+def get_external_changes(project_id: str) -> ExternalChangeSet:
+    return external_changes_service.scan(project_id)
+
+
+@router.post("/projects/{project_id}/external-changes/scan", response_model=ExternalChangeSet)
+def scan_external_changes(project_id: str) -> ExternalChangeSet:
+    return external_changes_service.scan(project_id)
+
+
+@router.post("/projects/{project_id}/external-changes/import", response_model=ExternalChangeImportResult)
+def import_external_changes(project_id: str, payload: ExternalChangeImportRequest) -> ExternalChangeImportResult:
+    return external_changes_service.import_changes(project_id, payload)
 
 
 @router.post("/projects/{project_id}/folders", response_model=FileOperationResult)

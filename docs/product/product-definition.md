@@ -52,6 +52,7 @@ Product engineers, technical leads, documentation owners, and teams that maintai
 - Markdown remains the storage format for documents; image assets remain normal local project files referenced from Markdown.
 - The main editing experience is visual and document-like.
 - Version history is commit-based and simplified for non-Git-heavy workflows.
+- External filesystem changes are treated as an import queue. KnowNext.ai detects pasted folders or files in versioned local-Git projects, classifies risk, imports safe changes into a local version, and syncs to GitHub only through backend/runtime services.
 - AI is contextual to the active document and mediated by the local backend.
 - The desktop app should feel compact, fast, and professional.
 - The app must show the user's real available state. It must not invent projects, documents, users, history, AI responses, or backend results through a product mock mode.
@@ -157,6 +158,19 @@ The editor toolbar must remain compact, fixed under the document tabs, and align
 - Table insertion opens a compact 5 x 5 visual grid with the hovered size and a secondary custom-size action.
 - The toolbar degrades by priority on narrower widths: primary actions remain visible and less frequent actions move into compact format/structure/insert menus.
 - The editor must not add free font colors, arbitrary font sizes, free alignment, or other non-Markdown word-processor controls.
+
+## External Changes UX
+
+When a user pastes a folder into a project with Windows Explorer, KnowNext.ai should feel protective rather than technical:
+
+- Small, safe Markdown/image imports can be imported from a compact banner without interrupting writing.
+- Large, sensitive, deleted, or unsupported changes require a right-side review drawer.
+- The drawer answers what happened, what is safe, what is omitted, and what action is available.
+- The tree shows temporary badges for affected files and folders while the import is pending.
+- The status indicator uses human states and does not show Git branch names or low-level Git commands.
+- If GitHub sync fails, the version remains saved locally and the UI reports `Pendiente de sincronizar` with a retry path through the existing sync controls.
+
+Known limitation: automatic external-change detection currently depends on a local Git working tree. GitHub API cache projects need a future cache-baseline service before they can safely classify pasted files.
 
 ## Project Creation Flow UX
 
