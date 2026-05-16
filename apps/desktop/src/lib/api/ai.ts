@@ -17,7 +17,7 @@ import type {
 } from "../../types/domain";
 
 const AI_PROMPT_TIMEOUT_MS = 60_000;
-const AI_INTERACTION_TIMEOUT_MS = 120_000;
+const AI_INTERACTION_TIMEOUT_MS = 180_000;
 const AI_INDEX_TIMEOUT_MS = 120_000;
 const AI_CONTEXT_UPLOAD_TIMEOUT_MS = 120_000;
 

@@ -610,14 +610,16 @@ export function App() {
     setActiveUtilityTab(null);
   }
 
-  function handleOpenImage(assetId: string, name: string, path: string) {
+  function handleOpenImage(assetId: string, name: string, path: string, options?: { activate?: boolean }) {
     setImageTabs((currentTabs) => (
       currentTabs.some((tab) => tab.id === assetId)
         ? currentTabs.map((tab) => (tab.id === assetId ? { id: assetId, name, path } : tab))
         : [...currentTabs, { id: assetId, name, path }]
     ));
-    setActiveImageId(assetId);
-    setActiveUtilityTab(null);
+    if (options?.activate !== false) {
+      setActiveImageId(assetId);
+      setActiveUtilityTab(null);
+    }
   }
 
   async function refreshProjectCapabilityState(projectId = activeProject?.id) {
@@ -924,6 +926,13 @@ export function App() {
       applyFileOperationResult({ tree: response.tree, node: null, affectedDocuments });
     } else if (response.tree) {
       setTree(response.tree);
+    }
+    const generatedImage = response.generatedImages?.[0];
+    const generatedImageToOpen = generatedImage?.asset;
+    if (generatedImageToOpen) {
+      handleOpenImage(generatedImageToOpen.id, generatedImageToOpen.name, generatedImageToOpen.path, {
+        activate: !generatedImage.insertedIntoDocumentId,
+      });
     }
     if (response.requiresConfirmation) setAiPendingDelete(response.requiresConfirmation);
     const deletedPaths = getDeletedOperationPaths(response);
@@ -1602,6 +1611,7 @@ export function App() {
       permissions: nextAiConfig.permissions,
       rag: nextAiConfig.rag,
       vision: nextAiConfig.vision,
+      imageGeneration: nextAiConfig.imageGeneration,
       agentic: nextAiConfig.agentic,
       transcription: nextAiConfig.transcription,
     })

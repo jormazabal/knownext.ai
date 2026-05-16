@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -17,6 +18,7 @@ from app.schemas.ai import (
     AiIndexStatusResponse,
     AiInteractionRequest,
     AiInteractionResponse,
+    AiGeneratedImage,
     AiOperation,
     AiPendingDelete,
     AiPendingIntent,
@@ -32,6 +34,7 @@ from app.services.credential_service import credential_service
 from app.services.document_service import document_service
 from app.services.filesystem_service import decode_document_id, decode_node_id
 from app.services.ai_usage_service import ai_usage_service
+from app.services.asset_service import asset_service
 from app.services.openai_service import OpenAiProviderError, OpenAiUnavailableError, openai_service
 from app.services.project_service import project_service
 from app.services.rag_service import RagIndexState, rag_service
@@ -54,9 +57,11 @@ RECENT_CONVERSATION_EVENT_TYPES = {
     "task_planned",
     "task_checkpoint",
     "source_found",
+    "image_generated",
+    "image_inserted",
 }
 
-INTERACTION_TYPES = {"chat", "document_edit", "project_operation", "agentic_task", "clarification", "mixed"}
+INTERACTION_TYPES = {"chat", "document_edit", "project_operation", "agentic_task", "image_generation", "clarification", "mixed"}
 CONFIDENCE_LEVELS = {"high", "medium", "low"}
 UI_PLACEMENTS = {"document_bubble", "conversation_tab", "none"}
 EXECUTION_SCOPES = {"direct_action", "needs_permission", "needs_clarification", "agentic_task", "too_expensive_or_unclear"}
@@ -220,7 +225,7 @@ class AiService:
                     document_id=payload.documentId,
                     request_id=interaction_id,
                     model=selected_model,
-                    usage_kind=self._usage_kind(payload, None),
+                    usage_kind=self._usage_kind(payload, None, has_image_context=has_image_context),
                     status="failed",
                     usage=provider_usage,
                     error_code=type(error).__name__,
@@ -239,7 +244,7 @@ class AiService:
                     document_id=payload.documentId,
                     request_id=interaction_id,
                     model=selected_model,
-                    usage_kind=self._usage_kind(payload, None),
+                    usage_kind=self._usage_kind(payload, None, has_image_context=has_image_context),
                     status="failed",
                     usage=provider_usage,
                     error_code=type(error).__name__,
@@ -253,7 +258,7 @@ class AiService:
                     document_id=payload.documentId,
                     request_id=interaction_id,
                     model=selected_model,
-                    usage_kind=self._usage_kind(payload, None),
+                    usage_kind=self._usage_kind(payload, None, has_image_context=has_image_context),
                     status="failed",
                     usage=provider_usage,
                     error_code=type(error).__name__,
@@ -265,7 +270,7 @@ class AiService:
             document_id=payload.documentId,
             request_id=interaction_id,
             model=selected_model,
-            usage_kind=self._usage_kind(payload, response),
+            usage_kind=self._usage_kind(payload, response, has_image_context=has_image_context),
             status="completed",
             usage=provider_usage,
         )
@@ -349,6 +354,7 @@ class AiService:
         events: list[AiConversationEvent] = []
         operations: list[AiOperation] = []
         updated_document: AiUpdatedDocument | None = None
+        generated_images: list[AiGeneratedImage] = []
         tree: list[dict] | None = None
         affected_documents: list[dict] = []
         pending_delete: AiPendingDelete | None = None
@@ -482,6 +488,19 @@ class AiService:
                 )
                 operations.append(operation)
                 events.append(self._operation_event(project_id, operation))
+
+        image_generation = plan.get("imageGeneration") if isinstance(plan.get("imageGeneration"), dict) else None
+        if image_generation is not None:
+            base_markdown_by_document = {updated_document.documentId: updated_document.markdown} if updated_document is not None else {}
+            image_result = self._execute_image_generation(project_id, payload, image_generation, base_markdown_by_document)
+            generated_images.extend(image_result["generatedImages"])
+            operations.extend(image_result["operations"])
+            events.extend(image_result["events"])
+            tree = image_result["tree"] or tree
+            if image_result["updatedDocument"] is not None:
+                updated_document = image_result["updatedDocument"]
+                if interaction_type == "image_generation":
+                    interaction_type = "mixed"
 
         if task is not None:
             task_message = "Tarea IA preparada"
@@ -628,11 +647,181 @@ class AiService:
             conversationEvents=events,
             operations=operations,
             updatedDocument=updated_document,
+            generatedImages=generated_images,
             task=task,
             tree=tree,
             affectedDocuments=affected_documents,
             requiresConfirmation=pending_delete,
         )
+
+    def _execute_image_generation(
+        self,
+        project_id: str,
+        payload: AiInteractionRequest,
+        image_generation: dict[str, Any],
+        base_markdown_by_document: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        ai_config = config_service.get_config().ai
+        operations: list[AiOperation] = []
+        events: list[AiConversationEvent] = []
+        generated_images: list[AiGeneratedImage] = []
+        tree: list[dict] | None = None
+        updated_document: AiUpdatedDocument | None = None
+
+        intent = image_generation.get("intent")
+        if intent == "ask_clarification":
+            operation = self._blocked(project_id, "Necesito confirmar si quieres crear la imagen como archivo o insertarla en el documento.")
+            operations.append(operation)
+            events.append(self._operation_event(project_id, operation))
+            return {"operations": operations, "events": events, "generatedImages": generated_images, "tree": tree, "updatedDocument": updated_document}
+        if intent not in {"generate_image_asset", "generate_and_insert_image"}:
+            return {"operations": operations, "events": events, "generatedImages": generated_images, "tree": tree, "updatedDocument": updated_document}
+
+        prompt = image_generation.get("prompt") if isinstance(image_generation.get("prompt"), str) else ""
+        prompt = prompt.strip()
+        if not prompt:
+            operation = self._blocked(project_id, "La IA no preparó un prompt visual válido para generar la imagen.")
+            operations.append(operation)
+            events.append(self._operation_event(project_id, operation))
+            return {"operations": operations, "events": events, "generatedImages": generated_images, "tree": tree, "updatedDocument": updated_document}
+
+        image_config = ai_config.imageGeneration
+        output_format = image_generation.get("format") if image_generation.get("format") in {"png", "webp", "jpeg"} else image_config.outputFormat
+        model = image_generation.get("model") if image_generation.get("model") in {"gpt-image-2", "gpt-image-1.5", "gpt-image-1", "gpt-image-1-mini"} else image_config.model
+        size = image_generation.get("size") if image_generation.get("size") in {"auto", "1024x1024", "1536x1024", "1024x1536"} else image_config.size
+        quality = image_generation.get("quality") if image_generation.get("quality") in {"auto", "low", "medium", "high"} else image_config.quality
+        alt_text = image_generation.get("altText") if isinstance(image_generation.get("altText"), str) and image_generation.get("altText").strip() else "Imagen generada"
+        filename = _image_filename(image_generation.get("filename"), alt_text, output_format)
+
+        try:
+            generated = openai_service.generate_image(
+                prompt=prompt,
+                model=model,
+                size=size,
+                quality=quality,
+                output_format=output_format,
+            )
+            parent_id = self._generated_image_parent_id(
+                project_id,
+                payload,
+                image_config.defaultFolder,
+                image_config.customFolderPath,
+            )
+            asset_response = asset_service.create_generated_image(
+                project_id,
+                parent_id,
+                filename,
+                generated["bytes"],
+                {
+                    "kind": "ai_generated_image",
+                    "prompt": prompt if image_config.storePromptMetadata else None,
+                    "revisedPrompt": generated.get("revisedPrompt") if image_config.storePromptMetadata else None,
+                    "model": model,
+                    "size": size,
+                    "quality": quality,
+                    "format": output_format,
+                    "sourceDocumentId": payload.documentId,
+                },
+            )
+        except (OpenAiUnavailableError, OpenAiProviderError) as error:
+            operation = AiOperation(type="provider_error", status="error", message=str(error))
+            operations.append(operation)
+            events.append(self._event(project_id, "provider_error", "system", operation.message))
+            return {"operations": operations, "events": events, "generatedImages": generated_images, "tree": tree, "updatedDocument": updated_document}
+
+        asset = asset_response.asset
+        should_insert = intent == "generate_and_insert_image" or bool(image_generation.get("insertIntoDocument"))
+        ai_usage_service.record_image_generation_event(
+            project_id=project_id,
+            document_id=payload.documentId,
+            request_id=f"{payload.clientMessageId}:image:{asset.path}",
+            model=str(generated.get("model") or model),
+            size=str(generated.get("size") or size),
+            quality=str(generated.get("quality") or quality),
+            output_format=str(generated.get("format") or output_format),
+            image_count=1,
+            metadata={"assetPath": asset.path, "insertRequested": should_insert},
+        )
+        tree = [node.model_dump() for node in asset_response.tree]
+        operation = AiOperation(type="image_generated", message=f"Imagen creada: {asset.path}", nodeId=asset.id, path=asset.path)
+        operations.append(operation)
+        events.append(self._event(project_id, "image_generated", "system", operation.message, path=asset.path))
+
+        markdown_reference: str | None = None
+        inserted_document_id: str | None = None
+        if should_insert and image_config.confirmBeforeDocumentInsert:
+            blocked = self._blocked(project_id, "La imagen quedó creada como archivo del proyecto. La inserción automática está desactivada en Configuración de la app > IA.")
+            operations.append(blocked)
+            events.append(self._operation_event(project_id, blocked))
+        elif should_insert and not ai_config.permissions.insertImagesIntoDocuments:
+            blocked = self._blocked(project_id, _permission_message("insertar imágenes en documentos"))
+            operations.append(blocked)
+            events.append(self._operation_event(project_id, blocked))
+        elif should_insert and not ai_config.permissions.editDocuments:
+            blocked = self._blocked(project_id, _permission_message("editar documentos"))
+            operations.append(blocked)
+            events.append(self._operation_event(project_id, blocked))
+        elif should_insert:
+            target_document_id = image_generation.get("targetDocumentId") if isinstance(image_generation.get("targetDocumentId"), str) else payload.documentId
+            if target_document_id and self._document_id_belongs_to_project(project_id, target_document_id):
+                try:
+                    reference = asset_service.build_markdown_reference(project_id, target_document_id, asset.id, alt_text)
+                    base_markdown = (
+                        (base_markdown_by_document or {}).get(target_document_id)
+                        or (payload.activeMarkdown if target_document_id == payload.documentId else document_service.get_document(target_document_id).markdown)
+                    )
+                    updated_markdown = _insert_image_markdown(base_markdown, reference.markdown, payload.selectionFocus if target_document_id == payload.documentId else None)
+                    updated_document = AiUpdatedDocument(
+                        documentId=target_document_id,
+                        markdown=updated_markdown,
+                        summary=f"Imagen insertada: {asset.name}",
+                    )
+                    markdown_reference = reference.markdown
+                    inserted_document_id = target_document_id
+                    path = self._document_path(target_document_id)
+                    inserted_operation = AiOperation(
+                        type="image_inserted",
+                        message=f"Imagen insertada en {path}: {asset.name}",
+                        documentId=target_document_id,
+                        nodeId=asset.id,
+                        path=asset.path,
+                        summary=f"Referencia Markdown añadida: {asset.name}",
+                    )
+                    operations.append(inserted_operation)
+                    events.append(self._event(project_id, "image_inserted", "system", inserted_operation.message, document_id=target_document_id, path=asset.path, summary=inserted_operation.summary))
+                except HTTPException as error:
+                    blocked = self._blocked(project_id, _http_error_message(error))
+                    operations.append(blocked)
+                    events.append(self._operation_event(project_id, blocked))
+            else:
+                blocked = self._blocked(project_id, "No hay un documento activo válido para insertar la imagen.")
+                operations.append(blocked)
+                events.append(self._operation_event(project_id, blocked))
+
+        source_selection = None
+        if payload.selectionFocus and isinstance(payload.selectionFocus.text, str) and payload.selectionFocus.text.strip():
+            source_selection = {
+                "from": payload.selectionFocus.from_,
+                "to": payload.selectionFocus.to,
+                "text": _truncate_text(payload.selectionFocus.text, 500),
+            }
+        generated_images.append(
+            AiGeneratedImage(
+                asset=asset.model_dump(),
+                prompt=prompt,
+                revisedPrompt=generated.get("revisedPrompt"),
+                altText=alt_text,
+                markdownReference=markdown_reference,
+                insertedIntoDocumentId=inserted_document_id,
+                sourceDocumentId=payload.documentId,
+                sourceSelection=source_selection,
+                model=model,
+                size=size,
+                quality=quality,
+                format=output_format,
+            )
+        )
+        return {"operations": operations, "events": events, "generatedImages": generated_images, "tree": tree, "updatedDocument": updated_document}
 
     def _permission_policy_response(
         self,
@@ -671,6 +860,22 @@ class AiService:
                     blocked_action = "eliminar documentos o carpetas"
                 if blocked_action is not None:
                     break
+
+        image_generation = plan.get("imageGeneration") if isinstance(plan.get("imageGeneration"), dict) else None
+        if blocked_action is None and image_generation is not None:
+            intent = image_generation.get("intent")
+            if intent in {"generate_image_asset", "generate_and_insert_image"}:
+                if not ai_config.imageGeneration.enabled:
+                    blocked_action = "generar imágenes porque la generación está desactivada"
+                elif not ai_config.permissions.generateImages:
+                    blocked_action = "generar imágenes"
+                elif not ai_config.permissions.createImageAssets:
+                    blocked_action = "crear archivos de imagen en el proyecto"
+                elif (
+                    not ai_config.permissions.useDocumentContextForImageGeneration
+                    and (payload.documentId or payload.selectionFocus or payload.contextSourceIds)
+                ):
+                    blocked_action = "usar contexto documental para generar imágenes"
 
         if blocked_action is None and self._plan_requires_web(plan, task) and not ai_config.agentic.webResearchEnabled:
             blocked_action = "usar investigación web"
@@ -747,6 +952,9 @@ class AiService:
             normalized["uiPlacement"] = None
         if normalized.get("executionScope") not in EXECUTION_SCOPES:
             normalized["executionScope"] = None
+        image_generation = normalized.get("imageGeneration")
+        if not isinstance(image_generation, dict) or image_generation.get("intent") not in {"none", "generate_image_asset", "generate_and_insert_image", "ask_clarification"}:
+            normalized["imageGeneration"] = None
         return normalized
 
     def _normalize_preflight(self, preflight: dict[str, Any]) -> dict[str, Any]:
@@ -837,13 +1045,17 @@ class AiService:
         except Exception:
             return None
 
-    def _usage_kind(self, payload: AiInteractionRequest, response: AiInteractionResponse | None) -> str:
+    def _usage_kind(self, payload: AiInteractionRequest, response: AiInteractionResponse | None, *, has_image_context: bool = False) -> str:
         if response and response.interactionType == "agentic_task":
             return "agentic_task"
         if response and any(operation.type == "document_modified" for operation in response.operations):
             return "document_edit"
         if response and any(operation.type in {"document_created", "folder_created", "document_duplicated", "node_moved", "delete_requested"} for operation in response.operations):
             return "document_operation"
+        if response and any(operation.type in {"image_generated", "image_inserted"} for operation in response.operations):
+            return "image_generation"
+        if has_image_context:
+            return "vision"
         if payload.mode == "document":
             return "chat"
         return "project_chat"
@@ -889,8 +1101,21 @@ class AiService:
                 "createFolders": ai_config.permissions.createFolders,
                 "createDocuments": ai_config.permissions.createDocuments,
                 "deleteDocumentsAndFolders": ai_config.permissions.deleteDocumentsAndFolders,
+                "generateImages": ai_config.permissions.generateImages,
+                "createImageAssets": ai_config.permissions.createImageAssets,
+                "insertImagesIntoDocuments": ai_config.permissions.insertImagesIntoDocuments,
+                "useDocumentContextForImageGeneration": ai_config.permissions.useDocumentContextForImageGeneration,
                 "webResearchEnabled": ai_config.agentic.webResearchEnabled,
                 "policy": "Si el permiso necesario esta activo, ejecuta directamente. Si esta inactivo, devuelve una accion bloqueada; no pidas permiso en la conversacion.",
+            },
+            "imageGeneration": {
+                **ai_config.imageGeneration.model_dump(),
+                "capabilities": [
+                    "generate_image_asset",
+                    "generate_and_insert_image",
+                    "ask_clarification",
+                ],
+                "rule": "Decide semanticamente si el usuario necesita una imagen. No dependas de palabras concretas, idioma, regex ni frases fijas. Toda imagen generada se guarda primero como archivo del proyecto.",
             },
             "projectSearch": {
                 "exactMatches": (rag_context or {}).get("exactMatches", []),
@@ -1292,6 +1517,55 @@ class AiService:
             raise HTTPException(status_code=404, detail="AI target folder not found")
         return node.id
 
+    def _generated_image_parent_id(self, project_id: str, payload: AiInteractionRequest, default_folder: str, custom_folder_path: str) -> str | None:
+        if default_folder == "generated_assets":
+            return self._ensure_generated_assets_folder(project_id)
+        if default_folder == "custom_folder":
+            return self._ensure_folder_path(project_id, custom_folder_path)
+        if payload.documentId:
+            try:
+                document_path = self._document_path(payload.documentId)
+                parent_path = str(Path(document_path).parent).replace("\\", "/")
+                if parent_path and parent_path != ".":
+                    return self._folder_id_from_path(project_id, parent_path)
+            except HTTPException:
+                return None
+        return None
+
+    def _ensure_generated_assets_folder(self, project_id: str) -> str | None:
+        return self._ensure_folder_path(project_id, "assets/generated")
+
+    def _ensure_folder_path(self, project_id: str, folder_path: str) -> str | None:
+        normalized_path = self._normalize_generated_folder_path(folder_path)
+        existing = _find_node_by_path(project_service.get_project_tree(project_id), normalized_path)
+        if existing is not None:
+            if existing.type != "folder":
+                raise HTTPException(status_code=409, detail="AI image destination path is not a folder")
+            return existing.id
+
+        parent_id: str | None = None
+        current_path = ""
+        for part in normalized_path.split("/"):
+            current_path = f"{current_path}/{part}" if current_path else part
+            node = _find_node_by_path(project_service.get_project_tree(project_id), current_path)
+            if node is not None:
+                if node.type != "folder":
+                    raise HTTPException(status_code=409, detail="AI image destination path is not a folder")
+                parent_id = node.id
+                continue
+            created = project_service.create_folder(project_id, CreateFolderRequest(parentId=parent_id, name=part))
+            if created.node is None or created.node.type != "folder":
+                return None
+            parent_id = created.node.id
+        return parent_id
+
+    def _normalize_generated_folder_path(self, folder_path: str | None) -> str:
+        normalized = (folder_path or "assets/generated").strip().replace("\\", "/")
+        parts = [part.strip() for part in normalized.split("/") if part.strip()]
+        if normalized.startswith("/") or ":" in normalized or not parts or any(part in {".", ".."} for part in parts):
+            raise HTTPException(status_code=400, detail="AI image destination must be a relative project folder")
+        return "/".join(parts)
+
     def _node_id_from_path(self, project_id: str, path: object) -> str | None:
         if not isinstance(path, str) or not path.strip():
             return None
@@ -1480,6 +1754,7 @@ def _safe_plan_for_context(plan: dict[str, Any]) -> dict[str, Any]:
             "answer",
             "pendingIntent",
             "documentChange",
+            "imageGeneration",
             "task",
             "operations",
         }
@@ -1491,6 +1766,39 @@ def _truncate_text(value: str, max_chars: int) -> str:
     if len(normalized) <= max_chars:
         return normalized
     return f"{normalized[: max_chars - 3].rstrip()}..."
+
+
+def _slug(value: str, default: str = "imagen-generada") -> str:
+    normalized = re.sub(r"[^a-zA-Z0-9._ -]+", "", value.lower()).strip()
+    normalized = re.sub(r"[\s_]+", "-", normalized).strip("-._")
+    return normalized[:64].strip("-._") or default
+
+
+def _image_filename(raw_filename: object, alt_text: str, output_format: str) -> str:
+    suffix = ".jpeg" if output_format == "jpeg" else f".{output_format}"
+    if isinstance(raw_filename, str) and raw_filename.strip():
+        name = Path(raw_filename.strip()).name
+        if Path(name).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+            return name
+        return f"{_slug(Path(name).stem, _slug(alt_text))}{suffix}"
+    return f"{_slug(alt_text)}{suffix}"
+
+
+def _insert_image_markdown(markdown: str, image_markdown: str, selection_focus: Any) -> str:
+    normalized_reference = f"\n\n{image_markdown}\n\n"
+    focus_text = getattr(selection_focus, "text", None) if selection_focus is not None else None
+    if isinstance(focus_text, str) and focus_text.strip():
+        index = markdown.find(focus_text)
+        if index >= 0:
+            insert_at = index + len(focus_text)
+            return f"{markdown[:insert_at].rstrip()}{normalized_reference}{markdown[insert_at:].lstrip()}"
+    from_value = getattr(selection_focus, "from_", None) if selection_focus is not None else None
+    to_value = getattr(selection_focus, "to", None) if selection_focus is not None else None
+    if isinstance(to_value, int) and 0 <= to_value <= len(markdown):
+        return f"{markdown[:to_value].rstrip()}{normalized_reference}{markdown[to_value:].lstrip()}"
+    if isinstance(from_value, int) and 0 <= from_value <= len(markdown):
+        return f"{markdown[:from_value].rstrip()}{normalized_reference}{markdown[from_value:].lstrip()}"
+    return f"{markdown.rstrip()}{normalized_reference}".lstrip()
 
 
 def _int_between(value: object, minimum: int, maximum: int, default: int) -> int:

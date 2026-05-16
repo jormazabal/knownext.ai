@@ -1,4 +1,4 @@
-import type { AiConfig, AiConfigStatus, AiModelId, AppConfig, AppConfigUpdate, AppearanceAccentColor, AppearanceConfig, AppearanceThemeMode, DiagnosticsConfig, LayoutConfig, ProjectTabsConfig } from "../../types/domain";
+import type { AiConfig, AiConfigStatus, AiImageGenerationModelId, AiModelId, AppConfig, AppConfigUpdate, AppearanceAccentColor, AppearanceConfig, AppearanceThemeMode, DiagnosticsConfig, LayoutConfig, ProjectTabsConfig } from "../../types/domain";
 import { requestJson } from "./client";
 
 export const defaultLayoutConfig: LayoutConfig = {
@@ -26,6 +26,10 @@ export const defaultAiConfig: AiConfig = {
     createFolders: false,
     createDocuments: false,
     deleteDocumentsAndFolders: false,
+    generateImages: true,
+    createImageAssets: true,
+    insertImagesIntoDocuments: true,
+    useDocumentContextForImageGeneration: true,
   },
   rag: {
     enabled: false,
@@ -42,6 +46,19 @@ export const defaultAiConfig: AiConfig = {
     maxImageSizeMb: 12,
     detail: "auto",
     storeVisualDescriptions: true,
+  },
+  imageGeneration: {
+    enabled: true,
+    model: "gpt-image-2",
+    size: "auto",
+    quality: "auto",
+    outputFormat: "png",
+    defaultFolder: "document_folder",
+    customFolderPath: "assets/generated",
+    maxImagesPerPrompt: 1,
+    confirmBeforeDocumentInsert: false,
+    confirmBeforeUsingMultipleSources: true,
+    storePromptMetadata: true,
   },
   agentic: {
     depth: "guided",
@@ -195,6 +212,10 @@ function normalizeAi(ai: AiConfig | undefined): AiConfig | undefined {
       createFolders: Boolean(ai.permissions?.createFolders),
       createDocuments: Boolean(ai.permissions?.createDocuments),
       deleteDocumentsAndFolders: Boolean(ai.permissions?.deleteDocumentsAndFolders),
+      generateImages: ai.permissions?.generateImages !== false,
+      createImageAssets: ai.permissions?.createImageAssets !== false,
+      insertImagesIntoDocuments: ai.permissions?.insertImagesIntoDocuments !== false,
+      useDocumentContextForImageGeneration: ai.permissions?.useDocumentContextForImageGeneration !== false,
     },
     rag: {
       enabled: Boolean(ai.rag?.enabled),
@@ -212,6 +233,7 @@ function normalizeAi(ai: AiConfig | undefined): AiConfig | undefined {
       detail: ["auto", "low", "high"].includes(String(ai.vision?.detail)) ? ai.vision!.detail : "auto",
       storeVisualDescriptions: ai.vision?.storeVisualDescriptions !== false,
     },
+    imageGeneration: normalizeImageGeneration(ai.imageGeneration),
     agentic: {
       depth: normalizeAgenticDepth(ai.agentic?.depth),
       webResearchEnabled: Boolean(ai.agentic?.webResearchEnabled),
@@ -223,6 +245,48 @@ function normalizeAi(ai: AiConfig | undefined): AiConfig | undefined {
     },
     transcription: normalizeTranscription(ai.transcription),
   };
+}
+
+function normalizeImageGeneration(imageGeneration: AiConfig["imageGeneration"] | undefined): AiConfig["imageGeneration"] {
+  return {
+    enabled: imageGeneration?.enabled !== false,
+    model: normalizeImageGenerationModel(imageGeneration?.model),
+    size: ["auto", "1024x1024", "1536x1024", "1024x1536"].includes(String(imageGeneration?.size)) ? imageGeneration!.size : defaultAiConfig.imageGeneration.size,
+    quality: ["auto", "low", "medium", "high"].includes(String(imageGeneration?.quality)) ? imageGeneration!.quality : defaultAiConfig.imageGeneration.quality,
+    outputFormat: ["png", "webp", "jpeg"].includes(String(imageGeneration?.outputFormat)) ? imageGeneration!.outputFormat : defaultAiConfig.imageGeneration.outputFormat,
+    defaultFolder: normalizeImageGenerationFolder(imageGeneration?.defaultFolder),
+    customFolderPath: normalizeProjectRelativeFolderPath(imageGeneration?.customFolderPath, defaultAiConfig.imageGeneration.customFolderPath),
+    maxImagesPerPrompt: clampNumber(imageGeneration?.maxImagesPerPrompt, 1, 4, defaultAiConfig.imageGeneration.maxImagesPerPrompt),
+    confirmBeforeDocumentInsert: Boolean(imageGeneration?.confirmBeforeDocumentInsert),
+    confirmBeforeUsingMultipleSources: imageGeneration?.confirmBeforeUsingMultipleSources !== false,
+    storePromptMetadata: imageGeneration?.storePromptMetadata !== false,
+  };
+}
+
+function normalizeImageGenerationModel(model: unknown): AiImageGenerationModelId {
+  return ["gpt-image-2", "gpt-image-1.5", "gpt-image-1", "gpt-image-1-mini"].includes(String(model))
+    ? model as AiImageGenerationModelId
+    : defaultAiConfig.imageGeneration.model;
+}
+
+function normalizeImageGenerationFolder(folder: unknown): AiConfig["imageGeneration"]["defaultFolder"] {
+  return ["document_folder", "generated_assets", "custom_folder"].includes(String(folder))
+    ? folder as AiConfig["imageGeneration"]["defaultFolder"]
+    : defaultAiConfig.imageGeneration.defaultFolder;
+}
+
+function normalizeProjectRelativeFolderPath(path: unknown, fallback: string): string {
+  const rawPath = String(path ?? "").trim().replace(/\\/g, "/");
+  const parts = rawPath.split("/").map((part) => part.trim()).filter(Boolean);
+  if (
+    rawPath.startsWith("/") ||
+    rawPath.includes(":") ||
+    parts.length === 0 ||
+    parts.some((part) => part === "." || part === "..")
+  ) {
+    return fallback;
+  }
+  return parts.join("/").slice(0, 160);
 }
 
 function normalizeAiModel(model: unknown): AiModelId {

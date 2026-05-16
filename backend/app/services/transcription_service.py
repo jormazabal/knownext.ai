@@ -11,6 +11,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from app.services.config_service import config_service
 from app.services.credential_service import credential_service
+from app.services.ai_usage_service import ai_usage_service
 
 
 OPENAI_REALTIME_TRANSCRIPTION_URL = "wss://api.openai.com/v1/realtime?intent=transcription"
@@ -41,6 +42,8 @@ class TranscriptionService:
         language = start_message.get("language") if isinstance(start_message.get("language"), str) else config.defaultLanguage
         if language not in SUPPORTED_LANGUAGES:
             language = config.defaultLanguage if config.defaultLanguage in SUPPORTED_LANGUAGES else "auto"
+        project_id = start_message.get("projectId") if isinstance(start_message.get("projectId"), str) and start_message.get("projectId") else "transcription"
+        document_id = start_message.get("documentId") if isinstance(start_message.get("documentId"), str) and start_message.get("documentId") else None
 
         try:
             openai_ws = await self._connect_openai(api_key)
@@ -54,7 +57,7 @@ class TranscriptionService:
 
         stop_event = asyncio.Event()
         audio_ready_event = asyncio.Event()
-        forward_task = asyncio.create_task(self._forward_openai_events(websocket, openai_ws, stop_event))
+        forward_task = asyncio.create_task(self._forward_openai_events(websocket, openai_ws, stop_event, project_id, document_id, config.model))
         receive_task = asyncio.create_task(self._receive_client_audio(websocket, openai_ws, stop_event, audio_ready_event))
         commit_task = asyncio.create_task(self._commit_client_audio_periodically(openai_ws, stop_event, audio_ready_event))
 
@@ -132,7 +135,7 @@ class TranscriptionService:
             await asyncio.sleep(MANUAL_COMMIT_INTERVAL_SECONDS)
             await _commit_audio_if_ready(openai_ws, audio_ready_event)
 
-    async def _forward_openai_events(self, websocket: WebSocket, openai_ws, stop_event: asyncio.Event) -> None:
+    async def _forward_openai_events(self, websocket: WebSocket, openai_ws, stop_event: asyncio.Event, project_id: str, document_id: str | None, model: str) -> None:
         while not stop_event.is_set():
             try:
                 raw_event = await openai_ws.recv()
@@ -155,10 +158,20 @@ class TranscriptionService:
                     "delta": event.get("delta", ""),
                 })
             elif event_type == "conversation.item.input_audio_transcription.completed":
+                transcript = event.get("transcript", "") if isinstance(event.get("transcript"), str) else ""
+                if transcript.strip():
+                    ai_usage_service.record_audio_transcription_event(
+                        project_id=project_id,
+                        document_id=document_id,
+                        request_id=f"transcription:{event.get('item_id') or 'completed'}",
+                        model=model or "gpt-realtime-whisper",
+                        transcript=transcript,
+                        metadata={"itemId": event.get("item_id")},
+                    )
                 await websocket.send_json({
                     "type": "completed",
                     "itemId": event.get("item_id"),
-                    "transcript": event.get("transcript", ""),
+                    "transcript": transcript,
                 })
             elif event_type == "error":
                 await self._send_error(websocket, "openai_error", _extract_openai_error(event))

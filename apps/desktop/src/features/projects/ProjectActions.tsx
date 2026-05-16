@@ -1,15 +1,21 @@
 import {
   BarChart3,
   ChevronRight,
+  FileText,
   FileClock,
+  ImageIcon,
   LogOut,
+  Mic,
+  Sparkles,
   RefreshCw,
   ScrollText,
   Settings,
+  Telescope,
   UserPlus,
+  X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { AiUsageSummaryResponse, AppearanceConfig, AuthStatus } from "../../types/domain";
+import type { AiUsageCapabilitySummary, AiUsageModelSummary, AiUsageSummaryResponse, AppearanceConfig, AuthStatus } from "../../types/domain";
 
 type ProjectActionsProps = {
   appVersion: string;
@@ -76,7 +82,7 @@ export function ProjectActions({
 
   if (compact) {
     return (
-      <div ref={accountMenuRef} className="relative">
+      <div ref={accountMenuRef} className="relative z-[140]">
         <button
           className="grid h-8 w-8 place-items-center rounded-full bg-brand-hover text-[11px] font-semibold text-brand-orange hover:bg-brand-orange hover:text-white"
           data-tooltip={accountName}
@@ -102,6 +108,7 @@ export function ProjectActions({
           accountMenuOpen={accountMenuOpen}
           placement="right"
           onRunAction={runAccountAction}
+          onCloseAccountMenu={() => setAccountMenuOpen(false)}
           onLoginGithub={onLoginGithub}
           onLogout={onLogout}
           onOpenAppSettings={onOpenAppSettings}
@@ -114,7 +121,7 @@ export function ProjectActions({
   }
 
   return (
-    <div className="mt-auto border-t border-line">
+    <div className="relative z-[140] mt-auto border-t border-line">
       <div ref={accountMenuRef} className="relative px-3 py-1">
         <button
           className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-1 text-left hover:bg-brand-hover"
@@ -141,6 +148,7 @@ export function ProjectActions({
           accountMenuOpen={accountMenuOpen}
           placement="center"
           onRunAction={runAccountAction}
+          onCloseAccountMenu={() => setAccountMenuOpen(false)}
           onLoginGithub={onLoginGithub}
           onLogout={onLogout}
           onOpenAppSettings={onOpenAppSettings}
@@ -166,6 +174,7 @@ function AccountActionsMenu({
   accountMenuOpen,
   placement,
   onRunAction,
+  onCloseAccountMenu,
   onLoginGithub,
   onLogout,
   onOpenAppSettings,
@@ -185,6 +194,7 @@ function AccountActionsMenu({
   accountMenuOpen: boolean;
   placement: "center" | "right";
   onRunAction: (action: () => void) => void;
+  onCloseAccountMenu: () => void;
   onLoginGithub: () => void;
   onLogout: () => void;
   onOpenAppSettings: () => void;
@@ -192,14 +202,81 @@ function AccountActionsMenu({
   onCheckForUpdates: () => void;
   onOpenReleaseNotes: () => void;
 }) {
+  const [usagePanelOpen, setUsagePanelOpen] = useState(false);
+  const [usagePanelPinned, setUsagePanelPinned] = useState(false);
+  const usageOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const usageCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const usagePanelVisible = usagePanelOpen || usagePanelPinned;
+
+  useEffect(() => {
+    return () => {
+      if (usageOpenTimerRef.current) window.clearTimeout(usageOpenTimerRef.current);
+      if (usageCloseTimerRef.current) window.clearTimeout(usageCloseTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (accountMenuOpen) return;
+    setUsagePanelOpen(false);
+    setUsagePanelPinned(false);
+    cancelUsageTimers();
+  }, [accountMenuOpen]);
+
+  function cancelUsageTimers() {
+    if (usageOpenTimerRef.current) {
+      window.clearTimeout(usageOpenTimerRef.current);
+      usageOpenTimerRef.current = null;
+    }
+    if (usageCloseTimerRef.current) {
+      window.clearTimeout(usageCloseTimerRef.current);
+      usageCloseTimerRef.current = null;
+    }
+  }
+
+  function scheduleUsageOpen() {
+    if (usagePanelVisible) return;
+    cancelUsageTimers();
+    usageOpenTimerRef.current = window.setTimeout(() => {
+      setUsagePanelOpen(true);
+      usageOpenTimerRef.current = null;
+    }, 180);
+  }
+
+  function scheduleUsageClose() {
+    if (usagePanelPinned) return;
+    if (usageOpenTimerRef.current) {
+      window.clearTimeout(usageOpenTimerRef.current);
+      usageOpenTimerRef.current = null;
+    }
+    if (!usagePanelOpen) return;
+    usageCloseTimerRef.current = window.setTimeout(() => {
+      setUsagePanelOpen(false);
+      usageCloseTimerRef.current = null;
+    }, 140);
+  }
+
+  function pinUsagePanel() {
+    cancelUsageTimers();
+    setUsagePanelOpen(true);
+    setUsagePanelPinned(true);
+  }
+
+  function closeUsagePanelAndMenu() {
+    cancelUsageTimers();
+    setUsagePanelOpen(false);
+    setUsagePanelPinned(false);
+    onCloseAccountMenu();
+  }
+
   return (
     <div
       className={[
-        "absolute bottom-[38px] z-[80] w-[252px] transition",
+        "absolute bottom-[38px] z-[140] w-[252px] transition",
         placement === "right" ? "left-10" : "left-1/2 -translate-x-1/2",
         accountMenuOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
       ].join(" ")}
     >
+      <div className="relative" onMouseEnter={cancelUsageTimers} onMouseLeave={scheduleUsageClose}>
       <div className="rounded-md border border-line bg-white p-1 shadow-menu">
         <div className="px-2 py-2">
           <div className="flex items-start justify-between gap-3">
@@ -258,16 +335,16 @@ function AccountActionsMenu({
             </span>
           ) : null}
         </button>
-        <div className="group relative">
+        <div className="relative" onMouseEnter={scheduleUsageOpen} onMouseLeave={scheduleUsageClose}>
           <button
-            className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
+            className={`flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover ${usagePanelVisible ? "bg-brand-hover" : ""}`}
             aria-haspopup="dialog"
+            onFocus={scheduleUsageOpen}
           >
             <BarChart3 size={14} />
             <span className="min-w-0 flex-1 truncate">{text.aiUsage}</span>
             <ChevronRight size={13} className="text-ink-secondary" />
           </button>
-          <AiUsagePanel text={text} language={language} summary={aiUsageSummary} />
         </div>
         <button
           className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
@@ -286,86 +363,173 @@ function AccountActionsMenu({
           <span>{isCheckingForUpdates ? text.checkingUpdates : text.checkUpdates}</span>
         </button>
       </div>
+      {usagePanelVisible ? (
+        <AiUsagePanel
+          text={text}
+          language={language}
+          summary={aiUsageSummary}
+          onClose={closeUsagePanelAndMenu}
+          onPin={pinUsagePanel}
+          onHoverEnter={cancelUsageTimers}
+          onHoverLeave={scheduleUsageClose}
+        />
+      ) : null}
+      </div>
     </div>
   );
 }
 
-function AiUsagePanel({ text, language, summary }: { text: ProjectActionsCopy; language: AppearanceConfig["language"]; summary: AiUsageSummaryResponse | null }) {
-  const primaryUsage = summary?.models[0] ?? null;
-  const additionalModels = summary?.models.slice(1) ?? [];
-  const showMonthlyTotal = Boolean(summary && summary.models.length > 1);
+function AiUsagePanel({
+  text,
+  language,
+  summary,
+  onClose,
+  onPin,
+  onHoverEnter,
+  onHoverLeave,
+}: {
+  text: ProjectActionsCopy;
+  language: AppearanceConfig["language"];
+  summary: AiUsageSummaryResponse | null;
+  onClose: () => void;
+  onPin: () => void;
+  onHoverEnter: () => void;
+  onHoverLeave: () => void;
+}) {
+  const [view, setView] = useState<"capability" | "model">("capability");
   const monthLabel = formatUsageMonth(summary?.month, language);
+  const capabilityRows = getCapabilityUsageRows(summary);
+  const modelRows = summary?.models ?? [];
+  const activeRows = view === "capability" ? capabilityRows : modelRows;
+  const totals = getUsageTotals(summary);
+  const hasUsage = totals.interactions > 0 || totals.totalTokens > 0 || totals.estimatedCost > 0;
 
   return (
     <div
+      onMouseEnter={onHoverEnter}
+      onMouseLeave={onHoverLeave}
+      onMouseDown={(event) => {
+        event.stopPropagation();
+        onPin();
+      }}
       className={[
-        "fixed bottom-[72px] left-[264px] z-[120] w-[292px] rounded-md border border-line bg-white p-3 shadow-menu transition",
-        "pointer-events-none -translate-x-1 opacity-0 group-hover:pointer-events-auto group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:translate-x-0 group-focus-within:opacity-100",
+        "absolute bottom-0 left-[calc(100%-1px)] z-[150] w-[360px] rounded-md border border-line bg-white p-3 shadow-menu",
       ].join(" ")}
     >
-      <div className="rounded bg-panel p-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-[11px] font-semibold text-ink-primary">{text.aiUsageTitle}</p>
-            <p className="mt-0.5 text-[10px] text-ink-secondary">{monthLabel}</p>
-          </div>
-          {primaryUsage ? (
-            <span className="shrink-0 rounded bg-white px-2 py-1 font-mono text-[9px] font-semibold text-brand-orange shadow-sm">
-              {primaryUsage.model}
-            </span>
-          ) : null}
+      <div className="flex items-start gap-3">
+        <div className="grid h-8 w-8 shrink-0 place-items-center rounded border border-brand-orange/20 bg-brand-hover text-brand-orange">
+          <BarChart3 size={15} />
         </div>
-
-        {primaryUsage ? (
-          <div className="mt-4 flex items-end justify-between gap-3">
-            <div>
-              <p className="text-[9px] font-semibold uppercase text-ink-secondary">{text.aiUsageCost}</p>
-              <p className="mt-1 font-mono text-[24px] font-semibold leading-none text-ink-primary">{formatCurrency(primaryUsage.estimatedCost, language)}</p>
-            </div>
-            <div className="grid h-12 w-12 place-items-center rounded-full border border-brand-orange/20 bg-white text-brand-orange">
-              <BarChart3 size={19} />
-            </div>
-          </div>
-        ) : (
-          <div className="mt-4 rounded border border-dashed border-line bg-white px-3 py-4">
-            <p className="text-[11px] font-semibold text-ink-primary">{text.aiUsageEmptyTitle}</p>
-            <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{text.aiUsageEmptyDetail}</p>
-          </div>
-        )}
+        <div className="min-w-0 flex-1">
+          <p className="text-[12px] font-semibold text-ink-primary">{text.aiUsageTitle}</p>
+          <p className="mt-0.5 text-[10px] font-medium text-ink-secondary">{monthLabel}</p>
+        </div>
+        <button
+          type="button"
+          className="grid h-7 w-7 shrink-0 place-items-center rounded text-ink-secondary hover:bg-panel hover:text-ink-primary"
+          aria-label={text.aiUsageClose}
+          onClick={onClose}
+        >
+          <X size={14} />
+        </button>
       </div>
 
-      {primaryUsage ? (
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <AiUsageMetric label={text.aiUsageInteractions} value={formatInteger(primaryUsage.interactions, language)} />
-          <AiUsageMetric label={text.aiUsageTokens} value={formatInteger(primaryUsage.totalTokens, language)} />
-        </div>
-      ) : null}
+      <div className="mt-3 grid grid-cols-2 rounded border border-line bg-panel p-0.5">
+        <button
+          type="button"
+          className={`h-7 rounded text-[10px] font-semibold transition ${view === "capability" ? "bg-white text-brand-orange shadow-sm" : "text-ink-secondary hover:text-ink-primary"}`}
+          onClick={() => setView("capability")}
+        >
+          {text.aiUsageByCapability}
+        </button>
+        <button
+          type="button"
+          className={`h-7 rounded text-[10px] font-semibold transition ${view === "model" ? "bg-white text-brand-orange shadow-sm" : "text-ink-secondary hover:text-ink-primary"}`}
+          onClick={() => setView("model")}
+        >
+          {text.aiUsageByModel}
+        </button>
+      </div>
 
-      {showMonthlyTotal ? (
-        <div className="mt-3 rounded border border-line bg-white p-2">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-[10px] font-semibold text-ink-secondary">{text.aiUsageTotalCost}</span>
-            <span className="font-mono text-[12px] font-semibold text-brand-orange">{formatCurrency(summary?.totalEstimatedCost ?? 0, language)}</span>
-          </div>
-          <div className="mt-2 space-y-1.5">
-            {additionalModels.map((modelUsage) => (
-              <div key={modelUsage.model} className="flex items-center justify-between gap-2 rounded bg-panel px-2 py-1.5">
-                <span className="truncate font-mono text-[9px] font-semibold text-ink-primary">{modelUsage.model}</span>
-                <span className="font-mono text-[9px] text-ink-secondary">{formatCurrency(modelUsage.estimatedCost, language)}</span>
-              </div>
-            ))}
-          </div>
+      {hasUsage ? (
+        <div className="mt-3 space-y-1.5">
+          {activeRows.length > 0 ? (
+            activeRows.map((row) => (
+              <AiUsageRow
+                key={"capability" in row ? row.capability : row.model}
+                label={"capability" in row ? getCapabilityLabel(row, text) : row.model}
+                icon={"capability" in row ? getCapabilityIcon(row.capability) : null}
+                interactions={row.interactions}
+                tokens={row.totalTokens}
+                cost={row.estimatedCost}
+                language={language}
+                text={text}
+              />
+            ))
+          ) : (
+            <div className="rounded border border-dashed border-line bg-panel px-3 py-3">
+              <p className="text-[11px] font-semibold text-ink-primary">{text.aiUsageNoModelsTitle}</p>
+              <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{text.aiUsageNoModelsDetail}</p>
+            </div>
+          )}
+          <AiUsageRow
+            label={text.aiUsageTotal}
+            icon={<BarChart3 size={13} />}
+            interactions={totals.interactions}
+            tokens={totals.totalTokens}
+            cost={totals.estimatedCost}
+            language={language}
+            text={text}
+            total
+          />
         </div>
-      ) : null}
+      ) : (
+        <div className="mt-3 rounded border border-dashed border-line bg-panel px-3 py-4">
+          <p className="text-[11px] font-semibold text-ink-primary">{text.aiUsageEmptyTitle}</p>
+          <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{text.aiUsageEmptyDetail}</p>
+        </div>
+      )}
     </div>
   );
 }
 
-function AiUsageMetric({ label, value }: { label: string; value: string }) {
+function AiUsageRow({
+  label,
+  icon,
+  interactions,
+  tokens,
+  cost,
+  language,
+  text,
+  total = false,
+}: {
+  label: string;
+  icon?: React.ReactNode;
+  interactions: number;
+  tokens: number;
+  cost: number;
+  language: AppearanceConfig["language"];
+  text: ProjectActionsCopy;
+  total?: boolean;
+}) {
   return (
-    <div className="rounded border border-line bg-white px-2.5 py-2">
-      <p className="text-[9px] font-semibold text-ink-secondary">{label}</p>
-      <p className="mt-1 font-mono text-[13px] font-semibold text-ink-primary">{value}</p>
+    <div className={`grid grid-cols-[minmax(0,1.55fr)_52px_68px_72px] items-center gap-2 rounded border px-2.5 py-2 ${total ? "border-brand-orange/30 bg-brand-hover" : "border-line bg-white"}`}>
+      <div className={`flex min-w-0 items-center gap-2 ${total ? "text-brand-orange" : "text-ink-primary"}`}>
+        {icon ? <span className={`grid h-4 w-4 shrink-0 place-items-center ${total ? "text-brand-orange" : "text-ink-secondary"}`}>{icon}</span> : null}
+        <p className="truncate text-[11px] font-semibold">{label}</p>
+      </div>
+      <AiUsageCell label={text.aiUsageInteractionsShort} value={formatInteger(interactions, language)} alignRight />
+      <AiUsageCell label={text.aiUsageTokens} value={formatCompactInteger(tokens, language)} alignRight />
+      <AiUsageCell label={text.aiUsageCost} value={formatCurrency(cost, language)} alignRight />
+    </div>
+  );
+}
+
+function AiUsageCell({ label, value, alignRight = false }: { label: string; value: string; alignRight?: boolean }) {
+  return (
+    <div className={alignRight ? "text-right" : ""}>
+      <p className="text-[8px] font-semibold uppercase leading-none text-ink-secondary">{label}</p>
+      <p className="mt-1 truncate font-mono text-[10px] font-semibold leading-none text-ink-primary">{value}</p>
     </div>
   );
 }
@@ -383,13 +547,24 @@ const projectActionsCopy = {
     checkingUpdates: "Buscando actualizaciones",
     checkUpdates: "Buscar actualizaciones",
     aiUsage: "Uso IA",
-    aiUsageTitle: "Uso IA estimado",
+    aiUsageTitle: "Uso IA",
+    aiUsageByCapability: "Por capacidad",
+    aiUsageByModel: "Por modelo",
+    aiUsageClose: "Cerrar uso IA",
     aiUsageModel: "Modelo",
     aiUsageTokens: "Tokens",
     aiUsageCost: "Coste",
     aiUsageInteractions: "Interacciones",
     aiUsageInteractionsShort: "Int.",
+    aiUsageTotal: "Total",
     aiUsageTotalCost: "Total mes",
+    aiUsageNoModelsTitle: "Sin modelos en uso",
+    aiUsageNoModelsDetail: "Este mes hay uso registrado, pero todavía no hay detalle por modelo.",
+    aiUsageDocumentAi: "IA documental",
+    aiUsageImages: "Imágenes",
+    aiUsageVision: "Visión",
+    aiUsageAudio: "Audio",
+    aiUsageAgentic: "Tareas agénticas",
     aiUsageEmptyTitle: "Sin uso registrado",
     aiUsageEmptyDetail: "Las estadísticas aparecerán cuando se complete una interacción real con IA.",
     releaseNotes: "Notas de release",
@@ -405,13 +580,24 @@ const projectActionsCopy = {
     checkingUpdates: "Checking for updates",
     checkUpdates: "Check for updates",
     aiUsage: "AI usage",
-    aiUsageTitle: "Estimated AI usage",
+    aiUsageTitle: "AI usage",
+    aiUsageByCapability: "By capability",
+    aiUsageByModel: "By model",
+    aiUsageClose: "Close AI usage",
     aiUsageModel: "Model",
     aiUsageTokens: "Tokens",
     aiUsageCost: "Cost",
     aiUsageInteractions: "Interactions",
     aiUsageInteractionsShort: "Int.",
+    aiUsageTotal: "Total",
     aiUsageTotalCost: "Month total",
+    aiUsageNoModelsTitle: "No models used",
+    aiUsageNoModelsDetail: "This month has usage, but model-level detail is not available yet.",
+    aiUsageDocumentAi: "Document AI",
+    aiUsageImages: "Images",
+    aiUsageVision: "Vision",
+    aiUsageAudio: "Audio",
+    aiUsageAgentic: "Agentic tasks",
     aiUsageEmptyTitle: "No usage recorded",
     aiUsageEmptyDetail: "Statistics will appear after a real AI interaction completes.",
     releaseNotes: "Release notes",
@@ -428,6 +614,13 @@ function formatInteger(value: number, language: AppearanceConfig["language"]) {
   return new Intl.NumberFormat(language === "es" ? "es-ES" : "en-US", { maximumFractionDigits: 0 }).format(value);
 }
 
+function formatCompactInteger(value: number, language: AppearanceConfig["language"]) {
+  return new Intl.NumberFormat(language === "es" ? "es-ES" : "en-US", {
+    notation: value >= 100_000 ? "compact" : "standard",
+    maximumFractionDigits: value >= 100_000 ? 1 : 0,
+  }).format(value);
+}
+
 function formatCurrency(value: number, language: AppearanceConfig["language"]) {
   return new Intl.NumberFormat(language === "es" ? "es-ES" : "en-US", {
     style: "currency",
@@ -442,8 +635,72 @@ function formatUsageMonth(month: string | undefined, language: AppearanceConfig[
     return language === "es" ? "Mes actual" : "Current month";
   }
   const [year, monthIndex] = month.split("-").map(Number);
-  return new Intl.DateTimeFormat(language === "es" ? "es-ES" : "en-US", {
-    month: "long",
-    year: "numeric",
-  }).format(new Date(year, monthIndex - 1, 1));
+  const formatted = new Intl.DateTimeFormat(language === "es" ? "es-ES" : "en-US", { month: "long" }).format(new Date(year, monthIndex - 1, 1));
+  return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+}
+
+function getCapabilityUsageRows(summary: AiUsageSummaryResponse | null): AiUsageCapabilitySummary[] {
+  if (summary?.capabilities?.length) {
+    return summary.capabilities;
+  }
+  const totals = getUsageTotals(summary);
+  return [
+    emptyCapabilityUsage("document_ai", "IA documental", totals),
+    emptyCapabilityUsage("image_generation", "Imágenes"),
+    emptyCapabilityUsage("vision", "Visión"),
+    emptyCapabilityUsage("audio", "Audio"),
+    emptyCapabilityUsage("agentic_tasks", "Tareas agénticas"),
+  ];
+}
+
+function emptyCapabilityUsage(
+  capability: AiUsageCapabilitySummary["capability"],
+  label: string,
+  values: Partial<Pick<AiUsageCapabilitySummary, "interactions" | "totalTokens" | "estimatedCost">> = {},
+): AiUsageCapabilitySummary {
+  return {
+    capability,
+    label,
+    interactions: values.interactions ?? 0,
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    embeddingTokens: 0,
+    totalTokens: values.totalTokens ?? 0,
+    estimatedCost: values.estimatedCost ?? 0,
+    currency: "EUR",
+    usageSource: "unknown",
+  };
+}
+
+function getUsageTotals(summary: AiUsageSummaryResponse | null) {
+  const models = summary?.models ?? [];
+  return {
+    interactions: models.reduce((total, model) => total + model.interactions, 0),
+    totalTokens: models.reduce((total, model) => total + model.totalTokens, 0),
+    estimatedCost: summary?.totalEstimatedCost ?? models.reduce((total, model) => total + model.estimatedCost, 0),
+  };
+}
+
+function getCapabilityLabel(row: AiUsageCapabilitySummary, text: ProjectActionsCopy) {
+  const labels: Record<AiUsageCapabilitySummary["capability"], string> = {
+    document_ai: text.aiUsageDocumentAi,
+    image_generation: text.aiUsageImages,
+    vision: text.aiUsageVision,
+    audio: text.aiUsageAudio,
+    agentic_tasks: text.aiUsageAgentic,
+  };
+  return labels[row.capability] ?? row.label;
+}
+
+function getCapabilityIcon(capability: AiUsageCapabilitySummary["capability"]) {
+  const icons: Record<AiUsageCapabilitySummary["capability"], React.ReactNode> = {
+    document_ai: <FileText size={13} />,
+    image_generation: <ImageIcon size={13} />,
+    vision: <Telescope size={13} />,
+    audio: <Mic size={13} />,
+    agentic_tasks: <Sparkles size={13} />,
+  };
+  return icons[capability];
 }

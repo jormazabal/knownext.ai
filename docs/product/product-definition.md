@@ -10,7 +10,7 @@ The first version focuses on the core editing surface:
 - Folder, Markdown document, and project image tree.
 - Document tabs.
 - Visual Markdown editing through Milkdown.
-- Project image management for PNG, JPEG, WEBP, and GIF assets, including upload, preview, Markdown linking, and AI context use.
+- Project image management for PNG, JPEG, WEBP, and GIF assets, including upload, preview, Markdown linking, AI context use, and AI-generated image assets.
 - Document status and save feedback.
 - Mock Git commit history for the active document.
 - Contextual AI prompt input for the active document.
@@ -25,6 +25,7 @@ KnowNext.ai includes a project-scoped AI assistant mediated by the local FastAPI
 - Prompts include a short backend-built recent conversation context to resolve references like `eso`, `lo anterior`, or `ahora`, filtered to the active document when applicable. The active document and current prompt remain higher priority than conversation history.
 - AI provider responses are interpreted as a structured plan with separate conversational `answer`, optional document change, optional project operations, and optional task plan. Conversational text must never be promoted into document content by backend keyword heuristics.
 - Project images can be attached as explicit AI prompt context. When image context is active and vision is enabled, the backend sends image inputs through OpenAI Responses with the configured vision model/detail instead of React calling providers directly.
+- The assistant can semantically infer image-generation requests from the prompt without keyword, language, or regex matching. Generated images are always saved first as normal project image files. If the user asks to include the result in the active document, the backend also returns an updated Markdown document with a relative image reference so Milkdown renders the image in the single-column document flow.
 - The prompt has two execution modes. `Rápido` is the default: one direct call, no automatic agentic task, no automatic IA-tab routing. `Razonar` performs a short structured preflight before execution and can choose direct action, a real clarification, a blocked-permission response, or an agentic task.
 - Reasoning depth is selected per prompt (`Ligero`, `Medio`, `Profundo`) so token use is explicit and task-specific instead of a global app default.
 - The prompt microphone supports realtime transcription through the local backend. Its split control starts/stops dictation from the icon side and opens destination/language options from the chevron side. The destination can be `Transcribir al prompt` or `Dictar en documento`; document dictation writes at the active Milkdown cursor as unsaved user input and does not auto-send prompts or save files.
@@ -33,12 +34,13 @@ KnowNext.ai includes a project-scoped AI assistant mediated by the local FastAPI
 - Informational responses that do not modify a document appear in a compact dismissible bubble above the prompt and are also recorded in the `IA` tab.
 - Multi-step requests can be routed automatically to the `IA` tab as guided tasks. Task cards show steps, source intent, estimated limits, web-research requirements, and checkpoints before creating or modifying documents.
 - App settings permissions are the source of truth for AI actions. When the required permission is enabled, the assistant executes directly without asking for extra permission or showing a pre-approval step. When the permission is disabled, the assistant does not execute the action and tells the user it can be enabled in `Configuración de la app > IA`.
-- The assistant can edit Markdown documents only when `Editar documentos` is enabled. It can create folders and Markdown documents only when the corresponding permissions are enabled. The document creation permission also allows AI document duplication and document moves; the folder creation permission also allows AI folder moves. Delete operations execute only when the delete permission is enabled.
+- The assistant can edit Markdown documents only when `Editar documentos` is enabled. It can create folders and Markdown documents only when the corresponding permissions are enabled. The document creation permission also allows AI document duplication and document moves; the folder creation permission also allows AI folder moves. Delete operations execute only when the delete permission is enabled. Image generation has separate permissions for generating images, creating image files, inserting them into documents, and using document context for visual prompts.
 - OpenAI is the first supported provider. API keys are configured in app settings, stored locally through backend credential storage, and never exposed to React after save.
 - Audio transcription uses `gpt-realtime-whisper` by default. React may capture microphone audio, but OpenAI realtime sessions are mediated by FastAPI so provider credentials remain backend-only.
 - App settings include web research, action permissions, and max step/document/source/cost limits for agentic work. Task depth is selected from the prompt when using `Razonar`.
 - Project-wide RAG is opt-in. When enabled, Markdown documentation is indexed with a project manifest, incremental file hashing, OpenAI vector stores for semantic retrieval, and a local exact-search index for terms, acronyms, filenames, and code-like references. Responses should cite relevant paths when evidence comes from the project.
 - Image indexing is separately configurable. When enabled, project images are analyzed with the configured OpenAI vision model and local visual descriptions are stored for project asset metadata and future retrieval flows.
+- Image generation is separately configurable from vision. Settings include provider model, size, quality, output format, default storage location, insertion confirmation preference, and whether to retain prompt metadata for generated assets.
 - Prompts and document content must not be written to trace logs.
 
 ## Target User

@@ -14,7 +14,7 @@ Backend code lives in `backend/app`.
 
 - `project_service`: project list and document tree.
 - `filesystem_service`: local project folder scanning and Markdown file operations for the navigation tree.
-- `config_service`: application configuration, including persisted layout widths, appearance preferences such as locale, zoom, theme mode, and primary accent color, diagnostics settings, AI provider/model settings, RAG settings, and agentic task permission/limit settings. Per-task reasoning depth is carried on AI interaction requests, not stored as the primary app-level control.
+- `config_service`: application configuration, including persisted layout widths, appearance preferences such as locale, zoom, theme mode, and primary accent color, diagnostics settings, AI provider/model settings, RAG settings, image-generation settings, and agentic task permission/limit settings. Per-task reasoning depth is carried on AI interaction requests, not stored as the primary app-level control.
 - `logging_service`: trace logging to a dedicated local log folder. Error and critical entries are always written; informational entries require diagnostics logging to be enabled.
 - `app_storage`: shared JSON file storage rooted in the KnowNext.ai application data directory, with per-file locking and atomic temporary-file replacement for concurrent API requests.
 - `document_service`: document loading and saving.
@@ -23,11 +23,11 @@ Backend code lives in `backend/app`.
 - `git_service`: local Git operations mediated by FastAPI; React never executes Git.
 - `github_service`: GitHub REST API access for repository discovery, cache hydration, history, and commit creation.
 - `version_service`: provider abstraction for local Git and GitHub API histories. Development fakes must not be exposed as production history.
-- `ai_service`: project-scoped AI orchestration for prompts, active document and containing-folder context, optional selected-text focus context, short recent conversation context, conversation events, structured interaction plans, document edit plans, permission-gated project file operations including create, duplicate, move, and delete flows, guided task plans, configured task limits, and RAG query context. It must only apply document changes from explicit structured document-change fields, never by inferring edits from conversational text.
+- `ai_service`: project-scoped AI orchestration for prompts, active document and containing-folder context, optional selected-text focus context, short recent conversation context, conversation events, structured interaction plans, document edit plans, image-generation plans, permission-gated project file operations including create, duplicate, move, and delete flows, guided task plans, configured task limits, and RAG query context. It must only apply document changes from explicit structured document-change fields or validated image insertion plans, never by inferring edits from conversational text.
 - `ai_context_service`: project-scoped active prompt context. It owns visible prompt sources, `@` project-document lookup, external file upload, text extraction, image payload preparation, one-hour inactivity expiry, source previews, source removal/extension, and conversion of extracted external text into project Markdown documents. React sends source ids; this service resolves current content at interaction time.
 - `transcription_service`: realtime microphone transcription proxy. React streams local PCM audio to FastAPI over a local WebSocket; this service opens the OpenAI Realtime transcription session with the configured model, normalizes delta/completed/error events, and never writes audio or transcript contents to trace logs.
 - `rag_service`: project RAG indexing boundary. It owns the local manifest, incremental Markdown scanning by hash, local SQLite FTS exact search, and OpenAI vector-store synchronization state.
-- `openai_service`: OpenAI Responses API, strict structured response parsing, and low-level vector-store/file operations. It is the only backend service that should call OpenAI directly.
+- `openai_service`: OpenAI Responses API, strict structured response parsing, GPT Image generation, and low-level vector-store/file operations. It is the only backend service that should call OpenAI directly.
 
 ## Local Application Files
 
@@ -59,6 +59,8 @@ Project metadata remains in local JSON, while document tree and Markdown documen
 
 Image assets are normal files inside the project folder. `filesystem_service` exposes supported images in the tree, `asset_service` owns upload/metadata/content/usage/image-reference contracts, and `asset_reference_service` parses and rewrites Markdown image links. Moving or renaming images rewrites matching Markdown references across the project; moving Markdown documents rewrites that document's relative image links.
 
+AI-generated images use the same asset path as uploaded images. `ai_service` executes only structured `imageGeneration` plans, calls `openai_service.generate_image`, writes the returned bytes through `asset_service.create_generated_image`, returns the refreshed tree, and optionally returns `updatedDocument` with a relative Markdown image reference. If insertion fails after generation, the asset remains in the project and the response reports the insertion issue separately.
+
 ## Empty And Unavailable Data Contracts
 
 - `GET /api/projects` may return an empty array. This is a valid loaded state and must not be replaced by seeded projects unless an explicit onboarding/import action creates them.
@@ -67,11 +69,12 @@ Image assets are normal files inside the project folder. `filesystem_service` ex
 - Auth endpoints must distinguish anonymous/disconnected users from authenticated users. They must not return mock users in normal product runtime.
 - History and AI endpoints must distinguish unavailable providers, empty results, and service errors with structured responses or documented status errors so the UI can show the correct empty or disabled state.
 - AI document edits must return updated Markdown to the frontend without writing to disk. The normal draft/save flow remains responsible for persistence.
-- AI interactions must separate conversational answer, document change, project operations, and task plan in the response contract. A provider answer alone is a conversation event; it is not document Markdown.
+- AI interactions must separate conversational answer, document change, image generation, project operations, and task plan in the response contract. A provider answer alone is a conversation event; it is not document Markdown.
 - Agentic task plans can only be surfaced from reasoning-mode interactions and must respect web-research permission plus max step/document/source/cost limits before surfacing in the UI.
 - AI selected-text focus is an additive context item for resolving references in the current prompt. It must not replace `activeDocument.markdown`.
 - AI prompt context source ids are resolved by FastAPI at interaction time. If a source is expired, missing, processing, or unreadable, it must not be silently treated as active context; responses return the current source list and expired ids so the prompt can stay visually truthful.
 - Project image context sources are resolved by FastAPI and passed to OpenAI Responses as image inputs only when vision is enabled. The configured vision model is used for interactions with explicit image context, and image indexing stores local visual descriptions generated through the configured vision model/detail.
+- Image-generation intent is semantic and structured. The backend must not use user-text keyword matching to decide whether to generate or insert an image; the LLM planner returns `imageGeneration.intent`, prompt, destination, and metadata, and the backend validates permissions and target document state before execution.
 - Realtime transcription events are not AI document operations. Prompt transcription fills the local prompt input and waits for explicit submit; document dictation inserts confirmed transcript segments into the active Milkdown buffer as user edits, leaving normal dirty/save and undo/redo behavior in place.
 - AI duplicate and move operations must return the refreshed tree and any affected document id/path mappings so open tabs and drafts can follow moved files.
 - AI operations must use configured app permissions as the execution gate. If a permission is enabled, the backend may execute the structured operation directly; if it is disabled, the backend returns a structured `permission_blocked` operation with guidance to change `Configuración de la app > IA`.

@@ -86,7 +86,7 @@ describe("ProjectActions", () => {
     expect(onOpenReleaseNotes).toHaveBeenCalledTimes(1);
   });
 
-  it("shows AI usage by model from the account menu", () => {
+  it("shows AI usage by model from the account menu", async () => {
     render(
       <ProjectActions
         appVersion="0.7.2"
@@ -97,6 +97,36 @@ describe("ProjectActions", () => {
           estimated: true,
           totalEstimatedCost: 1.86,
           generatedAt: "2026-05-12T12:00:00Z",
+          capabilities: [
+            {
+              capability: "document_ai",
+              label: "IA documental",
+              interactions: 32,
+              inputTokens: 62000,
+              cachedInputTokens: 0,
+              outputTokens: 34180,
+              reasoningTokens: 0,
+              embeddingTokens: 0,
+              totalTokens: 96180,
+              estimatedCost: 1.86,
+              currency: "EUR",
+              usageSource: "provider",
+            },
+            {
+              capability: "image_generation",
+              label: "Imágenes",
+              interactions: 0,
+              inputTokens: 0,
+              cachedInputTokens: 0,
+              outputTokens: 0,
+              reasoningTokens: 0,
+              embeddingTokens: 0,
+              totalTokens: 0,
+              estimatedCost: 0,
+              currency: "EUR",
+              usageSource: "unknown",
+            },
+          ],
           models: [
             {
               model: "gpt-5.4-mini",
@@ -127,13 +157,17 @@ describe("ProjectActions", () => {
     fireEvent.click(screen.getByRole("button", { name: /sin cuenta github/i }));
     fireEvent.mouseEnter(screen.getByRole("button", { name: /uso ia/i }));
 
-    expect(screen.getByText("Uso IA estimado")).toBeInTheDocument();
+    await screen.findByText("Mayo");
+    expect(screen.getAllByText("Uso IA").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("IA documental")).toBeInTheDocument();
+    expect(screen.getAllByText("96.180").length).toBeGreaterThanOrEqual(1);
+    fireEvent.click(screen.getByRole("button", { name: /por modelo/i }));
     expect(screen.getByText("gpt-5.4-mini")).toBeInTheDocument();
-    expect(screen.getByText("96.180")).toBeInTheDocument();
-    expect(screen.getByText("32")).toBeInTheDocument();
-    expect(screen.getByText(/1,86/)).toBeInTheDocument();
+    expect(screen.getAllByText("96.180").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("32").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/1,86/).length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("gpt-5.5")).not.toBeInTheDocument();
-    expect(screen.queryByText("Total mes")).not.toBeInTheDocument();
+    expect(screen.getByText("Total")).toBeInTheDocument();
     expect(screen.queryByText(/datos ficticios/i)).not.toBeInTheDocument();
   });
 

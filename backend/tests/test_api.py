@@ -41,7 +41,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.13.0"
+    assert payload["version"] == "0.14.0"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -456,6 +456,11 @@ def test_visual_image_reindex_uses_configured_vision_model(tmp_path, monkeypatch
     metadata = client.get(f"/api/projects/{project_id}/assets/{image_id}").json()
     assert metadata["indexed"] is True
     assert metadata["visualDescription"] == "Captura de pantalla de prueba."
+    summary = client.get("/api/ai/usage/summary?tzOffsetMinutes=120").json()
+    vision_summary = next(capability for capability in summary["capabilities"] if capability["capability"] == "vision")
+    assert vision_summary["interactions"] == 1
+    assert vision_summary["totalTokens"] > 0
+    assert any(model["model"] == "gpt-5.4" for model in summary["models"])
 
 
 def test_project_registry_writes_projects_json(tmp_path) -> None:
@@ -671,6 +676,58 @@ def test_realtime_whisper_session_update_omits_auto_language_hint() -> None:
     session_update = _build_session_update("gpt-realtime-whisper", "auto")
 
     assert session_update["session"]["audio"]["input"]["transcription"] == {"model": "gpt-realtime-whisper"}
+
+
+def test_realtime_transcription_completed_event_records_usage() -> None:
+    import asyncio
+
+    from app.services.transcription_service import transcription_service
+
+    class FakeClientWebSocket:
+        def __init__(self) -> None:
+            self.messages: list[dict] = []
+
+        async def send_json(self, payload: dict) -> None:
+            self.messages.append(payload)
+
+    class FakeOpenAiWebSocket:
+        def __init__(self) -> None:
+            self.events = [
+                json.dumps(
+                    {
+                        "type": "conversation.item.input_audio_transcription.completed",
+                        "item_id": "audio-1",
+                        "transcript": "Texto transcrito para medir uso de audio.",
+                    }
+                )
+            ]
+
+        async def recv(self) -> str:
+            if self.events:
+                return self.events.pop(0)
+            raise RuntimeError("closed")
+
+    async def run_forwarder() -> FakeClientWebSocket:
+        websocket = FakeClientWebSocket()
+        stop_event = asyncio.Event()
+        await transcription_service._forward_openai_events(
+            websocket,
+            FakeOpenAiWebSocket(),
+            stop_event,
+            "project-audio",
+            None,
+            "gpt-realtime-whisper",
+        )
+        return websocket
+
+    websocket = asyncio.run(run_forwarder())
+
+    assert websocket.messages[0]["type"] == "completed"
+    summary = client.get("/api/ai/usage/summary?tzOffsetMinutes=120").json()
+    audio_summary = next(capability for capability in summary["capabilities"] if capability["capability"] == "audio")
+    assert audio_summary["interactions"] == 1
+    assert audio_summary["outputTokens"] > 0
+    assert any(model["model"] == "gpt-realtime-whisper" for model in summary["models"])
 
 
 def test_trace_logging_writes_only_when_enabled(tmp_path) -> None:
@@ -1465,6 +1522,14 @@ def test_ai_usage_summary_starts_empty() -> None:
     assert payload["currency"] == "EUR"
     assert payload["estimated"] is True
     assert payload["totalEstimatedCost"] == 0
+    assert [capability["capability"] for capability in payload["capabilities"]] == [
+        "document_ai",
+        "image_generation",
+        "vision",
+        "audio",
+        "agentic_tasks",
+    ]
+    assert all(capability["interactions"] == 0 for capability in payload["capabilities"])
     assert payload["models"] == []
 
 
@@ -1525,6 +1590,277 @@ def test_ai_interaction_records_provider_usage_summary(tmp_path, monkeypatch) ->
     assert model_summary["usageSource"] == "provider"
     assert model_summary["estimatedCost"] > 0
     assert summary["totalEstimatedCost"] == model_summary["estimatedCost"]
+    capability_summary = summary["capabilities"][0]
+    assert capability_summary["capability"] == "document_ai"
+    assert capability_summary["interactions"] == 1
+    assert capability_summary["totalTokens"] == 1500
+    assert capability_summary["estimatedCost"] == model_summary["estimatedCost"]
+
+
+def test_ai_usage_summary_includes_legacy_generated_image_metadata(tmp_path) -> None:
+    generated_dir = tmp_path / "ai-generated-images"
+    generated_dir.mkdir()
+    (generated_dir / "project-legacy-images.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "images": [
+                    {
+                        "path": "gato-tocando-la-bateria.png",
+                        "updatedAt": "2026-05-16T17:37:55.654799+00:00",
+                        "kind": "ai_generated_image",
+                        "prompt": "Un gato tocando la batería.",
+                        "model": "gpt-image-2",
+                        "size": "auto",
+                        "quality": "auto",
+                        "format": "png",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = client.get("/api/ai/usage/summary?month=2026-05&tzOffsetMinutes=120").json()
+    image_summary = next(capability for capability in summary["capabilities"] if capability["capability"] == "image_generation")
+
+    assert image_summary["interactions"] == 1
+    assert image_summary["usageSource"] == "estimated"
+    assert image_summary["estimatedCost"] > 0
+    assert summary["models"][0]["model"] == "gpt-image-2"
+
+
+def test_ai_generates_project_image_asset_from_prompt(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "ai-generated-image"
+    docs_root.mkdir()
+    (docs_root / "visual.md").write_text("# Visual\n\nTexto base.\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Image", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    document_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+
+    def fake_plan(payload, context, rag, model=None):
+        return {
+            "display": "bubble",
+            "uiPlacement": "document_bubble",
+            "interactionType": "image_generation",
+            "confidence": "high",
+            "executionScope": "direct_action",
+            "intentDecision": "execute_now",
+            "routeToAiTab": False,
+            "needsUserClarification": False,
+            "answer": "He creado la imagen.",
+            "pendingIntent": None,
+            "documentChange": None,
+            "imageGeneration": {
+                "intent": "generate_image_asset",
+                "prompt": "Infografía compacta sobre el texto seleccionado.",
+                "altText": "Infografía del texto seleccionado",
+                "filename": "infografia-visual.png",
+                "insertIntoDocument": False,
+                "targetDocumentId": None,
+                "placement": "after_selection",
+                "model": None,
+                "size": None,
+                "quality": None,
+                "format": "png",
+            },
+            "task": None,
+            "operations": [],
+        }
+
+    def fake_generate_image(**kwargs):
+        return {"bytes": TINY_PNG, "revisedPrompt": "Infografía revisada.", "model": kwargs["model"], "size": kwargs["size"], "quality": kwargs["quality"], "format": kwargs["output_format"]}
+
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+    monkeypatch.setattr(openai_service, "generate_image", fake_generate_image)
+
+    response = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "documentId": document_id,
+            "prompt": "Haz algo visual con esto",
+            "activeMarkdown": "# Visual\n\nTexto base.\n",
+            "mode": "document",
+            "clientMessageId": "client-image",
+            "selectionFocus": {"documentId": document_id, "path": "visual.md", "from": 10, "to": 21, "text": "Texto base."},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["interactionType"] == "image_generation"
+    assert payload["generatedImages"][0]["asset"]["name"] == "infografia-visual.png"
+    assert payload["generatedImages"][0]["insertedIntoDocumentId"] is None
+    assert any(operation["type"] == "image_generated" for operation in payload["operations"])
+    assert (docs_root / "infografia-visual.png").exists()
+    summary = client.get("/api/ai/usage/summary?tzOffsetMinutes=120").json()
+    image_summary = next(capability for capability in summary["capabilities"] if capability["capability"] == "image_generation")
+    assert image_summary["interactions"] == 1
+    assert image_summary["estimatedCost"] > 0
+    assert any(model["model"] == "gpt-image-2" for model in summary["models"])
+
+
+def test_ai_generates_project_image_asset_in_custom_folder(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "ai-generated-image-custom-folder"
+    docs_root.mkdir()
+    (docs_root / "visual.md").write_text("# Visual\n\nTexto base.\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Image Custom Folder", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    document_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+    config = client.get("/api/config/ai").json()
+    config["imageGeneration"]["defaultFolder"] = "custom_folder"
+    config["imageGeneration"]["customFolderPath"] = "assets/infografias"
+    updated_config = client.put("/api/config/ai", json=config)
+    assert updated_config.status_code == 200
+
+    def fake_plan(payload, context, rag, model=None):
+        return {
+            "display": "bubble",
+            "uiPlacement": "document_bubble",
+            "interactionType": "image_generation",
+            "confidence": "high",
+            "executionScope": "direct_action",
+            "intentDecision": "execute_now",
+            "routeToAiTab": False,
+            "needsUserClarification": False,
+            "answer": "He creado la imagen.",
+            "pendingIntent": None,
+            "documentChange": None,
+            "imageGeneration": {
+                "intent": "generate_image_asset",
+                "prompt": "Infografía compacta sobre el texto seleccionado.",
+                "altText": "Infografía del texto seleccionado",
+                "filename": "infografia-visual.png",
+                "insertIntoDocument": False,
+                "targetDocumentId": None,
+                "placement": "after_selection",
+                "model": None,
+                "size": None,
+                "quality": None,
+                "format": "png",
+            },
+            "task": None,
+            "operations": [],
+        }
+
+    def fake_generate_image(**kwargs):
+        return {"bytes": TINY_PNG, "revisedPrompt": "Infografía revisada.", "model": kwargs["model"], "size": kwargs["size"], "quality": kwargs["quality"], "format": kwargs["output_format"]}
+
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+    monkeypatch.setattr(openai_service, "generate_image", fake_generate_image)
+
+    response = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "documentId": document_id,
+            "prompt": "Haz algo visual con esto",
+            "activeMarkdown": "# Visual\n\nTexto base.\n",
+            "mode": "document",
+            "clientMessageId": "client-image-custom-folder",
+            "selectionFocus": {"documentId": document_id, "path": "visual.md", "from": 10, "to": 21, "text": "Texto base."},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generatedImages"][0]["asset"]["path"] == "assets/infografias/infografia-visual.png"
+    assert (docs_root / "assets" / "infografias" / "infografia-visual.png").exists()
+    def flatten_paths(nodes):
+        paths = set()
+        for node in nodes:
+            paths.add(node["path"])
+            paths.update(flatten_paths(node.get("children") or []))
+        return paths
+
+    tree_paths = flatten_paths(client.get(f"/api/projects/{project_id}/tree").json())
+    assert "assets" in tree_paths
+    assert "assets/infografias" in tree_paths
+
+
+def test_ai_generates_and_inserts_project_image_reference(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "ai-insert-generated-image"
+    docs_root.mkdir()
+    markdown = "# Proceso\n\nTexto importante.\n\nFin\n"
+    (docs_root / "proceso.md").write_text(markdown, encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Insert Image", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    document_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+
+    def fake_plan(payload, context, rag, model=None):
+        return {
+            "display": "bubble",
+            "uiPlacement": "document_bubble",
+            "interactionType": "image_generation",
+            "confidence": "high",
+            "executionScope": "direct_action",
+            "intentDecision": "execute_now",
+            "routeToAiTab": False,
+            "needsUserClarification": False,
+            "answer": "He creado e insertado la imagen.",
+            "pendingIntent": None,
+            "documentChange": None,
+            "imageGeneration": {
+                "intent": "generate_and_insert_image",
+                "prompt": "Infografía para explicar Texto importante.",
+                "altText": "Infografía del proceso",
+                "filename": "infografia-proceso.png",
+                "insertIntoDocument": True,
+                "targetDocumentId": document_id,
+                "placement": "after_selection",
+                "model": None,
+                "size": None,
+                "quality": None,
+                "format": "png",
+            },
+            "task": None,
+            "operations": [],
+        }
+
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+    monkeypatch.setattr(openai_service, "generate_image", lambda **kwargs: {"bytes": TINY_PNG, "revisedPrompt": None, "model": kwargs["model"], "size": kwargs["size"], "quality": kwargs["quality"], "format": kwargs["output_format"]})
+
+    response = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "documentId": document_id,
+            "prompt": "Crea una infografía y ponla aquí",
+            "activeMarkdown": markdown,
+            "mode": "document",
+            "clientMessageId": "client-insert-image",
+            "selectionFocus": {"documentId": document_id, "path": "proceso.md", "from": 11, "to": 28, "text": "Texto importante."},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    updated = payload["updatedDocument"]
+    assert updated["documentId"] == document_id
+    assert "Texto importante.\n\n![Infografía del proceso](./infografia-proceso.png)" in updated["markdown"]
+    assert payload["generatedImages"][0]["insertedIntoDocumentId"] == document_id
+    assert payload["generatedImages"][0]["markdownReference"] == "![Infografía del proceso](./infografia-proceso.png)"
+    assert any(operation["type"] == "image_inserted" for operation in payload["operations"])
+    assert (docs_root / "infografia-proceso.png").exists()
 
 
 def test_ai_index_status_returns_project_rag_status(tmp_path) -> None:
@@ -2052,6 +2388,15 @@ def test_ai_agentic_task_routes_to_conversation_with_limits(tmp_path, monkeypatc
                 ],
             },
             "operations": [],
+            "__openaiUsage": {
+                "inputTokens": 1800,
+                "cachedInputTokens": 0,
+                "outputTokens": 700,
+                "reasoningTokens": 120,
+                "embeddingTokens": 0,
+                "totalTokens": 2500,
+                "usageSource": "provider",
+            },
         }
 
     def fake_preflight_agentic(payload, context, rag, model=None):
@@ -2098,6 +2443,10 @@ def test_ai_agentic_task_routes_to_conversation_with_limits(tmp_path, monkeypatc
     assert payload["task"]["webResearchAllowed"] is True
     assert payload["conversationEvents"][-1]["type"] == "task_planned"
     assert payload["conversationEvents"][-1]["task"]["title"] == "Preparar resúmenes documentales"
+    summary = client.get("/api/ai/usage/summary?tzOffsetMinutes=120").json()
+    agentic_summary = next(capability for capability in summary["capabilities"] if capability["capability"] == "agentic_tasks")
+    assert agentic_summary["interactions"] == 1
+    assert agentic_summary["totalTokens"] == 2500
 
 
 def test_ai_interaction_includes_recent_document_conversation_context(tmp_path, monkeypatch) -> None:

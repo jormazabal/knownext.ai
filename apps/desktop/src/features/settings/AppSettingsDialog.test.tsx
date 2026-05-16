@@ -33,7 +33,7 @@ const baseProps = {
 };
 
 describe("AppSettingsDialog", () => {
-  it("shows service status as the first settings section", () => {
+  it("shows the configuration summary as the first settings section", () => {
     render(
       <AppSettingsDialog
         {...baseProps}
@@ -68,13 +68,21 @@ describe("AppSettingsDialog", () => {
       />,
     );
 
+    expect(screen.getByRole("heading", { name: /resumen de configuración/i })).toBeInTheDocument();
+    expect(screen.getByText("Modelos de IA utilizados")).toBeInTheDocument();
+    expect(screen.queryByText("¿Necesitas ayuda?")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /copiar resumen/i })).not.toBeInTheDocument();
+    expect(screen.queryByText("Coste por 1M tokens")).not.toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: /apartados de configuración/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /resumen/i })).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.click(screen.getByRole("tab", { name: /sistema y diagnóstico/i }));
+
     expect(screen.getByRole("heading", { name: /estado de servicios/i })).toBeInTheDocument();
     expect(screen.getByText("Backend local")).toBeInTheDocument();
     expect(screen.getByText("Operativo")).toBeInTheDocument();
-    expect(screen.getAllByText("0.6.13").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("0.6.13")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /reiniciar backend/i })).toBeEnabled();
-    expect(screen.getByRole("tablist", { name: /apartados de configuración/i })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /servicios/i })).toHaveAttribute("aria-selected", "true");
   });
 
   it("allows checking and restarting runtime services", () => {
@@ -117,6 +125,7 @@ describe("AppSettingsDialog", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("tab", { name: /sistema y diagnóstico/i }));
     fireEvent.click(screen.getByRole("button", { name: /comprobar/i }));
     fireEvent.click(screen.getByRole("button", { name: /reiniciar backend/i }));
 
@@ -159,6 +168,8 @@ describe("AppSettingsDialog", () => {
         }}
       />,
     );
+
+    fireEvent.click(screen.getByRole("tab", { name: /sistema y diagnóstico/i }));
 
     expect(screen.getByRole("button", { name: /reiniciar backend/i })).toBeDisabled();
     expect(screen.getByText(/modo web\/desarrollo/i)).toBeInTheDocument();
@@ -205,6 +216,7 @@ describe("AppSettingsDialog", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("tab", { name: /sistema y diagnóstico/i }));
     fireEvent.click(screen.getByRole("button", { name: /copiar diagnóstico/i }));
 
     expect(writeText).toHaveBeenCalledWith(expect.stringContaining("expectedProfile=web-dev"));
@@ -222,14 +234,21 @@ describe("AppSettingsDialog", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("tab", { name: "IA" }));
+    fireEvent.click(screen.getByRole("tab", { name: "IA documental" }));
     expect(screen.getByText("Modelo de respuesta")).toBeInTheDocument();
-    expect(screen.getAllByText("Coste").length).toBeGreaterThanOrEqual(4);
-    expect(screen.getByText("Crear, duplicar y mover documentos")).toBeInTheDocument();
-    expect(screen.getByText("Crear y mover carpetas")).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: /equilibrado/i })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText("Elige el equilibrio entre inteligencia, velocidad y coste para las respuestas documentales.")).toBeInTheDocument();
+    expect(screen.getByText("Proveedor de IA")).toBeInTheDocument();
+    expect(screen.getByText("Contexto documental (RAG)")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /gpt-5.4-mini/i })).toHaveAttribute("aria-expanded", "false");
 
-    fireEvent.click(screen.getByRole("radio", { name: /máxima inteligencia/i }));
+    fireEvent.click(screen.getByRole("button", { name: /gpt-5.4-mini/i }));
+    const selectedModelOption = screen.getAllByRole("option", { name: /gpt-5.4-mini/i }).find((option) => option.getAttribute("aria-selected") === "true");
+    expect(selectedModelOption).toBeTruthy();
+    expect(screen.getByText("Ver guía de modelos")).toBeInTheDocument();
+
+    const maximumModelOption = screen.getAllByRole("option", { name: /gpt-5.5/i }).find((option) => option.tagName === "BUTTON");
+    expect(maximumModelOption).toBeTruthy();
+    fireEvent.click(maximumModelOption!);
 
     expect(onAiChange).toHaveBeenCalledWith(expect.objectContaining({ model: "gpt-5.5" }));
   });
@@ -251,11 +270,40 @@ describe("AppSettingsDialog", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("tab", { name: "IA" }));
+    fireEvent.click(screen.getByRole("tab", { name: "IA documental" }));
 
-    expect(screen.getByText("Visión de imágenes")).toBeInTheDocument();
-    expect(screen.getByText("Tareas agénticas")).toBeInTheDocument();
-    expect(screen.getAllByDisplayValue(defaultAiConfig.vision.model).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Contexto documental (RAG)")).toBeInTheDocument();
+    expect(screen.getByText("Modelo de respuesta")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Capacidades" }));
+    expect(screen.getByText("1. Imágenes")).toBeInTheDocument();
+    expect(screen.getByText("4. Tareas agénticas")).toBeInTheDocument();
+  });
+
+  it("allows choosing a custom generated image folder", () => {
+    const onAiChange = vi.fn();
+
+    render(
+      <AppSettingsDialog
+        {...baseProps}
+        runtimeServicesStatus={null}
+        onAiChange={onAiChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Capacidades" }));
+
+    expect(screen.getByText(/Define dónde se guardan las imágenes generadas/i)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/carpeta por defecto/i), { target: { value: "custom_folder" } });
+
+    expect(screen.getByLabelText(/ruta personalizada/i)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/ruta personalizada/i), { target: { value: "assets/infografias" } });
+
+    expect(onAiChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      imageGeneration: expect.objectContaining({
+        defaultFolder: "custom_folder",
+        customFolderPath: "assets/infografias",
+      }),
+    }));
   });
 
   it("allows disabling the extended Markdown underline control from appearance settings", () => {
@@ -269,7 +317,7 @@ describe("AppSettingsDialog", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("tab", { name: "Apariencia" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Interfaz" }));
 
     expect(screen.getByText("Compatibilidad Markdown")).toBeInTheDocument();
     expect(screen.getByText("Mostrar subrayado en el editor")).toBeInTheDocument();
@@ -292,7 +340,7 @@ describe("AppSettingsDialog", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("tab", { name: "Apariencia" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Interfaz" }));
     fireEvent.click(screen.getByRole("button", { name: "Oscuro" }));
     fireEvent.click(screen.getByRole("radio", { name: "Color Verde" }));
 
@@ -318,7 +366,7 @@ describe("AppSettingsDialog", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("tab", { name: "Apariencia" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Interfaz" }));
     fireEvent.click(screen.getByRole("button", { name: "Restablecer apariencia" }));
 
     expect(onAppearanceChange).toHaveBeenCalledWith({
@@ -339,10 +387,10 @@ describe("AppSettingsDialog", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("tab", { name: "IA" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Capacidades" }));
 
-    expect(screen.getByText("Tareas agénticas")).toBeInTheDocument();
-    expect(screen.getByText("Control desde el prompt")).toBeInTheDocument();
+    expect(screen.getByText("4. Tareas agénticas")).toBeInTheDocument();
+    expect(screen.getByText(/Permite flujos de varios pasos/i)).toBeInTheDocument();
     expect(screen.getByText("Investigación web")).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText("Investigación web"));

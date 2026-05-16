@@ -7,13 +7,17 @@ AiInteractionMode = Literal["document", "project"]
 AiInteractionStatus = Literal["completed", "blocked", "error"]
 AiInteractionDisplay = Literal["bubble", "conversation", "none"]
 AiUiPlacement = Literal["document_bubble", "conversation_tab", "none"]
-AiInteractionType = Literal["chat", "document_edit", "project_operation", "agentic_task", "clarification", "mixed"]
+AiInteractionType = Literal["chat", "document_edit", "project_operation", "agentic_task", "image_generation", "clarification", "mixed"]
 AiConfidence = Literal["high", "medium", "low"]
 AiExecutionMode = Literal["quick", "reasoning"]
 AiReasoningDepth = Literal["light", "medium", "deep"]
 AiExecutionScope = Literal["direct_action", "needs_permission", "needs_clarification", "agentic_task", "too_expensive_or_unclear"]
 AiModelId = Literal["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"]
 AiVisionModelId = Literal["gpt-5.4-mini", "gpt-5.4", "gpt-5.5"]
+AiImageGenerationModelId = Literal["gpt-image-2", "gpt-image-1.5", "gpt-image-1", "gpt-image-1-mini"]
+AiImageGenerationSize = Literal["auto", "1024x1024", "1536x1024", "1024x1536"]
+AiImageGenerationQuality = Literal["auto", "low", "medium", "high"]
+AiImageGenerationFormat = Literal["png", "webp", "jpeg"]
 AiAgenticDepth = Literal["quick", "guided", "deep", "bounded_autonomous"]
 AiTranscriptionTarget = Literal["prompt", "document"]
 AiTranscriptionLanguage = Literal["auto", "es", "en", "fr", "de", "it", "pt", "ca", "eu", "gl"]
@@ -36,6 +40,8 @@ AiOperationType = Literal[
     "task_planned",
     "task_checkpoint",
     "source_found",
+    "image_generated",
+    "image_inserted",
 ]
 AiConversationEventType = Literal[
     "user_message",
@@ -53,10 +59,13 @@ AiConversationEventType = Literal[
     "task_planned",
     "task_checkpoint",
     "source_found",
+    "image_generated",
+    "image_inserted",
 ]
 AiIndexStatus = Literal["not-indexed", "indexing", "updated", "error"]
 AiUsageStatus = Literal["completed", "failed", "cancelled"]
 AiUsageSource = Literal["provider", "estimated", "unknown", "mixed"]
+AiUsageCapability = Literal["document_ai", "image_generation", "vision", "audio", "agentic_tasks"]
 AiContextSourceKind = Literal["project_document", "external_file", "image"]
 AiContextSourceStatus = Literal["processing", "ready", "warning", "error", "expiring", "expired"]
 AiContextWeight = Literal["light", "medium", "high", "too_large"]
@@ -67,6 +76,10 @@ class AiPermissions(BaseModel):
     createFolders: bool = False
     createDocuments: bool = False
     deleteDocumentsAndFolders: bool = False
+    generateImages: bool = True
+    createImageAssets: bool = True
+    insertImagesIntoDocuments: bool = True
+    useDocumentContextForImageGeneration: bool = True
 
 
 class AiRagConfig(BaseModel):
@@ -85,6 +98,20 @@ class AiVisionConfig(BaseModel):
     maxImageSizeMb: int = 12
     detail: Literal["auto", "low", "high"] = "auto"
     storeVisualDescriptions: bool = True
+
+
+class AiImageGenerationConfig(BaseModel):
+    enabled: bool = True
+    model: AiImageGenerationModelId = "gpt-image-2"
+    size: AiImageGenerationSize = "auto"
+    quality: AiImageGenerationQuality = "auto"
+    outputFormat: AiImageGenerationFormat = "png"
+    defaultFolder: Literal["document_folder", "generated_assets", "custom_folder"] = "document_folder"
+    customFolderPath: str = "assets/generated"
+    maxImagesPerPrompt: int = 1
+    confirmBeforeDocumentInsert: bool = False
+    confirmBeforeUsingMultipleSources: bool = True
+    storePromptMetadata: bool = True
 
 
 class AiAgenticConfig(BaseModel):
@@ -111,6 +138,7 @@ class AiConfig(BaseModel):
     permissions: AiPermissions = Field(default_factory=AiPermissions)
     rag: AiRagConfig = Field(default_factory=AiRagConfig)
     vision: AiVisionConfig = Field(default_factory=AiVisionConfig)
+    imageGeneration: AiImageGenerationConfig = Field(default_factory=AiImageGenerationConfig)
     agentic: AiAgenticConfig = Field(default_factory=AiAgenticConfig)
     transcription: AiTranscriptionConfig = Field(default_factory=AiTranscriptionConfig)
 
@@ -254,6 +282,21 @@ class AiUpdatedDocument(BaseModel):
     summary: str
 
 
+class AiGeneratedImage(BaseModel):
+    asset: dict
+    prompt: str
+    revisedPrompt: str | None = None
+    altText: str
+    markdownReference: str | None = None
+    insertedIntoDocumentId: str | None = None
+    sourceDocumentId: str | None = None
+    sourceSelection: dict | None = None
+    model: str
+    size: str
+    quality: str
+    format: str
+
+
 class AiPendingDelete(BaseModel):
     confirmationId: str
     nodeIds: list[str]
@@ -338,6 +381,7 @@ class AiInteractionResponse(BaseModel):
     conversationEvents: list[AiConversationEvent] = Field(default_factory=list)
     operations: list[AiOperation] = Field(default_factory=list)
     updatedDocument: AiUpdatedDocument | None = None
+    generatedImages: list[AiGeneratedImage] = Field(default_factory=list)
     task: AiAgenticTask | None = None
     tree: list[dict] | None = None
     affectedDocuments: list[dict] = Field(default_factory=list)
@@ -379,10 +423,26 @@ class AiUsageModelSummary(BaseModel):
     usageSource: AiUsageSource = "unknown"
 
 
+class AiUsageCapabilitySummary(BaseModel):
+    capability: AiUsageCapability
+    label: str
+    interactions: int = 0
+    inputTokens: int = 0
+    cachedInputTokens: int = 0
+    outputTokens: int = 0
+    reasoningTokens: int = 0
+    embeddingTokens: int = 0
+    totalTokens: int = 0
+    estimatedCost: float = 0
+    currency: Literal["EUR"] = "EUR"
+    usageSource: AiUsageSource = "unknown"
+
+
 class AiUsageSummaryResponse(BaseModel):
     month: str
     currency: Literal["EUR"] = "EUR"
     estimated: bool = True
     totalEstimatedCost: float = 0
     generatedAt: str
+    capabilities: list[AiUsageCapabilitySummary] = Field(default_factory=list)
     models: list[AiUsageModelSummary] = Field(default_factory=list)
