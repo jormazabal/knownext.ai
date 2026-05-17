@@ -117,8 +117,7 @@ class ExternalChangesService:
             if not line.strip() or len(line) < 4:
                 continue
             code = line[:2]
-            raw_path = line[3:].strip()
-            path = self._decode_git_path(raw_path.split(" -> ", 1)[-1]).replace("\\", "/")
+            path = self._path_from_porcelain_line(line)
             change_type = self._change_type(code)
             candidate = root / path
             item = self._classify_item(project_id, root, path, candidate, change_type)
@@ -189,7 +188,7 @@ class ExternalChangesService:
             if not folder_path:
                 continue
             status = git_service.porcelain_status(root)
-            if any(line[3:].strip().replace("\\", "/") == folder_path for line in status.splitlines() if len(line) >= 4):
+            if any(self._path_from_porcelain_line(line) == folder_path for line in status.splitlines() if len(line) >= 4):
                 continue
             folder = root / folder_path
             if folder.exists() and folder.is_dir():
@@ -246,13 +245,56 @@ class ExternalChangesService:
             return "renamed"
         return "modified"
 
+    def _path_from_porcelain_line(self, line: str) -> str:
+        raw_path = line[3:].strip()
+        return self._decode_git_path(raw_path.split(" -> ", 1)[-1]).replace("\\", "/")
+
     def _decode_git_path(self, path: str) -> str:
         if len(path) >= 2 and path.startswith('"') and path.endswith('"'):
-            try:
-                return bytes(path[1:-1], "utf-8").decode("unicode_escape")
-            except UnicodeDecodeError:
-                return path[1:-1]
+            return self._decode_git_quoted_path(path[1:-1])
         return path
+
+    def _decode_git_quoted_path(self, path: str) -> str:
+        decoded = bytearray()
+        index = 0
+        simple_escapes = {
+            "a": b"\a",
+            "b": b"\b",
+            "t": b"\t",
+            "n": b"\n",
+            "v": b"\v",
+            "f": b"\f",
+            "r": b"\r",
+            "\\": b"\\",
+            '"': b'"',
+            "?": b"?",
+        }
+        while index < len(path):
+            char = path[index]
+            if char != "\\":
+                decoded.extend(char.encode("utf-8"))
+                index += 1
+                continue
+
+            next_index = index + 1
+            if next_index >= len(path):
+                decoded.extend(b"\\")
+                index += 1
+                continue
+
+            escaped = path[next_index]
+            if escaped in "01234567":
+                end = next_index
+                while end < len(path) and end < next_index + 3 and path[end] in "01234567":
+                    end += 1
+                decoded.append(int(path[next_index:end], 8))
+                index = end
+                continue
+
+            replacement = simple_escapes.get(escaped)
+            decoded.extend(replacement if replacement is not None else escaped.encode("utf-8"))
+            index += 2
+        return decoded.decode("utf-8", errors="replace")
 
     def _title(self, items: list[ExternalChangeItem]) -> str:
         if not items:

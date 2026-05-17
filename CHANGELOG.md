@@ -2,6 +2,11 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.16.1 - 2026-05-17
+
+- Fixed external-change imports for folders and files with non-ASCII characters in their path, including names such as `Facturación`.
+- Added backend coverage for Git quoted UTF-8 paths so pasted Windows folders do not produce mojibake paths like `FacturaciÃ³n`.
+
 ## 0.16.0 - 2026-05-17
 
 - Added external-change detection for local Git projects so pasted folders and files from Windows Explorer are surfaced inside KnowNext.ai instead of silently waiting in Git status.

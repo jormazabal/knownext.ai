@@ -41,7 +41,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.16.0"
+    assert payload["version"] == "0.16.1"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -293,6 +293,15 @@ def test_project_tree_reads_local_folder_and_manages_files(tmp_path) -> None:
     assert not (docs_root / "Guides" / "notes-renamed.md").exists()
 
 
+def test_external_changes_decode_git_quoted_utf8_paths() -> None:
+    from app.services.external_changes_service import external_changes_service
+
+    assert (
+        external_changes_service._decode_git_path('"Facturaci\\303\\263n/Facturaciones.md"')
+        == "Facturación/Facturaciones.md"
+    )
+
+
 def test_external_changes_scan_classifies_and_imports_safe_git_changes(tmp_path) -> None:
     docs_root = tmp_path / "external-docs"
     docs_root.mkdir()
@@ -316,8 +325,8 @@ def test_external_changes_scan_classifies_and_imports_safe_git_changes(tmp_path)
     os.system(f'git -C "{docs_root}" add intro.md')
     os.system(f'git -C "{docs_root}" commit -m "Initial"')
 
-    (docs_root / "Documentacion API").mkdir()
-    (docs_root / "Documentacion API" / "overview.md").write_text("# API\n", encoding="utf-8")
+    (docs_root / "Facturación").mkdir()
+    (docs_root / "Facturación" / "Facturaciones.md").write_text("# Facturación\n", encoding="utf-8")
     (docs_root / ".env").write_text("SECRET=value\n", encoding="utf-8")
 
     scanned = client.post(f"/api/projects/{project_id}/external-changes/scan")
@@ -327,7 +336,7 @@ def test_external_changes_scan_classifies_and_imports_safe_git_changes(tmp_path)
     assert payload["summary"]["safe"] >= 1
     assert payload["summary"]["blocked"] >= 1
     assert payload["requiresReview"] is True
-    assert any(item["path"] == "Documentacion API/overview.md" and item["decision"] == "include" for item in payload["items"])
+    assert any(item["path"] == "Facturación/Facturaciones.md" and item["decision"] == "include" for item in payload["items"])
     assert any(item["path"] == ".env" and item["decision"] == "omit" for item in payload["items"])
 
     imported = client.post(
@@ -345,7 +354,7 @@ def test_external_changes_scan_classifies_and_imports_safe_git_changes(tmp_path)
     )
     assert imported.status_code == 200
     assert imported.json()["status"] == "synced"
-    assert _find_tree_node(imported.json()["tree"], "overview.md")["type"] == "document"
+    assert _find_tree_node(imported.json()["tree"], "Facturaciones.md")["type"] == "document"
     assert ".env" not in os.popen(f'git -C "{docs_root}" ls-files').read()
 
 
