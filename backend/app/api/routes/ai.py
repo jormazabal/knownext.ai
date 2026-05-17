@@ -64,6 +64,11 @@ def create_project_image_context_source(project_id: str, payload: AiCreateProjec
     return asset_service.create_project_image_context_source(project_id, payload.documentId)
 
 
+@router.post("/projects/{project_id}/ai/context/project-attachments", response_model=AiContextSource)
+def create_project_attachment_context_source(project_id: str, payload: AiCreateProjectDocumentContextRequest) -> AiContextSource:
+    return ai_context_service.create_project_attachment_source(project_id, payload.documentId)
+
+
 @router.post("/projects/{project_id}/ai/context/files", response_model=AiContextSourceListResponse)
 async def upload_context_files(project_id: str, files: list[UploadFile] = File(...)) -> AiContextSourceListResponse:
     return await ai_context_service.upload_files(project_id, files)

@@ -42,7 +42,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.16.2"
+    assert payload["version"] == "0.17.0"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -352,6 +352,7 @@ def test_external_changes_scan_classifies_and_imports_safe_git_changes(tmp_path)
 
     (docs_root / "Facturación").mkdir()
     (docs_root / "Facturación" / "Facturaciones.md").write_text("# Facturación\n", encoding="utf-8")
+    (docs_root / "manual.pdf").write_bytes(b"%PDF-1.4\n(Manual)\n%%EOF")
     (docs_root / ".env").write_text("SECRET=value\n", encoding="utf-8")
 
     scanned = client.post(f"/api/projects/{project_id}/external-changes/scan")
@@ -360,8 +361,10 @@ def test_external_changes_scan_classifies_and_imports_safe_git_changes(tmp_path)
     assert payload["summary"]["total"] >= 2
     assert payload["summary"]["safe"] >= 1
     assert payload["summary"]["blocked"] >= 1
+    assert payload["summary"]["attachments"] == 1
     assert payload["requiresReview"] is True
     assert any(item["path"] == "Facturación/Facturaciones.md" and item["decision"] == "include" for item in payload["items"])
+    assert any(item["path"] == "manual.pdf" and item["kind"] == "attachment" and item["decision"] == "review" for item in payload["items"])
     assert any(item["path"] == ".env" and item["decision"] == "omit" for item in payload["items"])
 
     imported = client.post(
@@ -414,6 +417,73 @@ def test_project_tree_imports_and_exposes_image_assets(tmp_path) -> None:
     assert imported.status_code == 200
     assert imported.json()["asset"]["name"] == "screen.webp"
     assert (docs_root / "screen.webp").exists()
+
+
+def test_project_tree_imports_and_manages_attachment_files(tmp_path) -> None:
+    docs_root = tmp_path / "docs-attachments"
+    docs_root.mkdir()
+    (docs_root / "intro.md").write_text("# Intro\n", encoding="utf-8")
+    (docs_root / "brief.pdf").write_bytes(b"%PDF-1.4\n(Attachment text)\n%%EOF")
+    (docs_root / ".env").write_text("SECRET=value\n", encoding="utf-8")
+
+    created = client.post(
+        "/api/projects",
+        json={"name": "Docs con archivos", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+
+    tree = client.get(f"/api/projects/{project_id}/tree").json()
+    attachment_node = _find_tree_node(tree, "brief.pdf")
+    assert attachment_node["type"] == "attachment"
+    assert attachment_node["mimeType"] == "application/pdf"
+    assert attachment_node["sizeBytes"] > 0
+    assert _find_tree_node(tree, ".env") == {}
+
+    imported = client.post(
+        f"/api/projects/{project_id}/attachments",
+        files={"file": ("dataset.csv", b"name,value\nalpha,1\n", "text/csv")},
+    )
+    assert imported.status_code == 200
+    assert imported.json()["node"]["type"] == "attachment"
+    assert imported.json()["node"]["name"] == "dataset.csv"
+    assert (docs_root / "dataset.csv").exists()
+
+    renamed = client.patch(
+        f"/api/projects/{project_id}/nodes/{imported.json()['node']['id']}/rename",
+        json={"name": "dataset-renamed"},
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["node"]["name"] == "dataset-renamed.csv"
+    assert (docs_root / "dataset-renamed.csv").exists()
+
+
+def test_ai_context_project_attachment_source_is_resolved(tmp_path) -> None:
+    docs_root = tmp_path / "project-ai-context-attachment"
+    docs_root.mkdir()
+    (docs_root / "brief.txt").write_text("Texto de apoyo persistente.", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "Project AI Attachment", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    attachment_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
+
+    search = client.get(f"/api/projects/{project_id}/ai/context/search?q=brief")
+    assert search.status_code == 200
+    assert search.json()[0]["kind"] == "external_file"
+    assert search.json()[0]["path"] == "brief.txt"
+
+    source = client.post(
+        f"/api/projects/{project_id}/ai/context/project-attachments",
+        json={"documentId": attachment_id},
+    )
+    assert source.status_code == 200
+    assert source.json()["kind"] == "external_file"
+    assert source.json()["path"] == "brief.txt"
+
+    preview = client.get(f"/api/projects/{project_id}/ai/context/sources/{source.json()['id']}/preview")
+    assert preview.status_code == 200
+    assert "Texto de apoyo" in preview.json()["previewText"]
 
 
 def test_image_references_are_built_tracked_and_rewritten_when_image_moves(tmp_path) -> None:

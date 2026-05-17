@@ -25,6 +25,14 @@ const nodes: DocumentTreeNode[] = [
     open: true,
     children: [],
   },
+  {
+    id: "attachment-brief",
+    name: "brief.pdf",
+    type: "attachment",
+    path: "brief.pdf",
+    mimeType: "application/pdf",
+    sizeBytes: 1200,
+  },
 ];
 
 afterEach(() => cleanup());
@@ -186,7 +194,7 @@ describe("DocumentTree", () => {
     );
 
     expect(screen.getByText("Archivos")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Buscar carpetas y documentos" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Buscar archivos y carpetas" })).toBeEnabled();
 
     await userEvent.click(screen.getByRole("button", { name: "Añadir" }));
     await userEvent.click(screen.getByRole("button", { name: /^Nueva carpeta/ }));
@@ -198,8 +206,12 @@ describe("DocumentTree", () => {
     await userEvent.click(screen.getByRole("button", { name: "Vista del árbol" }));
     await userEvent.click(screen.getByRole("button", { name: "Solo Markdown" }));
     expect(screen.queryByText("Archivo")).not.toBeInTheDocument();
+    expect(screen.queryByText("brief.pdf")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Vista del árbol" }));
     await userEvent.click(screen.getByRole("button", { name: "Ver todo" }));
+    await userEvent.click(screen.getByRole("button", { name: "Vista del árbol" }));
+    await userEvent.click(screen.getByRole("button", { name: "Solo archivos" }));
+    expect(screen.getByText("brief.pdf")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Vista del árbol" }));
     await userEvent.click(screen.getByRole("button", { name: "Expandir carpetas" }));
     await userEvent.click(screen.getByRole("button", { name: "Vista del árbol" }));
@@ -236,8 +248,8 @@ describe("DocumentTree", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Buscar carpetas y documentos" }));
-    await userEvent.type(screen.getByPlaceholderText("Buscar carpetas y documentos"), "func");
+    await userEvent.click(screen.getByRole("button", { name: "Buscar archivos y carpetas" }));
+    await userEvent.type(screen.getByPlaceholderText("Buscar archivos y carpetas"), "func");
 
     const dialog = screen.getByRole("dialog");
     expect(screen.getByText("requisitos-funcionales.md")).toBeInTheDocument();
@@ -270,11 +282,45 @@ describe("DocumentTree", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Buscar carpetas y documentos" }));
-    await userEvent.type(screen.getByPlaceholderText("Buscar carpetas y documentos"), "quis");
+    await userEvent.click(screen.getByRole("button", { name: "Buscar archivos y carpetas" }));
+    await userEvent.type(screen.getByPlaceholderText("Buscar archivos y carpetas"), "quis");
     await userEvent.keyboard("{Tab}");
 
     expect(onSelectTreeNode).toHaveBeenCalledWith("folder-requirements", "folder", "Requisitos");
+  });
+
+  it("dispatches attachment context menu actions without opening an editor", async () => {
+    const onContextAction = vi.fn();
+    const onActivateTreeNode = vi.fn();
+    const attachmentNode = nodes[2];
+
+    render(
+      <DocumentTree
+        nodes={nodes}
+        activeDocumentId=""
+        onOpenDocument={vi.fn()}
+        onActivateTreeNode={onActivateTreeNode}
+        onSelectTreeNode={vi.fn()}
+        onCreateFolder={vi.fn()}
+        onCreateDocument={vi.fn()}
+        onExpandTree={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onConfigureProject={vi.fn()}
+        onRenameNode={vi.fn()}
+        onToggleNode={vi.fn()}
+        onContextAction={onContextAction}
+        onMoveNode={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByText("brief.pdf"));
+    expect(onActivateTreeNode).toHaveBeenCalledWith("attachment-brief");
+
+    await userEvent.hover(screen.getByRole("button", { name: /abrir menú de brief\.pdf/i }));
+    await waitFor(() => expect(screen.getByText("Usar como contexto IA")).toBeInTheDocument());
+    await userEvent.click(screen.getByText("Usar como contexto IA"));
+
+    expect(onContextAction).toHaveBeenCalledWith("add-attachment-context", attachmentNode);
   });
 });
 

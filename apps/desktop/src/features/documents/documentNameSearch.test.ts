@@ -22,12 +22,13 @@ const nodes: DocumentTreeNode[] = [
     ],
   },
   { id: "doc-final", name: "Plan final.md", type: "document" },
+  { id: "attachment-final", name: "Plan final.pdf", type: "attachment" },
 ];
 
 describe("searchDocumentTreeByName", () => {
   it("matches text in the middle and end of folder or document names", () => {
     expect(searchDocumentTreeByName(nodes, "tect").map((result) => result.id)).toEqual(["folder-architecture", "doc-backend"]);
-    expect(searchDocumentTreeByName(nodes, "final").map((result) => result.id)).toEqual(["doc-final"]);
+    expect(searchDocumentTreeByName(nodes, "final").map((result) => result.id)).toEqual(["doc-final", "attachment-final"]);
   });
 
   it("uses the path only as result context, not as a searchable field", () => {

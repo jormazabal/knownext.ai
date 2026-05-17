@@ -1,7 +1,8 @@
 import json
-from fastapi import HTTPException
 from pathlib import Path
 from uuid import uuid4
+
+from fastapi import HTTPException, UploadFile
 
 from app.schemas.project import (
     CreateDocumentRequest,
@@ -248,6 +249,9 @@ class ProjectService:
             payload.name,
             payload.markdown,
         )
+
+    async def import_attachment(self, project_id: str, parent_id: str | None, upload: UploadFile) -> FileOperationResult:
+        return await filesystem_service.import_attachment(project_id, self._get_project_root(project_id), parent_id, upload)
 
     def rename_node(self, project_id: str, node_id: str, payload: RenameNodeRequest) -> FileOperationResult:
         result = filesystem_service.rename_node(project_id, self._get_project_root(project_id), node_id, payload.name)

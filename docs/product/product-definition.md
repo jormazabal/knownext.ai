@@ -7,10 +7,11 @@ KnowNext.ai is a desktop workspace for project documentation written in Markdown
 The first version focuses on the core editing surface:
 
 - Project selection.
-- Folder, Markdown document, and project image tree.
+- Folder, Markdown document, project image, and support-file tree.
 - Document tabs.
 - Visual Markdown editing through Milkdown.
 - Project image management for PNG, JPEG, WEBP, and GIF assets, including upload, preview, Markdown linking, AI context use, and AI-generated image assets.
+- Support-file management for useful project files such as PDF, Office documents, CSV/TSV, text, JSON/YAML/XML, and archives, including import, search, rename, move, delete, versioning, backup, and explicit AI context when text can be extracted.
 - Document status and save feedback.
 - Mock Git commit history for the active document.
 - Contextual AI prompt input for the active document.
@@ -25,6 +26,7 @@ KnowNext.ai includes a project-scoped AI assistant mediated by the local FastAPI
 - Prompts include a short backend-built recent conversation context to resolve references like `eso`, `lo anterior`, or `ahora`, filtered to the active document when applicable. The active document and current prompt remain higher priority than conversation history.
 - AI provider responses are interpreted as a structured plan with separate conversational `answer`, optional document change, optional project operations, and optional task plan. Conversational text must never be promoted into document content by backend keyword heuristics.
 - Project images can be attached as explicit AI prompt context. When image context is active and vision is enabled, the backend sends image inputs through OpenAI Responses with the configured vision model/detail instead of React calling providers directly.
+- Project support files that can be converted to text, such as PDF, DOCX, PPTX, TXT, CSV, TSV, JSON, YAML, and XML, can be attached as explicit AI prompt context. The backend extracts and stores temporary prompt-context text through `ai_context_service`; React only shows the source chip and sends its source id.
 - The assistant can semantically infer image-generation requests from the prompt without keyword, language, or regex matching. Generated images are always saved first as normal project image files. If the user asks to include the result in the active document, the backend also returns an updated Markdown document with a relative image reference so Milkdown renders the image in the single-column document flow.
 - The prompt has two execution modes. `Rápido` is the default: one direct call, no automatic agentic task, no automatic IA-tab routing. `Razonar` performs a short structured preflight before execution and can choose direct action, a real clarification, a blocked-permission response, or an agentic task.
 - Reasoning depth is selected per prompt (`Ligero`, `Medio`, `Profundo`) so token use is explicit and task-specific instead of a global app default.
@@ -38,7 +40,7 @@ KnowNext.ai includes a project-scoped AI assistant mediated by the local FastAPI
 - OpenAI is the first supported provider. API keys are configured in app settings, stored locally through backend credential storage, and never exposed to React after save.
 - Audio transcription uses `gpt-realtime-whisper` by default. React may capture microphone audio, but OpenAI realtime sessions are mediated by FastAPI so provider credentials remain backend-only.
 - App settings include web research, action permissions, and max step/document/source/cost limits for agentic work. Task depth is selected from the prompt when using `Razonar`.
-- Project-wide RAG is opt-in. When enabled, Markdown documentation is indexed with a project manifest, incremental file hashing, OpenAI vector stores for semantic retrieval, and a local exact-search index for terms, acronyms, filenames, and code-like references. Responses should cite relevant paths when evidence comes from the project.
+- Project-wide RAG is opt-in. When enabled, Markdown documentation is indexed with a project manifest, incremental file hashing, OpenAI vector stores for semantic retrieval, and a local exact-search index for terms, acronyms, filenames, and code-like references. Support-file indexing is not automatic in the first implementation; files that can be read are used when the user explicitly adds them as prompt context. Responses should cite relevant paths when evidence comes from the project.
 - Image indexing is separately configurable. When enabled, project images are analyzed with the configured OpenAI vision model and local visual descriptions are stored for project asset metadata and future retrieval flows.
 - Image generation is separately configurable from vision. Settings include provider model, size, quality, output format, default storage location, insertion confirmation preference, and whether to retain prompt metadata for generated assets.
 - Prompts and document content must not be written to trace logs.
@@ -49,7 +51,7 @@ Product engineers, technical leads, documentation owners, and teams that maintai
 
 ## Product Principles
 
-- Markdown remains the storage format for documents; image assets remain normal local project files referenced from Markdown.
+- Markdown remains the storage format for editable documents; image assets and support files remain normal local project files in the repository.
 - The main editing experience is visual and document-like.
 - Version history is commit-based and simplified for non-Git-heavy workflows.
 - External filesystem changes are treated as an import queue. KnowNext.ai detects pasted folders or files in versioned local-Git projects, classifies risk, imports safe changes into a local version, and syncs to GitHub only through backend/runtime services.
@@ -163,7 +165,7 @@ The editor toolbar must remain compact, fixed under the document tabs, and align
 
 When a user pastes a folder into a project with Windows Explorer, KnowNext.ai should feel protective rather than technical:
 
-- Small, safe Markdown/image imports can be imported from a compact banner without interrupting writing.
+- Small, safe Markdown/image imports can be imported from a compact banner without interrupting writing. Support files are visible in review because they may be useful but should be intentional.
 - Large, sensitive, deleted, or unsupported changes require a right-side review drawer.
 - The drawer answers what happened, what is safe, what is omitted, and what action is available.
 - The tree shows temporary badges for affected files and folders while the import is pending.

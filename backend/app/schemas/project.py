@@ -67,6 +67,7 @@ class ExternalChangeSummary(BaseModel):
     folders: int = 0
     documents: int = 0
     images: int = 0
+    attachments: int = 0
     omitted: int = 0
     totalBytes: int = 0
 

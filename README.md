@@ -18,7 +18,7 @@ This first version establishes the product foundation:
 
 The latest Windows installer is published on GitHub Releases:
 
-- [Download KnowNext.ai for Windows](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_0.16.2_x64-setup.exe)
+- [Download KnowNext.ai for Windows](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_0.17.0_x64-setup.exe)
 - [View all releases](https://github.com/jormazabal/knownext.ai/releases)
 
 The desktop app also checks the signed updater manifest at:
