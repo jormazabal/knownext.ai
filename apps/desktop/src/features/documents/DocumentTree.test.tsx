@@ -33,6 +33,12 @@ const nodes: DocumentTreeNode[] = [
     mimeType: "application/pdf",
     sizeBytes: 1200,
   },
+  { id: "attachment-docx", name: "proposal.docx", type: "attachment", path: "proposal.docx" },
+  { id: "attachment-pptx", name: "deck.pptx", type: "attachment", path: "deck.pptx" },
+  { id: "attachment-xlsx", name: "budget.xlsx", type: "attachment", path: "budget.xlsx" },
+  { id: "attachment-txt", name: "notes.txt", type: "attachment", path: "notes.txt" },
+  { id: "attachment-csv", name: "metrics.csv", type: "attachment", path: "metrics.csv" },
+  { id: "attachment-generic", name: "bundle.bin", type: "attachment", path: "bundle.bin" },
 ];
 
 afterEach(() => cleanup());
@@ -224,6 +230,36 @@ describe("DocumentTree", () => {
     expect(onExpandTree).toHaveBeenCalledTimes(1);
     expect(onCollapseTree).toHaveBeenCalledTimes(1);
     expect(onConfigureProject).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows distinct support-file type badges and keeps toolbar outside the scroll region", () => {
+    const { container } = render(
+      <DocumentTree
+        nodes={nodes}
+        activeDocumentId=""
+        onOpenDocument={vi.fn()}
+        onActivateTreeNode={vi.fn()}
+        onSelectTreeNode={vi.fn()}
+        onCreateFolder={vi.fn()}
+        onCreateDocument={vi.fn()}
+        onExpandTree={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onConfigureProject={vi.fn()}
+        onRenameNode={vi.fn()}
+        onToggleNode={vi.fn()}
+        onContextAction={vi.fn()}
+        onMoveNode={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("PDF")).toBeInTheDocument();
+    expect(screen.getByText("DOC")).toBeInTheDocument();
+    expect(screen.getByText("PPT")).toBeInTheDocument();
+    expect(screen.getByText("XLS")).toBeInTheDocument();
+    expect(screen.getByText("TXT")).toBeInTheDocument();
+    expect(screen.getByText("CSV")).toBeInTheDocument();
+    expect(screen.queryByText("BIN")).not.toBeInTheDocument();
+    expect(container.querySelector(".overflow-y-auto")?.contains(screen.getByText("Archivos"))).toBe(false);
   });
 
   it("searches folders and documents by name fragments", async () => {

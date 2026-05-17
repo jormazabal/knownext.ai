@@ -22,8 +22,6 @@ SAFE_AUTOIMPORT_LIMIT = 50
 SAFE_AUTOIMPORT_SIZE_BYTES = 25 * 1024 * 1024
 PRIVATE_SUFFIXES = {".env", ".key", ".pem", ".p12", ".pfx", ".crt", ".cer"}
 PRIVATE_NAMES = {".env", ".env.local", ".env.production", "id_rsa", "id_ed25519"}
-ATTACHMENT_SUFFIXES = {".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".csv", ".tsv", ".json", ".xml", ".yaml", ".yml", ".zip", ".7z", ".rar"}
-
 
 class ExternalChangesService:
     def scan(self, project_id: str) -> ExternalChangeSet:
@@ -160,11 +158,11 @@ class ExternalChangesService:
             risk = "safe"
             decision = "include"
             reason = None
-        elif suffix in ATTACHMENT_SUFFIXES:
+        elif candidate.exists() and candidate.is_file():
             kind = "attachment"
             risk = "review"
             decision = "review"
-            reason = "Adjunto permitido, requiere confirmación."
+            reason = "Archivo de apoyo, requiere confirmación."
 
         if size and size > SAFE_AUTOIMPORT_SIZE_BYTES:
             risk = "review" if risk != "blocked" else risk

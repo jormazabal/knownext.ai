@@ -42,7 +42,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.17.0"
+    assert payload["version"] == "0.17.1"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -353,6 +353,7 @@ def test_external_changes_scan_classifies_and_imports_safe_git_changes(tmp_path)
     (docs_root / "Facturación").mkdir()
     (docs_root / "Facturación" / "Facturaciones.md").write_text("# Facturación\n", encoding="utf-8")
     (docs_root / "manual.pdf").write_bytes(b"%PDF-1.4\n(Manual)\n%%EOF")
+    (docs_root / "bundle.bin").write_bytes(b"\x00\x01\x02")
     (docs_root / ".env").write_text("SECRET=value\n", encoding="utf-8")
 
     scanned = client.post(f"/api/projects/{project_id}/external-changes/scan")
@@ -361,10 +362,11 @@ def test_external_changes_scan_classifies_and_imports_safe_git_changes(tmp_path)
     assert payload["summary"]["total"] >= 2
     assert payload["summary"]["safe"] >= 1
     assert payload["summary"]["blocked"] >= 1
-    assert payload["summary"]["attachments"] == 1
+    assert payload["summary"]["attachments"] == 2
     assert payload["requiresReview"] is True
     assert any(item["path"] == "Facturación/Facturaciones.md" and item["decision"] == "include" for item in payload["items"])
     assert any(item["path"] == "manual.pdf" and item["kind"] == "attachment" and item["decision"] == "review" for item in payload["items"])
+    assert any(item["path"] == "bundle.bin" and item["kind"] == "attachment" and item["decision"] == "review" for item in payload["items"])
     assert any(item["path"] == ".env" and item["decision"] == "omit" for item in payload["items"])
 
     imported = client.post(
@@ -424,6 +426,7 @@ def test_project_tree_imports_and_manages_attachment_files(tmp_path) -> None:
     docs_root.mkdir()
     (docs_root / "intro.md").write_text("# Intro\n", encoding="utf-8")
     (docs_root / "brief.pdf").write_bytes(b"%PDF-1.4\n(Attachment text)\n%%EOF")
+    (docs_root / "bundle.bin").write_bytes(b"\x00\x01\x02")
     (docs_root / ".env").write_text("SECRET=value\n", encoding="utf-8")
 
     created = client.post(
@@ -437,6 +440,9 @@ def test_project_tree_imports_and_manages_attachment_files(tmp_path) -> None:
     assert attachment_node["type"] == "attachment"
     assert attachment_node["mimeType"] == "application/pdf"
     assert attachment_node["sizeBytes"] > 0
+    generic_node = _find_tree_node(tree, "bundle.bin")
+    assert generic_node["type"] == "attachment"
+    assert generic_node["mimeType"] == "application/octet-stream"
     assert _find_tree_node(tree, ".env") == {}
 
     imported = client.post(
@@ -455,6 +461,15 @@ def test_project_tree_imports_and_manages_attachment_files(tmp_path) -> None:
     assert renamed.status_code == 200
     assert renamed.json()["node"]["name"] == "dataset-renamed.csv"
     assert (docs_root / "dataset-renamed.csv").exists()
+
+    imported_generic = client.post(
+        f"/api/projects/{project_id}/attachments",
+        files={"file": ("generic.custom", b"raw payload", "application/octet-stream")},
+    )
+    assert imported_generic.status_code == 200
+    assert imported_generic.json()["node"]["type"] == "attachment"
+    assert imported_generic.json()["node"]["name"] == "generic.custom"
+    assert (docs_root / "generic.custom").exists()
 
 
 def test_ai_context_project_attachment_source_is_resolved(tmp_path) -> None:

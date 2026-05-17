@@ -2111,7 +2111,6 @@ export function App() {
   async function promptImportProjectFile(parentId: string | null = null) {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".md,.markdown,.pdf,.docx,.xlsx,.pptx,.txt,.csv,.tsv,.json,.xml,.yaml,.yml,.zip,.7z,.rar,text/markdown,image/png,image/jpeg,image/webp,image/gif";
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file || !activeProject) return;
@@ -2133,25 +2132,16 @@ export function App() {
           return;
         }
 
-        if (["pdf", "docx", "xlsx", "pptx", "txt", "csv", "tsv", "json", "xml", "yaml", "yml", "zip", "7z", "rar"].includes(extension)) {
-          const result = await importProjectAttachment(activeProject.id, parentId, file);
-          applyFileOperationResult(result);
-          if (result.node?.type === "attachment") {
-            setActiveTreeNodeId(result.node.id);
-            setNotice({
-              title: "Archivo importado",
-              message: "Se gestionará en el proyecto sin abrir un visualizador interno.",
-              tone: "info",
-            });
-          }
-          return;
+        const result = await importProjectAttachment(activeProject.id, parentId, file);
+        applyFileOperationResult(result);
+        if (result.node?.type === "attachment") {
+          setActiveTreeNodeId(result.node.id);
+          setNotice({
+            title: "Archivo importado",
+            message: "Se gestionará en el proyecto sin abrir un visualizador interno.",
+            tone: "info",
+          });
         }
-
-        setNotice({
-          title: "Formato no admitido",
-          message: "Solo se pueden importar Markdown, imágenes y archivos de apoyo compatibles.",
-          tone: "info",
-        });
       } catch (error) {
         showError(error, "No se pudo importar el archivo.");
       }

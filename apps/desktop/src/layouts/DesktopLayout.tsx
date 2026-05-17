@@ -384,7 +384,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
               onCreateProject={props.onCreateProject}
             />
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-1.5">
+          <div className="min-h-0 flex-1 overflow-hidden px-2 py-1.5">
             {props.activeProject ? (
               <DocumentTree
                 nodes={props.tree}
