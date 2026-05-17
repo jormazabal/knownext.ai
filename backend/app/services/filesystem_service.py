@@ -13,22 +13,6 @@ EXCLUDED_DIRS = {".git", ".knownext", "node_modules", "__pycache__", ".venv", "v
 DOCUMENT_SUFFIXES = {".md", ".markdown"}
 DOCUMENT_SUFFIX = ".md"
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
-ATTACHMENT_SUFFIXES = {
-    ".pdf",
-    ".docx",
-    ".xlsx",
-    ".pptx",
-    ".txt",
-    ".csv",
-    ".tsv",
-    ".json",
-    ".xml",
-    ".yaml",
-    ".yml",
-    ".zip",
-    ".7z",
-    ".rar",
-}
 PRIVATE_SUFFIXES = {".env", ".key", ".pem", ".p12", ".pfx", ".crt", ".cer"}
 PRIVATE_NAMES = {".env", ".env.local", ".env.production", "id_rsa", "id_ed25519"}
 MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024
@@ -103,8 +87,6 @@ def _ensure_attachment_name(name: str, current_suffix: str) -> str:
     suffix = Path(safe_name).suffix.lower()
     if suffix in DOCUMENT_SUFFIXES | IMAGE_SUFFIXES:
         raise HTTPException(status_code=400, detail="Use the Markdown or image import flow for this file type")
-    if suffix not in ATTACHMENT_SUFFIXES:
-        raise HTTPException(status_code=400, detail=f"Unsupported attachment type: {suffix or safe_name}")
     return safe_name
 
 
@@ -119,10 +101,6 @@ def _safe_attachment_filename(filename: str | None) -> str:
     suffix = Path(name).suffix.lower()
     if suffix in DOCUMENT_SUFFIXES | IMAGE_SUFFIXES:
         raise HTTPException(status_code=400, detail="Use the Markdown or image import flow for this file type")
-    if not suffix:
-        raise HTTPException(status_code=400, detail="Unsupported attachment type")
-    if suffix not in ATTACHMENT_SUFFIXES:
-        raise HTTPException(status_code=400, detail=f"Unsupported attachment type: {suffix}")
     return name
 
 
@@ -339,7 +317,7 @@ class FileSystemService:
                 nodes.append(self._document_node(project_id, child, root))
             elif child.is_file() and child.suffix.lower() in IMAGE_SUFFIXES:
                 nodes.append(self._image_node(project_id, child, root))
-            elif child.is_file() and child.suffix.lower() in ATTACHMENT_SUFFIXES and not _is_private_filename(child.name):
+            elif child.is_file() and not _is_private_filename(child.name):
                 nodes.append(self._attachment_node(project_id, child, root))
 
         return nodes

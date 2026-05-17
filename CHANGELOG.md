@@ -2,6 +2,13 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.17.1 - 2026-05-18
+
+- Added distinct tree badges/icons for PDF, DOCX, PPTX, XLSX, TXT, and CSV support files.
+- Kept the document-tree toolbar fixed while only the folder/file list scrolls.
+- Broadened support-file management so non-private unknown file types are scanned, imported, renamed, moved, deleted, and versioned as generic files.
+- Added frontend and backend coverage for typed support-file icons, generic attachments, and external-change classification.
+
 ## 0.17.0 - 2026-05-17
 
 - Added first-class management for project support files such as PDF, Office documents, CSV/TSV, text, JSON/YAML/XML, and archives.

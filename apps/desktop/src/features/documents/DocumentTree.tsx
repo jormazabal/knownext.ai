@@ -218,25 +218,24 @@ export function DocumentTree({
 
   return (
     <div
-      className="cursor-default text-[11px]"
+      className="flex h-full min-h-0 cursor-default flex-col text-[11px]"
       onDragLeave={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null);
       }}
-      onScroll={() => setOpenMenu(null)}
     >
-      <div>
-        <DocumentTreeToolbar
-          filter={filter}
-          disabled={!hasActiveProject}
-          onFilterChange={setFilter}
-          onCreateFolder={onCreateFolder}
-          onCreateDocument={onCreateDocument}
-          onImportFile={onImportFile}
-          onSearch={() => setSearchOpen(true)}
-          onExpandTree={onExpandTree}
-          onCollapseTree={onCollapseTree}
-          onConfigureProject={onConfigureProject}
-        />
+      <DocumentTreeToolbar
+        filter={filter}
+        disabled={!hasActiveProject}
+        onFilterChange={setFilter}
+        onCreateFolder={onCreateFolder}
+        onCreateDocument={onCreateDocument}
+        onImportFile={onImportFile}
+        onSearch={() => setSearchOpen(true)}
+        onExpandTree={onExpandTree}
+        onCollapseTree={onCollapseTree}
+        onConfigureProject={onConfigureProject}
+      />
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pb-2" onScroll={() => setOpenMenu(null)}>
         {visibleNodes.length > 0 ? (
           visibleNodes.map((node) => (
             <TreeNode
@@ -406,7 +405,7 @@ function TreeNode({
         ) : node.type === "image" ? (
           <Image size={14} className={["mr-1.5", isActive ? "text-brand-orange" : "text-ink-secondary"].join(" ")} />
         ) : node.type === "attachment" ? (
-          <AttachmentIcon node={node} active={isActive} />
+          <AttachmentIcon name={node.name} active={isActive} />
         ) : (
           <FileText size={14} className={["mr-1.5", isActive ? "text-brand-orange" : "text-ink-secondary"].join(" ")} />
         )}
@@ -478,21 +477,72 @@ function TreeNode({
   );
 }
 
-function AttachmentIcon({ node, active }: { node: DocumentTreeNode; active: boolean }) {
-  const suffix = node.name.split(".").pop()?.toLowerCase() ?? "";
-  const Icon =
-    suffix === "pdf" || suffix === "txt"
-      ? FileText
-      : ["csv", "tsv", "xlsx"].includes(suffix)
-        ? FileSpreadsheet
-        : suffix === "pptx"
-          ? Presentation
-          : ["zip", "7z", "rar"].includes(suffix)
-            ? FileArchive
-            : ["json", "xml", "yaml", "yml"].includes(suffix)
-              ? FileType
-              : File;
-  return <Icon size={14} className={["mr-1.5", active ? "text-brand-orange" : "text-ink-secondary"].join(" ")} />;
+function AttachmentIcon({ name, active, size = "sm" }: { name: string; active: boolean; size?: "sm" | "md" }) {
+  const fileType = getAttachmentFileType(name);
+  const Icon = fileType.icon;
+  const iconSize = size === "md" ? 15 : 14;
+  return (
+    <span
+      className={[
+        "relative grid shrink-0 place-items-center",
+        size === "md" ? "h-8 w-8 rounded-md border bg-white" : "h-5 w-4",
+        size === "sm" ? "mr-1.5" : "",
+        size === "md" ? fileType.containerClass : "",
+        active ? "text-brand-orange" : fileType.iconClass,
+      ].join(" ")}
+      aria-hidden="true"
+    >
+      <Icon size={iconSize} strokeWidth={1.9} />
+      {fileType.badge ? (
+        <span
+          className={[
+            "pointer-events-none absolute rounded-[3px] border px-[2px] font-bold leading-none tracking-normal",
+            size === "md" ? "-bottom-0.5 left-1 text-[6px]" : "-bottom-0.5 left-1.5 text-[5px]",
+            active ? "border-orange-200 bg-brand-hover text-brand-orange" : fileType.badgeClass,
+          ].join(" ")}
+        >
+          {fileType.badge}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function getAttachmentFileType(name: string): {
+  icon: LucideIcon;
+  badge: string | null;
+  iconClass: string;
+  badgeClass: string;
+  containerClass: string;
+} {
+  const suffix = name.split(".").pop()?.toLowerCase() ?? "";
+  switch (suffix) {
+    case "pdf":
+      return { icon: FileText, badge: "PDF", iconClass: "text-red-600", badgeClass: "border-red-100 bg-red-50 text-red-700", containerClass: "border-red-100" };
+    case "docx":
+      return { icon: FileText, badge: "DOC", iconClass: "text-sky-700", badgeClass: "border-sky-100 bg-sky-50 text-sky-700", containerClass: "border-sky-100" };
+    case "pptx":
+      return { icon: Presentation, badge: "PPT", iconClass: "text-orange-700", badgeClass: "border-orange-100 bg-orange-50 text-orange-700", containerClass: "border-orange-100" };
+    case "xlsx":
+      return { icon: FileSpreadsheet, badge: "XLS", iconClass: "text-emerald-700", badgeClass: "border-emerald-100 bg-emerald-50 text-emerald-700", containerClass: "border-emerald-100" };
+    case "txt":
+      return { icon: FileText, badge: "TXT", iconClass: "text-slate-600", badgeClass: "border-slate-100 bg-slate-50 text-slate-700", containerClass: "border-slate-100" };
+    case "csv":
+      return { icon: FileSpreadsheet, badge: "CSV", iconClass: "text-teal-700", badgeClass: "border-teal-100 bg-teal-50 text-teal-700", containerClass: "border-teal-100" };
+    case "tsv":
+      return { icon: FileSpreadsheet, badge: "TSV", iconClass: "text-teal-700", badgeClass: "border-teal-100 bg-teal-50 text-teal-700", containerClass: "border-teal-100" };
+    case "zip":
+    case "7z":
+    case "rar":
+      return { icon: FileArchive, badge: null, iconClass: "text-ink-secondary", badgeClass: "", containerClass: "border-line" };
+    case "json":
+    case "xml":
+    case "yaml":
+    case "yml":
+      return { icon: FileType, badge: null, iconClass: "text-ink-secondary", badgeClass: "", containerClass: "border-line" };
+    default:
+      return { icon: File, badge: null, iconClass: "text-ink-secondary", badgeClass: "", containerClass: "border-line" };
+  }
 }
 
 function DocumentNameSearchDialog({
@@ -614,7 +664,7 @@ function DocumentNameSearchDialog({
                       result.type === "folder" ? "border-orange-200 bg-brand-hover text-brand-orange" : "border-line bg-white text-ink-secondary",
                     ].join(" ")}
                   >
-                    {result.type === "folder" ? <Folder size={15} /> : result.type === "image" ? <Image size={15} /> : result.type === "attachment" ? <File size={15} /> : <FileText size={15} />}
+                    {result.type === "folder" ? <Folder size={15} /> : result.type === "image" ? <Image size={15} /> : result.type === "attachment" ? <AttachmentIcon name={result.name} active={index === activeIndex} size="md" /> : <FileText size={15} />}
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[12px] font-semibold text-ink-primary">
