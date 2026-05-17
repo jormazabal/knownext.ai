@@ -443,12 +443,13 @@ export function App() {
       setProjectSyncState("synced");
       return;
     }
+    if (externalChangesBusy) return;
     void refreshExternalChangeSet(activeProject.id, { refreshTreeOnChanges: true, silent: true });
     const interval = window.setInterval(() => {
       void refreshExternalChangeSet(activeProject.id, { refreshTreeOnChanges: true, silent: true });
     }, 8000);
     return () => window.clearInterval(interval);
-  }, [activeProject?.id, configLoaded]);
+  }, [activeProject?.id, configLoaded, externalChangesBusy]);
 
   useEffect(() => {
     if (!configLoaded || !activeProject) {
@@ -720,6 +721,7 @@ export function App() {
 
   async function handleImportExternalChanges(options: { safeOnly?: boolean } = {}) {
     if (!activeProject || !externalChangeSet) return;
+    if (externalChangesBusy) return;
     const decisions = buildExternalImportDecisions(externalChangeSet, externalChangeDecisions, options.safeOnly);
     setExternalChangesBusy(true);
     setProjectSyncState("saving");
