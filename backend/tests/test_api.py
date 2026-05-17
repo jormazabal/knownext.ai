@@ -2,6 +2,7 @@ import base64
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -41,7 +42,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.16.1"
+    assert payload["version"] == "0.16.2"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -300,6 +301,30 @@ def test_external_changes_decode_git_quoted_utf8_paths() -> None:
         external_changes_service._decode_git_path('"Facturaci\\303\\263n/Facturaciones.md"')
         == "Facturación/Facturaciones.md"
     )
+
+
+def test_git_service_retries_transient_index_lock(tmp_path, monkeypatch) -> None:
+    from app.services import git_service as git_service_module
+    from app.services.git_service import git_service
+
+    calls = 0
+
+    def fake_run(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return SimpleNamespace(
+                returncode=128,
+                stdout="",
+                stderr="fatal: Unable to create '.git/index.lock': File exists. Another git process seems to be running in this repository.",
+            )
+        return SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr(git_service_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(git_service_module.time, "sleep", lambda _seconds: None)
+
+    assert git_service._run(tmp_path, ["git", "status"]) == "ok\n"
+    assert calls == 2
 
 
 def test_external_changes_scan_classifies_and_imports_safe_git_changes(tmp_path) -> None:

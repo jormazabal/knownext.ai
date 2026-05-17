@@ -40,8 +40,9 @@ class ExternalChangesService:
                 message="La detección automática de cambios externos requiere un proyecto con historial Git local.",
             )
 
-        git_service.ensure_repository(root)
-        items = self._items_from_porcelain(project_id, root, git_service.porcelain_status(root))
+        with git_service.repository_lock(root):
+            git_service.ensure_repository(root)
+            items = self._items_from_porcelain(project_id, root, git_service.porcelain_status(root))
         summary = self._summarize(items)
         requires_review = summary.review > 0 or summary.blocked > 0 or summary.total > SAFE_AUTOIMPORT_LIMIT or summary.totalBytes > SAFE_AUTOIMPORT_SIZE_BYTES
         status = "none"
@@ -70,37 +71,38 @@ class ExternalChangesService:
         if project["versioningMode"] != "local-git":
             raise HTTPException(status_code=409, detail="External imports require local Git versioning")
 
-        change_set = self.scan(project_id)
-        decisions = {decision.itemId: decision.decision for decision in payload.decisions}
-        selected_items = [
-            item
-            for item in change_set.items
-            if item.risk != "blocked" and decisions.get(item.id, item.decision) == "include"
-        ]
-        selected_paths = [item.path for item in selected_items if item.kind != "folder"]
-        if not selected_paths:
-            raise HTTPException(status_code=409, detail="No safe external changes selected")
+        with git_service.repository_lock(root):
+            change_set = self.scan(project_id)
+            decisions = {decision.itemId: decision.decision for decision in payload.decisions}
+            selected_items = [
+                item
+                for item in change_set.items
+                if item.risk != "blocked" and decisions.get(item.id, item.decision) == "include"
+            ]
+            selected_paths = [item.path for item in selected_items if item.kind != "folder"]
+            if not selected_paths:
+                raise HTTPException(status_code=409, detail="No safe external changes selected")
 
-        version_title = f"Importación externa: {self._import_title(selected_items)}"
-        git_service.create_project_version(root, selected_paths, version_title)
-        pending_remote_sync = False
-        status = "synced"
-        message = "Versión local guardada."
+            version_title = f"Importación externa: {self._import_title(selected_items)}"
+            git_service.create_project_version(root, selected_paths, version_title)
+            pending_remote_sync = False
+            status = "synced"
+            message = "Versión local guardada."
 
-        if payload.syncRemote and project.get("syncMode") == "manual-github" and git_service.has_remote_origin(root):
-            status = "syncing"
-            try:
-                git_service.pull(root)
-                git_service.push(root)
-                message = "Versión local guardada y sincronizada con GitHub."
-            except HTTPException:
+            if payload.syncRemote and project.get("syncMode") == "manual-github" and git_service.has_remote_origin(root):
+                status = "syncing"
+                try:
+                    git_service.pull(root)
+                    git_service.push(root)
+                    message = "Versión local guardada y sincronizada con GitHub."
+                except HTTPException:
+                    pending_remote_sync = True
+                    status = "pending"
+                    message = "Versión local guardada. La sincronización con GitHub queda pendiente."
+            elif project.get("syncMode") == "manual-github":
                 pending_remote_sync = True
                 status = "pending"
-                message = "Versión local guardada. La sincronización con GitHub queda pendiente."
-        elif project.get("syncMode") == "manual-github":
-            pending_remote_sync = True
-            status = "pending"
-            message = "Versión local guardada. No hay remoto GitHub configurado para sincronizar."
+                message = "Versión local guardada. No hay remoto GitHub configurado para sincronizar."
 
         return ExternalChangeImportResult(
             status=status,
@@ -113,6 +115,7 @@ class ExternalChangesService:
 
     def _items_from_porcelain(self, project_id: str, root: Path, status_output: str) -> list[ExternalChangeItem]:
         items: list[ExternalChangeItem] = []
+        status_paths = {self._path_from_porcelain_line(line) for line in status_output.splitlines() if len(line) >= 4}
         for line in status_output.splitlines():
             if not line.strip() or len(line) < 4:
                 continue
@@ -123,7 +126,7 @@ class ExternalChangesService:
             item = self._classify_item(project_id, root, path, candidate, change_type)
             items.append(item)
             if item.changeType == "added":
-                items.extend(self._new_parent_folder_items(project_id, root, path))
+                items.extend(self._new_parent_folder_items(project_id, root, path, status_paths))
         return self._dedupe_items(items)
 
     def _classify_item(self, project_id: str, root: Path, path: str, candidate: Path, change_type: str) -> ExternalChangeItem:
@@ -180,15 +183,14 @@ class ExternalChangesService:
             reason=reason,
         )
 
-    def _new_parent_folder_items(self, project_id: str, root: Path, path: str) -> list[ExternalChangeItem]:
+    def _new_parent_folder_items(self, project_id: str, root: Path, path: str, status_paths: set[str]) -> list[ExternalChangeItem]:
         items: list[ExternalChangeItem] = []
         parts = Path(path).parts[:-1]
         for index in range(1, len(parts) + 1):
             folder_path = Path(*parts[:index]).as_posix()
             if not folder_path:
                 continue
-            status = git_service.porcelain_status(root)
-            if any(self._path_from_porcelain_line(line) == folder_path for line in status.splitlines() if len(line) >= 4):
+            if folder_path in status_paths:
                 continue
             folder = root / folder_path
             if folder.exists() and folder.is_dir():

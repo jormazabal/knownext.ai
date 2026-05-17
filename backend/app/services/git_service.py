@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import os
 import subprocess
+import threading
+import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Iterator
 
 from fastapi import HTTPException
 
@@ -10,6 +15,16 @@ from app.schemas.version import VersionRecord
 
 
 class GitService:
+    def __init__(self) -> None:
+        self._locks: dict[str, threading.RLock] = {}
+        self._locks_guard = threading.Lock()
+
+    @contextmanager
+    def repository_lock(self, root: Path) -> Iterator[None]:
+        lock = self._lock_for(root)
+        with lock:
+            yield
+
     def is_repository(self, root: Path) -> bool:
         return (root / ".git").exists()
 
@@ -64,7 +79,7 @@ class GitService:
     def status(self, root: Path) -> tuple[bool, str | None, str | None]:
         if not self.is_repository(root):
             return False, None, None
-        has_changes = bool(self._run(root, ["git", "status", "--porcelain"], allow_empty=True).strip())
+        has_changes = bool(self._run(root, ["git", "status", "--porcelain"], allow_empty=True, optional_locks=False).strip())
         last_hash = self._run(root, ["git", "rev-parse", "--short", "HEAD"], allow_empty=True).strip() or None
         last_date = self._run(root, ["git", "log", "-1", "--date=iso-strict", "--pretty=%ad"], allow_empty=True).strip() or None
         return has_changes, last_hash, self._relative_time(last_date) if last_date else None
@@ -82,7 +97,7 @@ class GitService:
     def porcelain_status(self, root: Path) -> str:
         if not self.is_repository(root):
             return ""
-        return self._run(root, ["git", "status", "--porcelain", "-uall"], allow_empty=True)
+        return self._run(root, ["git", "status", "--porcelain", "-uall"], allow_empty=True, optional_locks=False)
 
     def has_remote_origin(self, root: Path) -> bool:
         if not self.is_repository(root):
@@ -110,16 +125,35 @@ class GitService:
             return
         self._run(root, ["git", "remote", "add", "origin", remote_url])
 
-    def _run(self, cwd: Path, command: list[str], allow_empty: bool = False) -> str:
-        try:
-            result = subprocess.run(command, cwd=cwd, text=True, encoding="utf-8", capture_output=True, check=False)
-        except FileNotFoundError as error:
-            raise HTTPException(status_code=500, detail="Git is not installed or not available") from error
-        if result.returncode != 0:
+    def _run(self, cwd: Path, command: list[str], allow_empty: bool = False, optional_locks: bool = True) -> str:
+        env = None
+        if not optional_locks:
+            env = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
+
+        last_error = ""
+        for attempt in range(6):
+            try:
+                result = subprocess.run(command, cwd=cwd, env=env, text=True, encoding="utf-8", capture_output=True, check=False)
+            except FileNotFoundError as error:
+                raise HTTPException(status_code=500, detail="Git is not installed or not available") from error
+            if result.returncode == 0:
+                return result.stdout
+            last_error = (result.stderr or result.stdout or "Git command failed").strip()
             if allow_empty and self._is_empty_revision_error(result.stderr):
                 return ""
-            raise HTTPException(status_code=409, detail=(result.stderr or result.stdout or "Git command failed").strip())
-        return result.stdout
+            if not self._is_index_lock_error(last_error):
+                break
+            time.sleep(0.2 * (attempt + 1))
+        raise HTTPException(status_code=409, detail=last_error)
+
+    def _lock_for(self, root: Path) -> threading.RLock:
+        key = str(root.resolve()).lower()
+        with self._locks_guard:
+            lock = self._locks.get(key)
+            if lock is None:
+                lock = threading.RLock()
+                self._locks[key] = lock
+            return lock
 
     def _is_empty_revision_error(self, stderr: str) -> bool:
         normalized = stderr.lower()
@@ -128,6 +162,10 @@ class GitService:
             or "needed a single revision" in normalized
             or "ambiguous argument 'head'" in normalized
         )
+
+    def _is_index_lock_error(self, message: str) -> bool:
+        normalized = message.lower()
+        return "index.lock" in normalized or "another git process seems to be running" in normalized
 
     def _initials(self, name: str) -> str:
         parts = [part for part in name.replace("@", " ").split() if part]

@@ -2,6 +2,11 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.16.2 - 2026-05-17
+
+- Prevented external-change scanning from overlapping with selected imports, avoiding transient Git `index.lock` failures with larger pasted batches.
+- Reduced external-change scans to a single Git status read and added retry handling for temporary `index.lock` contention.
+
 ## 0.16.1 - 2026-05-17
 
 - Fixed external-change imports for folders and files with non-ASCII characters in their path, including names such as `Facturación`.
