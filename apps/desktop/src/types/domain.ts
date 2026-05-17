@@ -98,6 +98,7 @@ export type ExternalChangeSummary = {
   folders: number;
   documents: number;
   images: number;
+  attachments: number;
   omitted: number;
   totalBytes: number;
 };
@@ -329,7 +330,7 @@ export type AppConfigUpdate = {
 export type DocumentTreeNode = {
   id: string;
   name: string;
-  type: "folder" | "document" | "image";
+  type: "folder" | "document" | "image" | "attachment";
   path?: string;
   mimeType?: string | null;
   sizeBytes?: number | null;
@@ -341,7 +342,7 @@ export type DocumentTreeNode = {
 export type DocumentNameSearchResult = {
   id: string;
   name: string;
-  type: "folder" | "document";
+  type: "folder" | "document" | "image" | "attachment";
   path: string[];
   parentIds: string[];
   matchRanges: Array<{ start: number; end: number }>;

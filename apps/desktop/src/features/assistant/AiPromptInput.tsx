@@ -475,7 +475,7 @@ export function AiPromptInput({
                 setReferenceQuery("");
                 textareaRef.current?.focus();
               }} />
-              <ContextMenuButton icon={File} title="Adjuntar archivo" detail="PDF, Word, PowerPoint, Markdown o imagen" onClick={() => fileInputRef.current?.click()} />
+              <ContextMenuButton icon={File} title="Adjuntar archivo" detail="PDF, Office, CSV, Markdown e imagen" onClick={() => fileInputRef.current?.click()} />
               <ContextMenuButton icon={Image} title="Pegar imagen" detail="Usa Ctrl+V dentro del prompt" onClick={() => {
                 setContextMenuOpen(false);
                 textareaRef.current?.focus();
@@ -487,7 +487,7 @@ export function AiPromptInput({
             className="hidden"
             type="file"
             multiple
-            accept=".md,.txt,.pdf,.docx,.pptx,image/png,image/jpeg,image/webp,image/gif"
+            accept=".md,.txt,.csv,.pdf,.docx,.pptx,image/png,image/jpeg,image/webp,image/gif"
             onChange={(event) => {
               const files = Array.from(event.currentTarget.files ?? []);
               event.currentTarget.value = "";
@@ -914,7 +914,7 @@ function ReferencePicker({
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => onSelect(result)}
           >
-            {result.kind === "image" ? <Image size={13} className="shrink-0" /> : <FileText size={13} className="shrink-0" />}
+            {result.kind === "image" ? <Image size={13} className="shrink-0" /> : result.kind === "external_file" ? <File size={13} className="shrink-0" /> : <FileText size={13} className="shrink-0" />}
             <span className="min-w-0">
               <span className="block truncate text-[11px] font-semibold">{result.name}</span>
               <span className="block truncate text-[10px] text-ink-secondary">{result.path}</span>
@@ -965,7 +965,7 @@ function ActiveSourcesPopover({
                   <span className="block truncate text-[11px] font-semibold">{source.name}</span>
                   <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-ink-secondary">
                     <SourceStatus source={source} />
-                    <span>{source.kind === "project_document" ? "Proyecto" : source.kind === "image" ? "Imagen" : "Externo"}</span>
+                    <span>{source.kind === "image" ? "Imagen" : source.kind === "project_document" || source.path ? "Proyecto" : "Externo"}</span>
                     {source.expiresAt ? <span>{formatRelativeExpiry(source.expiresAt)}</span> : null}
                   </span>
                 </button>
@@ -1001,7 +1001,7 @@ function ActiveSourcesPopover({
                   Mantener 1 h
                 </button>
               ) : null}
-              {onAddToProject && preview.source.kind === "external_file" ? (
+              {onAddToProject && preview.source.kind === "external_file" && !preview.source.path ? (
                 <button type="button" className="inline-flex h-7 items-center gap-1 rounded-full bg-brand-orange px-2.5 text-[10px] font-semibold text-white hover:bg-brand-dark" onClick={() => void onAddToProject(preview.source.id)}>
                   <FileText size={12} />
                   Añadir al proyecto

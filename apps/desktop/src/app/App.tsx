@@ -36,6 +36,7 @@ import {
   deleteAiIndex,
   deleteOpenAiKey,
   addAiContextSourceToProject,
+  addProjectAttachmentAiContextSource,
   addProjectImageAiContextSource,
   addProjectDocumentAiContextSource,
   extendAiContextSource,
@@ -94,6 +95,7 @@ import {
   getProjectTree,
   getProjectCapabilities,
   getProjectVersioningStatus,
+  importProjectAttachment,
   listProjects,
   importProjectImage,
   moveTreeNode,
@@ -642,10 +644,14 @@ export function App() {
     setActiveUtilityTab(null);
   }
 
-  function handleSelectTreeNode(nodeId: string, type: "folder" | "document", name: string) {
+  function handleSelectTreeNode(nodeId: string, type: DocumentTreeNode["type"], name: string) {
     setTree((currentTree) => openTreeNodePath(currentTree, nodeId));
     setActiveTreeNodeId(nodeId);
     if (type === "document") handleOpenDocument(nodeId, name);
+    if (type === "image") {
+      const imageNode = findNodeById(tree, nodeId);
+      if (imageNode?.path) handleOpenImage(nodeId, name, imageNode.path);
+    }
   }
 
   function handleActivateTreeNode(nodeId: string) {
@@ -923,14 +929,27 @@ export function App() {
   async function handleAddProjectDocumentContext(documentId: string) {
     if (!activeProject) return;
     try {
-      if (documentId.startsWith("fs_") && findNodeById(tree, documentId)?.type === "image") {
+      const node = documentId.startsWith("fs_") ? findNodeById(tree, documentId) : null;
+      if (node?.type === "image") {
         await addProjectImageAiContextSource(activeProject.id, documentId);
+      } else if (node?.type === "attachment") {
+        await addProjectAttachmentAiContextSource(activeProject.id, documentId);
       } else {
         await addProjectDocumentAiContextSource(activeProject.id, documentId);
       }
       await refreshAiContextSources(activeProject.id);
     } catch (error) {
-      showError(error, "No se pudo añadir el documento al contexto IA.", { source: "app.aiContext.addDocument" });
+      showError(error, "No se pudo añadir el archivo al contexto IA.", { source: "app.aiContext.addDocument" });
+    }
+  }
+
+  async function handleAddProjectAttachmentContext(attachmentId: string) {
+    if (!activeProject) return;
+    try {
+      await addProjectAttachmentAiContextSource(activeProject.id, attachmentId);
+      await refreshAiContextSources(activeProject.id);
+    } catch (error) {
+      showError(error, "No se pudo añadir el archivo al contexto IA.", { source: "app.aiContext.addAttachment" });
     }
   }
 
@@ -1280,8 +1299,8 @@ export function App() {
 
   async function handleRenameNode(nodeId: string, name: string) {
     if (!activeProject) return;
-    const nextName = name.trim() || "Nueva carpeta";
     const previousNode = findNodeById(tree, nodeId);
+    const nextName = name.trim() || (previousNode?.type === "folder" ? "Nueva carpeta" : previousNode?.name ?? "archivo");
     if (previousNode?.name === nextName) {
       setTree((currentTree) => renameNode(currentTree, nodeId, nextName));
       return;
@@ -1809,7 +1828,7 @@ export function App() {
         tone: "info",
       });
     } catch (error) {
-      showError(error, "No se pudo reindexar las imagenes para IA.", { source: "app.aiImageIndex" });
+      showError(error, "No se pudo reindexar las imágenes para IA.", { source: "app.aiImageIndex" });
     }
   }
 
@@ -1918,6 +1937,11 @@ export function App() {
       return;
     }
 
+    if (action === "import-file") {
+      void promptImportProjectFile(node.id);
+      return;
+    }
+
     if (action === "open-image" && node.path) {
       handleOpenImage(node.id, node.name, node.path);
       return;
@@ -1925,6 +1949,17 @@ export function App() {
 
     if (action === "add-image-context") {
       void handleAddProjectImageContext(node.id);
+      return;
+    }
+
+    if (action === "add-attachment-context") {
+      void handleAddProjectAttachmentContext(node.id);
+      return;
+    }
+
+    if (action === "copy-path" && node.path) {
+      void navigator.clipboard?.writeText(node.path);
+      setNotice({ title: "Ruta copiada", message: node.path, tone: "info" });
       return;
     }
 
@@ -1964,7 +1999,9 @@ export function App() {
       ? `Se eliminará la carpeta "${node.name}" y su contenido del disco. Esta acción no se puede deshacer.`
       : node.type === "image"
         ? `Se eliminará la imagen "${node.name}" del disco. Esta acción no se puede deshacer.`
-        : `Se eliminará el documento "${node.name}" del disco. Esta acción no se puede deshacer.`;
+        : node.type === "attachment"
+          ? `Se eliminará el archivo "${node.name}" del disco. Esta acción no se puede deshacer.`
+          : `Se eliminará el documento "${node.name}" del disco. Esta acción no se puede deshacer.`;
     if (node.type === "image") {
       try {
         const usage = await getProjectImageUsage(activeProject.id, node.id);
@@ -2015,7 +2052,7 @@ export function App() {
         const impact = await getDocumentMoveImpact(activeProject.id, node.id);
         if (impact.references.length > 0) {
           const shared = impact.sharedAssetPaths.length > 0 ? ` ${impact.sharedAssetPaths.length} imagen(es) tambien se usan en otros documentos.` : "";
-          const proceed = window.confirm(`${impact.message}${shared}\n\nKnowNext.ai actualizara las referencias relativas para mantener las imagenes enlazadas.`);
+          const proceed = window.confirm(`${impact.message}${shared}\n\nKnowNext.ai actualizará las referencias relativas para mantener las imágenes enlazadas.`);
           if (!proceed) return false;
         }
       }
@@ -2074,7 +2111,7 @@ export function App() {
   async function promptImportProjectFile(parentId: string | null = null) {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".md,.markdown,text/markdown,image/png,image/jpeg,image/webp,image/gif";
+    input.accept = ".md,.markdown,.pdf,.docx,.xlsx,.pptx,.txt,.csv,.tsv,.json,.xml,.yaml,.yml,.zip,.7z,.rar,text/markdown,image/png,image/jpeg,image/webp,image/gif";
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file || !activeProject) return;
@@ -2096,9 +2133,23 @@ export function App() {
           return;
         }
 
+        if (["pdf", "docx", "xlsx", "pptx", "txt", "csv", "tsv", "json", "xml", "yaml", "yml", "zip", "7z", "rar"].includes(extension)) {
+          const result = await importProjectAttachment(activeProject.id, parentId, file);
+          applyFileOperationResult(result);
+          if (result.node?.type === "attachment") {
+            setActiveTreeNodeId(result.node.id);
+            setNotice({
+              title: "Archivo importado",
+              message: "Se gestionará en el proyecto sin abrir un visualizador interno.",
+              tone: "info",
+            });
+          }
+          return;
+        }
+
         setNotice({
           title: "Formato no admitido",
-          message: "Solo se pueden importar documentos Markdown e imágenes compatibles.",
+          message: "Solo se pueden importar Markdown, imágenes y archivos de apoyo compatibles.",
           tone: "info",
         });
       } catch (error) {
@@ -2151,6 +2202,14 @@ export function App() {
           setActiveImageId((currentImageId) => (currentImageId === sourceNode.id ? nextTabs[0]?.id ?? "" : currentImageId));
           return nextTabs;
         });
+      }
+    }
+
+    if (sourceNode?.type === "attachment") {
+      if (result.node?.type === "attachment") {
+        setActiveTreeNodeId((currentNodeId) => (currentNodeId === sourceNode.id ? result.node!.id : currentNodeId));
+      } else {
+        setActiveTreeNodeId((currentNodeId) => (currentNodeId === sourceNode.id ? activeDocumentId : currentNodeId));
       }
     }
 

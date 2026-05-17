@@ -2,6 +2,13 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.17.0 - 2026-05-17
+
+- Added first-class management for project support files such as PDF, Office documents, CSV/TSV, text, JSON/YAML/XML, and archives.
+- Extended the document tree with support-file icons, search, `Solo archivos` filtering, import, rename, move, delete, and no internal viewer for non-previewable files.
+- Added backend support-file scanning, import, privacy filtering, external-change classification, and AI prompt context extraction for readable project files.
+- Updated frontend/backend contracts, tests, product documentation, architecture notes, and manual acceptance coverage for support-file workflows.
+
 ## 0.16.2 - 2026-05-17
 
 - Prevented external-change scanning from overlapping with selected imports, avoiding transient Git `index.lock` failures with larger pasted batches.

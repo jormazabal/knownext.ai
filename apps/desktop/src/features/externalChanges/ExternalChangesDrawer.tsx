@@ -33,7 +33,7 @@ const groupOrder: Array<{ key: ExternalChangeKind; title: string }> = [
   { key: "folder", title: "Carpetas nuevas" },
   { key: "document", title: "Documentos Markdown" },
   { key: "image", title: "Imágenes" },
-  { key: "attachment", title: "Adjuntos" },
+  { key: "attachment", title: "Archivos" },
   { key: "private", title: "Privados" },
   { key: "ignored", title: "Omitidos automáticamente" },
   { key: "unsupported", title: "No compatibles" },

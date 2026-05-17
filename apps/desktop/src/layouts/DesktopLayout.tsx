@@ -135,7 +135,7 @@ type DesktopLayoutProps = {
   onOpenDocument: (documentId: string, name: string) => void;
   onOpenImage: (assetId: string, name: string, path: string) => void;
   onActivateTreeNode: (nodeId: string) => void;
-  onSelectTreeNode: (nodeId: string, type: "folder" | "document", name: string) => void;
+  onSelectTreeNode: (nodeId: string, type: DocumentTreeNode["type"], name: string) => void;
   onSelectTab: (documentId: string) => void;
   onCloseTab: (documentId: string) => void;
   onTreeContextAction: (action: DocumentTreeAction, node: DocumentTreeNode) => void;
@@ -917,7 +917,7 @@ function InsertImageDialog({
               />
               <div className="mt-3 max-h-72 space-y-1 overflow-y-auto">
                 {visibleImages.length === 0 ? (
-                  <p className="rounded-md border border-line bg-panel px-3 py-4 text-center text-[11px] text-ink-secondary">No hay imagenes que coincidan.</p>
+                  <p className="rounded-md border border-line bg-panel px-3 py-4 text-center text-[11px] text-ink-secondary">No hay imágenes que coincidan.</p>
                 ) : (
                   visibleImages.map((image) => (
                     <button

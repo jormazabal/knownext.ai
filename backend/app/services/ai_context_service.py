@@ -27,7 +27,7 @@ from app.schemas.ai import (
 from app.schemas.project import CreateDocumentRequest, TreeNode
 from app.services.app_storage import JsonFileStore, get_app_data_dir
 from app.services.document_service import document_service
-from app.services.filesystem_service import IMAGE_SUFFIXES, decode_document_id, encode_node_id
+from app.services.filesystem_service import IMAGE_SUFFIXES, decode_document_id, decode_node_id, encode_node_id
 from app.services.project_service import project_service
 
 
@@ -60,6 +60,14 @@ class AiContextService:
                 if normalized_query in image.name.lower() or normalized_query in (image.path or "").lower()
             ]
         images.sort(key=lambda image: (_score_document(image, normalized_query), image.path or image.name))
+        attachments = _flatten_context_attachments(tree)
+        if normalized_query:
+            attachments = [
+                attachment
+                for attachment in attachments
+                if normalized_query in attachment.name.lower() or normalized_query in (attachment.path or "").lower()
+            ]
+        attachments.sort(key=lambda attachment: (_score_document(attachment, normalized_query), attachment.path or attachment.name))
         results = [
             AiContextSearchResult(documentId=document.id, name=document.name, path=document.path or document.name, kind="project_document")
             for document in documents[:12]
@@ -73,6 +81,16 @@ class AiContextService:
                 mimeType=image.mimeType,
             )
             for image in images[:8]
+        )
+        results.extend(
+            AiContextSearchResult(
+                documentId=attachment.id,
+                name=attachment.name,
+                path=attachment.path or attachment.name,
+                kind="external_file",
+                mimeType=attachment.mimeType,
+            )
+            for attachment in attachments[:8]
         )
         return results[:20]
 
@@ -151,6 +169,74 @@ class AiContextService:
             "weight": "medium" if len(data_bytes) > 2 * 1024 * 1024 else "light",
             "warning": None,
             "error": None,
+            "createdAt": now,
+            "updatedAt": now,
+            "lastUsedAt": None,
+            "expiresAt": _expires_from(now),
+        }
+        self._append_source(project_id, record)
+        return self._source_from_record(record)
+
+    def create_project_attachment_source(self, project_id: str, attachment_id: str) -> AiContextSource:
+        node_project_id, relative_path = decode_node_id(attachment_id)
+        if node_project_id != project_id:
+            raise HTTPException(status_code=400, detail="Attachment does not belong to project")
+        root = project_service._get_project_root(project_id).resolve()
+        attachment_path = (root / relative_path).resolve()
+        try:
+            attachment_path.relative_to(root)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Attachment path escapes project folder") from None
+        if not attachment_path.exists() or not attachment_path.is_file():
+            raise HTTPException(status_code=404, detail="Attachment not found")
+        extension = attachment_path.suffix.lower()
+        if extension not in SUPPORTED_EXTENSIONS or extension in IMAGE_EXTENSIONS or extension in {".md"}:
+            raise HTTPException(status_code=400, detail="This project file cannot be used as text context")
+
+        normalized_path = attachment_path.relative_to(root).as_posix().strip("/")
+        data = self._read_project_data(project_id)
+        sources = data.get("sources") if isinstance(data.get("sources"), list) else []
+        for source in sources:
+            if source.get("kind") == "external_file" and source.get("attachmentPath") == normalized_path and not self._is_expired(source):
+                updated = self._refresh_record(source)
+                self._replace_source(project_id, updated)
+                return self._source_from_record(updated)
+
+        source_id = f"ctx_{uuid4().hex}"
+        now = _now()
+        mime_type = mimetypes.guess_type(attachment_path.name)[0] or "application/octet-stream"
+        try:
+            extracted = self._extract_file(attachment_path, attachment_path.name, mime_type, is_image=False)
+            status = "warning" if extracted.get("warning") else "ready"
+            warning = extracted.get("warning")
+            error = None
+        except Exception as exc:
+            extracted = {"text": "", "metadata": {"format": extension.lstrip("."), "source": "project", "path": normalized_path}}
+            status = "error"
+            warning = None
+            error = f"No se pudo leer el archivo: {type(exc).__name__}"
+        extracted["metadata"] = {
+            **(extracted.get("metadata") if isinstance(extracted.get("metadata"), dict) else {}),
+            "source": "project",
+            "path": normalized_path,
+            "mimeType": mime_type,
+            "sizeBytes": attachment_path.stat().st_size,
+        }
+        self._write_extracted(project_id, source_id, extracted)
+        text = str(extracted.get("text") or "")
+        record = {
+            "id": source_id,
+            "projectId": project_id,
+            "kind": "external_file",
+            "attachmentPath": normalized_path,
+            "name": attachment_path.name,
+            "path": normalized_path,
+            "mimeType": mime_type,
+            "sizeBytes": attachment_path.stat().st_size,
+            "status": status,
+            "weight": _weight_for_chars(len(text)),
+            "warning": warning,
+            "error": error,
             "createdAt": now,
             "updatedAt": now,
             "lastUsedAt": None,
@@ -522,6 +608,16 @@ def _flatten_images(nodes: list[TreeNode]) -> list[TreeNode]:
         if node.children:
             images.extend(_flatten_images(node.children))
     return images
+
+
+def _flatten_context_attachments(nodes: list[TreeNode]) -> list[TreeNode]:
+    attachments: list[TreeNode] = []
+    for node in nodes:
+        if node.type == "attachment" and Path(node.name).suffix.lower() in SUPPORTED_EXTENSIONS - IMAGE_EXTENSIONS - {".md"}:
+            attachments.append(node)
+        if node.children:
+            attachments.extend(_flatten_context_attachments(node.children))
+    return attachments
 
 
 def _score_document(document: TreeNode, query: str) -> int:

@@ -22,7 +22,7 @@ SAFE_AUTOIMPORT_LIMIT = 50
 SAFE_AUTOIMPORT_SIZE_BYTES = 25 * 1024 * 1024
 PRIVATE_SUFFIXES = {".env", ".key", ".pem", ".p12", ".pfx", ".crt", ".cer"}
 PRIVATE_NAMES = {".env", ".env.local", ".env.production", "id_rsa", "id_ed25519"}
-ATTACHMENT_SUFFIXES = {".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".csv"}
+ATTACHMENT_SUFFIXES = {".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".csv", ".tsv", ".json", ".xml", ".yaml", ".yml", ".zip", ".7z", ".rar"}
 
 
 class ExternalChangesService:
@@ -220,6 +220,7 @@ class ExternalChangesService:
             folders=sum(1 for item in items if item.kind == "folder"),
             documents=sum(1 for item in items if item.kind == "document"),
             images=sum(1 for item in items if item.kind == "image"),
+            attachments=sum(1 for item in items if item.kind == "attachment"),
             omitted=sum(1 for item in items if item.decision == "omit"),
             totalBytes=sum(item.sizeBytes or 0 for item in items),
         )

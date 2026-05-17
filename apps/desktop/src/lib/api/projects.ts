@@ -125,6 +125,15 @@ export async function importProjectImage(projectId: string, parentId: string | n
   return requestFormData<AssetImportResponse>(`/api/projects/${projectId}/assets/images${query ? `?${query}` : ""}`, formData);
 }
 
+export async function importProjectAttachment(projectId: string, parentId: string | null, file: File): Promise<FileOperationResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const params = new URLSearchParams();
+  if (parentId) params.set("parentId", parentId);
+  const query = params.toString();
+  return requestFormData<FileOperationResult>(`/api/projects/${projectId}/attachments${query ? `?${query}` : ""}`, formData);
+}
+
 export async function getProjectImage(projectId: string, assetId: string): Promise<AssetMetadata> {
   return requestJson<AssetMetadata>(`/api/projects/${projectId}/assets/${encodeURIComponent(assetId)}`);
 }

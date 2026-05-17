@@ -5,7 +5,7 @@ import mimetypes
 import shutil
 from pathlib import Path
 
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 
 from app.schemas.project import AffectedDocument, FileOperationResult, TreeNode
 
@@ -13,6 +13,25 @@ EXCLUDED_DIRS = {".git", ".knownext", "node_modules", "__pycache__", ".venv", "v
 DOCUMENT_SUFFIXES = {".md", ".markdown"}
 DOCUMENT_SUFFIX = ".md"
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+ATTACHMENT_SUFFIXES = {
+    ".pdf",
+    ".docx",
+    ".xlsx",
+    ".pptx",
+    ".txt",
+    ".csv",
+    ".tsv",
+    ".json",
+    ".xml",
+    ".yaml",
+    ".yml",
+    ".zip",
+    ".7z",
+    ".rar",
+}
+PRIVATE_SUFFIXES = {".env", ".key", ".pem", ".p12", ".pfx", ".crt", ".cer"}
+PRIVATE_NAMES = {".env", ".env.local", ".env.production", "id_rsa", "id_ed25519"}
+MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024
 ID_PREFIX = "fs_"
 
 
@@ -63,6 +82,50 @@ def _ensure_markdown_name(name: str) -> str:
     return safe_name if Path(safe_name).suffix.lower() in DOCUMENT_SUFFIXES else f"{safe_name}{DOCUMENT_SUFFIX}"
 
 
+def _is_private_filename(name: str) -> bool:
+    candidate = Path(name).name.lower()
+    return candidate in PRIVATE_NAMES or Path(candidate).suffix.lower() in PRIVATE_SUFFIXES
+
+
+def _ensure_image_name(name: str, current_suffix: str) -> str:
+    safe_name = _safe_name(name, "imagen")
+    if Path(safe_name).suffix.lower() not in IMAGE_SUFFIXES:
+        safe_name = f"{safe_name}{current_suffix}"
+    return safe_name
+
+
+def _ensure_attachment_name(name: str, current_suffix: str) -> str:
+    safe_name = _safe_name(name, "archivo")
+    if _is_private_filename(safe_name):
+        raise HTTPException(status_code=400, detail="Private files cannot be managed as project attachments")
+    if current_suffix and not Path(safe_name).suffix:
+        safe_name = f"{safe_name}{current_suffix}"
+    suffix = Path(safe_name).suffix.lower()
+    if suffix in DOCUMENT_SUFFIXES | IMAGE_SUFFIXES:
+        raise HTTPException(status_code=400, detail="Use the Markdown or image import flow for this file type")
+    if suffix not in ATTACHMENT_SUFFIXES:
+        raise HTTPException(status_code=400, detail=f"Unsupported attachment type: {suffix or safe_name}")
+    return safe_name
+
+
+def _safe_attachment_filename(filename: str | None) -> str:
+    name = Path(filename or "archivo").name.strip()
+    if not name or name in {".", ".."}:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if "/" in name or "\\" in name:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if _is_private_filename(name):
+        raise HTTPException(status_code=400, detail="Private files cannot be imported as project attachments")
+    suffix = Path(name).suffix.lower()
+    if suffix in DOCUMENT_SUFFIXES | IMAGE_SUFFIXES:
+        raise HTTPException(status_code=400, detail="Use the Markdown or image import flow for this file type")
+    if not suffix:
+        raise HTTPException(status_code=400, detail="Unsupported attachment type")
+    if suffix not in ATTACHMENT_SUFFIXES:
+        raise HTTPException(status_code=400, detail=f"Unsupported attachment type: {suffix}")
+    return name
+
+
 def _resolve_child(root: Path, relative_path: str | None) -> Path:
     if not relative_path:
         return root
@@ -87,6 +150,19 @@ def _unique_duplicate_path(source: Path, target_folder: Path | None = None) -> P
         candidate = parent / f"{source.stem} copia {counter}{source.suffix}"
         counter += 1
     return candidate
+
+
+def _unique_file_path(parent: Path, filename: str) -> Path:
+    candidate = parent / filename
+    if not candidate.exists():
+        return candidate
+    source = Path(filename)
+    counter = 2
+    while True:
+        candidate = parent / f"{source.stem} {counter}{source.suffix}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
 
 
 def _unique_folder_path(parent: Path, name: str) -> Path:
@@ -146,6 +222,25 @@ class FileSystemService:
         node = self._document_node(project_id, document_path, root.resolve())
         return FileOperationResult(tree=self.get_tree(project_id, root), node=node)
 
+    async def import_attachment(self, project_id: str, root: Path, parent_id: str | None, upload: UploadFile) -> FileOperationResult:
+        parent_path = self._resolve_parent_folder(project_id, root, parent_id)
+        filename = _safe_attachment_filename(upload.filename)
+        attachment_path = _unique_file_path(parent_path, filename)
+        size = 0
+        attachment_path.parent.mkdir(parents=True, exist_ok=True)
+        with attachment_path.open("wb") as output:
+            while True:
+                chunk = await upload.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_ATTACHMENT_BYTES:
+                    output.close()
+                    attachment_path.unlink(missing_ok=True)
+                    raise HTTPException(status_code=413, detail="Attachment is too large")
+                output.write(chunk)
+        return FileOperationResult(tree=self.get_tree(project_id, root), node=self._attachment_node(project_id, attachment_path, root.resolve()))
+
     def rename_node(self, project_id: str, root: Path, node_id: str, name: str) -> FileOperationResult:
         node_path = self._resolve_node(project_id, root, node_id)
         old_documents = self._collect_document_relative_paths(root.resolve(), node_path)
@@ -153,9 +248,9 @@ class FileSystemService:
         if node_path.is_file() and node_path.suffix.lower() in DOCUMENT_SUFFIXES:
             new_name = _ensure_markdown_name(name)
         elif node_path.is_file() and node_path.suffix.lower() in IMAGE_SUFFIXES:
-            new_name = _safe_name(name, node_path.name)
-            if Path(new_name).suffix.lower() not in IMAGE_SUFFIXES:
-                new_name = f"{new_name}{node_path.suffix}"
+            new_name = _ensure_image_name(name, node_path.suffix)
+        elif node_path.is_file():
+            new_name = _ensure_attachment_name(name, node_path.suffix)
         else:
             new_name = _safe_name(name, "Nueva carpeta")
         target_path = node_path.with_name(new_name)
@@ -238,10 +333,14 @@ class FileSystemService:
                 if child.name in EXCLUDED_DIRS or child.name.startswith("."):
                     continue
                 nodes.append(self._folder_node(project_id, child, root, depth))
+            elif child.name.startswith("."):
+                continue
             elif child.is_file() and child.suffix.lower() in DOCUMENT_SUFFIXES:
                 nodes.append(self._document_node(project_id, child, root))
             elif child.is_file() and child.suffix.lower() in IMAGE_SUFFIXES:
                 nodes.append(self._image_node(project_id, child, root))
+            elif child.is_file() and child.suffix.lower() in ATTACHMENT_SUFFIXES and not _is_private_filename(child.name):
+                nodes.append(self._attachment_node(project_id, child, root))
 
         return nodes
 
@@ -278,12 +377,25 @@ class FileSystemService:
             sizeBytes=image_path.stat().st_size,
         )
 
+    def _attachment_node(self, project_id: str, attachment_path: Path, root: Path) -> TreeNode:
+        relative_path = _normalize_relative_path(attachment_path.relative_to(root))
+        return TreeNode(
+            id=encode_node_id(project_id, relative_path),
+            name=attachment_path.name,
+            type="attachment",
+            path=relative_path,
+            mimeType=mimetypes.guess_type(attachment_path.name)[0] or "application/octet-stream",
+            sizeBytes=attachment_path.stat().st_size,
+        )
+
     def _node_for_path(self, project_id: str, path: Path, root: Path, depth: int) -> TreeNode:
         if path.is_dir():
             return self._folder_node(project_id, path, root, depth)
         if path.suffix.lower() in IMAGE_SUFFIXES:
             return self._image_node(project_id, path, root)
-        return self._document_node(project_id, path, root)
+        if path.suffix.lower() in DOCUMENT_SUFFIXES:
+            return self._document_node(project_id, path, root)
+        return self._attachment_node(project_id, path, root)
 
     def _resolve_parent_folder(self, project_id: str, root: Path, folder_id: str | None) -> Path:
         project_root = root.resolve()

@@ -44,7 +44,7 @@ export function getInlineNameCompletion(query: string, result: DocumentNameSearc
 function flattenSearchableNodes(nodes: DocumentTreeNode[], path: string[] = [], parentIds: string[] = []): IndexedTreeNode[] {
   return nodes.flatMap((node) => {
     const nextPath = [...path, node.name];
-    const isSearchable = node.type === "folder" || node.type === "document";
+    const isSearchable = node.type === "folder" || node.type === "document" || node.type === "image" || node.type === "attachment";
     const current = isSearchable ? [{ node, path: nextPath, parentIds }] : [];
     const children = node.children ? flattenSearchableNodes(node.children, nextPath, [...parentIds, node.id]) : [];
     return [...current, ...children];
@@ -69,8 +69,8 @@ function rankCandidate(candidate: IndexedTreeNode, normalizedQuery: string, quer
 function toResult(candidate: IndexedTreeNode, score: number, matchRanges: Array<{ start: number; end: number }>): RankedResult {
   return {
     id: candidate.node.id,
-    name: candidate.node.name,
-    type: candidate.node.type as "folder" | "document",
+      name: candidate.node.name,
+      type: candidate.node.type as "folder" | "document" | "image" | "attachment",
     path: candidate.path,
     parentIds: candidate.parentIds,
     matchRanges,

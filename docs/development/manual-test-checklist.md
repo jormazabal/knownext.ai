@@ -46,16 +46,17 @@
 - [ ] Create a local Git project and confirm the status bar shows a versioning state instead of Sin historial.
 - [ ] Create a project from a folder that already has Git/GitHub configured, associate the matching GitHub repository, and confirm the project is registered as Git local + GitHub existente without moving files.
 - [ ] Inspect the folder/document tree levels and confirm they match the active project's local folder.
-- [ ] Confirm Markdown documents, supported image files, and folders are shown in the navigation tree with distinct document/image/folder icons.
+- [ ] Confirm Markdown documents, supported image files, support files, and folders are shown in the navigation tree with distinct document/image/file/folder icons.
 - [ ] Confirm the file toolbar sits directly below the project selector with `Archivos` on the left and Buscar, Añadir, Vista del árbol, and Ajustes del proyecto icons aligned to the right.
 - [ ] Click Buscar and confirm a compact modal opens with the input focused, a close X, and no search field permanently added to the sidebar.
-- [ ] Type a middle or ending fragment of a folder name, for example `quis` for `Requisitos`, and confirm matching folders/documents appear even when the fragment is not at the start.
+- [ ] Type a middle or ending fragment of a folder name, for example `quis` for `Requisitos`, and confirm matching folders/documents/images/support files appear even when the fragment is not at the start.
 - [ ] Type a middle or ending fragment of a document name, select the result with Enter, and confirm the modal closes, the document opens, parent folders expand, and the document is selected in the tree.
+- [ ] Type part of a support-file name, select the result with Enter, and confirm the modal closes, parent folders expand, the file is selected in the tree, and no document/image viewer opens.
 - [ ] Select a folder result from search and confirm the modal closes, parent folders expand, that folder expands and is selected, while the current document remains open.
 - [ ] Confirm document search results show the document name plus a secondary parent-folder route for disambiguation, and that the route is not itself searched as content/name.
 - [ ] Confirm Up/Down changes the active search result, Tab and Enter select the active result, and Escape closes the search modal.
-- [ ] Open Añadir and confirm it offers Nueva carpeta, Nuevo Markdown, and Importar archivo for Markdown or image files.
-- [ ] Open Vista del árbol and confirm Ver todo, Solo Markdown, Solo imágenes, Expandir carpetas, and Contraer carpetas are grouped in one floating menu.
+- [ ] Open Añadir and confirm it offers Nueva carpeta, Nuevo Markdown, and Importar archivo for Markdown, image, and supported support files.
+- [ ] Open Vista del árbol and confirm Ver todo, Solo Markdown, Solo imágenes, Solo archivos, Expandir carpetas, and Contraer carpetas are grouped in one floating menu.
 - [ ] In desktop width, drag the divider next to the folder/document tree and confirm the left panel width changes with a visible vertical orange resize line.
 - [ ] In desktop width, focus the folder/document tree divider with the keyboard and confirm arrow keys resize the left panel within min/max limits.
 - [ ] Restart the app and confirm the folder/document tree width is restored from `config.json`.
@@ -87,11 +88,13 @@
 - [ ] Confirm the empty workspace area is very light gray and shows the gray KnowNext.ai watermark logo.
 - [ ] Confirm the AI prompt remains visible with project documentation wording when no document tab is open.
 - [ ] Switch projects and confirm each project restores its own open tabs and active document.
-- [ ] Confirm folder context menu shows Nueva carpeta, Nuevo documento, Importar imagen, Renombrar, Eliminar.
+- [ ] Confirm folder context menu shows Nueva carpeta, Nuevo documento, Importar archivo, Renombrar, Eliminar.
 - [ ] Confirm document context menu shows Renombrar, Duplicar, Mover, Eliminar.
 - [ ] Confirm image context menu shows Abrir, Insertar en documento, Usar como contexto IA, Copiar referencia, Renombrar, Mover, Eliminar.
+- [ ] Confirm support-file context menu shows Usar como contexto IA, Copiar ruta, Renombrar, Mover, Eliminar, and does not show Abrir or Insertar en documento.
 - [ ] Use the folder context menu to create a folder and document, then confirm they exist on disk.
-- [ ] Use Importar imagen from a folder menu and confirm only supported image files can be selected, the image is copied to that folder, appears in the tree, and opens in the image viewer tab.
+- [ ] Use Importar archivo from a folder menu to import an image and confirm the image is copied to that folder, appears in the tree, and opens in the image viewer tab.
+- [ ] Use Importar archivo from a folder menu to import a PDF, CSV, or TXT file and confirm the file is copied to that folder, appears in the tree with a file-specific icon, can be renamed/moved/deleted, and does not open a viewer tab.
 - [ ] Rename a folder or document from the tree and confirm the disk item is renamed.
 - [ ] Duplicate, move, and delete a document from the file context menu and confirm the disk changes.
 - [ ] Edit content in Milkdown visual mode.
@@ -132,8 +135,8 @@
 - [ ] In a Git local + sync project, use Traer cambios and Subir cambios from the history panel and confirm status feedback is visible.
 - [ ] In a local Git project, paste a small folder with Markdown files into the project from Windows Explorer and confirm KnowNext.ai detects external changes without stealing editor focus.
 - [ ] Confirm the document tab row shows a compact sync indicator and the editor shows a contextual banner with Revisar and Importar seguros.
-- [ ] Open Revisar and confirm the right drawer groups folders, Markdown documents, images, attachments, private files, omitted files, and unsupported files with clear counts and decisions.
-- [ ] Confirm safe Markdown/image items are preselected, review items can be included or omitted, and private files such as `.env`, `.pem`, or `.key` cannot be included.
+- [ ] Open Revisar and confirm the right drawer groups folders, Markdown documents, images, files, private files, omitted files, and unsupported files with clear counts and decisions.
+- [ ] Confirm safe Markdown/image items are preselected, support files require review, review items can be included or omitted, and private files such as `.env`, `.pem`, or `.key` cannot be included.
 - [ ] Confirm newly detected files/folders appear in the tree with temporary Nuevo/Revisar/Modificado badges and no permanent action icons.
 - [ ] Import selected safe changes and confirm a local version is created, the tree refreshes, badges disappear after clean scan, and the UI reports either Sincronizado or Pendiente de sincronizar with GitHub.
 - [ ] Paste a large or mixed folder and confirm KnowNext.ai requires review instead of importing immediately.
@@ -161,6 +164,8 @@
 - [ ] Remove the selected-text context chip and confirm the prompt can be sent without selected-text focus.
 - [ ] In the AI prompt, type `@` plus part of a filename and confirm a compact project-document picker opens above the prompt, filters results while typing, supports keyboard selection, and adds the selected document as a visible context chip.
 - [ ] In the AI prompt, type `@` plus part of an image filename and confirm project images appear with image icons, can be selected, and become visible image context chips.
+- [ ] In the AI prompt, type `@` plus part of a readable support-file name such as PDF, TXT, DOCX, PPTX, CSV, TSV, JSON, YAML, or XML and confirm it appears with a file icon, can be selected, and becomes a visible project context chip after backend extraction.
+- [ ] Try adding an unreadable support file such as an archive as AI context and confirm KnowNext.ai shows a clear warning/error instead of adding silent empty context.
 - [ ] Open an image from the project tree and use `Usar como contexto IA`; confirm the prompt receives the image context chip without leaving the image viewer.
 - [ ] Confirm every visible context chip in the prompt is treated as active context, remains visible after sending, and can be removed with its X button.
 - [ ] Add several context sources and confirm the prompt stays compact, shows `Fuentes · N · peso`, and opens a sources popover with status, origin, expiry, preview, remove, and extend actions.

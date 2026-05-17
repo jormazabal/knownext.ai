@@ -110,6 +110,11 @@ def create_document(project_id: str, payload: CreateDocumentRequest) -> FileOper
     return project_service.create_document(project_id, payload)
 
 
+@router.post("/projects/{project_id}/attachments", response_model=FileOperationResult)
+async def import_attachment(project_id: str, parentId: str | None = None, file: UploadFile = File(...)) -> FileOperationResult:
+    return await project_service.import_attachment(project_id, parentId, file)
+
+
 @router.patch("/projects/{project_id}/nodes/{node_id}/rename", response_model=FileOperationResult)
 def rename_node(project_id: str, node_id: str, payload: RenameNodeRequest) -> FileOperationResult:
     return project_service.rename_node(project_id, node_id, payload)

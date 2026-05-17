@@ -4,8 +4,12 @@ import {
   ChevronUp,
   Check,
   Copy,
+  File,
+  FileArchive,
   FileImage,
+  FileSpreadsheet,
   FileText,
+  FileType,
   Folder,
   FolderPlus,
   Eye,
@@ -16,6 +20,7 @@ import {
   Search,
   Trash2,
   MoveRight,
+  Presentation,
   FilePlus2,
   FileUp,
   Settings,
@@ -35,7 +40,7 @@ type DocumentTreeProps = {
   onOpenDocument: (documentId: string, name: string) => void;
   onOpenImage?: (assetId: string, name: string, path: string) => void;
   onActivateTreeNode: (nodeId: string) => void;
-  onSelectTreeNode: (nodeId: string, type: "folder" | "document", name: string) => void;
+  onSelectTreeNode: (nodeId: string, type: DocumentTreeNode["type"], name: string) => void;
   onCreateFolder: () => void;
   onCreateDocument: () => void;
   onImportFile?: () => void;
@@ -50,15 +55,19 @@ type DocumentTreeProps = {
 };
 
 type TreeFilter = "all" | "documents" | "images";
+type ExtendedTreeFilter = TreeFilter | "attachments";
 
 export type DocumentTreeAction =
   | "create-folder"
   | "create-document"
   | "import-image"
+  | "import-file"
   | "open-image"
   | "insert-image"
   | "add-image-context"
+  | "add-attachment-context"
   | "copy-image-reference"
+  | "copy-path"
   | "rename"
   | "delete"
   | "duplicate"
@@ -95,7 +104,7 @@ export function DocumentTree({
   } | null>(null);
   const [draggedNode, setDraggedNode] = useState<DocumentTreeNode | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string | null; valid: boolean; label: string } | null>(null);
-  const [filter, setFilter] = useState<TreeFilter>("all");
+  const [filter, setFilter] = useState<ExtendedTreeFilter>("all");
   const [searchOpen, setSearchOpen] = useState(false);
   const visibleNodes = filterTree(nodes, filter);
   const selectedNodeId = activeTreeNodeId || activeDocumentId;
@@ -254,7 +263,7 @@ export function DocumentTree({
           ))
         ) : (
           <div className="px-3 py-2 text-[11px] leading-5 text-ink-secondary">
-            {filter === "images" ? "No hay imágenes en este proyecto." : filter === "documents" ? "No hay documentos Markdown en este filtro." : "No hay documentos ni imágenes compatibles en esta carpeta."}
+            {filter === "attachments" ? "No hay archivos de apoyo en este proyecto." : filter === "images" ? "No hay imágenes en este proyecto." : filter === "documents" ? "No hay documentos Markdown en este filtro." : "No hay archivos compatibles en esta carpeta."}
           </div>
         )}
       </div>
@@ -386,6 +395,7 @@ function TreeNode({
           }
           if (node.type === "document") onOpenDocument(node.id, node.name);
           if (node.type === "image" && node.path) onOpenImage?.(node.id, node.name, node.path);
+          if (node.type === "attachment") onActivateTreeNode(node.id);
         }}
       >
         <span className="mr-0.5 grid h-5 w-4 place-items-center">
@@ -395,6 +405,8 @@ function TreeNode({
           <Folder size={15} className="mr-1.5 text-brand-orange" />
         ) : node.type === "image" ? (
           <Image size={14} className={["mr-1.5", isActive ? "text-brand-orange" : "text-ink-secondary"].join(" ")} />
+        ) : node.type === "attachment" ? (
+          <AttachmentIcon node={node} active={isActive} />
         ) : (
           <FileText size={14} className={["mr-1.5", isActive ? "text-brand-orange" : "text-ink-secondary"].join(" ")} />
         )}
@@ -425,7 +437,10 @@ function TreeNode({
             <button
               className="grid h-5 w-5 place-items-center rounded-md opacity-0 hover:bg-white group-hover:opacity-100"
               aria-label={`Abrir menú de ${node.name}`}
-              onClick={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                onMenuEnter(node, event);
+              }}
               onMouseEnter={(event) => onMenuEnter(node, event)}
               onMouseLeave={onMenuLeave}
             >
@@ -461,6 +476,23 @@ function TreeNode({
         : null}
     </div>
   );
+}
+
+function AttachmentIcon({ node, active }: { node: DocumentTreeNode; active: boolean }) {
+  const suffix = node.name.split(".").pop()?.toLowerCase() ?? "";
+  const Icon =
+    suffix === "pdf" || suffix === "txt"
+      ? FileText
+      : ["csv", "tsv", "xlsx"].includes(suffix)
+        ? FileSpreadsheet
+        : suffix === "pptx"
+          ? Presentation
+          : ["zip", "7z", "rar"].includes(suffix)
+            ? FileArchive
+            : ["json", "xml", "yaml", "yml"].includes(suffix)
+              ? FileType
+              : File;
+  return <Icon size={14} className={["mr-1.5", active ? "text-brand-orange" : "text-ink-secondary"].join(" ")} />;
 }
 
 function DocumentNameSearchDialog({
@@ -527,7 +559,7 @@ function DocumentNameSearchDialog({
         <div className="flex items-center gap-2 border-b border-line px-3 py-2.5">
           <Search size={16} className="shrink-0 text-ink-secondary" />
           <label id="document-name-search-title" className="sr-only">
-            Buscar carpetas y documentos
+            Buscar archivos y carpetas
           </label>
           <div className="relative min-w-0 flex-1">
             {completion ? (
@@ -540,7 +572,7 @@ function DocumentNameSearchDialog({
               ref={inputRef}
               className="relative z-10 h-9 w-full bg-transparent px-1 text-[13px] text-ink-primary caret-brand-orange outline-none placeholder:text-ink-secondary/70"
               value={query}
-              placeholder="Buscar carpetas y documentos"
+              placeholder="Buscar archivos y carpetas"
               aria-autocomplete="list"
               aria-controls="document-name-search-results"
               onChange={(event) => setQuery(event.currentTarget.value)}
@@ -561,7 +593,7 @@ function DocumentNameSearchDialog({
           {query.trim().length === 0 ? (
             <div className="px-3 py-8 text-center text-[11px] text-ink-secondary">Empieza a escribir un nombre.</div>
           ) : results.length === 0 ? (
-            <div className="px-3 py-8 text-center text-[11px] text-ink-secondary">No hay carpetas ni documentos con ese nombre.</div>
+            <div className="px-3 py-8 text-center text-[11px] text-ink-secondary">No hay archivos ni carpetas con ese nombre.</div>
           ) : (
             <>
               {results.map((result, index) => (
@@ -582,7 +614,7 @@ function DocumentNameSearchDialog({
                       result.type === "folder" ? "border-orange-200 bg-brand-hover text-brand-orange" : "border-line bg-white text-ink-secondary",
                     ].join(" ")}
                   >
-                    {result.type === "folder" ? <Folder size={15} /> : <FileText size={15} />}
+                    {result.type === "folder" ? <Folder size={15} /> : result.type === "image" ? <Image size={15} /> : result.type === "attachment" ? <File size={15} /> : <FileText size={15} />}
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[12px] font-semibold text-ink-primary">
@@ -652,9 +684,9 @@ function DocumentTreeToolbar({
   onCollapseTree,
   onConfigureProject,
 }: {
-  filter: TreeFilter;
+  filter: ExtendedTreeFilter;
   disabled: boolean;
-  onFilterChange: (filter: TreeFilter) => void;
+  onFilterChange: (filter: ExtendedTreeFilter) => void;
   onCreateFolder: () => void;
   onCreateDocument: () => void;
   onImportFile?: () => void;
@@ -695,7 +727,7 @@ function DocumentTreeToolbar({
     <div ref={toolbarRef} className="relative mb-2 flex h-8 items-center justify-between gap-2 px-1.5">
       <span className="text-[10px] font-semibold uppercase text-ink-secondary">Archivos</span>
       <div className="flex items-center gap-0.5">
-        <ToolbarIconButton label="Buscar carpetas y documentos" disabled={disabled} icon={Search} onClick={() => runAction(onSearch)} />
+        <ToolbarIconButton label="Buscar archivos y carpetas" disabled={disabled} icon={Search} onClick={() => runAction(onSearch)} />
         <ToolbarIconButton
           label="Añadir"
           icon={Plus}
@@ -719,7 +751,7 @@ function DocumentTreeToolbar({
           <ToolbarMenuItem
             icon={FileUp}
             label="Importar archivo"
-            description="Markdown o imagen del disco"
+            description="Markdown, imagen o archivo de apoyo"
             disabled={!onImportFile}
             onClick={() => onImportFile && runAction(onImportFile)}
           />
@@ -730,6 +762,7 @@ function DocumentTreeToolbar({
           <ToolbarMenuItem icon={Check} label="Ver todo" active={filter === "all"} onClick={() => runAction(() => onFilterChange("all"))} />
           <ToolbarMenuItem icon={FileText} label="Solo Markdown" active={filter === "documents"} onClick={() => runAction(() => onFilterChange("documents"))} />
           <ToolbarMenuItem icon={Image} label="Solo imágenes" active={filter === "images"} onClick={() => runAction(() => onFilterChange("images"))} />
+          <ToolbarMenuItem icon={File} label="Solo archivos" active={filter === "attachments"} onClick={() => runAction(() => onFilterChange("attachments"))} />
           <div className="my-1 border-t border-line" />
           <ToolbarMenuItem icon={ChevronDown} label="Expandir carpetas" onClick={() => runAction(onExpandTree)} />
           <ToolbarMenuItem icon={ChevronUp} label="Contraer carpetas" onClick={() => runAction(onCollapseTree)} />
@@ -814,9 +847,9 @@ function ToolbarMenuItem({
   );
 }
 
-function filterTree(nodes: DocumentTreeNode[], filter: TreeFilter): DocumentTreeNode[] {
+function filterTree(nodes: DocumentTreeNode[], filter: ExtendedTreeFilter): DocumentTreeNode[] {
   if (filter === "all") return nodes;
-  const acceptedType = filter === "documents" ? "document" : "image";
+  const acceptedType = filter === "documents" ? "document" : filter === "images" ? "image" : "attachment";
   return nodes.flatMap((node) => {
     if (node.type === acceptedType) return [node];
     if (node.type !== "folder") return [];
@@ -851,7 +884,7 @@ function ContextMenu({
   onMouseEnter,
   onMouseLeave,
 }: {
-  type: "folder" | "document" | "image";
+  type: DocumentTreeNode["type"];
   x: number;
   y: number;
   onSelect: (action: DocumentTreeAction) => void;
@@ -861,7 +894,7 @@ function ContextMenu({
   const folderItems = [
     { label: "Nueva carpeta", icon: FolderPlus, action: "create-folder" },
     { label: "Nuevo documento", icon: FilePlus2, action: "create-document" },
-    { label: "Importar imagen", icon: FileImage, action: "import-image" },
+    { label: "Importar archivo", icon: FileUp, action: "import-file" },
     { label: "Renombrar", icon: Pencil, action: "rename" },
     { label: "Mover", icon: MoveRight, action: "move" },
     { label: "Eliminar", icon: Trash2, action: "delete" },
@@ -869,6 +902,13 @@ function ContextMenu({
   const documentItems = [
     { label: "Renombrar", icon: Pencil, action: "rename" },
     { label: "Duplicar", icon: Copy, action: "duplicate" },
+    { label: "Mover", icon: MoveRight, action: "move" },
+    { label: "Eliminar", icon: Trash2, action: "delete" },
+  ];
+  const attachmentItems = [
+    { label: "Usar como contexto IA", icon: Copy, action: "add-attachment-context" },
+    { label: "Copiar ruta", icon: Copy, action: "copy-path" },
+    { label: "Renombrar", icon: Pencil, action: "rename" },
     { label: "Mover", icon: MoveRight, action: "move" },
     { label: "Eliminar", icon: Trash2, action: "delete" },
   ];
@@ -881,7 +921,7 @@ function ContextMenu({
     { label: "Mover", icon: MoveRight, action: "move" },
     { label: "Eliminar", icon: Trash2, action: "delete" },
   ];
-  const items = type === "folder" ? folderItems : type === "image" ? imageItems : documentItems;
+  const items = type === "folder" ? folderItems : type === "image" ? imageItems : type === "attachment" ? attachmentItems : documentItems;
 
   return (
     <div
