@@ -2,6 +2,14 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.17.2 - 2026-05-18
+
+- Fixed document-tree folder expansion so backend refreshes no longer force the first two folder levels open.
+- Changed new project tree loads to start with all folders collapsed by default.
+- Persisted each project's expanded folder paths in application config so folder state is restored after app restart.
+- Reapplied the saved folder state after tree-refreshing operations such as create, rename, move, import, sync, AI file operations, and draft restore.
+- Added frontend/backend coverage and manual acceptance notes for persisted document-tree folder state.
+
 ## 0.17.1 - 2026-05-18
 
 - Added distinct tree badges/icons for PDF, DOCX, PPTX, XLSX, TXT, and CSV support files.

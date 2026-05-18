@@ -329,7 +329,7 @@ class FileSystemService:
             name=folder_path.name,
             type="folder",
             path=relative_path,
-            open=depth < 2,
+            open=False,
             children=self._scan_directory(project_id, folder_path, root, depth + 1),
         )
 

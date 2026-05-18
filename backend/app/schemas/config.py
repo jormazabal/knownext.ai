@@ -57,6 +57,7 @@ class AppConfig(BaseModel):
     diagnostics: DiagnosticsConfig
     ai: AiConfig = Field(default_factory=AiConfig)
     tabsByProject: dict[str, ProjectTabsConfig]
+    treeOpenPathsByProject: dict[str, list[str]] = Field(default_factory=dict)
     lastRunAppVersion: str | None = None
     lastSeenReleaseNotesVersion: str | None = None
     openUtilityTabs: list[AppUtilityTabId] = Field(default_factory=list)
@@ -70,6 +71,7 @@ class AppConfigUpdate(BaseModel):
     diagnostics: DiagnosticsConfig | None = None
     ai: AiConfig | None = None
     tabsByProject: dict[str, ProjectTabsConfig] | None = None
+    treeOpenPathsByProject: dict[str, list[str]] | None = None
     lastRunAppVersion: str | None = None
     lastSeenReleaseNotesVersion: str | None = None
     openUtilityTabs: list[str] | None = None

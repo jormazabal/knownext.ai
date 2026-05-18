@@ -85,6 +85,7 @@ DEFAULT_AI = {
 }
 
 DEFAULT_TABS = {}
+DEFAULT_TREE_OPEN_PATHS = {}
 
 LAYOUT_LIMITS = {
     "sidebarWidth": (260, 480),
@@ -122,6 +123,7 @@ def _default_config() -> dict:
         "diagnostics": deepcopy(DEFAULT_DIAGNOSTICS),
         "ai": deepcopy(DEFAULT_AI),
         "tabsByProject": deepcopy(DEFAULT_TABS),
+        "treeOpenPathsByProject": deepcopy(DEFAULT_TREE_OPEN_PATHS),
         "lastRunAppVersion": None,
         "lastSeenReleaseNotesVersion": None,
         "openUtilityTabs": [],
@@ -340,6 +342,36 @@ def _normalize_tabs_by_project(value: object) -> dict:
     return normalized
 
 
+def _normalize_tree_open_paths_by_project(value: object) -> dict:
+    if not isinstance(value, dict):
+        return deepcopy(DEFAULT_TREE_OPEN_PATHS)
+
+    normalized: dict[str, list[str]] = {}
+    for project_id, raw_paths in value.items():
+        if not isinstance(project_id, str) or not project_id:
+            continue
+        if not isinstance(raw_paths, list):
+            continue
+
+        paths: list[str] = []
+        seen_paths: set[str] = set()
+        for raw_path in raw_paths:
+            if not isinstance(raw_path, str):
+                continue
+            path = raw_path.strip().replace("\\", "/").strip("/")
+            if not path or len(path) > 260 or path in seen_paths:
+                continue
+            if any(part in {"", ".", ".."} for part in path.split("/")):
+                continue
+            paths.append(path)
+            seen_paths.add(path)
+
+        if paths:
+            normalized[project_id] = sorted(paths, key=str.lower)
+
+    return normalized
+
+
 def _normalize_optional_string(value: object) -> str | None:
     if not isinstance(value, str):
         return None
@@ -417,6 +449,9 @@ class ConfigService:
                 }
             )
 
+        if payload.treeOpenPathsByProject is not None:
+            data["treeOpenPathsByProject"] = _normalize_tree_open_paths_by_project(payload.treeOpenPathsByProject)
+
         if "lastRunAppVersion" in payload.model_fields_set:
             data["lastRunAppVersion"] = _normalize_optional_string(payload.lastRunAppVersion)
 
@@ -453,6 +488,7 @@ class ConfigService:
         data["diagnostics"] = _normalize_diagnostics(data.get("diagnostics"))
         data["ai"] = _normalize_ai(data.get("ai"))
         data["tabsByProject"] = _normalize_tabs_by_project(data.get("tabsByProject"))
+        data["treeOpenPathsByProject"] = _normalize_tree_open_paths_by_project(data.get("treeOpenPathsByProject"))
         data["lastRunAppVersion"] = "legacy" if legacy_config_without_version_state else _normalize_optional_string(data.get("lastRunAppVersion"))
         data["lastSeenReleaseNotesVersion"] = _normalize_optional_string(data.get("lastSeenReleaseNotesVersion"))
         data["openUtilityTabs"] = _normalize_utility_tabs(data.get("openUtilityTabs"))
