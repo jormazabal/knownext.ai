@@ -106,11 +106,16 @@ export function DocumentTree({
   const [dropTarget, setDropTarget] = useState<{ id: string | null; valid: boolean; label: string } | null>(null);
   const [filter, setFilter] = useState<ExtendedTreeFilter>("all");
   const [searchOpen, setSearchOpen] = useState(false);
-  const visibleNodes = filterTree(nodes, filter);
+  const visibleNodes = useMemo(() => filterTree(nodes, filter), [nodes, filter]);
   const selectedNodeId = activeTreeNodeId || activeDocumentId;
 
   useEffect(() => {
     if (!selectedNodeId) return;
+    if (filter !== "all" && containsNodeId(nodes, selectedNodeId) && !containsNodeId(visibleNodes, selectedNodeId)) {
+      setFilter("all");
+      return;
+    }
+
     const frame = window.requestAnimationFrame(() => {
       const selectedRow = document.querySelector(`[data-tree-node-id="${escapeCssAttributeValue(selectedNodeId)}"]`);
       if (selectedRow instanceof HTMLElement && typeof selectedRow.scrollIntoView === "function") {
@@ -118,7 +123,7 @@ export function DocumentTree({
       }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [selectedNodeId, filter]);
+  }, [filter, nodes, selectedNodeId, visibleNodes]);
 
   function clearCloseTimer() {
     if (closeTimer.current !== null) {
@@ -907,6 +912,14 @@ function filterTree(nodes: DocumentTreeNode[], filter: ExtendedTreeFilter): Docu
     if (children.length === 0) return [];
     return [{ ...node, children }];
   });
+}
+
+function containsNodeId(nodes: DocumentTreeNode[], nodeId: string): boolean {
+  for (const node of nodes) {
+    if (node.id === nodeId) return true;
+    if (node.children && containsNodeId(node.children, nodeId)) return true;
+  }
+  return false;
 }
 
 function isValidFolderDrop(nodes: DocumentTreeNode[], draggedNode: DocumentTreeNode, targetNode: DocumentTreeNode) {
