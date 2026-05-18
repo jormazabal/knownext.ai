@@ -2,6 +2,13 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.17.3 - 2026-05-18
+
+- Fixed document-tab activation so the navigation tree reveals and selects the active document, expanding all parent folders and scrolling the selected node into view.
+- Kept selected documents discoverable when a tree filter would otherwise hide them by returning the tree to the full file view.
+- Corrected Milkdown numbered and bulleted list layout so list labels and content align cleanly without duplicated markers.
+- Added focused frontend coverage for selected-node reveal behavior when the tree filter hides the active document.
+
 ## 0.17.2 - 2026-05-18
 
 - Fixed document-tree folder expansion so backend refreshes no longer force the first two folder levels open.

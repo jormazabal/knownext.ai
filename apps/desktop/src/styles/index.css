@@ -996,9 +996,93 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .knownext-editor ul,
-.knownext-editor ol {
-  margin: 4px 0 9px 20px;
-  padding: 0;
+.knownext-editor ol,
+.knownext-editor .ProseMirror ul,
+.knownext-editor .ProseMirror ol {
+  margin: 6px 0 10px;
+  padding-left: 22px !important;
+  list-style-position: outside;
+}
+
+.knownext-editor ul,
+.knownext-editor .ProseMirror ul {
+  list-style-type: disc;
+}
+
+.knownext-editor ol,
+.knownext-editor .ProseMirror ol {
+  list-style-type: decimal;
+}
+
+.knownext-editor li:not(.list-item),
+.knownext-editor .ProseMirror li:not(.list-item) {
+  display: list-item !important;
+  margin: 3px 0;
+  padding-left: 4px !important;
+}
+
+.knownext-editor li:not(.list-item)::marker,
+.knownext-editor .ProseMirror li:not(.list-item)::marker {
+  color: rgb(var(--app-muted));
+  font-size: 11px;
+}
+
+.knownext-editor li > p,
+.knownext-editor .ProseMirror li > p {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.knownext-editor .ProseMirror li.list-item {
+  display: grid !important;
+  grid-template-columns: 24px minmax(0, 1fr);
+  column-gap: 6px;
+  align-items: start;
+  margin: 3px 0;
+  padding-left: 0 !important;
+  list-style: none;
+}
+
+.knownext-editor .ProseMirror li.list-item > .label-wrapper {
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  height: 17px !important;
+  min-height: 17px;
+}
+
+.knownext-editor .ProseMirror li.list-item > .label-wrapper .label {
+  display: inline-flex;
+  width: 20px;
+  height: 17px;
+  min-height: 17px;
+  padding: 0 !important;
+  align-items: center;
+  justify-content: flex-end;
+  color: rgb(var(--app-muted));
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.knownext-editor .ProseMirror li.list-item > .label-wrapper .label.bullet {
+  justify-content: center;
+}
+
+.knownext-editor .ProseMirror li.list-item > .label-wrapper .label.bullet svg {
+  width: 10px;
+  height: 10px;
+  fill: currentColor;
+}
+
+.knownext-editor .ProseMirror li.list-item > .children,
+.knownext-editor .ProseMirror li.list-item > .children > .content-dom {
+  min-width: 0;
+}
+
+.knownext-editor .ProseMirror li.list-item > .children p,
+.knownext-editor .ProseMirror li.list-item > .children > .content-dom > p {
+  margin: 0 !important;
+  padding: 0 !important;
 }
 
 .knownext-editor table {

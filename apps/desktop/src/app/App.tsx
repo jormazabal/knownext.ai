@@ -675,6 +675,11 @@ export function App() {
     });
   }
 
+  function revealTreeNode(nodeId: string) {
+    updateCurrentProjectTree((currentTree) => openTreeNodePath(currentTree, nodeId));
+    setActiveTreeNodeId(nodeId);
+  }
+
   function handleOpenDocument(documentId: string, name: string) {
     setTabs((currentTabs) => (
       currentTabs.some((tab) => tab.id === documentId)
@@ -682,14 +687,13 @@ export function App() {
         : [...currentTabs, { id: documentId, name }]
     ));
     setActiveDocumentId(documentId);
-    setActiveTreeNodeId(documentId);
+    revealTreeNode(documentId);
     setActiveImageId("");
     setActiveUtilityTab(null);
   }
 
   function handleSelectTreeNode(nodeId: string, type: DocumentTreeNode["type"], name: string) {
-    updateCurrentProjectTree((currentTree) => openTreeNodePath(currentTree, nodeId));
-    setActiveTreeNodeId(nodeId);
+    revealTreeNode(nodeId);
     if (type === "document") handleOpenDocument(nodeId, name);
     if (type === "image") {
       const imageNode = findNodeById(tree, nodeId);
@@ -848,7 +852,11 @@ export function App() {
     if (documentId === activeDocumentId && activeUtilityTab === null) {
       const nextActiveDocumentId = nextTabs[0]?.id ?? "";
       setActiveDocumentId(nextActiveDocumentId);
-      setActiveTreeNodeId(nextActiveDocumentId);
+      if (nextActiveDocumentId) {
+        revealTreeNode(nextActiveDocumentId);
+      } else {
+        setActiveTreeNodeId("");
+      }
     }
   }
 
@@ -889,7 +897,7 @@ export function App() {
     setActiveUtilityTab(null);
     setActiveImageId("");
     setActiveDocumentId(documentId);
-    setActiveTreeNodeId(documentId);
+    revealTreeNode(documentId);
   }
 
   function handleOpenReleaseNotes() {

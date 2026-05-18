@@ -84,6 +84,7 @@
 - [ ] Open `acta-reunion.md`.
 - [ ] Change active tab to `requisitos-funcionales.md`.
 - [ ] Change active tab to `decision-tecnologica.md`.
+- [ ] Collapse the parent folder of an already open document, activate that document's tab, and confirm the tree expands its parent folders, selects the document node, and scrolls it into view.
 - [ ] Close and open document tabs, then restart the app and confirm the same tabs, active document, and tab order are restored from `config.json`.
 - [ ] Close every document tab and confirm the tab bar, editor toolbar, document canvas, and status bar disappear.
 - [ ] Confirm the empty workspace area is very light gray and shows the gray KnowNext.ai watermark logo.
@@ -99,6 +100,7 @@
 - [ ] Rename a folder or document from the tree and confirm the disk item is renamed.
 - [ ] Duplicate, move, and delete a document from the file context menu and confirm the disk changes.
 - [ ] Edit content in Milkdown visual mode.
+- [ ] Add numbered and bulleted lists in Milkdown and confirm each item shows a single marker aligned with its text.
 - [ ] Use Insertar > Imagen in the Markdown toolbar, select an existing project image, and confirm Milkdown inserts a Markdown image reference and renders the image in document flow.
 - [ ] Use Insertar > Imagen > Subir from an active document in a nested folder and confirm the image is copied beside that Markdown file and inserted with a relative reference.
 - [ ] Use Insertar > Imagen > URL and confirm an external image URL is inserted without copying a file into the project.

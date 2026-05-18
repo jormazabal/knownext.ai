@@ -262,6 +262,62 @@ describe("DocumentTree", () => {
     expect(container.querySelector(".overflow-y-auto")?.contains(screen.getByText("Archivos"))).toBe(false);
   });
 
+  it("makes the selected tree node visible when the current filter hides it", async () => {
+    const scrollIntoView = vi.fn();
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+    try {
+      const { rerender } = render(
+        <DocumentTree
+          nodes={nodes}
+          activeDocumentId=""
+          onOpenDocument={vi.fn()}
+          onActivateTreeNode={vi.fn()}
+          onSelectTreeNode={vi.fn()}
+          onCreateFolder={vi.fn()}
+          onCreateDocument={vi.fn()}
+          onExpandTree={vi.fn()}
+          onCollapseTree={vi.fn()}
+          onConfigureProject={vi.fn()}
+          onRenameNode={vi.fn()}
+          onToggleNode={vi.fn()}
+          onContextAction={vi.fn()}
+          onMoveNode={vi.fn()}
+        />,
+      );
+
+      await userEvent.click(screen.getByRole("button", { name: "Vista del árbol" }));
+      await userEvent.click(screen.getByRole("button", { name: "Solo archivos" }));
+      expect(screen.queryByText("requisitos-funcionales.md")).not.toBeInTheDocument();
+
+      rerender(
+        <DocumentTree
+          nodes={nodes}
+          activeDocumentId="doc-functional"
+          activeTreeNodeId="doc-functional"
+          onOpenDocument={vi.fn()}
+          onActivateTreeNode={vi.fn()}
+          onSelectTreeNode={vi.fn()}
+          onCreateFolder={vi.fn()}
+          onCreateDocument={vi.fn()}
+          onExpandTree={vi.fn()}
+          onCollapseTree={vi.fn()}
+          onConfigureProject={vi.fn()}
+          onRenameNode={vi.fn()}
+          onToggleNode={vi.fn()}
+          onContextAction={vi.fn()}
+          onMoveNode={vi.fn()}
+        />,
+      );
+
+      await waitFor(() => expect(screen.getByText("requisitos-funcionales.md")).toBeInTheDocument());
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" }));
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
   it("searches folders and documents by name fragments", async () => {
     const onSelectTreeNode = vi.fn();
 
