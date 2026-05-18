@@ -152,6 +152,11 @@ import {
   removeReleaseNotesTab,
   shouldOpenReleaseNotesAfterStartup,
 } from "./releaseNotesState";
+import {
+  applyTreeOpenState,
+  updateTreeOpenPathsForProject,
+  type TreeOpenPathsByProject,
+} from "./treeOpenState";
 
 type AppNotice = {
   title: string;
@@ -198,6 +203,7 @@ export function App() {
   const [aiSelectionFocus, setAiSelectionFocus] = useState<AiSelectionFocus | null>(null);
   const [pendingEditorOperations, setPendingEditorOperations] = useState<MarkdownEditorExternalOperation[]>([]);
   const [tabsByProject, setTabsByProject] = useState<Record<string, ProjectTabsConfig>>({});
+  const [treeOpenPathsByProject, setTreeOpenPathsByProject] = useState<TreeOpenPathsByProject>({});
   const [openUtilityTabs, setOpenUtilityTabs] = useState<AppUtilityTabId[]>([]);
   const [activeUtilityTab, setActiveUtilityTab] = useState<AppUtilityTabId | null>(null);
   const [lastRunAppVersion, setLastRunAppVersion] = useState<string | null>(null);
@@ -273,6 +279,11 @@ export function App() {
             });
           }
         }
+        if (active) {
+          projectTree = applyTreeOpenState(projectTree, {
+            openPaths: appConfig.treeOpenPathsByProject[active.id] ?? [],
+          });
+        }
         const activeProjectTabs = active
           ? resolveProjectTabs(appConfig.tabsByProject, active.id, projectTree)
           : { openTabs: [], activeDocumentId: "" };
@@ -293,6 +304,7 @@ export function App() {
         setAiUsageSummary(loadedAiUsageSummary);
         setConfigPersistenceAvailable(true);
         setTabsByProject(appConfig.tabsByProject);
+        setTreeOpenPathsByProject(appConfig.treeOpenPathsByProject);
         setOpenUtilityTabs(nextOpenUtilityTabs);
         setActiveUtilityTab(shouldOpenReleaseNotes ? RELEASE_NOTES_UTILITY_TAB_ID : appConfig.activeUtilityTab ?? null);
         setLastRunAppVersion(APP_VERSION);
@@ -323,6 +335,7 @@ export function App() {
         setAiConfig({ ...(localPreferences.ai ?? defaultAiConfig), openaiKeyConfigured: false, openaiKeyPreview: null });
         setAiUsageSummary(null);
         setConfigPersistenceAvailable(false);
+        setTreeOpenPathsByProject({});
         setOpenUtilityTabs([]);
         setActiveUtilityTab(null);
       } finally {
@@ -348,6 +361,7 @@ export function App() {
         appearance: appearanceConfig,
         diagnostics: diagnosticsConfig,
         tabsByProject,
+        treeOpenPathsByProject,
         lastRunAppVersion,
         lastSeenReleaseNotesVersion,
         openUtilityTabs,
@@ -373,6 +387,7 @@ export function App() {
     layoutConfig,
     openUtilityTabs,
     tabsByProject,
+    treeOpenPathsByProject,
   ]);
 
   useEffect(() => {
@@ -632,6 +647,34 @@ export function App() {
     [documentSessions, tabs],
   );
 
+  function persistTreeOpenState(projectId: string, nodes: DocumentTreeNode[]) {
+    setTreeOpenPathsByProject((currentState) => updateTreeOpenPathsForProject(currentState, projectId, nodes));
+  }
+
+  function setProjectTree(
+    projectId: string,
+    nextTree: DocumentTreeNode[],
+    options: { currentTree?: DocumentTreeNode[]; additionalOpenPaths?: string[]; persist?: boolean } = {},
+  ) {
+    setTree((currentTree) => {
+      const restoredTree = applyTreeOpenState(nextTree, {
+        currentTree: options.currentTree ?? currentTree,
+        openPaths: treeOpenPathsByProject[projectId] ?? [],
+        additionalOpenPaths: options.additionalOpenPaths,
+      });
+      if (options.persist !== false) persistTreeOpenState(projectId, restoredTree);
+      return restoredTree;
+    });
+  }
+
+  function updateCurrentProjectTree(updater: (currentTree: DocumentTreeNode[]) => DocumentTreeNode[]) {
+    setTree((currentTree) => {
+      const nextTree = updater(currentTree);
+      if (activeProject) persistTreeOpenState(activeProject.id, nextTree);
+      return nextTree;
+    });
+  }
+
   function handleOpenDocument(documentId: string, name: string) {
     setTabs((currentTabs) => (
       currentTabs.some((tab) => tab.id === documentId)
@@ -645,7 +688,7 @@ export function App() {
   }
 
   function handleSelectTreeNode(nodeId: string, type: DocumentTreeNode["type"], name: string) {
-    setTree((currentTree) => openTreeNodePath(currentTree, nodeId));
+    updateCurrentProjectTree((currentTree) => openTreeNodePath(currentTree, nodeId));
     setActiveTreeNodeId(nodeId);
     if (type === "document") handleOpenDocument(nodeId, name);
     if (type === "image") {
@@ -701,7 +744,7 @@ export function App() {
       if (changeSet.summary.total > 0) {
         setProjectSyncState(changeSet.requiresReview ? "review-required" : "pending");
         if (options.refreshTreeOnChanges) {
-          setTree(await getProjectTree(projectId));
+          setProjectTree(projectId, await getProjectTree(projectId));
         }
       } else if (projectSyncState !== "pending") {
         setProjectSyncState(changeSet.status === "none" && changeSet.message ? "unsupported" : "synced");
@@ -735,7 +778,7 @@ export function App() {
     try {
       const payload: ExternalChangeImportRequest = { decisions, syncRemote: true };
       const result = await importExternalChanges(activeProject.id, payload);
-      setTree(result.tree);
+      setProjectTree(activeProject.id, result.tree);
       setProjectSyncState(result.status);
       setExternalChangesMessage(result.message);
       await refreshProjectCapabilityState(activeProject.id);
@@ -1006,7 +1049,7 @@ export function App() {
         name: source?.name ? `${source.name.replace(/\.[^.]+$/, "")}.md` : undefined,
         parentId: null,
       });
-      if (result.tree) setTree(result.tree);
+      if (result.tree && activeProject) setProjectTree(activeProject.id, result.tree);
       if (result.documentId) handleOpenDocument(result.documentId, result.path.split("/").pop() || result.path);
       await refreshAiContextSources(activeProject.id);
     } catch (error) {
@@ -1059,8 +1102,8 @@ export function App() {
     const affectedDocuments = response.affectedDocuments ?? [];
     if (response.tree && affectedDocuments.length > 0) {
       applyFileOperationResult({ tree: response.tree, node: null, affectedDocuments });
-    } else if (response.tree) {
-      setTree(response.tree);
+    } else if (response.tree && activeProject) {
+      setProjectTree(activeProject.id, response.tree);
     }
     const generatedImage = response.generatedImages?.[0];
     const generatedImageToOpen = generatedImage?.asset;
@@ -1204,7 +1247,7 @@ export function App() {
         force,
       });
       if (force && session.orphaned && activeProject?.id === saved.projectId) {
-        setTree(await getProjectTree(saved.projectId));
+        setProjectTree(saved.projectId, await getProjectTree(saved.projectId));
       }
       setDocumentSessions((currentSessions) => updateSession(currentSessions, documentId, {
         document: saved,
@@ -1261,15 +1304,19 @@ export function App() {
     try {
       const active = await persistActiveProject(project.id);
       const nextTree = await getProjectTree(active.id);
+      const restoredTree = applyTreeOpenState(nextTree, {
+        openPaths: treeOpenPathsByProject[active.id] ?? [],
+      });
       const nextVersioningStatus = await getProjectVersioningStatus(active.id);
-      const nextProjectTabs = resolveProjectTabs(tabsByProject, active.id, nextTree);
+      const nextProjectTabs = resolveProjectTabs(tabsByProject, active.id, restoredTree);
       setProjects((currentProjects) => currentProjects.map((currentProject) => ({
         ...currentProject,
         active: currentProject.id === active.id,
       })));
       setActiveProject(active);
       setVersioningStatus(nextVersioningStatus);
-      setTree(nextTree);
+      setTree(restoredTree);
+      persistTreeOpenState(active.id, restoredTree);
       setTabs(nextProjectTabs.openTabs);
       setActiveDocumentId(nextProjectTabs.activeDocumentId);
       setActiveTreeNodeId(nextProjectTabs.activeDocumentId);
@@ -1291,7 +1338,7 @@ export function App() {
     if (!activeProject) return;
     try {
       const result = await createFolder(activeProject.id, parentId, getUniqueFolderName(tree));
-      setTree(markNodeEditing(result.tree, result.node?.id ?? null));
+      setProjectTree(activeProject.id, markNodeEditing(result.tree, result.node?.id ?? null));
     } catch (error) {
       showError(error, "No se pudo crear la carpeta.");
     }
@@ -1302,7 +1349,7 @@ export function App() {
     const previousNode = findNodeById(tree, nodeId);
     const nextName = name.trim() || (previousNode?.type === "folder" ? "Nueva carpeta" : previousNode?.name ?? "archivo");
     if (previousNode?.name === nextName) {
-      setTree((currentTree) => renameNode(currentTree, nodeId, nextName));
+      updateCurrentProjectTree((currentTree) => renameNode(currentTree, nodeId, nextName));
       return;
     }
 
@@ -1312,7 +1359,7 @@ export function App() {
         if (usage.references.length > 0) {
           const proceed = window.confirm(`La imagen "${previousNode.name}" esta enlazada en ${usage.references.length} documento(s).\n\nKnowNext.ai actualizara las referencias relativas para que sigan apuntando a la imagen renombrada.`);
           if (!proceed) {
-            setTree(markNodeEditing(tree, null));
+            updateCurrentProjectTree((currentTree) => markNodeEditing(currentTree, null));
             return;
           }
         }
@@ -1321,20 +1368,20 @@ export function App() {
       applyFileOperationResult(result, previousNode);
     } catch (error) {
       showError(error, "No se pudo renombrar el elemento.");
-      setTree(markNodeEditing(tree, null));
+      updateCurrentProjectTree((currentTree) => markNodeEditing(currentTree, null));
     }
   }
 
   function handleToggleNode(nodeId: string) {
-    setTree((currentTree) => toggleNodeOpen(currentTree, nodeId));
+    updateCurrentProjectTree((currentTree) => toggleNodeOpen(currentTree, nodeId));
   }
 
   function handleExpandTree() {
-    setTree((currentTree) => setAllFoldersOpen(currentTree, true));
+    updateCurrentProjectTree((currentTree) => setAllFoldersOpen(currentTree, true));
   }
 
   function handleCollapseTree() {
-    setTree((currentTree) => setAllFoldersOpen(currentTree, false));
+    updateCurrentProjectTree((currentTree) => setAllFoldersOpen(currentTree, false));
   }
 
   async function handleCreateDocument(name: string, template: string) {
@@ -1364,9 +1411,11 @@ export function App() {
         nextProject,
       ]);
       const nextTree = await getProjectTree(nextProject.id);
-      const nextProjectTabs = resolveProjectTabs({}, nextProject.id, nextTree);
+      const restoredTree = applyTreeOpenState(nextTree);
+      const nextProjectTabs = resolveProjectTabs({}, nextProject.id, restoredTree);
       setActiveProject(nextProject);
-      setTree(nextTree);
+      setTree(restoredTree);
+      persistTreeOpenState(nextProject.id, restoredTree);
       setTabs(nextProjectTabs.openTabs);
       setActiveDocumentId(nextProjectTabs.activeDocumentId);
       setActiveTreeNodeId(nextProjectTabs.activeDocumentId);
@@ -1393,10 +1442,15 @@ export function App() {
       ));
       if (activeProject?.id === projectId) {
         const nextTree = await getProjectTree(projectId);
+        const restoredTree = applyTreeOpenState(nextTree, {
+          currentTree: tree,
+          openPaths: treeOpenPathsByProject[projectId] ?? [],
+        });
         const nextVersioningStatus = await getProjectVersioningStatus(projectId);
-        setTree(nextTree);
+        setTree(restoredTree);
+        persistTreeOpenState(projectId, restoredTree);
         setVersioningStatus(nextVersioningStatus);
-        const nextProjectTabs = resolveProjectTabs(tabsByProject, projectId, nextTree);
+        const nextProjectTabs = resolveProjectTabs(tabsByProject, projectId, restoredTree);
         setTabs(nextProjectTabs.openTabs);
         setActiveDocumentId(nextProjectTabs.activeDocumentId);
         setActiveTreeNodeId(nextProjectTabs.activeDocumentId);
@@ -1419,6 +1473,10 @@ export function App() {
         const { [projectId]: _removedProjectTabs, ...nextTabsByProject } = currentTabsByProject;
         return nextTabsByProject;
       });
+      setTreeOpenPathsByProject((currentState) => {
+        const { [projectId]: _removedProjectTreeState, ...nextState } = currentState;
+        return nextState;
+      });
       setEditProjectOpen(false);
 
       if (!nextActiveProject) {
@@ -1439,11 +1497,15 @@ export function App() {
       }
 
       const nextTree = await getProjectTree(nextActiveProject.id);
+      const restoredTree = applyTreeOpenState(nextTree, {
+        openPaths: treeOpenPathsByProject[nextActiveProject.id] ?? [],
+      });
       const nextVersioningStatus = await getProjectVersioningStatus(nextActiveProject.id);
-      const nextProjectTabs = resolveProjectTabs(tabsByProject, nextActiveProject.id, nextTree);
+      const nextProjectTabs = resolveProjectTabs(tabsByProject, nextActiveProject.id, restoredTree);
       setActiveProject(nextActiveProject);
       setVersioningStatus(nextVersioningStatus);
-      setTree(nextTree);
+      setTree(restoredTree);
+      persistTreeOpenState(nextActiveProject.id, restoredTree);
       setTabs(nextProjectTabs.openTabs);
       setActiveDocumentId(nextProjectTabs.activeDocumentId);
       setActiveTreeNodeId(nextProjectTabs.activeDocumentId);
@@ -1528,7 +1590,7 @@ export function App() {
     setSyncState("pulling");
     try {
       const response = await pullProject(activeProject.id);
-      setTree(await getProjectTree(activeProject.id));
+      setProjectTree(activeProject.id, await getProjectTree(activeProject.id));
       await refreshProjectCapabilityState(activeProject.id);
       await refreshExternalChangeSet(activeProject.id, { silent: true });
       setNotice({ title: "Sincronización completada", message: response.message, tone: "info" });
@@ -1917,7 +1979,7 @@ export function App() {
 
   function handleTreeContextAction(action: DocumentTreeAction, node: DocumentTreeNode) {
     if (action === "rename") {
-      setTree((currentTree) => markNodeEditing(currentTree, node.id));
+      updateCurrentProjectTree((currentTree) => markNodeEditing(currentTree, node.id));
       return;
     }
 
@@ -2099,7 +2161,7 @@ export function App() {
       if (!file || !activeProject) return;
       try {
         const result = await importProjectImage(activeProject.id, parentId, file);
-        setTree(result.tree);
+        setProjectTree(activeProject.id, result.tree);
         handleOpenImage(result.asset.id, result.asset.name, result.asset.path);
       } catch (error) {
         showError(error, "No se pudo importar la imagen.");
@@ -2119,7 +2181,7 @@ export function App() {
       try {
         if (["png", "jpg", "jpeg", "webp", "gif"].includes(extension)) {
           const result = await importProjectImage(activeProject.id, parentId, file);
-          setTree(result.tree);
+          setProjectTree(activeProject.id, result.tree);
           handleOpenImage(result.asset.id, result.asset.name, result.asset.path);
           return;
         }
@@ -2152,7 +2214,7 @@ export function App() {
   async function handleImportProjectImage(parentId: string | null, file: File): Promise<AssetImportResponse> {
     if (!activeProject) throw new Error("No active project");
     const result = await importProjectImage(activeProject.id, parentId, file);
-    setTree(result.tree);
+    setProjectTree(activeProject.id, result.tree);
     return result;
   }
 
@@ -2176,7 +2238,15 @@ export function App() {
   }
 
   function applyFileOperationResult(result: FileOperationResult, sourceNode?: DocumentTreeNode | null) {
-    setTree(result.tree);
+    if (activeProject) {
+      setProjectTree(activeProject.id, result.tree, {
+        additionalOpenPaths: sourceNode?.type === "folder" && sourceNode.open && result.node?.type === "folder" && result.node.path
+          ? [result.node.path]
+          : [],
+      });
+    } else {
+      setTree(result.tree);
+    }
 
     if (sourceNode?.type === "image") {
       if (result.node?.type === "image") {
@@ -2656,7 +2726,7 @@ export function App() {
       const restored = await restoreOrphanDraft(draft.draftKey);
       setOrphanDrafts((currentDrafts) => currentDrafts.filter((currentDraft) => currentDraft.draftKey !== draft.draftKey));
       if (activeProject?.id === restored.document.projectId) {
-        setTree(await getProjectTree(restored.document.projectId));
+        setProjectTree(restored.document.projectId, await getProjectTree(restored.document.projectId));
       }
       openOrReplaceTab(restored.document.id, restored.document.name);
       setDocumentSessions((currentSessions) => ({

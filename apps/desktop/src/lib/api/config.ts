@@ -90,6 +90,7 @@ export const defaultAppConfig: AppConfig = {
   diagnostics: defaultDiagnosticsConfig,
   ai: defaultAiConfig,
   tabsByProject: {},
+  treeOpenPathsByProject: {},
   lastRunAppVersion: null,
   lastSeenReleaseNotesVersion: null,
   openUtilityTabs: [],
@@ -176,11 +177,27 @@ function normalizeAppConfig(config: AppConfig): AppConfig {
     diagnostics: normalizeDiagnostics(config.diagnostics) ?? defaultDiagnosticsConfig,
     ai: normalizeAi(config.ai) ?? defaultAiConfig,
     tabsByProject: config.tabsByProject ?? {},
+    treeOpenPathsByProject: normalizeTreeOpenPathsByProject(config.treeOpenPathsByProject),
     openUtilityTabs: config.openUtilityTabs ?? [],
     activeUtilityTab: config.activeUtilityTab ?? null,
     lastRunAppVersion: config.lastRunAppVersion ?? null,
     lastSeenReleaseNotesVersion: config.lastSeenReleaseNotesVersion ?? null,
   };
+}
+
+function normalizeTreeOpenPathsByProject(value: unknown): Record<string, string[]> {
+  if (!value || typeof value !== "object") return {};
+  const normalized: Record<string, string[]> = {};
+  Object.entries(value as Record<string, unknown>).forEach(([projectId, rawPaths]) => {
+    if (!projectId || !Array.isArray(rawPaths)) return;
+    const paths = rawPaths
+      .filter((path): path is string => typeof path === "string")
+      .map((path) => path.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, ""))
+      .filter((path, index, allPaths) => Boolean(path) && !path.split("/").some((part) => part === "." || part === "..") && allPaths.indexOf(path) === index)
+      .sort((first, second) => first.localeCompare(second));
+    if (paths.length > 0) normalized[projectId] = paths;
+  });
+  return normalized;
 }
 
 function normalizeThemeMode(themeMode: unknown): AppearanceThemeMode {

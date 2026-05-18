@@ -47,6 +47,7 @@
 - [ ] Create a project from a folder that already has Git/GitHub configured, associate the matching GitHub repository, and confirm the project is registered as Git local + GitHub existente without moving files.
 - [ ] Inspect the folder/document tree levels and confirm they match the active project's local folder.
 - [ ] Confirm Markdown documents, supported image files, support files, and folders are shown in the navigation tree with distinct document/image/file/folder icons.
+- [ ] Confirm folders are collapsed by default on first project load, then expand/collapse several folders, restart the app, and confirm the same per-project folder state is restored.
 - [ ] Confirm the file toolbar sits directly below the project selector with `Archivos` on the left and Buscar, Añadir, Vista del árbol, and Ajustes del proyecto icons aligned to the right.
 - [ ] Click Buscar and confirm a compact modal opens with the input focused, a close X, and no search field permanently added to the sidebar.
 - [ ] Type a middle or ending fragment of a folder name, for example `quis` for `Requisitos`, and confirm matching folders/documents/images/support files appear even when the fragment is not at the start.

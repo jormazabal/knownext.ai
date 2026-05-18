@@ -42,7 +42,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.17.1"
+    assert payload["version"] == "0.17.2"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -105,6 +105,28 @@ def test_app_config_persists_extended_underline_appearance_option() -> None:
     assert updated.status_code == 200
     assert updated.json()["appearance"]["markdownExtendedUnderlineEnabled"] is False
     assert client.get("/api/config").json()["appearance"]["markdownExtendedUnderlineEnabled"] is False
+
+
+def test_app_config_persists_project_tree_open_paths() -> None:
+    current = client.get("/api/config")
+    assert current.status_code == 200
+
+    updated = client.put(
+        "/api/config",
+        json={
+            "treeOpenPathsByProject": {
+                "project-1": ["Guides", "Guides/API", "../private", "", "Guides"],
+                "project-2": ["Archive"],
+            }
+        },
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["treeOpenPathsByProject"] == {
+        "project-1": ["Guides", "Guides/API"],
+        "project-2": ["Archive"],
+    }
+    assert client.get("/api/config").json()["treeOpenPathsByProject"] == updated.json()["treeOpenPathsByProject"]
 
 
 def test_json_file_store_handles_concurrent_writes(tmp_path) -> None:
@@ -261,6 +283,7 @@ def test_project_tree_reads_local_folder_and_manages_files(tmp_path) -> None:
     assert tree.status_code == 200
     root_nodes = tree.json()
     assert root_nodes[0]["name"] == "Guides"
+    assert root_nodes[0]["open"] is False
     assert root_nodes[1]["name"] == "intro.md"
 
     folder_id = root_nodes[0]["id"]

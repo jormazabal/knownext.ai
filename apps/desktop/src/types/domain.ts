@@ -308,6 +308,7 @@ export type AppConfig = {
   diagnostics: DiagnosticsConfig;
   ai: AiConfig;
   tabsByProject: Record<string, ProjectTabsConfig>;
+  treeOpenPathsByProject: Record<string, string[]>;
   lastRunAppVersion?: string | null;
   lastSeenReleaseNotesVersion?: string | null;
   openUtilityTabs: AppUtilityTabId[];
@@ -321,6 +322,7 @@ export type AppConfigUpdate = {
   diagnostics?: DiagnosticsConfig;
   ai?: AiConfig;
   tabsByProject?: Record<string, ProjectTabsConfig>;
+  treeOpenPathsByProject?: Record<string, string[]>;
   lastRunAppVersion?: string | null;
   lastSeenReleaseNotesVersion?: string | null;
   openUtilityTabs?: AppUtilityTabId[];
