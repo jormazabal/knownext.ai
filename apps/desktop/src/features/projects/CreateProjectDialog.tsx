@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { selectProjectFolder } from "../../lib/runtime/folders";
-import type { AuthStatus, GithubPublishVisibility, GithubRepositorySummary, Project, ProjectCapabilities, ProjectCreationMode, ProjectPayload, VersioningMode } from "../../types/domain";
+import type { AuthStatus, GithubPublishVisibility, GithubRepositorySummary, Project, ProjectCapabilities, ProjectCreationMode, ProjectPayload, ProjectSyncStatus, SyncMode, VersioningMode } from "../../types/domain";
 import { getProjectIcon, projectColors, projectIconOptions } from "./projectVisuals";
 
 export type ProjectDialogInput = ProjectPayload;
@@ -38,19 +38,21 @@ type CreateProjectDialogProps = {
   capabilities?: ProjectCapabilities | null;
   githubRepositories?: GithubRepositorySummary[];
   githubRepositoriesLoading?: boolean;
+  projectSyncStatus?: ProjectSyncStatus | null;
   onLoginGithub?: () => void;
   onRefreshGithubRepositories?: () => void;
 };
 
 type WizardStepId = "scenario" | "location" | "versioning" | "identity" | "review";
 type ProjectStartMode = "github-existing" | "local-new" | "local-existing" | "local-existing-git";
-type LocalHistoryChoice = "files-only" | "local-git" | "existing-github-remote" | "publish-github";
+type LocalHistoryChoice = "files-only" | "local-git" | "existing-github-remote" | "existing-github-auto" | "publish-github" | "publish-github-auto";
+type ProjectProtectionLevel = "files" | "git" | "github";
 
 type DerivedProjectMode = {
   creationMode: ProjectCreationMode;
   versioningMode: VersioningMode;
   storageMode: "local-files" | "local-cache";
-  syncMode: "none" | "manual-github";
+  syncMode: SyncMode;
   requiresGithubRepository: boolean;
 };
 
@@ -85,6 +87,7 @@ export function CreateProjectDialog({
   capabilities = defaultCapabilities,
   githubRepositories = [],
   githubRepositoriesLoading = false,
+  projectSyncStatus = null,
   onLoginGithub,
   onRefreshGithubRepositories,
 }: CreateProjectDialogProps) {
@@ -99,6 +102,9 @@ export function CreateProjectDialog({
   const [githubOwner, setGithubOwner] = useState("");
   const [githubRepo, setGithubRepo] = useState("");
   const [githubPublishVisibility, setGithubPublishVisibility] = useState<GithubPublishVisibility>("private");
+  const [githubSyncPreference, setGithubSyncPreference] = useState<"manual" | "auto">("manual");
+  const [detachGithubConfirmed, setDetachGithubConfirmed] = useState(false);
+  const [detachGitConfirmed, setDetachGitConfirmed] = useState(false);
   const [activeStep, setActiveStep] = useState<WizardStepId>("scenario");
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
 
@@ -106,7 +112,7 @@ export function CreateProjectDialog({
   const SelectedIcon = getProjectIcon(icon);
   const isEditing = mode === "edit";
   const selectedGithubRepository = githubRepositories.find((repository) => repository.owner === githubOwner && repository.repo === githubRepo);
-  const derivedMode = deriveProjectMode(startMode, localHistoryChoice);
+  const derivedMode = deriveProjectMode(startMode, localHistoryChoice, githubSyncPreference);
   const finalFolderPath = isWebRuntime && !isEditing
     ? ""
     : startMode === "local-new" && newProjectParentPath.trim() && newProjectFolderName.trim()
@@ -116,6 +122,12 @@ export function CreateProjectDialog({
   const hasFolder = isWebRuntime && !isEditing ? true : startMode === "local-new" ? Boolean(newProjectParentPath.trim() && newProjectFolderName.trim()) : Boolean(folderPath.trim());
   const activeStepIndex = wizardSteps.findIndex((step) => step.id === activeStep);
   const canSubmit = hasFolder && (!derivedMode.requiresGithubRepository || hasGithubRepository);
+  const currentProtectionLevel = getProjectProtectionLevel(project);
+  const selectedProtectionLevel = getProtectionLevel(project, localHistoryChoice);
+  const needsGithubDetachConfirmation = isEditing && currentProtectionLevel === "github" && selectedProtectionLevel !== "github";
+  const needsGitDetachConfirmation = isEditing && currentProtectionLevel !== "files" && selectedProtectionLevel === "files";
+  const canSubmitConfiguration = (!needsGithubDetachConfirmation || detachGithubConfirmed) && (!needsGitDetachConfirmation || detachGitConfirmed);
+  const canSubmitEffective = canSubmit && canSubmitConfiguration;
   const canContinue = getStepCanContinue(activeStep, startMode, derivedMode, hasFolder, hasGithubRepository);
   const previewName = name.trim() || githubRepo.trim() || "Nuevo proyecto";
 
@@ -123,13 +135,11 @@ export function CreateProjectDialog({
     const repository = hasGithubRepository ? `${githubOwner.trim()}/${githubRepo.trim()}` : "Pendiente";
     return [
       { label: "Situación", value: startModeLabel(startMode, isWebRuntime && !isEditing) },
-      { label: isWebRuntime && !isEditing ? "Almacenamiento" : "Carpeta local", value: isWebRuntime && !isEditing ? "Servidor web de KnowNext.ai" : finalFolderPath || "Pendiente" },
-      { label: "Historial", value: historyChoiceLabel(startMode, localHistoryChoice) },
-      { label: "Modo de trabajo", value: derivedMode.storageMode === "local-cache" ? "Copia local conectada a GitHub" : "Archivos locales" },
-      ...(derivedMode.requiresGithubRepository ? [{ label: "GitHub", value: repository }] : []),
-      ...(localHistoryChoice === "publish-github" ? [{ label: "Visibilidad GitHub", value: githubPublishVisibility === "private" ? "Privado" : "Público" }] : []),
+      { label: isWebRuntime && !isEditing ? "Almacenamiento" : "Ubicación local", value: isWebRuntime && !isEditing ? "Servidor web de KnowNext.ai" : finalFolderPath || "Pendiente" },
+      ...(derivedMode.requiresGithubRepository ? [{ label: "Repositorio GitHub", value: repository }] : []),
+      ...(localHistoryChoice === "publish-github" || localHistoryChoice === "publish-github-auto" ? [{ label: "Visibilidad GitHub", value: githubPublishVisibility === "private" ? "Privado" : "Público" }] : []),
     ];
-  }, [derivedMode.requiresGithubRepository, derivedMode.storageMode, finalFolderPath, githubOwner, githubPublishVisibility, githubRepo, hasGithubRepository, isEditing, isWebRuntime, localHistoryChoice, startMode]);
+  }, [derivedMode.requiresGithubRepository, finalFolderPath, githubOwner, githubPublishVisibility, githubRepo, hasGithubRepository, isEditing, isWebRuntime, localHistoryChoice, startMode]);
 
   useEffect(() => {
     if (!open) return;
@@ -143,10 +153,13 @@ export function CreateProjectDialog({
       setNewProjectParentPath("");
       setNewProjectFolderName("");
       setStartMode(project.versioningMode === "github-api" ? "github-existing" : project.versioningMode === "local-git" ? "local-existing-git" : "local-existing");
-      setLocalHistoryChoice(project.versioningMode === "local-git" && project.githubRepository ? "existing-github-remote" : project.versioningMode === "local-git" ? "local-git" : "files-only");
+      setLocalHistoryChoice(project.githubRepository && project.syncMode === "auto-github" ? "existing-github-auto" : project.githubRepository ? "existing-github-remote" : project.versioningMode === "local-git" ? "local-git" : "files-only");
       setGithubOwner(project.githubRepository?.owner ?? "");
       setGithubRepo(project.githubRepository?.repo ?? "");
       setGithubPublishVisibility("private");
+      setGithubSyncPreference(project.syncMode === "auto-github" || project.syncMode === "auto-local" ? "auto" : "manual");
+      setDetachGithubConfirmed(false);
+      setDetachGitConfirmed(false);
       setActiveStep("identity");
       return;
     }
@@ -162,6 +175,9 @@ export function CreateProjectDialog({
     setGithubOwner("");
     setGithubRepo("");
     setGithubPublishVisibility("private");
+    setGithubSyncPreference("manual");
+    setDetachGithubConfirmed(false);
+    setDetachGitConfirmed(false);
     setActiveStep("scenario");
   }, [isEditing, isWebRuntime, open, project]);
 
@@ -174,28 +190,50 @@ export function CreateProjectDialog({
 
   function buildGithubRepository() {
     if (!hasGithubRepository) return null;
+    const existingRepository = project?.githubRepository?.owner === githubOwner.trim() && project.githubRepository.repo === slugifyGithubRepoName(githubRepo)
+      ? project.githubRepository
+      : null;
     return {
       owner: githubOwner.trim(),
       repo: slugifyGithubRepoName(githubRepo),
-      defaultRef: selectedGithubRepository?.defaultRef ?? null,
+      defaultRef: selectedGithubRepository?.defaultRef ?? existingRepository?.defaultRef ?? null,
       rootPath: "",
-      permissions: selectedGithubRepository?.permissions ?? (localHistoryChoice === "publish-github" ? ["pull", "push"] : []),
+      permissions: selectedGithubRepository?.permissions ?? existingRepository?.permissions ?? (localHistoryChoice === "publish-github" || localHistoryChoice === "publish-github-auto" ? ["pull", "push"] : []),
     };
   }
 
   function buildProjectInput() {
     if (isEditing && project) {
+      const wantsGithubConnection =
+        localHistoryChoice === "existing-github-remote"
+        || localHistoryChoice === "existing-github-auto"
+        || localHistoryChoice === "publish-github"
+        || localHistoryChoice === "publish-github-auto";
+      const nextVersioningMode: VersioningMode = wantsGithubConnection ? (project.versioningMode === "github-api" ? "github-api" : "local-git") : localHistoryChoice === "local-git" ? "local-git" : "none";
+      const nextSyncMode: SyncMode = localHistoryChoice === "existing-github-auto" || localHistoryChoice === "publish-github-auto"
+        ? "auto-github"
+        : localHistoryChoice === "existing-github-remote" || localHistoryChoice === "publish-github"
+          ? "manual-github"
+          : localHistoryChoice === "local-git"
+            ? githubSyncPreference === "auto" ? "auto-local" : "manual-local"
+            : "none";
+      const nextStorageMode = nextVersioningMode === "none" ? "local-files" : nextVersioningMode === "local-git" && project.versioningMode === "github-api" ? "local-files" : project.storageMode;
       return {
         name: name.trim() || project.name || "Nuevo proyecto",
         icon,
         iconColor,
         folderPath: folderPath.trim(),
         creationMode: "open-local" as const,
-        storageMode: project.storageMode,
-        versioningMode: project.versioningMode,
-        syncMode: project.syncMode,
-        githubRepository: project.githubRepository ?? null,
-        publishToGithub: null,
+        storageMode: nextStorageMode,
+        versioningMode: nextVersioningMode,
+        syncMode: nextSyncMode,
+        githubRepository: wantsGithubConnection ? buildGithubRepository() : null,
+        publishToGithub: localHistoryChoice === "publish-github" || localHistoryChoice === "publish-github-auto"
+          ? {
+            visibility: githubPublishVisibility,
+            description: `Documentacion ${name.trim() || githubRepo.trim() || project.name || "KnowNext.ai"}`,
+          }
+          : null,
       };
     }
 
@@ -210,7 +248,7 @@ export function CreateProjectDialog({
       versioningMode: derivedMode.versioningMode,
       syncMode: derivedMode.syncMode,
       githubRepository: derivedMode.requiresGithubRepository ? githubRepository : null,
-      publishToGithub: localHistoryChoice === "publish-github"
+      publishToGithub: localHistoryChoice === "publish-github" || localHistoryChoice === "publish-github-auto"
         ? {
           visibility: githubPublishVisibility,
           description: `Documentacion ${name.trim() || githubRepo.trim() || "KnowNext.ai"}`,
@@ -220,8 +258,12 @@ export function CreateProjectDialog({
   }
 
   function handleHistoryChoiceChange(choice: LocalHistoryChoice) {
+    setDetachGithubConfirmed(false);
+    setDetachGitConfirmed(false);
+    if (choice === "existing-github-auto" || choice === "publish-github-auto") setGithubSyncPreference("auto");
+    if (choice === "existing-github-remote" || choice === "publish-github") setGithubSyncPreference("manual");
     setLocalHistoryChoice(choice);
-    if (choice !== "publish-github") return;
+    if (choice !== "publish-github" && choice !== "publish-github-auto") return;
     if (!githubOwner.trim() && authStatus.user?.login) setGithubOwner(authStatus.user.login);
     if (!githubRepo.trim()) setGithubRepo(slugifyGithubRepoName(name || newProjectFolderName || lastPathSegment(finalFolderPath) || "documentacion"));
   }
@@ -270,7 +312,7 @@ export function CreateProjectDialog({
       <section
         className={[
           "flex max-h-[calc(100vh-32px)] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu",
-          isEditing ? "w-[min(480px,calc(100vw-32px))]" : "w-[min(960px,calc(100vw-32px))]",
+          isEditing ? "w-[min(640px,calc(100vw-32px))]" : "w-[min(960px,calc(100vw-32px))]",
         ].join(" ")}
       >
         <header className="flex shrink-0 items-center justify-between border-b border-line px-5 py-4">
@@ -280,10 +322,10 @@ export function CreateProjectDialog({
             </span>
             <div className="min-w-0">
               <h2 className="truncate text-[15px] font-semibold text-ink-primary">
-                {isEditing ? "Editar proyecto de documentación" : "Crear proyecto de documentación"}
+                {isEditing ? "Editar proyecto" : "Crear proyecto de documentación"}
               </h2>
               <p className="mt-0.5 text-[11px] text-ink-secondary">
-                {isEditing ? "Actualiza identidad y datos editables sin cambiar el tipo de proyecto." : "Asistente para elegir origen, carpeta local, historial y conexión GitHub."}
+                {isEditing ? "Actualiza la identidad, revisa el estado y configura GitHub." : "Asistente para elegir origen, carpeta local, historial y conexión GitHub."}
               </p>
             </div>
           </div>
@@ -344,8 +386,34 @@ export function CreateProjectDialog({
                 onNameChange={setName}
                 onIconChange={setIcon}
                 onIconColorChange={setIconColor}
+                authStatus={authStatus}
+                capabilities={capabilities}
+                githubRepositories={githubRepositories}
+                githubRepositoriesLoading={githubRepositoriesLoading}
+                projectSyncStatus={projectSyncStatus}
+                selectedGithubRepository={selectedGithubRepository}
+                githubOwner={githubOwner}
+                githubRepo={githubRepo}
+                githubPublishVisibility={githubPublishVisibility}
+                githubSyncPreference={githubSyncPreference}
+                onLoginGithub={onLoginGithub}
+                onRefreshGithubRepositories={onRefreshGithubRepositories}
+                onGithubOwnerChange={setGithubOwner}
+                onGithubRepoChange={setGithubRepo}
+                onGithubPublishVisibilityChange={setGithubPublishVisibility}
+                onGithubSyncPreferenceChange={setGithubSyncPreference}
                 onFolderPathChange={setFolderPath}
                 onSelectFolder={handleSelectFolder}
+                localHistoryChoice={localHistoryChoice}
+                onHistoryChoiceChange={handleHistoryChoiceChange}
+                currentProtectionLevel={currentProtectionLevel}
+                selectedProtectionLevel={selectedProtectionLevel}
+                needsGithubDetachConfirmation={needsGithubDetachConfirmation}
+                needsGitDetachConfirmation={needsGitDetachConfirmation}
+                detachGithubConfirmed={detachGithubConfirmed}
+                detachGitConfirmed={detachGitConfirmed}
+                onDetachGithubConfirmedChange={setDetachGithubConfirmed}
+                onDetachGitConfirmedChange={setDetachGitConfirmed}
                 isWebRuntime={isWebRuntime}
               />
             ) : activeStep === "scenario" ? (
@@ -357,7 +425,7 @@ export function CreateProjectDialog({
                 onLoginGithub={onLoginGithub}
                 onSelect={(nextMode) => {
                   setStartMode(nextMode);
-                  setLocalHistoryChoice(nextMode === "local-existing-git" ? "existing-github-remote" : "files-only");
+                  setLocalHistoryChoice(nextMode === "local-existing-git" ? "local-git" : "files-only");
                 }}
               />
             ) : activeStep === "location" ? (
@@ -401,6 +469,8 @@ export function CreateProjectDialog({
                 onLoginGithub={onLoginGithub}
                 onRefreshGithubRepositories={onRefreshGithubRepositories}
                 onHistoryChoiceChange={handleHistoryChoiceChange}
+                githubSyncPreference={githubSyncPreference}
+                onGithubSyncPreferenceChange={setGithubSyncPreference}
                 onGithubOwnerChange={setGithubOwner}
                 onGithubRepoChange={setGithubRepo}
                 onGithubPublishVisibilityChange={setGithubPublishVisibility}
@@ -426,6 +496,8 @@ export function CreateProjectDialog({
                 previewName={previewName}
                 items={reviewItems}
                 derivedMode={derivedMode}
+                localHistoryChoice={localHistoryChoice}
+                githubSyncPreference={githubSyncPreference}
                 authStatus={authStatus}
               />
             )}
@@ -466,7 +538,7 @@ export function CreateProjectDialog({
             ) : (
               <button
                 className="h-9 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={!canSubmit}
+                disabled={!canSubmitEffective}
                 onClick={handleSubmit}
               >
                 {isEditing ? "Guardar cambios" : "Crear proyecto"}
@@ -731,6 +803,8 @@ function VersioningStep({
   onLoginGithub,
   onRefreshGithubRepositories,
   onHistoryChoiceChange,
+  githubSyncPreference,
+  onGithubSyncPreferenceChange,
   onGithubOwnerChange,
   onGithubRepoChange,
   onGithubPublishVisibilityChange,
@@ -749,12 +823,46 @@ function VersioningStep({
   onLoginGithub?: () => void;
   onRefreshGithubRepositories?: () => void;
   onHistoryChoiceChange: (choice: LocalHistoryChoice) => void;
+  githubSyncPreference: "manual" | "auto";
+  onGithubSyncPreferenceChange: (mode: "manual" | "auto") => void;
   onGithubOwnerChange: (owner: string) => void;
   onGithubRepoChange: (repo: string) => void;
   onGithubPublishVisibilityChange: (visibility: GithubPublishVisibility) => void;
   onNameSuggestion: (name: string) => void;
 }) {
   const publishUnavailable = !authStatus.isAuthenticated || !capabilities?.canUseGithubApi || !capabilities?.canUseLocalGit;
+  const githubSelected = isGithubHistoryChoice(localHistoryChoice);
+  const githubAction = getGithubActionFromHistoryChoice(localHistoryChoice) ?? (startMode === "local-existing-git" ? "connect" : "publish");
+  const githubUnavailable = !authStatus.isAuthenticated || !capabilities?.canUseGithubApi || !capabilities?.canUseLocalGit;
+  const selectedProtectionLevel = getProtectionLevel(null, localHistoryChoice);
+  const automaticSyncAvailable = selectedProtectionLevel !== "files";
+  const disabledProtectionLevels: Partial<Record<ProjectProtectionLevel, string>> = {
+    ...(!capabilities?.canUseLocalGit ? { git: "La integración de Git local todavía no está disponible en esta instalación." } : {}),
+    ...(githubUnavailable ? { github: "Conecta GitHub y activa Git local para usar histórico con sincronización remota." } : {}),
+  };
+
+  function selectHistoryLevel(level: "files" | "git" | "github") {
+    if (level === "files") {
+      onHistoryChoiceChange("files-only");
+      return;
+    }
+    if (level === "git" && !capabilities?.canUseLocalGit) return;
+    if (level === "git") {
+      onHistoryChoiceChange("local-git");
+      return;
+    }
+    if (githubUnavailable) return;
+    onHistoryChoiceChange(getGithubHistoryChoice(githubAction, githubSyncPreference));
+  }
+
+  function selectGithubAction(action: "connect" | "publish") {
+    onHistoryChoiceChange(getGithubHistoryChoice(action, githubSyncPreference));
+  }
+
+  function selectSyncMode(mode: "manual" | "auto") {
+    onGithubSyncPreferenceChange(mode);
+    if (githubSelected) onHistoryChoiceChange(getGithubHistoryChoice(githubAction, mode));
+  }
 
   if (startMode === "github-existing") {
     return (
@@ -782,77 +890,101 @@ function VersioningStep({
   return (
     <section>
       <StepHeader
-        title="Cómo quieres tratar el historial"
-        description="Estas opciones separan documentación local, Git local ya presente y una posible relación con GitHub. Elige la que describe mejor tu carpeta actual."
+        title="Cómo quieres proteger este proyecto"
+        description="Elige el nivel de histórico y si las versiones se crean manualmente o al guardar."
       />
-      <div role="tablist" aria-label="Configuración de historial" className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <ModeTab
-          active={localHistoryChoice === "files-only"}
-          icon={HardDrive}
-          title="Solo archivos locales"
-          description="No se inicializa Git ni se conecta GitHub. Recomendado para empezar rápido o revisar documentación existente."
-          onClick={() => onHistoryChoiceChange("files-only")}
+      <div className="mt-4 rounded-md border border-line bg-white px-4 py-4">
+        <ProjectProtectionStateCards
+          localHistoryChoice={localHistoryChoice}
+          onSelectLevel={selectHistoryLevel}
+          disabledLevels={disabledProtectionLevels}
+          className="space-y-2"
         />
-        <ModeTab
-          active={localHistoryChoice === "local-git"}
-          disabled={!capabilities?.canUseLocalGit}
-          disabledReason="La integración de Git local todavía no está disponible en esta instalación."
-          icon={GitBranch}
-          title="Usar Git local"
-          description="Si la carpeta ya tiene .git se respeta; si no, KnowNext.ai prepara un repositorio local para versiones."
-          onClick={() => onHistoryChoiceChange("local-git")}
+        <AutomaticSyncToggle
+          disabled={!automaticSyncAvailable}
+          protectionLevel={selectedProtectionLevel}
+          value={githubSyncPreference === "auto"}
+          onChange={(enabled) => selectSyncMode(enabled ? "auto" : "manual")}
         />
-        <ModeTab
-          active={localHistoryChoice === "existing-github-remote"}
-          disabled={!capabilities?.canUseLocalGit}
-          disabledReason="La integración de Git local todavía no está disponible en esta instalación."
-          icon={Github}
-          title="Git local con GitHub existente"
-          description="Para carpetas que ya tienen remoto GitHub. Selecciona el repo para que la app entienda contra qué remoto sincronizas."
-          onClick={() => onHistoryChoiceChange("existing-github-remote")}
-        />
-        <ModeTab
-          active={localHistoryChoice === "publish-github"}
-          disabled={publishUnavailable}
-          disabledReason="Conecta GitHub para crear el repositorio remoto y preparar la sincronización desde esta carpeta local."
-          icon={UploadCloud}
-          title="Crear repo GitHub desde local"
-          description="Crea un repo nuevo en GitHub y deja esta carpeta preparada con Git local y remoto origin."
-          onClick={() => onHistoryChoiceChange("publish-github")}
-        />
+        {!capabilities?.canUseLocalGit && selectedProtectionLevel !== "files" ? (
+          <div className="mt-3">
+            <GuidanceNote
+              icon={Lock}
+              title="Git local no disponible"
+              description="La integración de Git local todavía no está disponible en esta instalación."
+            />
+          </div>
+        ) : null}
+        {githubSelected && githubUnavailable ? (
+          <div className="mt-3">
+            <GuidanceNote
+              icon={Lock}
+              title="GitHub no disponible"
+              description="Conecta GitHub y activa Git local para usar histórico con sincronización remota."
+            />
+          </div>
+        ) : null}
       </div>
-      {localHistoryChoice === "existing-github-remote" ? (
-        <div className="mt-4">
-          <GithubRepositoryFields
-            authStatus={authStatus}
-            githubRepositories={githubRepositories}
-            githubRepositoriesLoading={githubRepositoriesLoading}
-            selectedGithubRepository={selectedGithubRepository}
-            githubOwner={githubOwner}
-            githubRepo={githubRepo}
-            onLoginGithub={onLoginGithub}
-            onRefreshGithubRepositories={onRefreshGithubRepositories}
-            onGithubOwnerChange={onGithubOwnerChange}
-            onGithubRepoChange={onGithubRepoChange}
-            onNameSuggestion={onNameSuggestion}
+      {githubSelected ? (
+        <div className="mt-5 space-y-4 rounded-md border border-line bg-white px-4 py-4">
+          <SectionTitle
+            title="Configuración GitHub"
+            description="Completa la conexión remota necesaria para este nivel de protección."
           />
+          <GuidanceNote
+            icon={githubSyncPreference === "auto" ? Cloud : Info}
+            title={githubSyncPreference === "auto" ? "Sincronización automática al guardar" : "Sincronización manual al guardar"}
+            description={githubSyncPreference === "auto" ? "Al guardar, KnowNext.ai intentará crear la versión local y sincronizarla con GitHub si no hay conflictos." : "Al guardar, KnowNext.ai dejará activa la acción para sincronizar el documento con Git local y GitHub cuando el usuario lo solicite."}
+          />
+          <div role="tablist" aria-label="Tipo de conexión GitHub" className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <ModeTab
+              active={githubAction === "connect"}
+              disabled={!capabilities?.canUseLocalGit}
+              disabledReason="Git local no está disponible en este entorno."
+              icon={Github}
+              title="Conectar repositorio existente"
+              description="Asocia esta carpeta con un repo GitHub ya creado."
+              onClick={() => selectGithubAction("connect")}
+            />
+            <ModeTab
+              active={githubAction === "publish"}
+              disabled={publishUnavailable}
+              disabledReason="Conecta GitHub para crear el repositorio remoto y preparar la sincronización desde esta carpeta local."
+              icon={UploadCloud}
+              title="Publicar como nuevo repositorio"
+              description="Crea un repo nuevo, sube la primera versión y configura el remoto."
+              onClick={() => selectGithubAction("publish")}
+            />
+          </div>
+          {githubAction === "connect" ? (
+            <GithubRepositoryFields
+              authStatus={authStatus}
+              githubRepositories={githubRepositories}
+              githubRepositoriesLoading={githubRepositoriesLoading}
+              selectedGithubRepository={selectedGithubRepository}
+              githubOwner={githubOwner}
+              githubRepo={githubRepo}
+              onLoginGithub={onLoginGithub}
+              onRefreshGithubRepositories={onRefreshGithubRepositories}
+              onGithubOwnerChange={onGithubOwnerChange}
+              onGithubRepoChange={onGithubRepoChange}
+              onNameSuggestion={onNameSuggestion}
+            />
+          ) : (
+            <PublishGithubFields
+              authStatus={authStatus}
+              githubOwner={githubOwner}
+              githubRepo={githubRepo}
+              visibility={githubPublishVisibility}
+              onLoginGithub={onLoginGithub}
+              onGithubOwnerChange={onGithubOwnerChange}
+              onGithubRepoChange={onGithubRepoChange}
+              onVisibilityChange={onGithubPublishVisibilityChange}
+            />
+          )}
         </div>
       ) : null}
-      {localHistoryChoice === "publish-github" ? (
-        <div className="mt-4">
-          <PublishGithubFields
-            authStatus={authStatus}
-            githubOwner={githubOwner}
-            githubRepo={githubRepo}
-            visibility={githubPublishVisibility}
-            onLoginGithub={onLoginGithub}
-            onGithubOwnerChange={onGithubOwnerChange}
-            onGithubRepoChange={onGithubRepoChange}
-            onVisibilityChange={onGithubPublishVisibilityChange}
-          />
-        </div>
-      ) : null}
-      {!authStatus.isAuthenticated && localHistoryChoice !== "files-only" ? (
+      {!authStatus.isAuthenticated && githubSelected ? (
         <div className="mt-4 flex items-start justify-between gap-3 rounded-md border border-orange-200 bg-brand-hover px-3 py-3 text-[11px] text-ink-secondary">
           <span className="flex min-w-0 items-start gap-2">
             <Lock size={14} className="mt-0.5 shrink-0 text-brand-orange" />
@@ -935,8 +1067,34 @@ function EditProjectForm({
   onNameChange,
   onIconChange,
   onIconColorChange,
+  authStatus,
+  capabilities,
+  githubRepositories,
+  githubRepositoriesLoading,
+  projectSyncStatus,
+  selectedGithubRepository,
+  githubOwner,
+  githubRepo,
+  githubPublishVisibility,
+  githubSyncPreference,
+  onLoginGithub,
+  onRefreshGithubRepositories,
+  onGithubOwnerChange,
+  onGithubRepoChange,
+  onGithubPublishVisibilityChange,
+  onGithubSyncPreferenceChange,
   onFolderPathChange,
   onSelectFolder,
+  localHistoryChoice,
+  onHistoryChoiceChange,
+  currentProtectionLevel,
+  selectedProtectionLevel,
+  needsGithubDetachConfirmation,
+  needsGitDetachConfirmation,
+  detachGithubConfirmed,
+  detachGitConfirmed,
+  onDetachGithubConfirmedChange,
+  onDetachGitConfirmedChange,
   isWebRuntime,
 }: {
   project?: Project | null;
@@ -948,8 +1106,34 @@ function EditProjectForm({
   onNameChange: (name: string) => void;
   onIconChange: (icon: string) => void;
   onIconColorChange: (color: string) => void;
+  authStatus: AuthStatus;
+  capabilities: ProjectCapabilities | null;
+  githubRepositories: GithubRepositorySummary[];
+  githubRepositoriesLoading: boolean;
+  projectSyncStatus?: ProjectSyncStatus | null;
+  selectedGithubRepository?: GithubRepositorySummary;
+  githubOwner: string;
+  githubRepo: string;
+  githubPublishVisibility: GithubPublishVisibility;
+  githubSyncPreference: "manual" | "auto";
+  onLoginGithub?: () => void;
+  onRefreshGithubRepositories?: () => void;
+  onGithubOwnerChange: (owner: string) => void;
+  onGithubRepoChange: (repo: string) => void;
+  onGithubPublishVisibilityChange: (visibility: GithubPublishVisibility) => void;
+  onGithubSyncPreferenceChange: (mode: "manual" | "auto") => void;
   onFolderPathChange: (path: string) => void;
   onSelectFolder: () => Promise<string | null>;
+  localHistoryChoice: LocalHistoryChoice;
+  onHistoryChoiceChange: (choice: LocalHistoryChoice) => void;
+  currentProtectionLevel: ProjectProtectionLevel;
+  selectedProtectionLevel: ProjectProtectionLevel;
+  needsGithubDetachConfirmation: boolean;
+  needsGitDetachConfirmation: boolean;
+  detachGithubConfirmed: boolean;
+  detachGitConfirmed: boolean;
+  onDetachGithubConfirmedChange: (confirmed: boolean) => void;
+  onDetachGitConfirmedChange: (confirmed: boolean) => void;
   isWebRuntime: boolean;
 }) {
   const canEditFolder = !isWebRuntime && project?.storageMode !== "local-cache";
@@ -958,9 +1142,55 @@ function EditProjectForm({
   const folderReadOnlyHelp = isWebRuntime
     ? "En navegador los proyectos viven en la carpeta sandbox del backend web. No se reasigna desde la interfaz."
     : "Solo lectura. Para usar otra ubicación, crea un proyecto nuevo desde ese repositorio GitHub.";
+  const githubActionsUnavailable = !authStatus.isAuthenticated || !capabilities?.canUseGithubApi || !capabilities?.canUseLocalGit;
+  const githubActionReason = !authStatus.isAuthenticated
+    ? "Conecta GitHub para enlazar o publicar este proyecto."
+    : !capabilities?.canUseGithubApi
+      ? "La API de GitHub no está disponible en este entorno."
+      : !capabilities?.canUseLocalGit
+        ? "Git local no está disponible en este entorno."
+        : null;
+  const showGithubEvolution = Boolean(project && !githubRepository);
+  const showExistingGithubFields = localHistoryChoice === "existing-github-remote" || localHistoryChoice === "existing-github-auto";
+  const showPublishGithubFields = localHistoryChoice === "publish-github" || localHistoryChoice === "publish-github-auto";
+  const selectedGithubAction = localHistoryChoice === "publish-github" || localHistoryChoice === "publish-github-auto" ? "publish" : localHistoryChoice === "existing-github-remote" || localHistoryChoice === "existing-github-auto" ? "connect" : null;
+  const automaticSyncAvailable = selectedProtectionLevel !== "files";
+  const hasConfigurationPanel = selectedProtectionLevel !== currentProtectionLevel || selectedProtectionLevel === "github";
+
+  function updateGithubSyncPreference(mode: "manual" | "auto") {
+    onGithubSyncPreferenceChange(mode);
+    if (selectedProtectionLevel === "git") return;
+    if (project?.githubRepository || selectedGithubAction === "connect") {
+      onHistoryChoiceChange(mode === "auto" ? "existing-github-auto" : "existing-github-remote");
+      return;
+    }
+    if (selectedGithubAction === "publish") {
+      onHistoryChoiceChange(mode === "auto" ? "publish-github-auto" : "publish-github");
+    }
+  }
+
+  function selectGithubAction(action: "connect" | "publish") {
+    if (action === "connect") {
+      onHistoryChoiceChange(githubSyncPreference === "auto" ? "existing-github-auto" : "existing-github-remote");
+      return;
+    }
+    onHistoryChoiceChange(githubSyncPreference === "auto" ? "publish-github-auto" : "publish-github");
+  }
+
+  function selectProtectionLevel(level: ProjectProtectionLevel) {
+    if (level === "files") {
+      onHistoryChoiceChange("files-only");
+      return;
+    }
+    if (level === "git") {
+      onHistoryChoiceChange("local-git");
+      return;
+    }
+    onHistoryChoiceChange(getGithubHistoryChoice(selectedGithubAction ?? "connect", githubSyncPreference));
+  }
 
   return (
-    <section className="space-y-5">
+    <section className="space-y-4">
       <section className="rounded-md border border-line bg-white px-4 py-4">
         <SectionTitle
           title="Identidad"
@@ -972,15 +1202,22 @@ function EditProjectForm({
         </div>
       </section>
 
+      <section className="rounded-md border border-line bg-white px-4 py-4">
+        <SectionTitle title="Sincronización" />
+        <ProjectProtectionStateCards project={project} localHistoryChoice={localHistoryChoice} onSelectLevel={selectProtectionLevel} />
+        <AutomaticSyncToggle
+          disabled={!automaticSyncAvailable}
+          protectionLevel={selectedProtectionLevel}
+          value={githubSyncPreference === "auto"}
+          onChange={(enabled) => updateGithubSyncPreference(enabled ? "auto" : "manual")}
+        />
+      </section>
+
       {!isWebRuntime ? (
         <section className="rounded-md border border-line bg-white px-4 py-4">
           <SectionTitle
-            title="Carpeta de trabajo"
-            description={
-              canEditFolder
-                ? "Referencia local del proyecto. Se puede actualizar si has movido la documentación; KnowNext.ai no mueve archivos."
-                : "Copia local gestionada desde GitHub. Cambiarla rompería la relación con el repositorio remoto."
-            }
+            title="Carpeta local"
+            description={canEditFolder ? "Referencia local del proyecto. KnowNext.ai no mueve archivos." : "Ubicación local asociada al repositorio GitHub."}
           />
           <div className="mt-4">
             {canEditFolder ? (
@@ -1001,44 +1238,412 @@ function EditProjectForm({
         </section>
       ) : null}
 
-      <section className="rounded-md border border-line bg-white px-4 py-4">
-        <SectionTitle
-          title="Configuración"
-          description="Origen, almacenamiento, historial y sincronización. Se muestran como referencia y no se cambian desde edición."
-        />
-        <div className="mt-4 grid grid-cols-2 gap-3 max-[520px]:grid-cols-1">
-          <ReadOnlyField icon={projectStorageIcon(project)} label="Origen del proyecto" value={isWebRuntime ? "Proyecto web" : projectOriginLabel(project)} />
-          <ReadOnlyField icon={HardDrive} label="Modo de almacenamiento" value={isWebRuntime ? "Backend web gestionado" : storageModeLabel(project?.storageMode)} />
-          <ReadOnlyField icon={GitBranch} label="Historial" value={versioningModeLabel(project?.versioningMode ?? "none")} />
-          <ReadOnlyField icon={Cloud} label="Sincronización" value={syncModeLabel(project?.syncMode)} />
-          {githubRepository ? (
-            <ReadOnlyField
-              icon={Github}
-              label="Repositorio GitHub"
-              value={`${githubRepository.owner}/${githubRepository.repo}`}
-              help={githubRepository.defaultRef ? `Referencia interna: ${githubRepository.defaultRef}` : "Repositorio asociado al crear el proyecto."}
-            />
-          ) : (
-            <ReadOnlyField icon={Github} label="Repositorio GitHub" value="No conectado" help="Este proyecto no tiene repositorio GitHub asociado." />
-          )}
-        </div>
-        <div className="mt-4">
-          <GuidanceNote
-            icon={Lock}
-            title="Para cambiar origen o historial"
-            description="Crea un proyecto nuevo con el asistente. Así se evita mezclar una carpeta local, una caché GitHub o un remoto distinto dentro del mismo registro."
+      {hasConfigurationPanel ? (
+        <section className="rounded-md border border-line bg-white px-4 py-4">
+          <SectionTitle
+            title="Configuración del cambio"
+            description="Completa solo la información necesaria para aplicar la nueva configuración del proyecto."
           />
-        </div>
-      </section>
+          <div className="mt-4 space-y-4">
+            {needsGithubDetachConfirmation || needsGitDetachConfirmation ? (
+              <DetachConfirmationPanel
+                needsGithubDetachConfirmation={needsGithubDetachConfirmation}
+                needsGitDetachConfirmation={needsGitDetachConfirmation}
+                detachGithubConfirmed={detachGithubConfirmed}
+                detachGitConfirmed={detachGitConfirmed}
+                onDetachGithubConfirmedChange={onDetachGithubConfirmedChange}
+                onDetachGitConfirmedChange={onDetachGitConfirmedChange}
+              />
+            ) : null}
+            {selectedProtectionLevel === "github" ? (
+              <>
+                {githubRepository ? (
+                  <ConnectedGithubPanel
+                    repository={`${githubRepository.owner}/${githubRepository.repo}`}
+                    projectSyncStatus={projectSyncStatus}
+                    syncMode={project?.syncMode ?? "manual-github"}
+                  />
+                ) : (
+                  <DisconnectedGithubPanel
+                    githubActionsUnavailable={githubActionsUnavailable}
+                    githubActionReason={githubActionReason}
+                    selectedGithubAction={selectedGithubAction}
+                    onSelectGithubAction={selectGithubAction}
+                  />
+                )}
+                {showGithubEvolution ? (
+                  <div className="space-y-3">
+                    {showExistingGithubFields ? (
+                      <GithubRepositoryFields
+                        authStatus={authStatus}
+                        githubRepositories={githubRepositories}
+                        githubRepositoriesLoading={githubRepositoriesLoading}
+                        selectedGithubRepository={selectedGithubRepository}
+                        githubOwner={githubOwner}
+                        githubRepo={githubRepo}
+                        onLoginGithub={onLoginGithub}
+                        onRefreshGithubRepositories={onRefreshGithubRepositories}
+                        onGithubOwnerChange={onGithubOwnerChange}
+                        onGithubRepoChange={onGithubRepoChange}
+                        onNameSuggestion={onNameChange}
+                      />
+                    ) : null}
+                    {showPublishGithubFields ? (
+                      <PublishGithubFields
+                        authStatus={authStatus}
+                        githubOwner={githubOwner}
+                        githubRepo={githubRepo}
+                        visibility={githubPublishVisibility}
+                        onLoginGithub={onLoginGithub}
+                        onGithubOwnerChange={onGithubOwnerChange}
+                        onGithubRepoChange={onGithubRepoChange}
+                        onVisibilityChange={onGithubPublishVisibilityChange}
+                      />
+                    ) : null}
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+            {selectedProtectionLevel === "git" && currentProtectionLevel === "files" ? (
+              <GuidanceNote
+                icon={GitBranch}
+                title="Activar Git local"
+                description="Al guardar, KnowNext.ai preparará el historial local para esta carpeta. No se conectará ningún repositorio remoto."
+              />
+            ) : null}
+          </div>
+        </section>
+      ) : null}
     </section>
   );
 }
 
-function SectionTitle({ title, description }: { title: string; description: string }) {
+function ProjectProtectionStateCards({
+  project,
+  localHistoryChoice,
+  onSelectLevel,
+  disabledLevels = {},
+  className = "mt-4 space-y-2",
+}: {
+  project?: Project | null;
+  localHistoryChoice: LocalHistoryChoice;
+  onSelectLevel?: (level: ProjectProtectionLevel) => void;
+  disabledLevels?: Partial<Record<ProjectProtectionLevel, string>>;
+  className?: string;
+}) {
+  const selectedLevel = getProtectionLevel(project, localHistoryChoice);
+  const items: Array<{ level: ProjectProtectionLevel; icon: LucideIcon; title: string; description: string }> = [
+    {
+      level: "files",
+      icon: HardDrive,
+      title: "Archivos locales",
+      description: "Solo documentos en disco, sin historial Git.",
+    },
+    {
+      level: "git",
+      icon: GitBranch,
+      title: "Archivos locales + Git local",
+      description: "Versiones locales en esta carpeta.",
+    },
+    {
+      level: "github",
+      icon: Github,
+      title: "Archivos locales + Git local + GitHub",
+      description: "Histórico y sincronización con GitHub.",
+    },
+  ];
+
+  return (
+    <div className={className}>
+      {items.map((item) => {
+        const selected = item.level === selectedLevel;
+        const disabledReason = disabledLevels[item.level];
+        const disabled = Boolean(disabledReason);
+        const Icon = item.icon;
+        const className = [
+          "w-full rounded-md border px-3 py-3 text-left transition",
+          selected ? "border-brand-orange bg-brand-hover shadow-[inset_0_0_0_1px_rgba(243,112,33,0.16)]" : "border-line bg-panel",
+          onSelectLevel && !disabled ? "hover:border-brand-orange" : "",
+          !onSelectLevel ? "cursor-default" : "",
+          disabled ? "cursor-not-allowed opacity-55" : "",
+        ].join(" ");
+        const content = (
+          <div className="flex items-center gap-3">
+            <span className={["grid h-6 w-6 shrink-0 place-items-center rounded-full border", selected ? "border-brand-orange bg-brand-orange text-white" : "border-line bg-white text-ink-secondary"].join(" ")}>
+              {selected ? <Check size={14} /> : null}
+            </span>
+            <Icon size={16} className={selected ? "shrink-0 text-brand-orange" : "shrink-0 text-ink-secondary"} />
+            <div className="grid min-w-0 flex-1 gap-1 sm:grid-cols-[minmax(190px,0.45fr)_1fr] sm:items-center">
+              <div className="text-[11px] font-semibold leading-4 text-ink-primary">{item.title}</div>
+              <p className="text-[10px] leading-4 text-ink-secondary">{item.description}</p>
+            </div>
+          </div>
+        );
+
+        if (!onSelectLevel) {
+          return (
+            <div
+              key={item.level}
+              aria-current={selected ? "true" : undefined}
+              title={disabledReason}
+              className={className}
+            >
+              {content}
+            </div>
+          );
+        }
+
+        return (
+          <button
+            key={item.level}
+            type="button"
+            aria-pressed={selected}
+            aria-disabled={disabled}
+            disabled={disabled}
+            title={disabledReason}
+            onClick={() => onSelectLevel?.(item.level)}
+            className={className}
+          >
+            {content}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function DetachConfirmationPanel({
+  needsGithubDetachConfirmation,
+  needsGitDetachConfirmation,
+  detachGithubConfirmed,
+  detachGitConfirmed,
+  onDetachGithubConfirmedChange,
+  onDetachGitConfirmedChange,
+}: {
+  needsGithubDetachConfirmation: boolean;
+  needsGitDetachConfirmation: boolean;
+  detachGithubConfirmed: boolean;
+  detachGitConfirmed: boolean;
+  onDetachGithubConfirmedChange: (confirmed: boolean) => void;
+  onDetachGitConfirmedChange: (confirmed: boolean) => void;
+}) {
+  return (
+    <div className="space-y-3 rounded-md border border-orange-200 bg-brand-hover px-3 py-3">
+      <div className="flex items-start gap-2">
+        <AlertTriangle size={15} className="mt-0.5 shrink-0 text-brand-orange" />
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold text-ink-primary">Confirmar desacoplamiento</div>
+          <p className="mt-1 text-[10px] leading-4 text-ink-secondary">
+            Esta acción cambia cómo KnowNext.ai protege el proyecto. Los archivos del proyecto se conservan en disco.
+          </p>
+        </div>
+      </div>
+      <div className="space-y-2">
+        {needsGithubDetachConfirmation ? (
+          <label className="flex items-start gap-2 rounded-md border border-orange-200 bg-white px-3 py-2 text-[10px] leading-4 text-ink-secondary">
+            <input
+              className="mt-0.5 h-3.5 w-3.5 accent-brand-orange"
+              type="checkbox"
+              checked={detachGithubConfirmed}
+              onChange={(event) => onDetachGithubConfirmedChange(event.currentTarget.checked)}
+            />
+            <span>
+              <span className="block text-[11px] font-semibold text-ink-primary">Desacoplar GitHub</span>
+              Se eliminará la relación con el repositorio remoto dentro de KnowNext.ai. No se borrará el repositorio en GitHub ni los archivos locales.
+            </span>
+          </label>
+        ) : null}
+        {needsGitDetachConfirmation ? (
+          <label className="flex items-start gap-2 rounded-md border border-orange-200 bg-white px-3 py-2 text-[10px] leading-4 text-ink-secondary">
+            <input
+              className="mt-0.5 h-3.5 w-3.5 accent-brand-orange"
+              type="checkbox"
+              checked={detachGitConfirmed}
+              onChange={(event) => onDetachGitConfirmedChange(event.currentTarget.checked)}
+            />
+            <span>
+              <span className="block text-[11px] font-semibold text-ink-primary">Desactivar Git local</span>
+              KnowNext.ai dejará de usar el historial Git para este proyecto. No se eliminan documentos; la carpeta técnica de Git no se borra automáticamente.
+            </span>
+          </label>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function AutomaticSyncToggle({
+  value,
+  disabled,
+  readOnly = false,
+  protectionLevel,
+  onChange,
+}: {
+  value: boolean;
+  disabled: boolean;
+  readOnly?: boolean;
+  protectionLevel: ProjectProtectionLevel;
+  onChange: (enabled: boolean) => void;
+}) {
+  const title = "Sincronización automática";
+  const description = disabled
+    ? "Disponible cuando el proyecto usa Git local."
+    : protectionLevel === "github"
+      ? value
+        ? "Al guardar, KnowNext.ai crea la versión local y sincroniza GitHub si no hay conflictos."
+        : "Al guardar, KnowNext.ai deja pendiente la versión local y la sincronización con GitHub."
+      : value
+        ? "Al guardar, KnowNext.ai crea automáticamente una versión en Git local."
+        : "Al guardar, KnowNext.ai deja pendiente crear la versión local manualmente.";
+
+  return (
+    <div className={["mt-3 flex items-center gap-3 rounded-md border px-3 py-3", disabled ? "border-line bg-panel/70" : "border-line bg-white"].join(" ")}>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={value}
+        aria-label={title}
+        disabled={disabled || readOnly}
+        className={[
+          "relative h-6 w-11 shrink-0 rounded-full border transition",
+          value && !disabled ? "border-brand-orange bg-brand-orange" : "border-line bg-white",
+          disabled ? "cursor-not-allowed opacity-60" : readOnly ? "cursor-default" : "hover:border-brand-orange",
+        ].join(" ")}
+        onClick={() => onChange(!value)}
+      >
+        <span
+          className={[
+            "absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition",
+            value && !disabled ? "left-[21px]" : "left-0.5",
+            !value || disabled ? "border border-line" : "",
+          ].join(" ")}
+        />
+      </button>
+      <div className="min-w-0">
+        <div className="text-[11px] font-semibold text-ink-primary">{title}</div>
+        <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{description}</p>
+      </div>
+    </div>
+  );
+}
+
+function ConnectedGithubPanel({
+  repository,
+  projectSyncStatus,
+  syncMode,
+}: {
+  repository: string;
+  projectSyncStatus?: ProjectSyncStatus | null;
+  syncMode: Project["syncMode"];
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3 rounded-md border border-line bg-panel px-3 py-3">
+      <div className="flex min-w-0 items-start gap-3">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-white text-ink-secondary">
+          <Github size={16} />
+        </span>
+        <div className="min-w-0">
+          <div className="truncate text-[12px] font-semibold text-ink-primary">{repository}</div>
+          <div className="mt-1 text-[10px] leading-4 text-ink-secondary">
+            {projectSyncStatus?.detail ?? (syncMode === "auto-github" ? "Sincronización automática configurada." : "Sincronización manual configurada.")}
+          </div>
+        </div>
+      </div>
+      <StatusBadge label={projectSyncStatus?.label ?? syncModeLabel(syncMode)} tone={projectSyncStatus?.hasConflicts ? "danger" : projectSyncStatus?.pendingPull || projectSyncStatus?.pendingPush ? "warning" : "ok"} />
+    </div>
+  );
+}
+
+function DisconnectedGithubPanel({
+  githubActionsUnavailable,
+  githubActionReason,
+  selectedGithubAction,
+  onSelectGithubAction,
+}: {
+  githubActionsUnavailable: boolean;
+  githubActionReason: string | null;
+  selectedGithubAction: "connect" | "publish" | null;
+  onSelectGithubAction: (action: "connect" | "publish") => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-md border border-line bg-panel px-3 py-3">
+        <div className="flex items-start gap-3">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-white text-ink-secondary">
+            <Cloud size={16} />
+          </span>
+          <div className="min-w-0">
+            <div className="text-[12px] font-semibold text-ink-primary">GitHub no conectado</div>
+            <p className="mt-1 text-[10px] leading-4 text-ink-secondary">
+              Este proyecto solo está guardado en este equipo. Puedes conectar un repo existente o publicar esta carpeta como un repositorio nuevo.
+            </p>
+          </div>
+        </div>
+      </div>
+      {githubActionReason ? <GuidanceNote icon={Lock} title="GitHub no disponible" description={githubActionReason} /> : null}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <ModeTab
+          active={selectedGithubAction === "connect"}
+          disabled={githubActionsUnavailable}
+          icon={Github}
+          title="Conectar repositorio existente"
+          description="Usa un repo de GitHub ya creado."
+          onClick={() => onSelectGithubAction("connect")}
+        />
+        <ModeTab
+          active={selectedGithubAction === "publish"}
+          disabled={githubActionsUnavailable}
+          icon={UploadCloud}
+          title="Publicar como nuevo repositorio"
+          description="Crea el repo y sube la primera versión."
+          onClick={() => onSelectGithubAction("publish")}
+        />
+      </div>
+    </div>
+  );
+}
+
+function GithubSyncModeControl({ value, onChange }: { value: "manual" | "auto"; onChange: (mode: "manual" | "auto") => void }) {
+  return (
+    <div>
+      <div className="mb-2 text-[11px] font-medium text-ink-secondary">Modo de sincronización</div>
+      <div className="grid grid-cols-2 rounded-md border border-line bg-white p-1" role="tablist" aria-label="Modo de sincronización GitHub">
+        <button
+          role="tab"
+          aria-selected={value === "manual"}
+          className={["h-8 rounded px-3 text-[11px] font-semibold transition", value === "manual" ? "bg-brand-hover text-brand-orange" : "text-ink-secondary hover:bg-panel"].join(" ")}
+          type="button"
+          onClick={() => onChange("manual")}
+        >
+          Manual
+        </button>
+        <button
+          role="tab"
+          aria-selected={value === "auto"}
+          className={["h-8 rounded px-3 text-[11px] font-semibold transition", value === "auto" ? "bg-brand-hover text-brand-orange" : "text-ink-secondary hover:bg-panel"].join(" ")}
+          type="button"
+          onClick={() => onChange("auto")}
+        >
+          Automático
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function StatusBadge({ label, tone }: { label: string; tone: "ok" | "warning" | "danger" | "neutral" }) {
+  return (
+    <span className={["shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold", statusBadgeClass(tone)].join(" ")}>
+      {label}
+    </span>
+  );
+}
+
+function SectionTitle({ title, description }: { title: string; description?: string }) {
   return (
     <div>
       <h4 className="text-[12px] font-semibold text-ink-primary">{title}</h4>
-      <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{description}</p>
+      {description ? <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{description}</p> : null}
     </div>
   );
 }
@@ -1119,6 +1724,8 @@ function ProjectReviewStep({
   previewName,
   items,
   derivedMode,
+  localHistoryChoice,
+  githubSyncPreference,
   authStatus,
 }: {
   SelectedIcon: LucideIcon;
@@ -1126,15 +1733,19 @@ function ProjectReviewStep({
   previewName: string;
   items: { label: string; value: string }[];
   derivedMode: DerivedProjectMode;
+  localHistoryChoice: LocalHistoryChoice;
+  githubSyncPreference: "manual" | "auto";
   authStatus: AuthStatus;
 }) {
-  const requiresGithub = derivedMode.versioningMode !== "none";
+  const requiresGithub = derivedMode.requiresGithubRepository;
+  const protectionLevel = getProtectionLevel(null, localHistoryChoice);
+  const automaticSyncEnabled = githubSyncPreference === "auto" && protectionLevel !== "files";
 
   return (
     <section>
       <StepHeader
         title="Revisa la configuración"
-        description="Antes de crear el proyecto, comprueba el origen, la carpeta local y cómo se gestionará el historial. Si algo no encaja, vuelve al paso correspondiente."
+        description="Antes de crear el proyecto, comprueba la identidad, la ubicación y cómo se protegerá y sincronizará la documentación."
       />
       <div className="mt-5 rounded-md border border-line bg-white p-4">
         <div className="flex items-center gap-3 border-b border-line pb-4">
@@ -1154,22 +1765,62 @@ function ProjectReviewStep({
             </div>
           ))}
         </dl>
+        <div className="mt-4 rounded-md border border-line bg-white px-3 py-3">
+          <SectionTitle
+            title="Sincronización"
+            description="Es la configuración que KnowNext.ai aplicará al guardar documentos y gestionar versiones."
+          />
+          <ProjectProtectionStateCards
+            localHistoryChoice={localHistoryChoice}
+            className="mt-3 space-y-2"
+          />
+          <AutomaticSyncToggle
+            value={automaticSyncEnabled}
+            disabled={protectionLevel === "files"}
+            protectionLevel={protectionLevel}
+            readOnly
+            onChange={() => undefined}
+          />
+        </div>
         <div className="mt-4">
           <GuidanceNote
-            icon={requiresGithub ? Github : Info}
-            title={requiresGithub ? "Creación con GitHub" : "Creación local"}
-            description={
-              requiresGithub
-                ? authStatus.isAuthenticated
-                  ? "GitHub está conectado. KnowNext.ai guardará la relación con el repositorio y usará sincronización manual."
-                  : "GitHub es necesario para esta configuración. Vuelve a conectar la cuenta antes de crear el proyecto."
-                : "KnowNext.ai registrará la carpeta indicada sin mover archivos ni publicar cambios fuera del equipo."
-            }
+            icon={reviewGuidanceIcon(protectionLevel)}
+            title={reviewGuidanceTitle(protectionLevel)}
+            description={reviewGuidanceDescription(protectionLevel, derivedMode.syncMode, authStatus.isAuthenticated)}
           />
         </div>
       </div>
     </section>
   );
+}
+
+function reviewGuidanceIcon(protectionLevel: ProjectProtectionLevel): LucideIcon {
+  if (protectionLevel === "github") return Github;
+  if (protectionLevel === "git") return GitBranch;
+  return HardDrive;
+}
+
+function reviewGuidanceTitle(protectionLevel: ProjectProtectionLevel) {
+  if (protectionLevel === "github") return "Git local + GitHub";
+  if (protectionLevel === "git") return "Historial Git local";
+  return "Solo archivos locales";
+}
+
+function reviewGuidanceDescription(protectionLevel: ProjectProtectionLevel, syncMode: SyncMode, githubAuthenticated: boolean) {
+  if (protectionLevel === "files") {
+    return "KnowNext.ai registrará la carpeta indicada sin crear historial Git ni publicar cambios fuera del equipo.";
+  }
+  if (protectionLevel === "git") {
+    return syncMode === "auto-local"
+      ? "Al guardar, KnowNext.ai creará automáticamente una versión en Git local."
+      : "Al guardar, KnowNext.ai dejará pendiente la creación manual de la versión local.";
+  }
+  if (!githubAuthenticated) {
+    return "GitHub es necesario para esta configuración. Vuelve a conectar la cuenta antes de crear el proyecto.";
+  }
+  return syncMode === "auto-github"
+    ? "GitHub está conectado. Al guardar, KnowNext.ai creará la versión local y sincronizará el repositorio si no hay conflictos."
+    : "GitHub está conectado. Al guardar, KnowNext.ai dejará pendiente la versión local y la sincronización manual con el repositorio.";
 }
 
 function StepHeader({ title, description }: { title: string; description: string }) {
@@ -1557,7 +2208,7 @@ function GithubRepositoryFields({
       </div>
       {selectedGithubRepository ? (
         <div className="rounded-md border border-line bg-panel px-3 py-2 text-[11px] text-ink-secondary">
-          Rama por defecto interna: {selectedGithubRepository.defaultRef ?? "detectada por GitHub"}. Sincronización manual para evitar cambios inesperados.
+          Repositorio detectado con permisos {selectedGithubRepository.permissions.length > 0 ? selectedGithubRepository.permissions.join(", ") : "pendientes"}. KnowNext.ai no mostrará ramas en la interfaz.
         </div>
       ) : null}
     </div>
@@ -1577,8 +2228,8 @@ function ProjectVisualPicker({
 }) {
   return (
     <div className="space-y-4">
-      <div className="text-[11px] font-medium text-ink-secondary">
-        Icono
+      <div>
+        <div className="text-[11px] font-medium text-ink-secondary">Icono de aplicación</div>
         <div className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(28px,28px))] gap-1">
           {projectIconOptions.map((option) => {
             const OptionIcon = option.icon;
@@ -1602,8 +2253,8 @@ function ProjectVisualPicker({
           })}
         </div>
       </div>
-      <div className="text-[11px] font-medium text-ink-secondary">
-        Color
+      <div>
+        <div className="text-[11px] font-medium text-ink-secondary">Color del proyecto</div>
         <div className="mt-2 flex flex-wrap gap-1">
           {projectColors.map((color) => (
             <button
@@ -1675,7 +2326,42 @@ function ModeTab({
   );
 }
 
-function deriveProjectMode(startMode: ProjectStartMode, localHistoryChoice: LocalHistoryChoice): DerivedProjectMode {
+function isGithubHistoryChoice(choice: LocalHistoryChoice) {
+  return choice === "existing-github-remote" || choice === "existing-github-auto" || choice === "publish-github" || choice === "publish-github-auto";
+}
+
+function getGithubActionFromHistoryChoice(choice: LocalHistoryChoice): "connect" | "publish" | null {
+  if (choice === "existing-github-remote" || choice === "existing-github-auto") return "connect";
+  if (choice === "publish-github" || choice === "publish-github-auto") return "publish";
+  return null;
+}
+
+function getGithubHistoryChoice(action: "connect" | "publish", syncMode: "manual" | "auto"): LocalHistoryChoice {
+  if (action === "connect") return syncMode === "auto" ? "existing-github-auto" : "existing-github-remote";
+  return syncMode === "auto" ? "publish-github-auto" : "publish-github";
+}
+
+function getProtectionLevel(project: Project | null | undefined, localHistoryChoice: LocalHistoryChoice): ProjectProtectionLevel {
+  if (isGithubHistoryChoice(localHistoryChoice)) return "github";
+  if (localHistoryChoice === "local-git") return "git";
+  if (localHistoryChoice === "files-only") return "files";
+  return getProjectProtectionLevel(project);
+}
+
+function getProjectProtectionLevel(project: Project | null | undefined): ProjectProtectionLevel {
+  if (project?.githubRepository || project?.versioningMode === "github-api" || project?.syncMode === "manual-github" || project?.syncMode === "auto-github") return "github";
+  if (project?.versioningMode === "local-git") return "git";
+  return "files";
+}
+
+function statusBadgeClass(tone: "ok" | "warning" | "danger" | "neutral") {
+  if (tone === "ok") return "bg-green-50 text-green-700";
+  if (tone === "warning") return "bg-orange-50 text-brand-orange";
+  if (tone === "danger") return "bg-red-50 text-red-700";
+  return "bg-panel text-ink-secondary";
+}
+
+function deriveProjectMode(startMode: ProjectStartMode, localHistoryChoice: LocalHistoryChoice, syncPreference: "manual" | "auto" = "manual"): DerivedProjectMode {
   if (startMode === "github-existing") {
     return {
       creationMode: "github-repository",
@@ -1688,13 +2374,19 @@ function deriveProjectMode(startMode: ProjectStartMode, localHistoryChoice: Loca
 
   const creationMode: ProjectCreationMode = startMode === "local-new" ? "new-local" : "open-local";
   if (localHistoryChoice === "local-git") {
-    return { creationMode, versioningMode: "local-git", storageMode: "local-files", syncMode: "none", requiresGithubRepository: false };
+    return { creationMode, versioningMode: "local-git", storageMode: "local-files", syncMode: syncPreference === "auto" ? "auto-local" : "manual-local", requiresGithubRepository: false };
   }
   if (localHistoryChoice === "existing-github-remote") {
     return { creationMode, versioningMode: "local-git", storageMode: "local-files", syncMode: "manual-github", requiresGithubRepository: true };
   }
+  if (localHistoryChoice === "existing-github-auto") {
+    return { creationMode, versioningMode: "local-git", storageMode: "local-files", syncMode: "auto-github", requiresGithubRepository: true };
+  }
   if (localHistoryChoice === "publish-github") {
     return { creationMode, versioningMode: "local-git", storageMode: "local-files", syncMode: "manual-github", requiresGithubRepository: true };
+  }
+  if (localHistoryChoice === "publish-github-auto") {
+    return { creationMode, versioningMode: "local-git", storageMode: "local-files", syncMode: "auto-github", requiresGithubRepository: true };
   }
   return { creationMode, versioningMode: "none", storageMode: "local-files", syncMode: "none", requiresGithubRepository: false };
 }
@@ -1818,32 +2510,17 @@ function historyChoiceLabel(startMode: ProjectStartMode, localHistoryChoice: Loc
   if (startMode === "github-existing") return "GitHub versionado";
   if (localHistoryChoice === "local-git") return "Git local";
   if (localHistoryChoice === "existing-github-remote") return "Git local + GitHub existente";
+  if (localHistoryChoice === "existing-github-auto") return "GitHub automático";
   if (localHistoryChoice === "publish-github") return "Publicar en GitHub";
+  if (localHistoryChoice === "publish-github-auto") return "Publicar automático";
   return "Solo archivos locales";
 }
 
-function projectOriginLabel(project?: Project | null) {
-  if (!project) return "Proyecto registrado";
-  if (project.versioningMode === "github-api") return "Repositorio GitHub existente";
-  if (project.versioningMode === "local-git" && project.githubRepository) return "Carpeta local con GitHub";
-  if (project.versioningMode === "local-git") return "Carpeta local con Git";
-  return "Carpeta local";
-}
-
-function projectStorageIcon(project?: Project | null): LucideIcon {
-  if (project?.versioningMode === "github-api") return Github;
-  if (project?.versioningMode === "local-git") return FolderGit2;
-  if (project?.storageMode === "local-cache") return Cloud;
-  return HardDrive;
-}
-
-function storageModeLabel(storageMode?: "local-files" | "local-cache") {
-  if (storageMode === "local-cache") return "Copia local gestionada";
-  return "Archivos locales";
-}
-
-function syncModeLabel(syncMode?: "none" | "manual-github") {
+function syncModeLabel(syncMode?: SyncMode) {
+  if (syncMode === "auto-github") return "Automática con GitHub";
   if (syncMode === "manual-github") return "Manual con GitHub";
+  if (syncMode === "auto-local") return "Automática local";
+  if (syncMode === "manual-local") return "Manual local";
   return "Sin sincronización remota";
 }
 

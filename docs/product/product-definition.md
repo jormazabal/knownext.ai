@@ -171,6 +171,9 @@ When a user pastes a folder into a project with Windows Explorer, KnowNext.ai sh
 - The tree shows temporary badges for affected files and folders while the import is pending.
 - The status indicator uses human states and does not show Git branch names or low-level Git commands.
 - If GitHub sync fails, the version remains saved locally and the UI reports `Pendiente de sincronizar` with a retry path through the existing sync controls.
+- Projects can run as `Solo archivos`, `Historial local`, `GitHub manual`, or `GitHub automático`. Manual GitHub mode reports pending local/remote work and waits for explicit user action. Automatic GitHub mode versions local saves, document creation, renames, moves, deletes, attachments, and generated images through backend services and then attempts a safe push.
+- When GitHub has remote changes, KnowNext.ai may auto-apply them only if the affected documents are not active, dirty, or protected by a recoverable draft. Otherwise the UI reports `Revisión necesaria` or `Conflicto` and keeps local content intact.
+- Project settings are not limited to identity. A local project can be evolved after creation by activating local history, connecting an existing GitHub repository, publishing a new GitHub repository, and choosing manual or automatic synchronization.
 
 Known limitation: automatic external-change detection currently depends on a local Git working tree. GitHub API cache projects need a future cache-baseline service before they can safely classify pasted files.
 
@@ -189,10 +192,11 @@ The flow requirements are:
 - The GitHub repository selection area must handle loading, empty, unauthenticated, and error states without expanding the modal beyond the viewport.
 - The same flow is opened from both `Nuevo proyecto` and `Añadir primer proyecto`.
 - Keyboard navigation must support tab controls or wizard buttons, and focus must move to the active step heading or first invalid field after navigation/validation.
+- The edit-project dialog must expose safe evolution actions for existing projects: activate local history for file-only projects, switch existing GitHub projects between manual and automatic sync, connect a local project to an existing GitHub repo, or publish it as a new GitHub repo. The UI must describe these as product modes rather than Git branch operations.
 
 ## Explicit Non-Goals In The First Shell Phase
 
-- Real Git execution.
+- Direct Git execution from React components.
 - Complex project persistence.
 - Branch management UI.
 - Raw Markdown as the primary editor.

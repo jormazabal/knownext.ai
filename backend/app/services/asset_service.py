@@ -83,6 +83,7 @@ class AssetService:
                     raise HTTPException(status_code=413, detail="Image is too large")
                 output.write(chunk)
         asset = self.get_asset(project_id, encode_node_id(project_id, _normalize_relative_path(target.relative_to(root.resolve()))))
+        self._record_asset_change(project_id, asset.path, f"Importa imagen: {asset.name}")
         return AssetImportResponse(tree=filesystem_service.get_tree(project_id, root), asset=asset)
 
     def create_generated_image(
@@ -106,7 +107,16 @@ class AssetService:
         if metadata:
             self._write_generated_metadata(project_id, target, root.resolve(), metadata)
         asset = self.get_asset(project_id, encode_node_id(project_id, _normalize_relative_path(target.relative_to(root.resolve()))))
+        self._record_asset_change(project_id, asset.path, f"Crea imagen: {asset.name}")
         return AssetImportResponse(tree=filesystem_service.get_tree(project_id, root), asset=asset)
+
+    def _record_asset_change(self, project_id: str, path: str, title: str) -> None:
+        try:
+            from app.services.sync_service import sync_service
+
+            sync_service.after_local_change(project_id, [path], "image_asset_changed", title)
+        except HTTPException:
+            return
 
     def get_asset(self, project_id: str, asset_id: str) -> AssetMetadata:
         root = project_service._get_project_root(project_id)

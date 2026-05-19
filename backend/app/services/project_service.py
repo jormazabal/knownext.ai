@@ -19,6 +19,7 @@ from app.schemas.project import (
 from app.services.app_storage import get_app_data_dir, get_legacy_app_data_dirs
 from app.services.app_storage import JsonFileStore
 from app.services.auth_service import auth_service
+from app.services.credential_service import credential_service
 from app.services.draft_service import draft_service
 from app.services.filesystem_service import filesystem_service
 from app.services.git_service import git_service
@@ -40,7 +41,7 @@ class ProjectService:
     def get_capabilities(self) -> ProjectCapabilities:
         authenticated = auth_service.get_status().isAuthenticated
         return ProjectCapabilities(
-            canUseLocalGit=authenticated,
+            canUseLocalGit=git_service.is_available(),
             canConnectGithub=authenticated,
             canUseGithubApi=authenticated,
         )
@@ -55,6 +56,7 @@ class ProjectService:
     def create_project(self, payload: ProjectPayload) -> Project:
         registry = self._read_registry()
         self._validate_project_mode(payload)
+        sync_mode = self._effective_sync_mode(payload)
         project_id = f"project-{uuid4()}"
         folder_path = payload.folderPath.strip()
         if not folder_path:
@@ -73,8 +75,8 @@ class ProjectService:
             "iconColor": payload.iconColor,
             "storageMode": payload.storageMode,
             "versioningMode": payload.versioningMode,
-            "syncMode": payload.syncMode,
-            "authRequired": payload.versioningMode != "none",
+            "syncMode": sync_mode,
+            "authRequired": sync_mode in {"manual-github", "auto-github"} or payload.versioningMode == "github-api",
             "githubRepository": github_repository.model_dump() if github_repository else None,
             "isGitRepository": payload.versioningMode == "local-git",
             "active": True,
@@ -103,6 +105,7 @@ class ProjectService:
     def update_project(self, project_id: str, payload: ProjectPayload) -> Project:
         registry = self._read_registry()
         self._validate_project_mode(payload)
+        sync_mode = self._effective_sync_mode(payload)
         updated_project = None
 
         for index, project in enumerate(registry["projects"]):
@@ -117,9 +120,9 @@ class ProjectService:
                 "iconColor": payload.iconColor,
                 "storageMode": payload.storageMode,
                 "versioningMode": payload.versioningMode,
-                "syncMode": payload.syncMode,
-                "authRequired": payload.versioningMode != "none",
-                "githubRepository": payload.githubRepository.model_dump() if payload.githubRepository else project.get("githubRepository"),
+                "syncMode": sync_mode,
+                "authRequired": sync_mode in {"manual-github", "auto-github"} or payload.versioningMode == "github-api",
+                "githubRepository": payload.githubRepository.model_dump() if payload.githubRepository else None,
                 "isGitRepository": payload.versioningMode == "local-git",
             }
             registry["projects"][index] = updated_project
@@ -191,7 +194,7 @@ class ProjectService:
                 syncMode=project["syncMode"],
                 statusLabel="Sin historial",
             )
-        if project["authRequired"] and not authenticated:
+        if project["syncMode"] != "none" and project["authRequired"] and not authenticated:
             return ProjectVersioningStatus(
                 enabled=False,
                 available=False,
@@ -222,7 +225,7 @@ class ProjectService:
     def sync_pull(self, project_id: str) -> dict[str, str]:
         project = self._get_versioned_project(project_id)
         if project["versioningMode"] == "local-git":
-            output = git_service.pull(Path(project["folderPath"]))
+            output = git_service.pull(Path(project["folderPath"]), credential_service.get_github_token())
             return {"status": "ok", "message": output or "Proyecto actualizado"}
         if project["versioningMode"] == "github-api" and project.get("githubRepository"):
             from app.schemas.project import GithubRepository
@@ -234,41 +237,53 @@ class ProjectService:
     def sync_push(self, project_id: str) -> dict[str, str]:
         project = self._get_versioned_project(project_id)
         if project["versioningMode"] == "local-git":
-            output = git_service.push(Path(project["folderPath"]))
+            output = git_service.push(Path(project["folderPath"]), credential_service.get_github_token())
             return {"status": "ok", "message": output or "Cambios enviados"}
         return {"status": "ok", "message": "Las versiones GitHub API se publican al crear versión"}
 
     def create_folder(self, project_id: str, payload: CreateFolderRequest) -> FileOperationResult:
-        return filesystem_service.create_folder(project_id, self._get_project_root(project_id), payload.parentId, payload.name)
+        result = filesystem_service.create_folder(project_id, self._get_project_root(project_id), payload.parentId, payload.name)
+        self._record_file_operation(project_id, result, "folder_created", f"Crea carpeta: {result.node.name if result.node else payload.name}")
+        return result
 
     def create_document(self, project_id: str, payload: CreateDocumentRequest) -> FileOperationResult:
-        return filesystem_service.create_document(
+        result = filesystem_service.create_document(
             project_id,
             self._get_project_root(project_id),
             payload.parentId,
             payload.name,
             payload.markdown,
         )
+        self._record_file_operation(project_id, result, "document_created", f"Crea documento: {result.node.name if result.node else payload.name}")
+        return result
 
     async def import_attachment(self, project_id: str, parent_id: str | None, upload: UploadFile) -> FileOperationResult:
-        return await filesystem_service.import_attachment(project_id, self._get_project_root(project_id), parent_id, upload)
+        result = await filesystem_service.import_attachment(project_id, self._get_project_root(project_id), parent_id, upload)
+        self._record_file_operation(project_id, result, "attachment_imported", f"Importa archivo: {result.node.name if result.node else upload.filename}")
+        return result
 
     def rename_node(self, project_id: str, node_id: str, payload: RenameNodeRequest) -> FileOperationResult:
         result = filesystem_service.rename_node(project_id, self._get_project_root(project_id), node_id, payload.name)
         draft_service.apply_affected_documents(result.affectedDocuments)
+        self._record_file_operation(project_id, result, "node_renamed", f"Renombra: {payload.name}")
         return result
 
     def delete_node(self, project_id: str, node_id: str) -> FileOperationResult:
         result = filesystem_service.delete_node(project_id, self._get_project_root(project_id), node_id)
         draft_service.apply_affected_documents(result.affectedDocuments)
+        paths = [affected.path for affected in result.affectedDocuments if affected.path]
+        self._record_sync_change(project_id, paths, "node_deleted", "Elimina elementos")
         return result
 
     def duplicate_document(self, project_id: str, document_id: str, target_folder_id: str | None = None, name: str | None = None) -> FileOperationResult:
-        return filesystem_service.duplicate_document(project_id, self._get_project_root(project_id), document_id, target_folder_id, name)
+        result = filesystem_service.duplicate_document(project_id, self._get_project_root(project_id), document_id, target_folder_id, name)
+        self._record_file_operation(project_id, result, "document_duplicated", f"Duplica documento: {result.node.name if result.node else name or 'documento'}")
+        return result
 
     def move_node(self, project_id: str, node_id: str, payload: MoveNodeRequest) -> FileOperationResult:
         result = filesystem_service.move_node(project_id, self._get_project_root(project_id), node_id, payload.targetFolderId)
         draft_service.apply_affected_documents(result.affectedDocuments)
+        self._record_file_operation(project_id, result, "node_moved", "Mueve elementos")
         return result
 
     def _read_registry(self) -> dict:
@@ -427,8 +442,8 @@ class ProjectService:
         if storage_mode not in {"local-files", "local-cache"}:
             storage_mode = "local-cache" if versioning_mode == "github-api" else "local-files"
         sync_mode = project.get("syncMode")
-        if sync_mode not in {"none", "manual-github"}:
-            sync_mode = "manual-github" if versioning_mode in {"local-git", "github-api"} and project.get("githubRepository") else "none"
+        if sync_mode not in {"none", "manual-local", "auto-local", "manual-github", "auto-github"}:
+            sync_mode = "manual-github" if versioning_mode in {"local-git", "github-api"} and project.get("githubRepository") else "manual-local" if versioning_mode == "local-git" else "none"
         return {
             **project,
             "id": project_id,
@@ -436,12 +451,16 @@ class ProjectService:
             "storageMode": storage_mode,
             "versioningMode": versioning_mode,
             "syncMode": sync_mode,
-            "authRequired": versioning_mode != "none",
+            "authRequired": sync_mode in {"manual-github", "auto-github"} or versioning_mode == "github-api",
             "githubRepository": project.get("githubRepository"),
             "isGitRepository": versioning_mode == "local-git",
         }
 
     def _validate_project_mode(self, payload: ProjectPayload) -> None:
+        requested_github_sync = payload.syncMode in {"manual-github", "auto-github"}
+        if requested_github_sync and payload.githubRepository is None and payload.publishToGithub is None:
+            auth_service.require_github_auth()
+        sync_mode = self._effective_sync_mode(payload)
         if payload.publishToGithub and payload.versioningMode != "local-git":
             raise HTTPException(status_code=400, detail="Publishing to a new GitHub repo requires local Git versioning")
         if payload.publishToGithub and payload.githubRepository is None:
@@ -449,16 +468,33 @@ class ProjectService:
         if payload.versioningMode == "none":
             if payload.storageMode == "local-cache":
                 raise HTTPException(status_code=400, detail="Local cache storage requires GitHub API versioning")
+            if sync_mode != "none":
+                raise HTTPException(status_code=400, detail="Projects without Git history cannot use sync mode")
             return
-        auth_service.require_github_auth()
-        if payload.publishToGithub and payload.syncMode != "manual-github":
-            raise HTTPException(status_code=400, detail="Publishing to GitHub requires manual GitHub sync mode")
-        if payload.versioningMode == "github-api" and payload.syncMode != "manual-github":
-            raise HTTPException(status_code=400, detail="GitHub API projects require manual GitHub sync mode")
+        if sync_mode in {"manual-github", "auto-github"} or payload.versioningMode == "github-api" or payload.publishToGithub:
+            auth_service.require_github_auth()
+        if sync_mode in {"manual-local", "auto-local"} and payload.versioningMode != "local-git":
+            raise HTTPException(status_code=400, detail="Local sync modes require local Git versioning")
+        if sync_mode in {"manual-github", "auto-github"} and payload.githubRepository is None and not payload.publishToGithub:
+            raise HTTPException(status_code=400, detail="GitHub sync requires a GitHub repository")
+        if payload.versioningMode == "github-api" and payload.githubRepository is None:
+            raise HTTPException(status_code=400, detail="GitHub API projects require a GitHub repository")
+        if payload.publishToGithub and sync_mode not in {"manual-github", "auto-github"}:
+            raise HTTPException(status_code=400, detail="Publishing to GitHub requires GitHub sync mode")
+        if payload.versioningMode == "github-api" and sync_mode not in {"manual-github", "auto-github"}:
+            raise HTTPException(status_code=400, detail="GitHub API projects require GitHub sync mode")
         if payload.versioningMode == "github-api" and payload.storageMode != "local-cache":
             raise HTTPException(status_code=400, detail="GitHub API projects require local cache storage")
         if payload.versioningMode == "github-api" and payload.githubRepository is None:
             raise HTTPException(status_code=400, detail="GitHub API projects require a GitHub repository")
+
+    def _effective_sync_mode(self, payload: ProjectPayload) -> str:
+        if payload.versioningMode == "local-git" and payload.githubRepository is None and payload.publishToGithub is None:
+            if payload.syncMode == "manual-github":
+                return "manual-local"
+            if payload.syncMode == "auto-github":
+                return "auto-local"
+        return payload.syncMode
 
     def _prepare_local_project_folder(self, creation_mode: str, root: Path) -> None:
         if not str(root).strip():
@@ -476,6 +512,24 @@ class ProjectService:
             raise HTTPException(status_code=409, detail="Project has no versioning enabled")
         auth_service.require_github_auth()
         return project
+
+    def _record_file_operation(self, project_id: str, result: FileOperationResult, operation: str, title: str) -> None:
+        paths: list[str] = []
+        if result.node and result.node.path:
+            paths.append(result.node.path)
+        paths.extend([affected.path for affected in result.affectedDocuments if affected.path])
+        self._record_sync_change(project_id, paths, operation, title)
+
+    def _record_sync_change(self, project_id: str, paths: list[str], operation: str, title: str) -> None:
+        normalized_paths = sorted({path.replace("\\", "/").strip("/") for path in paths if path})
+        if not normalized_paths:
+            return
+        try:
+            from app.services.sync_service import sync_service
+
+            sync_service.after_local_change(project_id, normalized_paths, operation, title)
+        except HTTPException:
+            return
 
 
 project_service = ProjectService()

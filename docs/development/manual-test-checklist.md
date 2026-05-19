@@ -31,6 +31,7 @@
 - [ ] Confirm the assistant ends on a Resumen screen with the complete configuration and only then allows Crear proyecto.
 - [ ] Without GitHub login, confirm Repo GitHub existente, Carpeta con Git/GitHub, and GitHub-related history choices are visible but disabled with explanatory copy.
 - [ ] With GitHub connected, choose Crear repo GitHub desde local, fill owner/repo/visibility, and confirm the final summary shows the new repository and publishing visibility.
+- [ ] With GitHub connected, choose GitHub automático and Crear GitHub automático in the Historial step and confirm the summary reports automatic GitHub sync.
 - [ ] Without GitHub login, hover the lock on Crear repo GitHub desde local and confirm the lock is visually black and its tooltip explains that GitHub is required.
 - [ ] In Carpeta local nueva, type a new folder path that does not exist yet and confirm the project is created with that folder on disk.
 - [ ] Create a local files project without login and confirm it is present after restarting the app.
@@ -45,6 +46,9 @@
 - [ ] In a GitHub versionado project, change the same document on GitHub before creating a local version and confirm KnowNext.ai blocks the version with a remote conflict message.
 - [ ] Create a local Git project and confirm the status bar shows a versioning state instead of Sin historial.
 - [ ] Create a project from a folder that already has Git/GitHub configured, associate the matching GitHub repository, and confirm the project is registered as Git local + GitHub existente without moving files.
+- [ ] Open Ajustes del proyecto for a local project with no GitHub repository and confirm Evolución a GitHub offers Conectar GitHub manual, Conectar GitHub automático, Publicar GitHub manual, and Publicar GitHub automático.
+- [ ] From Ajustes del proyecto, publish or connect a disposable project to GitHub in manual mode and confirm the project refreshes as GitHub-connected without recreating local files.
+- [ ] From Ajustes del proyecto, switch the same GitHub-connected project between Sincronización manual and Sincronización automática and confirm the sync indicator updates after saving.
 - [ ] Inspect the folder/document tree levels and confirm they match the active project's local folder.
 - [ ] Confirm Markdown documents, supported image files, support files, and folders are shown in the navigation tree with distinct document/image/file/folder icons.
 - [ ] Confirm folders are collapsed by default on first project load, then expand/collapse several folders, restart the app, and confirm the same per-project folder state is restored.
@@ -132,10 +136,15 @@
 - [ ] Restore an orphan draft and confirm the file is recreated, the tree refreshes, and the document opens.
 - [ ] Try restoring an orphan draft after recreating the original file externally and confirm KnowNext.ai refuses to overwrite it.
 - [ ] Stop the FastAPI backend while using the browser build and confirm API failures are visible in the UI instead of silently showing mock data.
-- [ ] Without GitHub login, switch to a versioned project and confirm the history button is disabled with Historial requiere GitHub.
-- [ ] With GitHub login, open the version history panel on a versioned project.
+- [ ] Without GitHub login, switch to a local-history project and confirm the history button remains available.
+- [ ] Without GitHub login, switch to a GitHub-sync project and confirm GitHub sync actions are blocked with explanatory copy.
+- [ ] Open the version history panel on a versioned project.
 - [ ] Click Crear versión and confirm either a new version is created or a clear no-changes/provider error appears.
+- [ ] Restore a non-current version and confirm KnowNext.ai writes it as the current document content and creates a new history entry instead of rewinding history.
 - [ ] In a Git local + sync project, use Traer cambios and Subir cambios from the history panel and confirm status feedback is visible.
+- [ ] In automatic sync mode, save a document and confirm the sync indicator moves through saving/pending/synced states without requiring React-side Git operations.
+- [ ] In automatic sync mode, change a file remotely while the affected document is closed and confirm KnowNext.ai pulls it automatically when no conflicts are detected.
+- [ ] In automatic sync mode, change a file remotely while the affected document is open or dirty and confirm KnowNext.ai reports Revisión necesaria instead of overwriting the editor.
 - [ ] In a local Git project, paste a small folder with Markdown files into the project from Windows Explorer and confirm KnowNext.ai detects external changes without stealing editor focus.
 - [ ] Confirm the document tab row shows a compact sync indicator and the editor shows a contextual banner with Revisar and Importar seguros.
 - [ ] Open Revisar and confirm the right drawer groups folders, Markdown documents, images, files, private files, omitted files, and unsupported files with clear counts and decisions.

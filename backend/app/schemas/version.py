@@ -7,6 +7,7 @@ class VersionRecord(BaseModel):
     title: str
     author: str
     authorInitials: str
+    createdAt: str | None = None
     relativeTime: str
     current: bool = False
 
@@ -17,4 +18,14 @@ class CreateVersionRequest(BaseModel):
 
 
 class CreateVersionResponse(BaseModel):
+    version: VersionRecord
+
+
+class VersionContentResponse(BaseModel):
+    documentId: str
+    versionId: str
+    markdown: str
+
+
+class RestoreVersionResponse(BaseModel):
     version: VersionRecord

@@ -1,4 +1,16 @@
+from typing import Literal
+
 from pydantic import BaseModel
+
+
+DocumentVersionState = Literal[
+    "ok",
+    "unversioned",
+    "local-ahead",
+    "remote-ahead",
+    "diverged",
+    "unsupported",
+]
 
 
 class DocumentFingerprint(BaseModel):
@@ -59,6 +71,12 @@ class DocumentSyncStatus(BaseModel):
     hasDraft: bool = False
     orphaned: bool = False
     conflictStatus: str = "none"
+    versionState: DocumentVersionState = "unsupported"
+    localChanged: bool = False
+    remoteChanged: bool = False
+    localVersionHash: str | None = None
+    remoteVersionHash: str | None = None
+    message: str | None = None
 
 
 class SyncStatusResponse(BaseModel):

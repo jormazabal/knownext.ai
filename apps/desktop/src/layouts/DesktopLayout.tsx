@@ -1,12 +1,11 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { Image as ImageIcon, Maximize2, Minus, PanelLeftClose, PanelLeftOpen, Plus, Upload, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, FileText, GitCompareArrows, Image as ImageIcon, Maximize2, Minus, PanelLeftClose, PanelLeftOpen, Plus, RotateCcw, Upload, X } from "lucide-react";
 import { AiConversationView } from "../features/assistant/AiConversationView";
 import { AiPromptInput, type AiPromptExecutionOptions } from "../features/assistant/AiPromptInput";
 import { AiResponseBubble } from "../features/assistant/AiResponseBubble";
 import { DocumentStatusBar } from "../features/documents/DocumentStatusBar";
 import { DocumentTabs } from "../features/documents/DocumentTabs";
 import { DocumentTree, type DocumentTreeAction } from "../features/documents/DocumentTree";
-import { ExternalChangesBanner } from "../features/externalChanges/ExternalChangesBanner";
 import { ExternalChangesDrawer } from "../features/externalChanges/ExternalChangesDrawer";
 import { SyncStatusIndicator } from "../features/externalChanges/SyncStatusIndicator";
 import { ImageViewer } from "../features/documents/ImageViewer";
@@ -22,14 +21,15 @@ import {
   type MarkdownEditorHistoryState,
   type MarkdownEditorSelection,
 } from "../features/editor/editorTypes";
+import { ReadonlyMarkdownViewer } from "../features/editor/ReadonlyMarkdownViewer";
 import { ProjectActions } from "../features/projects/ProjectActions";
 import { ProjectSelector } from "../features/projects/ProjectSelector";
 import { ReleaseNotesViewer } from "../features/releaseNotes/ReleaseNotesViewer";
-import { VersionHistoryPanel } from "../features/versions/VersionHistoryPanel";
+import { formatVersionFullDate, VersionHistoryPanel, type VersionPreview, type VersionPreviewMode } from "../features/versions/VersionHistoryPanel";
 import { BrandMark } from "../components/brand/BrandMark";
 import { TitleBar } from "../components/window/TitleBar";
 import { getProjectImageContentUrl } from "../lib/api/projects";
-import type { AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentTreeNode, ExternalChangeDecision, ExternalChangeSet, InsertImageReferenceResponse, LayoutConfig, Project, ProjectSyncState, ProjectVersioningStatus, WorkspaceTab } from "../types/domain";
+import type { AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentSyncStatus, DocumentTreeNode, ExternalChangeDecision, ExternalChangeSet, InsertImageReferenceResponse, LayoutConfig, Project, ProjectSyncState, ProjectSyncStatus, ProjectVersioningStatus, VersionRecord, WorkspaceTab } from "../types/domain";
 
 const sidebarWidthConfig = {
   defaultWidth: 338,
@@ -72,6 +72,7 @@ type DesktopLayoutProps = {
   activeDocument: DocumentRecord | null;
   activeMarkdown: string;
   activeDocumentDirty: boolean;
+  activeDocumentSyncStatus: DocumentSyncStatus | null;
   pendingEditorOperations: MarkdownEditorExternalOperation[];
   activeDocumentConflictStatus: DocumentConflictStatus;
   activeDocumentHasRecoveredDraft: boolean;
@@ -83,6 +84,7 @@ type DesktopLayoutProps = {
   historyOpen: boolean;
   historyEnabled: boolean;
   versioningStatus: ProjectVersioningStatus | null;
+  projectSyncStatus: ProjectSyncStatus | null;
   externalChangeSet: ExternalChangeSet | null;
   externalChangeDecisions: Record<string, ExternalChangeDecision>;
   externalChangesOpen: boolean;
@@ -115,7 +117,9 @@ type DesktopLayoutProps = {
   onImportExternalChanges: () => void;
   onImportSafeExternalChanges: () => void;
   onOmitExternalChanges: () => void;
-  onCreateVersion: (title: string) => Promise<CreateVersionResponse | null>;
+  onRestoreVersion: (versionId: string) => Promise<CreateVersionResponse | null>;
+  onSaveActiveDocument: () => Promise<boolean>;
+  onDiscardActiveDocumentDraft: () => Promise<boolean>;
   onSendAiPrompt: (prompt: string, selectionFocus?: AiSelectionFocus | null, options?: AiPromptExecutionOptions) => void | Promise<void>;
   onAiTranscriptionChange: (transcription: Partial<AiConfigStatus["transcription"]>) => void;
   onClearAiSelectionFocus: () => void;
@@ -148,6 +152,9 @@ type DesktopLayoutProps = {
   onEditorOperationFailed: (operation: MarkdownEditorExternalOperation) => void;
   onDocumentSelectionChange: (documentId: string, selection: MarkdownEditorSelection | null) => void;
   onSave: () => void;
+  onSynchronizeDocument: () => void;
+  onUpdateDocumentFromRemote: () => void;
+  onDiscardPendingDocumentChanges: () => void;
   onKeepLocalVersion: () => void;
   onLoadDiskVersion: () => void;
   onToggleHistory: () => void;
@@ -161,6 +168,16 @@ type EditorDocumentSession = {
   markdown: string;
   editorKey: string;
   isLoading: boolean;
+};
+
+type RestoreStrategy = "restore" | "save-and-restore" | "discard-and-restore";
+type DiffLine = { type: "same" | "added" | "removed"; text: string };
+type SideBySideDiffRow = {
+  type: "same" | "changed" | "added" | "removed" | "skip";
+  leftNumber?: number;
+  rightNumber?: number;
+  leftText?: string;
+  rightText?: string;
 };
 
 export function DesktopLayout(props: DesktopLayoutProps) {
@@ -180,6 +197,10 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   const hasOpenTab = hasOpenDocument || hasOpenImage || hasReleaseNotes || hasAiConversation;
   const activeEditorController = editorControllers[props.activeDocumentId] ?? null;
   const activeEditorHistoryState = editorHistoryStates[props.activeDocumentId] ?? emptyMarkdownEditorHistoryState;
+  const [historyPreview, setHistoryPreview] = useState<VersionPreview | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<VersionRecord | null>(null);
+  const [restoringVersion, setRestoringVersion] = useState(false);
+  const activeHistoryPreview = historyPreview?.documentId === props.activeDocumentId ? historyPreview : null;
   const sidebar = useResizablePanelWidth({
     ...sidebarWidthConfig,
     width: props.layoutConfig.sidebarWidth,
@@ -308,6 +329,11 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   }, [navigationOpen]);
 
   useEffect(() => {
+    setHistoryPreview(null);
+    setRestoreTarget(null);
+  }, [props.activeDocumentId]);
+
+  useEffect(() => {
     if (!props.historyOpen || navigationOpen) return;
 
     function closeOnEscape(event: globalThis.KeyboardEvent) {
@@ -325,14 +351,29 @@ export function DesktopLayout(props: DesktopLayoutProps) {
 
   const [imageInsertOpen, setImageInsertOpen] = useState(false);
 
-  const activeStatus = getDocumentStatus({
-    saveState: props.saveState,
-    isDirty: props.activeDocumentDirty,
-    hasRecoveredDraft: props.activeDocumentHasRecoveredDraft,
-    conflictStatus: props.activeDocumentConflictStatus,
-    diskChanged: props.activeDocumentDiskChanged || props.activeDocumentConflictStatus === "disk-changed",
-  });
   const externalChangeBadges = useMemo(() => buildExternalChangeBadges(props.externalChangeSet), [props.externalChangeSet]);
+
+  async function confirmRestoreVersion(strategy: RestoreStrategy) {
+    if (!restoreTarget) return;
+    setRestoringVersion(true);
+    try {
+      if (strategy === "save-and-restore") {
+        const saved = await props.onSaveActiveDocument();
+        if (!saved) return;
+      }
+      if (strategy === "discard-and-restore") {
+        const discarded = await props.onDiscardActiveDocumentDraft();
+        if (!discarded) return;
+      }
+      const response = await props.onRestoreVersion(restoreTarget.id);
+      if (response) {
+        setRestoreTarget(null);
+        setHistoryPreview(null);
+      }
+    } finally {
+      setRestoringVersion(false);
+    }
+  }
 
   return (
     <div className="h-screen overflow-hidden bg-white text-ink-primary">
@@ -480,6 +521,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             rightSlot={
               <SyncStatusIndicator
                 changeSet={props.externalChangeSet}
+                syncStatus={props.projectSyncStatus}
                 syncState={props.projectSyncState}
                 busy={props.externalChangesBusy}
                 onOpen={props.onOpenExternalChanges}
@@ -491,7 +533,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 historyOpen={props.historyOpen}
                 historyEnabled={props.historyEnabled}
                 historyDisabledReason={getHistoryDisabledReason(props.activeProject, props.authStatus, props.versioningStatus)}
-                editorReady={activeEditorController !== null}
+                editorReady={activeEditorController !== null && !activeHistoryPreview}
                 extendedUnderlineEnabled={props.markdownExtendedUnderlineEnabled}
                 activeActions={editorFormatState}
                 editorHistoryState={activeEditorHistoryState}
@@ -531,15 +573,20 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                           onAssetMetadataChange={setActiveImageAsset}
                           onOpenReference={handleOpenDocument}
                         />
+                      ) : activeHistoryPreview ? (
+                        <HistoryPreviewWorkspace
+                          preview={activeHistoryPreview}
+                          currentMarkdown={props.activeMarkdown}
+                          onModeChange={(mode) => setHistoryPreview((currentPreview) => (
+                            currentPreview && currentPreview.documentId === props.activeDocumentId
+                              ? { ...currentPreview, mode }
+                              : currentPreview
+                          ))}
+                          onRestore={() => setRestoreTarget(activeHistoryPreview.version)}
+                          onBackToCurrent={() => setHistoryPreview(null)}
+                        />
                       ) : (
                         <>
-                      <ExternalChangesBanner
-                        changeSet={props.externalChangeSet}
-                        syncState={props.projectSyncState}
-                        busy={props.externalChangesBusy}
-                        onReview={props.onOpenExternalChanges}
-                        onImportSafe={props.onImportSafeExternalChanges}
-                      />
                       {props.activeDocumentDiskChanged || props.activeDocumentConflictStatus === "orphaned" ? (
                         <DocumentConflictBanner
                           conflictStatus={props.activeDocumentConflictStatus}
@@ -598,6 +645,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                   </div>
                 </>
               )}
+              {!activeHistoryPreview ? (
               <AiPromptInput
                 documentId={hasOpenDocument ? props.activeDocumentId : undefined}
                 projectId={props.activeProject?.id}
@@ -623,7 +671,8 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 onPreviewContextSource={props.onPreviewAiContextSource}
                 onAddContextSourceToProject={props.onAddAiContextSourceToProject}
               />
-              {hasOpenDocument ? (
+              ) : null}
+              {hasOpenDocument && !activeHistoryPreview ? (
                 <AiResponseBubble
                   bubble={props.aiBubble}
                   pendingIntent={props.aiPendingIntent}
@@ -668,18 +717,17 @@ export function DesktopLayout(props: DesktopLayoutProps) {
               />
               {hasOpenDocument ? (
                 <DocumentStatusBar
-                  statusLabel={activeStatus.label}
-                  statusTone={activeStatus.tone}
                   isDirty={props.activeDocumentDirty}
                   saveState={props.saveState}
                   wordCount={props.activeDocument?.wordCount ?? countWords(props.activeMarkdown)}
-                  characterCount={countCharacters(props.activeMarkdown)}
                   gitEnabled={props.historyEnabled}
-                  versioningLabel={props.versioningStatus?.statusLabel ?? "Sin historial"}
-                  lastVersionHash={props.versioningStatus?.lastVersionHash}
-                  lastVersionRelativeTime={props.versioningStatus?.lastVersionRelativeTime}
                   canSave={Boolean(props.activeDocument && props.activeDocumentId)}
+                  documentSyncStatus={props.activeDocumentSyncStatus}
+                  isSyncing={props.isSyncingProject || props.externalChangesBusy}
                   onSave={props.onSave}
+                  onSynchronize={props.onSynchronizeDocument}
+                  onUpdateFromRemote={props.onUpdateDocumentFromRemote}
+                  onDiscardPendingChanges={props.onDiscardPendingDocumentChanges}
                 />
               ) : hasOpenImage && activeWorkspaceTab?.kind === "image" ? (
                 <ImageWorkspaceStatusBar
@@ -725,11 +773,9 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 >
                   <VersionHistoryPanel
                     documentId={props.activeDocumentId}
-                    syncMode={props.activeProject?.syncMode ?? "none"}
-                    isSyncing={props.isSyncingProject}
-                    onPullProject={props.onPullProject}
-                    onPushProject={props.onPushProject}
-                    onCreateVersion={props.onCreateVersion}
+                    documentName={props.activeDocument?.name ?? "documento"}
+                    activePreviewVersionId={activeHistoryPreview?.version.id ?? null}
+                    onPreviewChange={setHistoryPreview}
                     onClose={props.onCloseHistory}
                   />
                 </div>
@@ -737,9 +783,436 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             ) : null}
           </div>
         </main>
+        {restoreTarget ? (
+          <RestoreVersionDialog
+            version={restoreTarget}
+            isDirty={props.activeDocumentDirty}
+            restoring={restoringVersion}
+            onCancel={() => setRestoreTarget(null)}
+            onConfirm={(strategy) => void confirmRestoreVersion(strategy)}
+          />
+        ) : null}
       </div>
     </div>
   );
+}
+
+function HistoryPreviewWorkspace({
+  preview,
+  currentMarkdown,
+  onModeChange,
+  onRestore,
+  onBackToCurrent,
+}: {
+  preview: VersionPreview;
+  currentMarkdown: string;
+  onModeChange: (mode: VersionPreviewMode) => void;
+  onRestore: () => void;
+  onBackToCurrent: () => void;
+}) {
+  const diff = useMemo(() => buildLineDiff(preview.markdown, currentMarkdown), [currentMarkdown, preview.markdown]);
+  const sideBySideDiff = useMemo(() => buildSideBySideDiff(preview.markdown, currentMarkdown), [currentMarkdown, preview.markdown]);
+  const added = diff.filter((line) => line.type === "added").length;
+  const removed = diff.filter((line) => line.type === "removed").length;
+
+  return (
+    <div className="space-y-3">
+      <section className="flex h-11 min-w-0 items-center justify-between gap-2 rounded-md border border-orange-200 bg-brand-hover px-2.5">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="min-w-0 truncate text-[13px] font-semibold text-ink-primary">{preview.version.title || "Versión del documento"}</span>
+          <span className="shrink-0 font-mono text-[11px] text-ink-secondary">{preview.version.hash}</span>
+          <span className="hidden shrink-0 text-[11px] text-ink-secondary md:inline">
+            {formatVersionFullDate(preview.version)}
+          </span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <span className="hidden text-[11px] text-ink-secondary xl:inline">Actual sin cambios</span>
+          <div className="flex rounded-md border border-orange-200 bg-white/70 p-0.5">
+            <button
+              className={["grid h-7 w-8 place-items-center rounded", preview.mode === "diff" ? "bg-white text-brand-orange shadow-subtle" : "text-ink-secondary hover:text-ink-primary"].join(" ")}
+              onClick={() => onModeChange("diff")}
+              data-tooltip={`Ver cambios: +${added} -${removed}`}
+              aria-label={`Ver cambios: +${added} -${removed}`}
+            >
+              <GitCompareArrows size={14} />
+            </button>
+            <button
+              className={["grid h-7 w-8 place-items-center rounded", preview.mode === "content" ? "bg-white text-brand-orange shadow-subtle" : "text-ink-secondary hover:text-ink-primary"].join(" ")}
+              onClick={() => onModeChange("content")}
+              data-tooltip="Ver contenido"
+              aria-label="Ver contenido"
+            >
+              <FileText size={14} />
+            </button>
+          </div>
+          <button
+            className="grid h-8 w-8 place-items-center rounded-md border border-line bg-white text-ink-secondary hover:bg-panel hover:text-ink-primary"
+            onClick={onBackToCurrent}
+            data-tooltip="Volver a versión actual"
+            aria-label="Volver a versión actual"
+          >
+            <ArrowLeft size={14} />
+          </button>
+          <button
+            className="grid h-8 w-8 place-items-center rounded-md bg-brand-orange text-white hover:bg-brand-dark"
+            onClick={onRestore}
+            data-tooltip="Restaurar versión"
+            aria-label="Restaurar versión"
+          >
+            <RotateCcw size={14} />
+          </button>
+        </div>
+      </section>
+
+      {preview.mode === "content" ? (
+        <section className="rounded-md border border-line bg-white p-4">
+          <div className="mb-3 rounded-md bg-panel px-3 py-2 text-[11px] font-semibold text-ink-secondary">
+            Contenido de solo lectura de la versión seleccionada
+          </div>
+          <ReadonlyMarkdownViewer
+            markdown={preview.markdown}
+            ariaLabel="Contenido de la versión seleccionada"
+            emptyMessage="Esta versión no tiene contenido."
+          />
+        </section>
+      ) : (
+        <section className="rounded-md border border-line bg-white">
+          <div className="flex items-center justify-between gap-3 border-b border-line px-3 py-2 text-[11px] font-semibold text-ink-secondary">
+            <span className="flex items-center gap-2">
+            <GitCompareArrows size={14} />
+            Comparación entre esta versión y el documento actual
+            </span>
+            <span className="font-mono text-[10px] text-ink-secondary">-{removed} +{added}</span>
+          </div>
+          <div className="overflow-hidden rounded-b-md font-mono text-[12px] leading-6">
+            {sideBySideDiff.length === 0 ? (
+              <div className="bg-panel px-4 py-3 text-ink-secondary">No hay diferencias relevantes.</div>
+            ) : (
+              <div className="grid grid-cols-2">
+                <div className="border-b border-r border-line bg-panel px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">
+                  Versión seleccionada
+                </div>
+                <div className="border-b border-line bg-panel px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">
+                  Versión actual
+                </div>
+                {sideBySideDiff.map((row, index) => (
+                  <SideBySideDiffRowView key={`${row.type}-${index}-${row.leftNumber ?? ""}-${row.rightNumber ?? ""}`} row={row} />
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function RestoreVersionDialog({
+  version,
+  isDirty,
+  restoring,
+  onCancel,
+  onConfirm,
+}: {
+  version: VersionRecord;
+  isDirty: boolean;
+  restoring: boolean;
+  onCancel: () => void;
+  onConfirm: (strategy: RestoreStrategy) => void;
+}) {
+  return (
+    <div className="knownext-modal-overlay fixed inset-0 z-[90] grid place-items-center bg-black/25">
+      <section className="w-[min(460px,calc(100vw-32px))] rounded-lg border border-line bg-white shadow-menu">
+        <header className="flex items-start gap-3 border-b border-line px-5 py-4">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-brand-hover text-brand-orange">
+            <RotateCcw size={17} />
+          </span>
+          <div className="min-w-0">
+            <h3 className="text-[15px] font-semibold text-ink-primary">Restaurar versión</h3>
+            <p className="mt-1 text-[11px] leading-5 text-ink-secondary">
+              Se restaurará la versión del {formatVersionFullDate(version)}. KnowNext.ai creará una nueva versión actual; el historial anterior no se borrará.
+            </p>
+          </div>
+        </header>
+        {isDirty ? (
+          <div className="mx-5 mt-4 flex gap-3 rounded-md border border-orange-200 bg-brand-hover px-3 py-2 text-[11px] leading-5 text-ink-secondary">
+            <AlertTriangle size={16} className="mt-0.5 shrink-0 text-brand-orange" />
+            <p>Tienes cambios pendientes sin guardar. Guarda esos cambios antes de restaurar o descártalos para volver directamente a esta versión.</p>
+          </div>
+        ) : null}
+        <footer className="flex flex-wrap justify-end gap-2 px-5 py-4">
+          <button
+            className="h-9 rounded-md border border-line px-4 text-[11px] hover:bg-panel"
+            type="button"
+            onClick={onCancel}
+            disabled={restoring}
+          >
+            Cancelar
+          </button>
+          {isDirty ? (
+            <>
+              <button
+                className="h-9 rounded-md border border-line px-4 text-[11px] font-semibold text-ink-primary hover:bg-panel disabled:opacity-60"
+                type="button"
+                onClick={() => onConfirm("save-and-restore")}
+                disabled={restoring}
+              >
+                Guardar y restaurar
+              </button>
+              <button
+                className="h-9 rounded-md bg-red-700 px-4 text-[11px] font-semibold text-white hover:bg-red-800 disabled:opacity-60"
+                type="button"
+                onClick={() => onConfirm("discard-and-restore")}
+                disabled={restoring}
+              >
+                Descartar y restaurar
+              </button>
+            </>
+          ) : (
+            <button
+              className="h-9 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-60"
+              type="button"
+              onClick={() => onConfirm("restore")}
+              disabled={restoring}
+            >
+              {restoring ? "Restaurando" : "Restaurar versión"}
+            </button>
+          )}
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function SideBySideDiffRowView({ row }: { row: SideBySideDiffRow }) {
+  if (row.type === "skip") {
+    return (
+      <>
+        <div className="border-r border-line bg-panel px-3 py-1 text-center text-[11px] text-ink-secondary">...</div>
+        <div className="bg-panel px-3 py-1 text-center text-[11px] text-ink-secondary">...</div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <DiffCell
+        lineNumber={row.leftNumber}
+        text={row.leftText}
+        tone={row.type === "removed" || row.type === "changed" ? "removed" : row.type === "added" ? "empty" : "same"}
+      />
+      <DiffCell
+        lineNumber={row.rightNumber}
+        text={row.rightText}
+        tone={row.type === "added" || row.type === "changed" ? "added" : row.type === "removed" ? "empty" : "same"}
+      />
+    </>
+  );
+}
+
+function DiffCell({
+  lineNumber,
+  text,
+  tone,
+}: {
+  lineNumber?: number;
+  text?: string;
+  tone: "same" | "added" | "removed" | "empty";
+}) {
+  return (
+    <div
+      className={[
+        "grid min-w-0 grid-cols-[42px_1fr] gap-2 border-b border-line/70 px-2 py-0.5",
+        tone === "same" ? "bg-white text-ink-secondary" : "",
+        tone === "added" ? "bg-green-50 text-green-800" : "",
+        tone === "removed" ? "bg-red-50 text-red-800" : "",
+        tone === "empty" ? "bg-panel/70 text-ink-secondary" : "",
+      ].join(" ")}
+    >
+      <span className="select-none text-right text-[10px] text-ink-secondary/70">{lineNumber ?? ""}</span>
+      <span className="min-w-0 whitespace-pre-wrap break-words">{text || " "}</span>
+    </div>
+  );
+}
+
+function buildLineDiff(previous: string, current: string): DiffLine[] {
+  if (previous === current) return [];
+  const previousLines = previous.split(/\r?\n/);
+  const currentLines = current.split(/\r?\n/);
+  const table = Array.from({ length: previousLines.length + 1 }, () => Array(currentLines.length + 1).fill(0) as number[]);
+  for (let row = previousLines.length - 1; row >= 0; row -= 1) {
+    for (let column = currentLines.length - 1; column >= 0; column -= 1) {
+      table[row][column] = previousLines[row] === currentLines[column]
+        ? table[row + 1][column + 1] + 1
+        : Math.max(table[row + 1][column], table[row][column + 1]);
+    }
+  }
+
+  const diff: DiffLine[] = [];
+  let row = 0;
+  let column = 0;
+  while (row < previousLines.length && column < currentLines.length) {
+    if (previousLines[row] === currentLines[column]) {
+      diff.push({ type: "same", text: previousLines[row] });
+      row += 1;
+      column += 1;
+    } else if (table[row + 1][column] >= table[row][column + 1]) {
+      diff.push({ type: "removed", text: previousLines[row] });
+      row += 1;
+    } else {
+      diff.push({ type: "added", text: currentLines[column] });
+      column += 1;
+    }
+  }
+  while (row < previousLines.length) {
+    diff.push({ type: "removed", text: previousLines[row] });
+    row += 1;
+  }
+  while (column < currentLines.length) {
+    diff.push({ type: "added", text: currentLines[column] });
+    column += 1;
+  }
+  return trimUnchangedContext(diff);
+}
+
+function buildSideBySideDiff(previous: string, current: string): SideBySideDiffRow[] {
+  if (previous === current) return [];
+  const operations = buildLineDiffOperations(previous, current);
+  const rows: SideBySideDiffRow[] = [];
+  let index = 0;
+  while (index < operations.length) {
+    const operation = operations[index];
+    if (operation.type === "same") {
+      rows.push({
+        type: "same",
+        leftNumber: operation.leftNumber,
+        rightNumber: operation.rightNumber,
+        leftText: operation.text,
+        rightText: operation.text,
+      });
+      index += 1;
+      continue;
+    }
+
+    const removed: DiffOperation[] = [];
+    const added: DiffOperation[] = [];
+    while (index < operations.length && operations[index].type !== "same") {
+      if (operations[index].type === "removed") removed.push(operations[index]);
+      if (operations[index].type === "added") added.push(operations[index]);
+      index += 1;
+    }
+    const pairCount = Math.max(removed.length, added.length);
+    for (let pairIndex = 0; pairIndex < pairCount; pairIndex += 1) {
+      const left = removed[pairIndex];
+      const right = added[pairIndex];
+      rows.push({
+        type: left && right ? "changed" : left ? "removed" : "added",
+        leftNumber: left?.leftNumber,
+        rightNumber: right?.rightNumber,
+        leftText: left?.text,
+        rightText: right?.text,
+      });
+    }
+  }
+  return trimSideBySideContext(rows);
+}
+
+type DiffOperation = {
+  type: "same" | "added" | "removed";
+  text: string;
+  leftNumber?: number;
+  rightNumber?: number;
+};
+
+function buildLineDiffOperations(previous: string, current: string): DiffOperation[] {
+  const previousLines = previous.split(/\r?\n/);
+  const currentLines = current.split(/\r?\n/);
+  const table = Array.from({ length: previousLines.length + 1 }, () => Array(currentLines.length + 1).fill(0) as number[]);
+  for (let row = previousLines.length - 1; row >= 0; row -= 1) {
+    for (let column = currentLines.length - 1; column >= 0; column -= 1) {
+      table[row][column] = previousLines[row] === currentLines[column]
+        ? table[row + 1][column + 1] + 1
+        : Math.max(table[row + 1][column], table[row][column + 1]);
+    }
+  }
+
+  const operations: DiffOperation[] = [];
+  let row = 0;
+  let column = 0;
+  while (row < previousLines.length && column < currentLines.length) {
+    if (previousLines[row] === currentLines[column]) {
+      operations.push({ type: "same", text: previousLines[row], leftNumber: row + 1, rightNumber: column + 1 });
+      row += 1;
+      column += 1;
+    } else if (table[row + 1][column] >= table[row][column + 1]) {
+      operations.push({ type: "removed", text: previousLines[row], leftNumber: row + 1 });
+      row += 1;
+    } else {
+      operations.push({ type: "added", text: currentLines[column], rightNumber: column + 1 });
+      column += 1;
+    }
+  }
+  while (row < previousLines.length) {
+    operations.push({ type: "removed", text: previousLines[row], leftNumber: row + 1 });
+    row += 1;
+  }
+  while (column < currentLines.length) {
+    operations.push({ type: "added", text: currentLines[column], rightNumber: column + 1 });
+    column += 1;
+  }
+  return operations;
+}
+
+function trimSideBySideContext(rows: SideBySideDiffRow[]): SideBySideDiffRow[] {
+  const changedIndexes = rows
+    .map((row, index) => (row.type === "same" ? -1 : index))
+    .filter((index) => index >= 0);
+  if (changedIndexes.length === 0) return [];
+  const visible = new Set<number>();
+  for (const index of changedIndexes) {
+    for (let offset = -2; offset <= 2; offset += 1) {
+      const target = index + offset;
+      if (target >= 0 && target < rows.length) visible.add(target);
+    }
+  }
+  const result: SideBySideDiffRow[] = [];
+  let skipped = false;
+  for (let index = 0; index < rows.length; index += 1) {
+    if (visible.has(index)) {
+      if (skipped) result.push({ type: "skip" });
+      result.push(rows[index]);
+      skipped = false;
+    } else {
+      skipped = true;
+    }
+  }
+  return result;
+}
+
+function trimUnchangedContext(diff: DiffLine[]): DiffLine[] {
+  const changedIndexes = diff
+    .map((line, index) => (line.type === "same" ? -1 : index))
+    .filter((index) => index >= 0);
+  if (changedIndexes.length === 0) return [];
+  const visible = new Set<number>();
+  for (const index of changedIndexes) {
+    for (let offset = -2; offset <= 2; offset += 1) {
+      const target = index + offset;
+      if (target >= 0 && target < diff.length) visible.add(target);
+    }
+  }
+  const result: DiffLine[] = [];
+  let skipped = false;
+  for (let index = 0; index < diff.length; index += 1) {
+    if (visible.has(index)) {
+      if (skipped) result.push({ type: "same", text: "..." });
+      result.push(diff[index]);
+      skipped = false;
+    } else {
+      skipped = true;
+    }
+  }
+  return result;
 }
 
 type ResizablePanelConfig = {
@@ -1152,37 +1625,12 @@ function keepStableHistoryStateForDocument(
 
 function getHistoryDisabledReason(project: Project | null, authStatus: AuthStatus, versioningStatus: ProjectVersioningStatus | null) {
   if (!project || project.versioningMode === "none") return "Historial no disponible en proyectos de archivos locales";
-  if (!authStatus.isAuthenticated) return "Inicia sesión con GitHub para activar el historial versionado";
+  if ((project.syncMode === "manual-github" || project.syncMode === "auto-github") && !authStatus.isAuthenticated) return "Inicia sesión con GitHub para activar la sincronización";
   return versioningStatus?.reason ?? "Historial no disponible";
 }
 
 function countWords(markdown: string) {
   return markdown.trim().split(/\s+/).filter(Boolean).length;
-}
-
-function countCharacters(markdown: string) {
-  return markdown.length;
-}
-
-function getDocumentStatus({
-  saveState,
-  isDirty,
-  hasRecoveredDraft,
-  conflictStatus,
-  diskChanged,
-}: {
-  saveState: "idle" | "saving" | "saved";
-  isDirty: boolean;
-  hasRecoveredDraft: boolean;
-  conflictStatus: DocumentConflictStatus;
-  diskChanged: boolean;
-}) {
-  if (conflictStatus === "orphaned") return { label: "Archivo no encontrado", tone: "warning" as const };
-  if (diskChanged) return { label: "Conflicto con disco", tone: "warning" as const };
-  if (saveState === "saved") return { label: "Guardado", tone: "success" as const };
-  if (hasRecoveredDraft) return { label: "Borrador recuperado", tone: "warning" as const };
-  if (isDirty) return { label: "Cambios sin guardar", tone: "warning" as const };
-  return { label: "Sin cambios", tone: "success" as const };
 }
 
 function buildExternalChangeBadges(changeSet: ExternalChangeSet | null): Record<string, string> {

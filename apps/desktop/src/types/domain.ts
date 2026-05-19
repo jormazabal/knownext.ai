@@ -28,7 +28,7 @@ export type ProjectPayload = {
 
 export type StorageMode = "local-files" | "local-cache";
 export type VersioningMode = "none" | "local-git" | "github-api";
-export type SyncMode = "none" | "manual-github";
+export type SyncMode = "none" | "manual-local" | "auto-local" | "manual-github" | "auto-github";
 export type ProjectCreationMode = "new-local" | "open-local" | "github-repository";
 export type GithubPublishVisibility = "private" | "public";
 
@@ -73,7 +73,69 @@ export type ExternalChangeKind = "folder" | "document" | "image" | "attachment" 
 export type ExternalChangeRisk = "safe" | "review" | "blocked";
 export type ExternalChangeDecision = "include" | "omit" | "review";
 export type ExternalChangeSetStatus = "none" | "safe" | "needs-review" | "blocked";
-export type ProjectSyncState = "synced" | "saving" | "syncing" | "pending" | "review-required" | "error" | "unsupported";
+export type ProductProjectMode = "local-files" | "local-history" | "github-manual" | "github-auto";
+
+export type ProjectSyncState =
+  | "unconfigured"
+  | "local-only"
+  | "local-history"
+  | "synced"
+  | "saving"
+  | "syncing"
+  | "pending"
+  | "local-pending"
+  | "remote-available"
+  | "review-required"
+  | "conflict"
+  | "offline"
+  | "error"
+  | "unsupported";
+
+export type SyncConflictType =
+  | "remote_changed_open_document"
+  | "local_and_remote_changed"
+  | "remote_deleted_local_modified"
+  | "local_deleted_remote_modified"
+  | "diverged_history"
+  | "push_rejected"
+  | "dirty_working_tree";
+
+export type SyncConflict = {
+  id: string;
+  projectId: string;
+  path: string;
+  type: SyncConflictType;
+  status: "open" | "resolved" | "dismissed";
+  localHash?: string | null;
+  remoteHash?: string | null;
+  message: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type OpenDocumentSyncState = {
+  documentId: string;
+  path: string;
+  isActive: boolean;
+  isDirty: boolean;
+  hasDraft: boolean;
+  baseFingerprint?: DocumentFingerprint | null;
+};
+
+export type ProjectSyncStatus = {
+  projectId: string;
+  mode: ProductProjectMode;
+  state: ProjectSyncState;
+  label: string;
+  detail?: string | null;
+  pendingPush: boolean;
+  pendingPull: boolean;
+  hasConflicts: boolean;
+  lastSyncAt?: string | null;
+  lastLocalVersionHash?: string | null;
+  lastRemoteHash?: string | null;
+  conflicts: SyncConflict[];
+};
 
 export type ExternalChangeItem = {
   id: string;
@@ -428,6 +490,7 @@ export type VersionRecord = {
   title: string;
   author: string;
   authorInitials: string;
+  createdAt?: string | null;
   relativeTime: string;
   current?: boolean;
 };
@@ -847,6 +910,14 @@ export type SyncStatusDocument = {
   baseFingerprint?: DocumentFingerprint | null;
 };
 
+export type DocumentVersionState =
+  | "ok"
+  | "unversioned"
+  | "local-ahead"
+  | "remote-ahead"
+  | "diverged"
+  | "unsupported";
+
 export type DocumentSyncStatus = {
   documentId: string;
   exists: boolean;
@@ -855,6 +926,12 @@ export type DocumentSyncStatus = {
   hasDraft: boolean;
   orphaned: boolean;
   conflictStatus: DocumentConflictStatus;
+  versionState: DocumentVersionState;
+  localChanged: boolean;
+  remoteChanged: boolean;
+  localVersionHash?: string | null;
+  remoteVersionHash?: string | null;
+  message?: string | null;
 };
 
 export type SyncStatusResponse = {

@@ -17,7 +17,9 @@ from app.schemas.document import (
 from app.services.draft_service import draft_service
 from app.services.filesystem_service import decode_document_id
 from app.services.filesystem_service import filesystem_service
+from app.services.git_service import git_service
 from app.services.project_service import project_service
+from app.services.credential_service import credential_service
 
 
 def _updated_at(document_path) -> str:
@@ -67,6 +69,15 @@ def _resolve_project_child(root: Path, relative_path: str) -> Path:
     return candidate
 
 
+def _normalize_repo_path(path: str) -> str:
+    return path.replace("\\", "/").strip("/")
+
+
+def _path_changed(paths: list[str], relative_path: str) -> bool:
+    normalized_path = _normalize_repo_path(relative_path)
+    return normalized_path in {_normalize_repo_path(path) for path in paths}
+
+
 class DocumentService:
     def get_document(self, document_id: str) -> Document:
         if document_id.startswith("fs_"):
@@ -101,6 +112,7 @@ class DocumentService:
                 document_path.write_text(markdown, encoding="utf-8")
                 fingerprint = _fingerprint(document_path)
                 draft_service.delete_draft(document_id)
+                self._record_local_change(project_id, [relative_path], "document_restored", f"Restaura documento: {document_path.name}")
                 return Document(
                     id=document_id,
                     name=document_path.name,
@@ -128,6 +140,7 @@ class DocumentService:
             document_path = filesystem_service.save_document(project_root, relative_path, markdown)
             fingerprint = _fingerprint(document_path)
             draft_service.delete_draft(document_id)
+            self._record_local_change(project_id, [relative_path], "document_saved", f"Actualiza documento: {document_path.name}")
             return Document(
                 id=document_id,
                 name=document_path.name,
@@ -140,6 +153,14 @@ class DocumentService:
             )
 
         raise HTTPException(status_code=404, detail="Document not found")
+
+    def _record_local_change(self, project_id: str, paths: list[str], operation: str, title: str) -> None:
+        try:
+            from app.services.sync_service import sync_service
+
+            sync_service.after_local_change(project_id, paths, operation, title)
+        except HTTPException:
+            return
 
     def save_draft(self, document_id: str, markdown: str, base_fingerprint: DocumentFingerprint | None = None) -> DraftResponse:
         try:
@@ -287,6 +308,7 @@ class DocumentService:
 
         current_fingerprint = _fingerprint_fast(document_path, base_fingerprint)
         disk_changed = base_fingerprint is not None and not _fingerprints_match(base_fingerprint, current_fingerprint)
+        version_status = self._get_document_version_status(project_id, relative_path)
         return DocumentSyncStatus(
             documentId=document_id,
             exists=True,
@@ -294,7 +316,96 @@ class DocumentService:
             diskChanged=disk_changed,
             hasDraft=draft is not None,
             conflictStatus="disk-changed" if disk_changed else "draft" if draft is not None else "none",
+            **version_status,
         )
+
+    def _get_document_version_status(self, project_id: str, relative_path: str) -> dict:
+        try:
+            registry = project_service._read_registry()
+            project = project_service._find_project(registry, project_id)
+        except HTTPException as error:
+            return {"versionState": "unsupported", "message": str(error.detail)}
+
+        if project.get("versioningMode") == "none":
+            return {"versionState": "unversioned"}
+        if project.get("versioningMode") != "local-git":
+            return {"versionState": "unsupported", "message": "Document sync status is not available for this versioning mode"}
+
+        root = Path(project["folderPath"])
+        if not git_service.is_repository(root):
+            return {"versionState": "unsupported", "message": "Project is not a Git repository"}
+
+        local_changed = git_service.has_changes_for_path(root, relative_path)
+        local_hash = git_service.rev_parse(root, "HEAD", short=True)
+        status = {
+            "versionState": "local-ahead" if local_changed else "ok",
+            "localChanged": local_changed,
+            "remoteChanged": False,
+            "localVersionHash": local_hash,
+            "remoteVersionHash": None,
+            "message": None,
+        }
+
+        if project.get("syncMode") not in {"manual-github", "auto-github"}:
+            return status
+        if not git_service.has_remote_origin(root):
+            return {**status, "message": "Project has no GitHub remote configured"}
+
+        try:
+            git_service.fetch(root, credential_service.get_github_token())
+            branch = self._project_branch(project)
+            remote_ref = git_service.remote_ref(root, branch)
+            head = git_service.rev_parse(root, "HEAD")
+            remote = git_service.rev_parse(root, remote_ref) if remote_ref else None
+        except HTTPException as error:
+            return {**status, "versionState": "unsupported", "message": str(error.detail)}
+
+        if not head or not remote:
+            return status
+
+        remote_hash = git_service.rev_parse(root, remote_ref, short=True) if remote_ref else None
+        if head == remote:
+            return {**status, "remoteVersionHash": remote_hash}
+
+        if git_service.is_ancestor(root, remote, head):
+            local_paths = git_service.changed_paths_between(root, remote, head)
+            local_ahead = local_changed or _path_changed(local_paths, relative_path)
+            return {
+                **status,
+                "versionState": "local-ahead" if local_ahead else "ok",
+                "localChanged": local_ahead,
+                "remoteVersionHash": remote_hash,
+            }
+
+        if git_service.is_ancestor(root, head, remote):
+            remote_paths = git_service.changed_paths_between(root, head, remote)
+            remote_changed = _path_changed(remote_paths, relative_path)
+            return {
+                **status,
+                "versionState": "remote-ahead" if remote_changed else status["versionState"],
+                "remoteChanged": remote_changed,
+                "remoteVersionHash": remote_hash,
+            }
+
+        merge_base = git_service.merge_base(root, head, remote)
+        local_paths = git_service.changed_paths_between(root, merge_base, head) if merge_base else []
+        remote_paths = git_service.changed_paths_between(root, merge_base, remote) if merge_base else git_service.changed_paths_between(root, head, remote)
+        local_ahead = local_changed or _path_changed(local_paths, relative_path)
+        remote_changed = _path_changed(remote_paths, relative_path)
+        version_state = "diverged" if remote_changed else "local-ahead" if local_ahead else "ok"
+        return {
+            **status,
+            "versionState": version_state,
+            "localChanged": local_ahead,
+            "remoteChanged": remote_changed,
+            "remoteVersionHash": remote_hash,
+        }
+
+    def _project_branch(self, project: dict) -> str | None:
+        repository = project.get("githubRepository")
+        if isinstance(repository, dict):
+            return repository.get("defaultRef")
+        return None
 
     def _project_root_for_draft(self, draft: dict) -> tuple[Path | None, str | None]:
         try:

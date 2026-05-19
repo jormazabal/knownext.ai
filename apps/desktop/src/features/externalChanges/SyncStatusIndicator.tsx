@@ -1,15 +1,16 @@
 import { AlertCircle, CheckCircle2, Cloud, Clock3, Loader2, RefreshCw } from "lucide-react";
-import type { ExternalChangeSet, ProjectSyncState } from "../../types/domain";
+import type { ExternalChangeSet, ProjectSyncState, ProjectSyncStatus } from "../../types/domain";
 
 type SyncStatusIndicatorProps = {
   changeSet: ExternalChangeSet | null;
+  syncStatus?: ProjectSyncStatus | null;
   syncState: ProjectSyncState;
   busy: boolean;
   onOpen: () => void;
 };
 
-export function SyncStatusIndicator({ changeSet, syncState, busy, onOpen }: SyncStatusIndicatorProps) {
-  const view = getStatusView(changeSet, syncState, busy);
+export function SyncStatusIndicator({ changeSet, syncStatus, syncState, busy, onOpen }: SyncStatusIndicatorProps) {
+  const view = getStatusView(changeSet, syncStatus, syncState, busy);
   const Icon = view.icon;
 
   return (
@@ -30,9 +31,27 @@ export function SyncStatusIndicator({ changeSet, syncState, busy, onOpen }: Sync
   );
 }
 
-function getStatusView(changeSet: ExternalChangeSet | null, syncState: ProjectSyncState, busy: boolean) {
+function getStatusView(changeSet: ExternalChangeSet | null, syncStatus: ProjectSyncStatus | null | undefined, syncState: ProjectSyncState, busy: boolean) {
   if (busy || syncState === "saving" || syncState === "syncing") {
     return { label: syncState === "syncing" ? "Sincronizando con GitHub" : "Guardando versión", detail: "KnowNext.ai está procesando cambios externos.", icon: Loader2, tone: "orange" as const, spinning: true };
+  }
+  if (syncStatus?.hasConflicts || syncStatus?.state === "conflict" || syncStatus?.state === "review-required") {
+    return { label: "Revisión necesaria", detail: syncStatus.detail || "Hay cambios locales y remotos que requieren decisión.", icon: AlertCircle, tone: "orange" as const, spinning: false };
+  }
+  if (syncStatus?.state === "local-pending") {
+    return { label: "Pendiente de subir", detail: syncStatus.detail || "Hay versiones locales pendientes de GitHub.", icon: Clock3, tone: "orange" as const, spinning: false };
+  }
+  if (syncStatus?.state === "remote-available") {
+    return { label: "Cambios remotos disponibles", detail: "GitHub tiene cambios listos para traer.", icon: RefreshCw, tone: "orange" as const, spinning: false };
+  }
+  if (syncStatus?.state === "offline" || syncStatus?.state === "error") {
+    return { label: syncStatus.label, detail: syncStatus.detail || "No se pudo completar la sincronización.", icon: AlertCircle, tone: syncStatus.state === "offline" ? "orange" as const : "red" as const, spinning: false };
+  }
+  if (syncStatus?.state === "local-history") {
+    return { label: "Historial local", detail: "El proyecto guarda versiones en este equipo.", icon: CheckCircle2, tone: "muted" as const, spinning: false };
+  }
+  if (syncStatus?.state === "local-only") {
+    return { label: "Solo local", detail: "El proyecto no tiene historial versionado.", icon: CheckCircle2, tone: "muted" as const, spinning: false };
   }
   if (changeSet?.summary.total) {
     if (changeSet.requiresReview) {

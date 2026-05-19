@@ -53,7 +53,9 @@ Layout width values in `config.json` are user preferences. Services should prese
 ## Project Modes
 
 - `local-files` + `none`: available without login; document operations read and write the selected local folder.
-- `local-files` + `local-git`: requires GitHub login by product decision; local Git provides document history and optional manual GitHub sync.
+- `local-files` + `local-git` + `none`: available without GitHub login when local Git is installed; local Git provides document history only.
+- `local-files` + `local-git` + `manual-github`: local Git history plus explicit user-driven pull/push to the associated GitHub repository.
+- `local-files` + `local-git` + `auto-github`: local Git history plus backend-owned safe background sync. Local document/file operations record a local version and attempt push. Remote changes are pulled only when affected documents are not open, dirty, or draft-protected.
 - `local-cache` + `github-api`: requires GitHub login; GitHub is the versioning authority while KnowNext.ai keeps a local cache for editing and drafts.
 
 Project metadata remains in local JSON, while document tree and Markdown document operations are mediated by backend services. Unsaved document content is mediated by `draft_service` until the user explicitly saves or versions it. Routers should stay thin and call services when contracts evolve.
@@ -86,6 +88,14 @@ AI-generated images use the same asset path as uploaded images. `ai_service` exe
 ## Draft and Sync Contracts
 
 - `POST /api/documents/sync-status` checks open document fingerprints for active external changes without loading full document content.
+- `GET /api/projects/{project_id}/sync/status` returns the current project sync mode, human state, pending push/pull flags, last known heads, and open conflicts.
+- `POST /api/projects/{project_id}/sync/scan` fetches remote metadata and classifies the project as local-only, local-history, synced, pending, remote-available, review-required, conflict, offline, or error.
+- `POST /api/projects/{project_id}/sync/auto-run` performs the same scan and may auto-push or auto-pull only when the sync mode and open-document safety checks allow it.
+- `POST /api/projects/{project_id}/history/enable` initializes local Git history for an existing project and creates the initial project version when files exist.
+- `POST /api/projects/{project_id}/github/connect` associates an existing GitHub repository with an existing local project and sets manual or automatic sync.
+- `POST /api/projects/{project_id}/github/publish` creates a new GitHub repository, configures the local remote, pushes the initial version, and sets manual or automatic sync.
+- `POST /api/projects/{project_id}/sync-mode` switches an already connected GitHub project between manual and automatic sync.
+- `POST /api/projects/{project_id}/sync/conflicts/{conflict_id}/resolve` records the selected conflict decision and recalculates project sync state.
 - `GET /api/projects/{project_id}/external-changes` returns the current external-change set for the project.
 - `POST /api/projects/{project_id}/external-changes/scan` forces a rescan of external filesystem/Git changes.
 - `POST /api/projects/{project_id}/external-changes/import` imports selected external changes as a local version and returns the refreshed tree plus human sync state. React sends item decisions only; Git add/commit/push remains backend-owned.
