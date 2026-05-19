@@ -51,8 +51,10 @@ Any remaining mock fixtures must be limited to tests, Storybook/demo surfaces, o
 - AI-generated images are returned from `src/lib/api/ai.ts` as `generatedImages`. React refreshes the tree from the backend response, opens generated image assets in image tabs when they were not inserted into a document, and applies `updatedDocument` through the existing editor-operation path when insertion was requested.
 - AI prompt context is rendered as chips inside `AiPromptInput`. If a source chip is visible, it is active and its id is sent with the next AI interaction. React owns only source presentation and user intent; FastAPI owns file upload, extraction, expiry, preview, source resolution, and conversion into project documents.
 - Project image and support-file context use the same visible chip model as document context. Search results can include images and support files; selecting a readable support file creates a backend-owned extracted-text context source for the next prompt.
-- The project assistant supports local files, local Git with manual sync, and GitHub API projects. Versioned modes remain disabled until GitHub login is active.
-- The history button is enabled only when the active project has a versioning provider and the user is authenticated.
+- The project assistant supports local files, local history, manual GitHub sync, automatic GitHub sync, and GitHub API projects. GitHub-backed modes require GitHub login; local history only requires local Git availability.
+- The project editor supports evolution after creation: activate local history, connect an existing GitHub repository, publish a new GitHub repository, and switch connected projects between manual and automatic sync.
+- The history button is enabled when the active project has a versioning provider. GitHub login is required only for GitHub-backed sync modes.
+- React polls project sync status through `src/lib/api/sync.ts`, sends open-document safety state, and renders the returned human sync state. It never executes Git, reads remotes, or writes credentials directly.
 - UI components receive persisted values as props and dispatch user intent back to the root app state.
 
 ## Startup And Empty States
@@ -108,6 +110,7 @@ Any remaining mock fixtures must be limited to tests, Storybook/demo surfaces, o
 ## External Changes UX
 
 - The global sync indicator lives at the right edge of the document tab row and uses product states: `Sincronizado`, `Cambios externos detectados`, `Revisión necesaria`, `Guardando versión`, `Sincronizando con GitHub`, `Pendiente de sincronizar`, and `Error de sincronización`.
+- Automatic sync is a product mode, not a separate UI workspace. It runs through backend `auto-run` checks while the project is open and must never overwrite active, dirty, or draft-protected documents.
 - When the active project has external changes, the document canvas shows a compact banner above the editor. Safe batches can be imported directly; risky batches route to review.
 - Review opens as a right drawer so the user keeps document context. The drawer groups files by folders, Markdown documents, images, support files, private files, ignored files, and unsupported files. Safe items are preselected; review items need user selection; blocked items cannot be included.
 - Newly detected tree items receive temporary badges such as `Nuevo`, `Modificado`, `Eliminado`, or `Revisar`. Badges disappear after the external-change set is imported and the backend reports a clean state.

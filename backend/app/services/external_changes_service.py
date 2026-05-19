@@ -16,6 +16,7 @@ from app.schemas.project import (
 from app.services.filesystem_service import DOCUMENT_SUFFIXES, EXCLUDED_DIRS, IMAGE_SUFFIXES, filesystem_service
 from app.services.git_service import git_service
 from app.services.project_service import project_service
+from app.services.credential_service import credential_service
 
 
 SAFE_AUTOIMPORT_LIMIT = 50
@@ -87,17 +88,18 @@ class ExternalChangesService:
             status = "synced"
             message = "Versión local guardada."
 
-            if payload.syncRemote and project.get("syncMode") == "manual-github" and git_service.has_remote_origin(root):
+            if payload.syncRemote and project.get("syncMode") in {"manual-github", "auto-github"} and git_service.has_remote_origin(root):
                 status = "syncing"
                 try:
-                    git_service.pull(root)
-                    git_service.push(root)
+                    token = credential_service.get_github_token()
+                    git_service.pull(root, token)
+                    git_service.push(root, token)
                     message = "Versión local guardada y sincronizada con GitHub."
                 except HTTPException:
                     pending_remote_sync = True
                     status = "pending"
                     message = "Versión local guardada. La sincronización con GitHub queda pendiente."
-            elif project.get("syncMode") == "manual-github":
+            elif project.get("syncMode") in {"manual-github", "auto-github"}:
                 pending_remote_sync = True
                 status = "pending"
                 message = "Versión local guardada. No hay remoto GitHub configurado para sincronizar."

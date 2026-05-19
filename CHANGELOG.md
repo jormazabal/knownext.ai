@@ -2,6 +2,17 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.18.0 - 2026-05-20
+
+- Redesigned project creation and editing around three protection levels: local files, local files with Git history, and local files with Git plus GitHub synchronization.
+- Added manual and automatic synchronization modes to the project model, with document save and sync actions presented from the document footer.
+- Added backend-mediated document synchronization endpoints and document-level sync status so the UI reports only the active document's version state.
+- Simplified the document footer into clear user states for saved, draft, outdated, and pending synchronization cases, including confirmation flows for destructive updates.
+- Reworked version history into a compact side panel that selects versions while the main document area shows formatted historical content or a two-column diff.
+- Added restore confirmation for historical versions and kept restored versions as new history entries instead of replacing previous history.
+- Expanded project visual customization with additional icons and a more natural 16-color circular palette.
+- Updated product, frontend/backend architecture, and manual validation documentation for the unified history and synchronization flow.
+
 ## 0.17.3 - 2026-05-18
 
 - Fixed document-tab activation so the navigation tree reveals and selects the active document, expanding all parent folders and scrolling the selected node into view.

@@ -54,13 +54,16 @@ describe("CreateProjectDialog", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: /editar proyecto de documentación/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /editar proyecto/i })).toBeInTheDocument();
     expect(screen.getByDisplayValue("Proyecto Beta")).toBeInTheDocument();
     expect(screen.getByDisplayValue("C:\\Documentacion\\Proyecto Beta")).toBeInTheDocument();
-    expect(screen.getByText(/configuración/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/carpeta local/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/archivos locales/i)).toBeInTheDocument();
-    expect(screen.getByText(/sin sincronización remota/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Sincronización" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /configuración del cambio/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/^archivos locales$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^archivos locales \+ git local$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^archivos locales \+ git local \+ github$/i)).toBeInTheDocument();
+    expect(screen.getByText(/solo documentos en disco/i)).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: /sincronización automática/i })).toBeDisabled();
 
     await userEvent.clear(screen.getByLabelText(/nombre del proyecto/i));
     await userEvent.type(screen.getByLabelText(/nombre del proyecto/i), "Proyecto Beta actualizado");
@@ -111,11 +114,13 @@ describe("CreateProjectDialog", () => {
       />,
     );
 
-    expect(screen.getAllByText(/repositorio github existente/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/copia local gestionada/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/manual con github/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /configuración del cambio/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/carpeta local gestionada/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/manual con github/i).length).toBeGreaterThan(0);
     expect(screen.getByText("knownext/docs")).toBeInTheDocument();
     expect(screen.getAllByText(/solo lectura/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole("switch", { name: /sincronización automática/i })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("switch", { name: /sincronización automática/i })).toBeEnabled();
     expect(screen.queryByRole("button", { name: /seleccionar/i })).not.toBeInTheDocument();
 
     await userEvent.clear(screen.getByLabelText(/nombre del proyecto/i));
@@ -138,6 +143,62 @@ describe("CreateProjectDialog", () => {
         rootPath: "",
         permissions: ["pull", "push"],
       },
+      publishToGithub: null,
+    });
+  });
+
+  it("requires explicit confirmations before detaching GitHub and local Git", async () => {
+    const onUpdate = vi.fn();
+    const githubProject: Project = {
+      ...activeProject,
+      id: "project-github",
+      name: "Docs GitHub",
+      storageMode: "local-files",
+      versioningMode: "local-git",
+      syncMode: "manual-github",
+      authRequired: true,
+      githubRepository: {
+        owner: "knownext",
+        repo: "docs",
+        defaultRef: "main",
+        rootPath: "",
+        permissions: ["pull", "push"],
+      },
+    };
+
+    render(
+      <CreateProjectDialog
+        open
+        mode="edit"
+        project={githubProject}
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onUpdate={onUpdate}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /archivos locales solo documentos en disco/i }));
+
+    expect(screen.getByText(/confirmar desacoplamiento/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/desacoplar github/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/desactivar git local/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /guardar cambios/i })).toBeDisabled();
+
+    await userEvent.click(screen.getByLabelText(/desacoplar github/i));
+    expect(screen.getByRole("button", { name: /guardar cambios/i })).toBeDisabled();
+    await userEvent.click(screen.getByLabelText(/desactivar git local/i));
+    await userEvent.click(screen.getByRole("button", { name: /guardar cambios/i }));
+
+    expect(onUpdate).toHaveBeenCalledWith("project-github", {
+      name: "Docs GitHub",
+      icon: "folder",
+      iconColor: "#F37021",
+      folderPath: "C:\\Documentacion\\Proyecto Beta",
+      creationMode: "open-local",
+      storageMode: "local-files",
+      versioningMode: "none",
+      syncMode: "none",
+      githubRepository: null,
       publishToGithub: null,
     });
   });
@@ -308,7 +369,8 @@ describe("CreateProjectDialog", () => {
     expect(screen.queryByText("C:\\Documentacion\\Proyecto Beta")).not.toBeInTheDocument();
     expect(screen.queryByText(/sandbox del backend web/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/carpeta de trabajo/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/backend web gestionado/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Sincronización" })).toBeInTheDocument();
+    expect(screen.getByText(/^archivos locales$/i)).toBeInTheDocument();
   });
 
   it("uses the local runtime API outside Tauri to keep the full selected path", async () => {
@@ -439,8 +501,8 @@ describe("CreateProjectDialog", () => {
     await userEvent.click(screen.getByRole("button", { name: /seleccionar/i }));
     await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
 
-    expect(screen.getByRole("tab", { name: /crear repo github desde local/i })).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByLabelText(/conecta github para crear el repositorio remoto/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /archivos locales \+ git local \+ github/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /archivos locales \+ git local \+ github/i })).toHaveAttribute("title", expect.stringMatching(/conecta github/i));
   });
 
   it("configures publishing a local folder into a new GitHub repository", async () => {
@@ -472,7 +534,7 @@ describe("CreateProjectDialog", () => {
     openDialog.mockResolvedValue("C:\\Docs\\publish-docs");
     await userEvent.click(screen.getByRole("button", { name: /seleccionar/i }));
     await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
-    await userEvent.click(screen.getByRole("tab", { name: /crear repo github desde local/i }));
+    await userEvent.click(screen.getByRole("button", { name: /archivos locales \+ git local \+ github/i }));
 
     expect(screen.getByLabelText(/propietario github/i)).toHaveValue("knownext-user");
     await userEvent.clear(screen.getByLabelText(/nombre del nuevo repo/i));
@@ -480,6 +542,14 @@ describe("CreateProjectDialog", () => {
     await userEvent.click(screen.getByRole("tab", { name: /público/i }));
     await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
     await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
+
+    expect(screen.getByRole("heading", { name: /revisa la configuración/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Sincronización" })).toBeInTheDocument();
+    expect(screen.getByText(/^archivos locales \+ git local \+ github$/i)).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: /sincronización automática/i })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText(/sincronización manual con el repositorio/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^modo de trabajo$/i)).not.toBeInTheDocument();
+
     await userEvent.click(screen.getByRole("button", { name: /crear proyecto/i }));
 
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
@@ -541,6 +611,7 @@ describe("CreateProjectDialog", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /seleccionar/i }));
     await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
+    await userEvent.click(screen.getByRole("button", { name: /archivos locales \+ git local \+ github/i }));
     await userEvent.selectOptions(screen.getByLabelText(/repositorio github/i), "knownext/docs");
     await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
     await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));

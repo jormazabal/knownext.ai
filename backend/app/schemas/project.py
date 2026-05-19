@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 StorageMode = Literal["local-files", "local-cache"]
 VersioningMode = Literal["none", "local-git", "github-api"]
-SyncMode = Literal["none", "manual-github"]
+SyncMode = Literal["none", "manual-local", "auto-local", "manual-github", "auto-github"]
 GithubPublishVisibility = Literal["private", "public"]
 
 
@@ -41,7 +41,22 @@ ExternalChangeKind = Literal["folder", "document", "image", "attachment", "priva
 ExternalChangeRisk = Literal["safe", "review", "blocked"]
 ExternalChangeDecision = Literal["include", "omit", "review"]
 ExternalChangeSetStatus = Literal["none", "safe", "needs-review", "blocked"]
-ProjectSyncState = Literal["synced", "saving", "syncing", "pending", "review-required", "error", "unsupported"]
+ProjectSyncState = Literal[
+    "unconfigured",
+    "local-only",
+    "local-history",
+    "synced",
+    "saving",
+    "syncing",
+    "pending",
+    "local-pending",
+    "remote-available",
+    "review-required",
+    "conflict",
+    "offline",
+    "error",
+    "unsupported",
+]
 
 
 class ExternalChangeItem(BaseModel):

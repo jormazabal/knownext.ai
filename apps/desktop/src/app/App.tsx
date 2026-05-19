@@ -65,11 +65,12 @@ import {
   saveDocumentDraft,
 } from "../lib/api/documents";
 import { getExternalChanges, importExternalChanges, scanExternalChanges } from "../lib/api/externalChanges";
+import { autoRunProjectSync, changeProjectSyncMode, connectProjectGithub, enableProjectHistory, getProjectSyncStatus, publishProjectGithub, scanProjectSync } from "../lib/api/sync";
 import { APP_VERSION } from "../lib/appVersion";
 import { RELEASE_NOTES_MARKDOWN } from "../lib/releaseNotes";
 import { getAuthStatus, logout as logoutGithub, pollGithubDeviceFlow, startGithubDeviceFlow } from "../lib/api/auth";
 import { listGithubRepositories } from "../lib/api/github";
-import { createProjectVersion } from "../lib/api/versions";
+import { createProjectVersion, restoreVersion } from "../lib/api/versions";
 import {
   checkForUpdate,
   getUpdaterStatus,
@@ -124,6 +125,7 @@ import type {
   AppUtilityTabId,
   DiagnosticsConfig,
   AssetImportResponse,
+  DocumentSyncStatus,
   DocumentRecord,
   DocumentTreeNode,
   FileOperationResult,
@@ -143,6 +145,9 @@ import type {
   ExternalChangeSet,
   ExternalChangeImportRequest,
   ProjectSyncState,
+  ProjectSyncStatus,
+  OpenDocumentSyncState,
+  SyncMode,
   WorkspaceTab,
 } from "../types/domain";
 import {
@@ -163,6 +168,12 @@ type AppNotice = {
   message: string;
   tone: "error" | "info";
 };
+
+type DocumentFooterDialog =
+  | "discard-draft"
+  | "update-remote"
+  | "update-remote-discard-draft"
+  | "sync-saved-while-draft";
 
 type UpdateState = "idle" | "checking" | "available" | "not-available" | "unsupported" | "downloading" | "installing" | "error";
 type GithubLoginState = "idle" | "starting" | "waiting" | "authenticated" | "error";
@@ -236,8 +247,11 @@ export function App() {
   const [externalChangesOpen, setExternalChangesOpen] = useState(false);
   const [externalChangesBusy, setExternalChangesBusy] = useState(false);
   const [projectSyncState, setProjectSyncState] = useState<ProjectSyncState>("synced");
+  const [projectSyncStatus, setProjectSyncStatus] = useState<ProjectSyncStatus | null>(null);
   const [externalChangesMessage, setExternalChangesMessage] = useState<string | null>(null);
   const [mutedExternalChangeSetId, setMutedExternalChangeSetId] = useState<string | null>(null);
+  const [documentSyncStatuses, setDocumentSyncStatuses] = useState<Record<string, DocumentSyncStatus>>({});
+  const [documentFooterDialog, setDocumentFooterDialog] = useState<DocumentFooterDialog | null>(null);
   const lastTraceLogRef = useRef<{ fingerprint: string; timestamp: number } | null>(null);
   const githubLoginPollingRef = useRef(false);
   const lastDocumentContextRef = useRef<{ id: string | null; path: string | null }>({ id: null, path: null });
@@ -259,6 +273,7 @@ export function App() {
         const active = projectList.find((project) => project.active) ?? projectList[0];
         let projectTree: DocumentTreeNode[] = [];
         let activeVersioningStatus: ProjectVersioningStatus | null = null;
+        let activeSyncStatus: ProjectSyncStatus | null = null;
         if (active) {
           try {
             projectTree = await getProjectTree(active.id);
@@ -275,6 +290,15 @@ export function App() {
             void recordTraceLog({
               source: "app.startup.versioningStatus",
               message: "No se pudo cargar el estado de versionado durante el arranque.",
+              detail: describeError(error),
+            });
+          }
+          try {
+            activeSyncStatus = await getProjectSyncStatus(active.id);
+          } catch (error) {
+            void recordTraceLog({
+              source: "app.startup.syncStatus",
+              message: "No se pudo cargar el estado de sincronización durante el arranque.",
               detail: describeError(error),
             });
           }
@@ -296,6 +320,8 @@ export function App() {
         setAuthStatus(auth);
         setProjectCapabilities(capabilities);
         setVersioningStatus(activeVersioningStatus);
+        setProjectSyncStatus(activeSyncStatus);
+        if (activeSyncStatus) setProjectSyncState(activeSyncStatus.state);
         setTree(projectTree);
         setLayoutConfig(appConfig.layout);
         setAppearanceConfig(appConfig.appearance ?? defaultAppearanceConfig);
@@ -326,6 +352,7 @@ export function App() {
         setProjects([]);
         setActiveProject(null);
         setVersioningStatus(null);
+        setProjectSyncStatus(null);
         setTree([]);
         setTabs([]);
         setActiveDocumentId("");
@@ -458,6 +485,7 @@ export function App() {
       setExternalChangeDecisions({});
       setMutedExternalChangeSetId(null);
       setProjectSyncState("synced");
+      setProjectSyncStatus(null);
       return;
     }
     if (externalChangesBusy) return;
@@ -467,6 +495,15 @@ export function App() {
     }, 8000);
     return () => window.clearInterval(interval);
   }, [activeProject?.id, configLoaded, externalChangesBusy]);
+
+  useEffect(() => {
+    if (!configLoaded || !activeProject) return;
+    void refreshProjectSyncStatus(activeProject.id, { autoRun: isAutomaticSyncMode(activeProject.syncMode), silent: true });
+    const interval = window.setInterval(() => {
+      void refreshProjectSyncStatus(activeProject.id, { autoRun: isAutomaticSyncMode(activeProject.syncMode), silent: true });
+    }, 45000);
+    return () => window.clearInterval(interval);
+  }, [activeProject?.id, activeProject?.syncMode, activeDocumentId, configLoaded, documentSessions]);
 
   useEffect(() => {
     if (!configLoaded || !activeProject) {
@@ -628,6 +665,7 @@ export function App() {
   ], [activeProject, imageTabs, openUtilityTabs, tabs]);
   const activeTabId = activeUtilityTab === RELEASE_NOTES_UTILITY_TAB_ID ? RELEASE_NOTES_WORKSPACE_TAB_ID : activeImageId || activeDocumentId || (activeProject ? AI_CONVERSATION_TAB_ID : "");
   const activeSession = activeDocumentId ? documentSessions[activeDocumentId] : undefined;
+  const activeDocumentSyncStatus = activeDocumentId ? documentSyncStatuses[activeDocumentId] ?? null : null;
   useEffect(() => {
     if (!activeDocumentId || !activeSession?.document) return;
     lastDocumentContextRef.current = { id: activeDocumentId, path: activeSession.document.path };
@@ -756,6 +794,35 @@ export function App() {
       setExternalChangesMessage(changeSet.message ?? null);
     } catch (error) {
       if (!options.silent) showError(error, "No se pudieron revisar los cambios externos.");
+    }
+  }
+
+  function getOpenDocumentSyncState(): OpenDocumentSyncState[] {
+    return Object.entries(documentSessions)
+      .filter(([, session]) => session.document)
+      .map(([documentId, session]) => ({
+        documentId,
+        path: session.document?.path ?? "",
+        isActive: documentId === activeDocumentId,
+        isDirty: session.isDirty,
+        hasDraft: Boolean(session.hasRecoveredDraft || session.draftUpdatedAt),
+        baseFingerprint: session.baseFingerprint,
+      }));
+  }
+
+  async function refreshProjectSyncStatus(projectId = activeProject?.id, options: { autoRun?: boolean; silent?: boolean } = {}) {
+    if (!projectId) return;
+    try {
+      const payload = {
+        openDocuments: getOpenDocumentSyncState(),
+        allowAutoApply: Boolean(options.autoRun),
+      };
+      const status = options.autoRun ? await autoRunProjectSync(projectId, payload) : await scanProjectSync(projectId, payload);
+      setProjectSyncStatus(status);
+      setProjectSyncState(status.state);
+      setExternalChangesMessage(status.detail ?? status.label);
+    } catch (error) {
+      if (!options.silent) showError(error, "No se pudo comprobar la sincronización del proyecto.");
     }
   }
 
@@ -1279,6 +1346,19 @@ export function App() {
         });
       }, 1400);
       await refreshProjectCapabilityState(saved.projectId);
+      await refreshProjectSyncStatus(saved.projectId, { autoRun: isAutomaticSyncMode(activeProject?.syncMode), silent: true });
+      try {
+        const response = await getDocumentsSyncStatus([{ documentId, baseFingerprint: saved.baseFingerprint }]);
+        setDocumentSyncStatuses((currentStatuses) => ({
+          ...currentStatuses,
+          ...Object.fromEntries(response.documents.map((status) => [status.documentId, status])),
+        }));
+      } catch (error) {
+        showError(error, "No se pudo actualizar el estado del documento guardado.", {
+          source: "app.documentSync.afterSave",
+          suppressApiConnectionNotice: true,
+        });
+      }
       return true;
     } catch (error) {
       setDocumentSessions((currentSessions) => updateSession(currentSessions, documentId, { saveState: "idle" }));
@@ -1441,13 +1521,54 @@ export function App() {
 
   async function handleUpdateProject(projectId: string, project: ProjectPayload) {
     try {
-      const updatedProject = await updateProject(projectId, project);
-      setProjects((currentProjects) => currentProjects.map((currentProject) => (
-        currentProject.id === projectId ? updatedProject : currentProject
-      )));
-      setActiveProject((currentProject) => (
-        currentProject?.id === projectId ? updatedProject : currentProject
-      ));
+      const currentProject = projects.find((candidate) => candidate.id === projectId);
+      const githubRepository = project.githubRepository;
+      const githubSyncMode = project.syncMode === "auto-github" ? "auto-github" : "manual-github";
+      const isNewGithubConnection = Boolean(!currentProject?.githubRepository && githubRepository && project.syncMode !== "none");
+      const isGithubPublish = Boolean(isNewGithubConnection && project.publishToGithub && githubRepository);
+      const isGithubConnect = Boolean(isNewGithubConnection && !project.publishToGithub && githubRepository);
+      const identityPayload = isNewGithubConnection && currentProject
+        ? {
+          ...project,
+          versioningMode: currentProject.versioningMode,
+          syncMode: currentProject.syncMode,
+          githubRepository: currentProject.githubRepository ?? null,
+          publishToGithub: null,
+        }
+        : project;
+
+      await updateProject(projectId, identityPayload);
+      if (currentProject?.versioningMode === "none" && project.versioningMode === "local-git" && !isNewGithubConnection) {
+        await enableProjectHistory(projectId);
+      }
+      if (isGithubPublish && githubRepository && project.publishToGithub) {
+        await publishProjectGithub(projectId, {
+          owner: githubRepository.owner,
+          repo: githubRepository.repo,
+          visibility: project.publishToGithub.visibility,
+          description: project.publishToGithub.description,
+          syncMode: githubSyncMode,
+        });
+      } else if (isGithubConnect && githubRepository) {
+        await connectProjectGithub(projectId, {
+          owner: githubRepository.owner,
+          repo: githubRepository.repo,
+          defaultRef: githubRepository.defaultRef ?? null,
+          rootPath: githubRepository.rootPath,
+          syncMode: githubSyncMode,
+        });
+      } else if (currentProject?.githubRepository && currentProject.syncMode !== project.syncMode) {
+        await changeProjectSyncMode(projectId, project.syncMode);
+      }
+
+      const refreshedProjects = await listProjects();
+      const updatedProject = refreshedProjects.find((candidate) => candidate.id === projectId) ?? currentProject ?? null;
+      setProjects(refreshedProjects);
+      if (updatedProject) {
+        setActiveProject((currentProject) => (
+          currentProject?.id === projectId ? updatedProject : currentProject
+        ));
+      }
       if (activeProject?.id === projectId) {
         const nextTree = await getProjectTree(projectId);
         const restoredTree = applyTreeOpenState(nextTree, {
@@ -1463,6 +1584,7 @@ export function App() {
         setActiveDocumentId(nextProjectTabs.activeDocumentId);
         setActiveTreeNodeId(nextProjectTabs.activeDocumentId);
         if (!nextVersioningStatus.enabled) setHistoryOpen(false);
+        await refreshProjectSyncStatus(projectId, { autoRun: isAutomaticSyncMode(updatedProject?.syncMode), silent: true });
       }
       setEditProjectOpen(false);
     } catch (error) {
@@ -1625,19 +1747,134 @@ export function App() {
     }
   }
 
-  async function handleCreateActiveVersion(title: string): Promise<CreateVersionResponse | null> {
-    if (!activeProject || !activeDocumentId) return null;
+  async function handleSynchronizeActiveDocument(options: { preserveDraft?: boolean } = {}) {
+    if (!activeProject || !activeDocumentId || !versioningStatus?.enabled) return;
     const session = documentSessions[activeDocumentId];
-    if (session?.isDirty) {
+    const documentName = session?.document?.name ?? "documento";
+
+    if (session?.isDirty && !options.preserveDraft) {
       const saved = await handleSave(activeDocumentId);
-      if (!saved) return null;
+      if (!saved) return;
     }
+
+    setProjectSyncState("syncing");
     try {
-      const response = await createProjectVersion(activeProject.id, activeDocumentId, title);
+      const documentHasLocalChanges = Boolean(
+        activeDocumentSyncStatus?.localChanged
+        || activeDocumentSyncStatus?.versionState === "local-ahead"
+        || (session?.isDirty && !options.preserveDraft),
+      );
+      if (activeProject.versioningMode === "local-git" && documentHasLocalChanges) {
+        try {
+          await createProjectVersion(activeProject.id, activeDocumentId, `Actualiza ${documentName}`);
+        } catch (error) {
+          if (!isNoVersionChangesError(error)) throw error;
+        }
+        await refreshProjectCapabilityState(activeProject.id);
+      }
+
+      if (isGithubSyncMode(activeProject.syncMode)) {
+        const response = await pushProject(activeProject.id);
+        await refreshProjectCapabilityState(activeProject.id);
+        await refreshProjectSyncStatus(activeProject.id, { silent: true });
+        await checkOpenDocumentSync();
+        setExternalChangesMessage(response.message);
+        return;
+      }
+
+      await refreshProjectSyncStatus(activeProject.id, { silent: true });
+      await checkOpenDocumentSync();
+    } catch (error) {
+      setProjectSyncState("error");
+      showError(error, "No se pudo sincronizar el documento.");
+    }
+  }
+
+  async function handleDiscardActiveDocumentDraft() {
+    if (!activeDocumentId) return false;
+    try {
+      await discardDocumentDraft(activeDocumentId);
+      await loadDocumentSession(activeDocumentId, true);
+      await checkOpenDocumentSync();
+      setNotice({ title: "Cambios descartados", message: "Se ha restaurado la última versión guardada del documento.", tone: "info" });
+      return true;
+    } catch (error) {
+      showError(error, "No se pudieron descartar los cambios pendientes.");
+      return false;
+    }
+  }
+
+  async function handleApplyIncomingDocumentVersion(options: { discardDraft: boolean }) {
+    if (!activeProject || !activeDocumentId) return;
+    try {
+      if (options.discardDraft) {
+        await discardDocumentDraft(activeDocumentId);
+      }
+
+      const incomingForActiveDocument = activeDocumentSyncStatus?.versionState === "remote-ahead" || activeDocumentSyncStatus?.versionState === "diverged";
+      if (incomingForActiveDocument && isGithubSyncMode(activeProject.syncMode)) {
+        await handlePullProject();
+        await loadDocumentSession(activeDocumentId, true);
+        await refreshProjectSyncStatus(activeProject.id, { silent: true });
+        await checkOpenDocumentSync();
+        return;
+      }
+
+      if (activeDocumentSyncStatus?.diskChanged || activeDocumentSyncStatus?.conflictStatus === "disk-changed") {
+        await handleLoadDiskVersion();
+        await checkOpenDocumentSync();
+        return;
+      }
+
+      await refreshProjectSyncStatus(activeProject.id, { autoRun: isAutomaticSyncMode(activeProject.syncMode), silent: true });
+      await checkOpenDocumentSync();
+    } catch (error) {
+      showError(error, "No se pudo actualizar el documento con la última versión disponible.");
+    }
+  }
+
+  function requestDiscardActiveDocumentDraft() {
+    setDocumentFooterDialog("discard-draft");
+  }
+
+  function requestIncomingDocumentVersion() {
+    setDocumentFooterDialog((activeSession?.isDirty ?? false) ? "update-remote-discard-draft" : "update-remote");
+  }
+
+  function requestSynchronizeActiveDocument() {
+    if (activeSession?.isDirty) {
+      setDocumentFooterDialog("sync-saved-while-draft");
+      return;
+    }
+    void handleSynchronizeActiveDocument();
+  }
+
+  async function confirmDocumentFooterDialog() {
+    const dialog = documentFooterDialog;
+    setDocumentFooterDialog(null);
+    if (dialog === "discard-draft") {
+      await handleDiscardActiveDocumentDraft();
+      return;
+    }
+    if (dialog === "update-remote" || dialog === "update-remote-discard-draft") {
+      await handleApplyIncomingDocumentVersion({ discardDraft: dialog === "update-remote-discard-draft" });
+      return;
+    }
+    if (dialog === "sync-saved-while-draft") {
+      await handleSynchronizeActiveDocument({ preserveDraft: true });
+    }
+  }
+
+  async function handleRestoreActiveVersion(versionId: string): Promise<CreateVersionResponse | null> {
+    if (!activeProject || !activeDocumentId) return null;
+    try {
+      const response = await restoreVersion(activeDocumentId, versionId);
+      await loadDocumentSession(activeDocumentId, true);
       await refreshProjectCapabilityState(activeProject.id);
+      await refreshProjectSyncStatus(activeProject.id, { autoRun: isAutomaticSyncMode(activeProject.syncMode), silent: true });
       return response;
     } catch (error) {
-      showError(error, "No se pudo crear la versión del documento.");
+      showError(error, "No se pudo restaurar la versión seleccionada.");
       return null;
     }
   }
@@ -2252,6 +2489,7 @@ export function App() {
           ? [result.node.path]
           : [],
       });
+      void refreshProjectSyncStatus(activeProject.id, { autoRun: isAutomaticSyncMode(activeProject.syncMode), silent: true });
     } else {
       setTree(result.tree);
     }
@@ -2339,7 +2577,7 @@ export function App() {
     }
   }
 
-  const historyEnabled = Boolean(activeProject && authStatus.isAuthenticated && versioningStatus?.enabled);
+  const historyEnabled = Boolean(activeProject && versioningStatus?.enabled && (!isGithubSyncMode(activeProject.syncMode) || authStatus.isAuthenticated));
 
   return (
     <>
@@ -2370,6 +2608,7 @@ export function App() {
         activeDocument={activeSession?.document ?? null}
         activeMarkdown={activeSession?.markdown ?? ""}
         activeDocumentDirty={activeSession?.isDirty ?? false}
+        activeDocumentSyncStatus={activeDocumentSyncStatus}
         pendingEditorOperations={pendingEditorOperations}
         activeDocumentConflictStatus={activeSession?.conflictStatus ?? "none"}
         activeDocumentHasRecoveredDraft={activeSession?.hasRecoveredDraft ?? false}
@@ -2381,6 +2620,7 @@ export function App() {
         historyOpen={historyOpen}
         historyEnabled={historyEnabled}
         versioningStatus={versioningStatus}
+        projectSyncStatus={projectSyncStatus}
         externalChangeSet={externalChangeSet}
         externalChangeDecisions={externalChangeDecisions}
         externalChangesOpen={externalChangesOpen}
@@ -2421,7 +2661,9 @@ export function App() {
         onImportExternalChanges={() => void handleImportExternalChanges()}
         onImportSafeExternalChanges={() => void handleImportExternalChanges({ safeOnly: true })}
         onOmitExternalChanges={handleOmitExternalChanges}
-        onCreateVersion={handleCreateActiveVersion}
+        onRestoreVersion={handleRestoreActiveVersion}
+        onSaveActiveDocument={() => handleSave()}
+        onDiscardActiveDocumentDraft={handleDiscardActiveDocumentDraft}
         onSendAiPrompt={handleSendAiPrompt}
         onAiTranscriptionChange={handleAiTranscriptionChange}
         onClearAiSelectionFocus={() => setAiSelectionFocus(null)}
@@ -2454,6 +2696,9 @@ export function App() {
         onEditorOperationFailed={handleEditorOperationFailed}
         onDocumentSelectionChange={handleDocumentSelectionChange}
         onSave={() => void handleSave()}
+        onSynchronizeDocument={requestSynchronizeActiveDocument}
+        onUpdateDocumentFromRemote={requestIncomingDocumentVersion}
+        onDiscardPendingDocumentChanges={requestDiscardActiveDocumentDraft}
         onKeepLocalVersion={() => void handleSave(activeDocumentId, true)}
         onLoadDiskVersion={() => void handleLoadDiskVersion()}
         onToggleHistory={() => {
@@ -2548,8 +2793,16 @@ export function App() {
         capabilities={projectCapabilities}
         githubRepositories={githubRepositories}
         githubRepositoriesLoading={githubRepositoriesLoading}
+        projectSyncStatus={projectSyncStatus}
         onLoginGithub={() => void handleOpenGithubLogin()}
         onRefreshGithubRepositories={() => void refreshGithubRepositories()}
+      />
+      <DocumentFooterActionDialog
+        open={documentFooterDialog !== null}
+        action={documentFooterDialog}
+        documentName={activeSession?.document?.name ?? "documento"}
+        onCancel={() => setDocumentFooterDialog(null)}
+        onConfirm={() => void confirmDocumentFooterDialog()}
       />
       <MoveDocumentDialog
         open={moveNode !== null}
@@ -2614,6 +2867,18 @@ export function App() {
           [documentId]: createLoadedDocumentSession(record, currentSession),
         };
       });
+      try {
+        const response = await getDocumentsSyncStatus([{ documentId, baseFingerprint: record.baseFingerprint }]);
+        setDocumentSyncStatuses((currentStatuses) => ({
+          ...currentStatuses,
+          ...Object.fromEntries(response.documents.map((status) => [status.documentId, status])),
+        }));
+      } catch (error) {
+        showError(error, "No se pudo comprobar el estado del documento abierto.", {
+          source: "app.documentSync.load",
+          suppressApiConnectionNotice: true,
+        });
+      }
     } catch (error) {
       setDocumentSessions((currentSessions) => {
         const { [documentId]: _failedSession, ...nextSessions } = currentSessions;
@@ -2669,6 +2934,10 @@ export function App() {
 
     try {
       const response = await getDocumentsSyncStatus(documents);
+      setDocumentSyncStatuses((currentStatuses) => ({
+        ...currentStatuses,
+        ...Object.fromEntries(response.documents.map((status) => [status.documentId, status])),
+      }));
       const cleanChangedDocumentIds = response.documents
         .filter((status) => {
           if (!status.diskChanged) return false;
@@ -3196,6 +3465,85 @@ function CloseDirtyDocumentDialog({
   );
 }
 
+function DocumentFooterActionDialog({
+  open,
+  action,
+  documentName,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  action: DocumentFooterDialog | null;
+  documentName: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!open || !action) return null;
+  const copy = getDocumentFooterActionCopy(action, documentName);
+
+  return (
+    <div className="knownext-modal-overlay fixed inset-0 z-[90] grid place-items-center bg-black/20">
+      <section className="w-[440px] rounded-lg border border-line bg-white shadow-menu" role="dialog" aria-modal="true" aria-labelledby="document-footer-action-title">
+        <header className="border-b border-line px-5 py-4">
+          <h2 id="document-footer-action-title" className="text-[15px] font-semibold text-ink-primary">{copy.title}</h2>
+          <p className="mt-1 truncate text-[11px] text-ink-secondary">{documentName}</p>
+        </header>
+        <div className="px-5 py-5">
+          <p className="text-[12px] leading-5 text-ink-secondary">{copy.description}</p>
+        </div>
+        <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
+          <button className="h-9 rounded-md border border-line px-3 text-[11px] font-medium text-ink-primary hover:bg-panel" type="button" onClick={onCancel}>
+            Cancelar
+          </button>
+          <button
+            className={[
+              "h-9 rounded-md px-3 text-[11px] font-semibold text-white shadow-subtle",
+              copy.danger ? "bg-red-600 hover:bg-red-700" : "bg-brand-orange hover:bg-brand-dark",
+            ].join(" ")}
+            type="button"
+            onClick={onConfirm}
+          >
+            {copy.confirmLabel}
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function getDocumentFooterActionCopy(action: DocumentFooterDialog, documentName: string) {
+  if (action === "discard-draft") {
+    return {
+      title: "Descartar cambios pendientes",
+      description: `Se volverá a la última versión guardada de ${documentName}. Los cambios no guardados se perderán.`,
+      confirmLabel: "Descartar cambios",
+      danger: true,
+    };
+  }
+  if (action === "update-remote-discard-draft") {
+    return {
+      title: "Actualizar y perder cambios pendientes",
+      description: "Existe una versión más reciente en Git/GitHub. Si continúas, se descargará esa versión y se perderán los cambios pendientes que todavía no has guardado.",
+      confirmLabel: "Actualizar y descartar",
+      danger: true,
+    };
+  }
+  if (action === "sync-saved-while-draft") {
+    return {
+      title: "Sincronizar versión guardada",
+      description: "Se sincronizará la última versión guardada del documento. Los cambios pendientes seguirán abiertos como borrador hasta que los guardes.",
+      confirmLabel: "Sincronizar versión guardada",
+      danger: false,
+    };
+  }
+  return {
+    title: "Actualizar documento",
+    description: "Existe una versión más reciente en Git/GitHub. Se descargará y se mostrará la última versión del documento.",
+    confirmLabel: "Actualizar",
+    danger: false,
+  };
+}
+
 function RecoverableDraftsDialog({
   open,
   drafts,
@@ -3533,4 +3881,18 @@ function MoveDocumentDialog({
       </section>
     </div>
   );
+}
+
+function isAutomaticSyncMode(syncMode?: SyncMode | null) {
+  return syncMode === "auto-local" || syncMode === "auto-github";
+}
+
+function isGithubSyncMode(syncMode?: SyncMode | null) {
+  return syncMode === "manual-github" || syncMode === "auto-github";
+}
+
+function isNoVersionChangesError(error: unknown) {
+  if (!(error instanceof ApiError) || error.status !== 409) return false;
+  const detail = typeof error.detail === "string" ? error.detail : error.message;
+  return detail.includes("No document changes") || detail.includes("No selected changes");
 }

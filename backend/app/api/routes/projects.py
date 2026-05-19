@@ -26,6 +26,7 @@ from app.schemas.github import SyncResponse
 from app.services.asset_service import asset_service
 from app.services.external_changes_service import external_changes_service
 from app.services.project_service import project_service
+from app.services.sync_service import sync_service
 
 router = APIRouter()
 
@@ -77,12 +78,14 @@ def get_project_versioning_status(project_id: str) -> ProjectVersioningStatus:
 
 @router.post("/projects/{project_id}/sync/pull", response_model=SyncResponse)
 def pull_project(project_id: str) -> SyncResponse:
-    return SyncResponse(**project_service.sync_pull(project_id))
+    status = sync_service.pull(project_id)
+    return SyncResponse(status=status.state, message=status.detail or status.label)
 
 
 @router.post("/projects/{project_id}/sync/push", response_model=SyncResponse)
 def push_project(project_id: str) -> SyncResponse:
-    return SyncResponse(**project_service.sync_push(project_id))
+    status = sync_service.push(project_id)
+    return SyncResponse(status=status.state, message=status.detail or status.label)
 
 
 @router.get("/projects/{project_id}/external-changes", response_model=ExternalChangeSet)

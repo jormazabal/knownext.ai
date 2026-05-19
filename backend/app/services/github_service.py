@@ -83,6 +83,7 @@ class GithubService:
                     title=commit.get("message", "Versión GitHub").splitlines()[0],
                     author=name,
                     authorInitials=git_service._initials(name),
+                    createdAt=date_value or None,
                     relativeTime=git_service._relative_time(date_value) if date_value else "",
                     current=index == 0,
                 )
@@ -147,6 +148,7 @@ class GithubService:
             title=body["message"],
             author=author,
             authorInitials=git_service._initials(author),
+            createdAt=commit.get("author", {}).get("date"),
             relativeTime="ahora",
             current=True,
         )

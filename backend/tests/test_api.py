@@ -42,7 +42,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.17.3"
+    assert payload["version"] == "0.18.0"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -1139,7 +1139,7 @@ def test_projects_registry_migrates_v1_project_modes(tmp_path) -> None:
     assert response.status_code == 200
     project = response.json()[0]
     assert project["versioningMode"] == "local-git"
-    assert project["authRequired"] is True
+    assert project["authRequired"] is False
     assert json.loads(projects_file.read_text(encoding="utf-8"))["schemaVersion"] == 2
 
 
@@ -1164,7 +1164,7 @@ def test_versioned_project_creation_requires_github_login(tmp_path) -> None:
 
 def test_auth_status_mock_login_logout_and_capabilities() -> None:
     assert client.get("/api/auth/status").json()["isAuthenticated"] is False
-    assert client.get("/api/projects/capabilities").json()["canUseLocalGit"] is False
+    assert client.get("/api/projects/capabilities").json()["canUseLocalGit"] is True
 
     device = client.post("/api/auth/github/device/start")
     assert device.status_code == 200
@@ -1493,6 +1493,57 @@ def test_document_sync_status_detects_clean_changed_and_orphaned_document(tmp_pa
     assert orphaned.json()["documents"][0]["exists"] is False
     assert orphaned.json()["documents"][0]["orphaned"] is True
     assert orphaned.json()["documents"][0]["conflictStatus"] == "orphaned"
+
+
+def test_document_sync_status_reports_only_the_requested_document_version_state(tmp_path) -> None:
+    docs_root = tmp_path / "git-sync-docs"
+
+    created = client.post(
+        "/api/projects",
+        json={
+            "name": "Document Sync",
+            "folderPath": str(docs_root),
+            "icon": "folder",
+            "iconColor": "#F37021",
+            "creationMode": "new-local",
+            "storageMode": "local-files",
+            "versioningMode": "local-git",
+            "syncMode": "manual-local",
+        },
+    )
+    assert created.status_code == 201
+    project_id = created.json()["id"]
+
+    first = client.post(f"/api/projects/{project_id}/documents", json={"parentId": None, "name": "first.md", "markdown": "# First\n"})
+    second = client.post(f"/api/projects/{project_id}/documents", json={"parentId": None, "name": "second.md", "markdown": "# Second\n"})
+    first_id = first.json()["node"]["id"]
+    second_id = second.json()["node"]["id"]
+    assert client.post(f"/api/projects/{project_id}/versions", json={"documentId": first_id, "title": "Version first"}).status_code == 200
+    assert client.post(f"/api/projects/{project_id}/versions", json={"documentId": second_id, "title": "Version second"}).status_code == 200
+
+    first_document = client.get(f"/api/documents/{first_id}").json()
+    second_document = client.get(f"/api/documents/{second_id}").json()
+    saved = client.put(
+        f"/api/documents/{first_id}",
+        json={"markdown": "# First\n\nChanged locally\n", "baseFingerprint": first_document["baseFingerprint"]},
+    )
+    assert saved.status_code == 200
+
+    status = client.post(
+        "/api/documents/sync-status",
+        json={
+            "documents": [
+                {"documentId": first_id, "baseFingerprint": saved.json()["baseFingerprint"]},
+                {"documentId": second_id, "baseFingerprint": second_document["baseFingerprint"]},
+            ],
+        },
+    )
+    assert status.status_code == 200
+    statuses = {document["documentId"]: document for document in status.json()["documents"]}
+    assert statuses[first_id]["versionState"] == "local-ahead"
+    assert statuses[first_id]["localChanged"] is True
+    assert statuses[second_id]["versionState"] == "ok"
+    assert statuses[second_id]["localChanged"] is False
 
 
 def test_orphan_drafts_can_be_listed_restored_discarded_and_not_overwritten(tmp_path) -> None:

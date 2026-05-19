@@ -28,6 +28,13 @@ class GitService:
     def is_repository(self, root: Path) -> bool:
         return (root / ".git").exists()
 
+    def is_available(self) -> bool:
+        try:
+            subprocess.run(["git", "--version"], text=True, capture_output=True, check=False)
+            return True
+        except FileNotFoundError:
+            return False
+
     def ensure_repository(self, root: Path) -> None:
         root.mkdir(parents=True, exist_ok=True)
         if self.is_repository(root):
@@ -58,6 +65,7 @@ class GitService:
                     title=title or "Versión del documento",
                     author=author or "KnowNext.ai",
                     authorInitials=self._initials(author or "KN"),
+                    createdAt=date_value,
                     relativeTime=self._relative_time(date_value),
                     current=index == 0,
                 )
@@ -84,15 +92,83 @@ class GitService:
         last_date = self._run(root, ["git", "log", "-1", "--date=iso-strict", "--pretty=%ad"], allow_empty=True).strip() or None
         return has_changes, last_hash, self._relative_time(last_date) if last_date else None
 
-    def pull(self, root: Path) -> str:
+    def pull(self, root: Path, auth_token: str | None = None) -> str:
         if not self.is_repository(root):
             raise HTTPException(status_code=409, detail="Project is not a Git repository")
-        return self._run(root, ["git", "pull", "--ff-only"], allow_empty=True)
+        return self._run(root, self._with_auth_header(["git", "pull", "--ff-only"], auth_token), allow_empty=True)
 
-    def push(self, root: Path) -> str:
+    def push(self, root: Path, auth_token: str | None = None) -> str:
         if not self.is_repository(root):
             raise HTTPException(status_code=409, detail="Project is not a Git repository")
-        return self._run(root, ["git", "push"], allow_empty=True)
+        return self._run(root, self._with_auth_header(["git", "push"], auth_token), allow_empty=True)
+
+    def fetch(self, root: Path, auth_token: str | None = None) -> str:
+        if not self.is_repository(root):
+            raise HTTPException(status_code=409, detail="Project is not a Git repository")
+        if not self.has_remote_origin(root):
+            raise HTTPException(status_code=409, detail="Project has no GitHub remote configured")
+        return self._run(root, self._with_auth_header(["git", "fetch", "origin"], auth_token), allow_empty=True)
+
+    def current_branch(self, root: Path) -> str | None:
+        if not self.is_repository(root):
+            return None
+        return self._run(root, ["git", "branch", "--show-current"], allow_empty=True).strip() or None
+
+    def remote_ref(self, root: Path, branch: str | None = None) -> str | None:
+        branch_name = branch or self.current_branch(root) or "main"
+        remote = f"origin/{branch_name}"
+        return remote if self.rev_parse(root, remote) else None
+
+    def rev_parse(self, root: Path, ref: str = "HEAD", short: bool = False) -> str | None:
+        if not self.is_repository(root):
+            return None
+        command = ["git", "rev-parse"]
+        if short:
+            command.append("--short")
+        command.append(ref)
+        return self._run(root, command, allow_empty=True).strip() or None
+
+    def merge_base(self, root: Path, left: str, right: str) -> str | None:
+        if not self.is_repository(root):
+            return None
+        return self._run(root, ["git", "merge-base", left, right], allow_empty=True).strip() or None
+
+    def is_ancestor(self, root: Path, ancestor: str, descendant: str) -> bool:
+        if not self.is_repository(root):
+            return False
+        try:
+            self._run(root, ["git", "merge-base", "--is-ancestor", ancestor, descendant], allow_empty=True)
+            return True
+        except HTTPException:
+            return False
+
+    def changed_paths_between(self, root: Path, left: str, right: str) -> list[str]:
+        if not self.is_repository(root):
+            return []
+        output = self._run(root, ["git", "diff", "--name-only", left, right], allow_empty=True)
+        return [line.strip().replace("\\", "/") for line in output.splitlines() if line.strip()]
+
+    def has_changes_for_path(self, root: Path, relative_path: str) -> bool:
+        if not self.is_repository(root):
+            return False
+        normalized_path = relative_path.replace("\\", "/").strip("/")
+        if not normalized_path:
+            return False
+        status = self._run(
+            root,
+            ["git", "status", "--porcelain", "-uall", "--", normalized_path],
+            allow_empty=True,
+            optional_locks=False,
+        )
+        return bool(status.strip())
+
+    def working_tree_dirty(self, root: Path) -> bool:
+        return bool(self.porcelain_status(root).strip())
+
+    def read_file_at_version(self, root: Path, commit_hash: str, relative_path: str) -> str:
+        if not self.is_repository(root):
+            raise HTTPException(status_code=409, detail="Project is not a Git repository")
+        return self._run(root, ["git", "show", f"{commit_hash}:{relative_path}"])
 
     def porcelain_status(self, root: Path) -> str:
         if not self.is_repository(root):
@@ -145,6 +221,18 @@ class GitService:
                 break
             time.sleep(0.2 * (attempt + 1))
         raise HTTPException(status_code=409, detail=last_error)
+
+    def _with_auth_header(self, command: list[str], auth_token: str | None) -> list[str]:
+        if not auth_token:
+            return command
+        if len(command) < 2 or command[0] != "git":
+            return command
+        return [
+            "git",
+            "-c",
+            f"http.extraHeader=Authorization: Bearer {auth_token}",
+            *command[1:],
+        ]
 
     def _lock_for(self, root: Path) -> threading.RLock:
         key = str(root.resolve()).lower()
