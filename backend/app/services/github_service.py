@@ -53,6 +53,17 @@ class GithubService:
             permissions=["pull", "push"],
         )
 
+    def verify_repository_access(self, repository: GithubRepository) -> GithubRepository:
+        data = self._request_json(f"/repos/{repository.owner}/{repository.repo}")
+        permissions = data.get("permissions", {})
+        return GithubRepository(
+            owner=(data.get("owner") or {}).get("login") or repository.owner,
+            repo=data.get("name") or repository.repo,
+            defaultRef=data.get("default_branch") or repository.defaultRef or "main",
+            rootPath=repository.rootPath,
+            permissions=[permission for permission, allowed in permissions.items() if allowed] or repository.permissions,
+        )
+
     def hydrate_repository_cache(self, project_id: str, root: Path, repository: GithubRepository) -> None:
         root.mkdir(parents=True, exist_ok=True)
         metadata = self._read_cache_metadata(root)

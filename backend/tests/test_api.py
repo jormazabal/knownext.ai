@@ -42,7 +42,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.18.3"
+    assert payload["version"] == "0.18.4"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -1291,6 +1291,13 @@ def test_github_api_project_uses_cache_metadata_and_blocks_remote_conflicts(tmp_
     remote_sha = {"value": "remote-1"}
 
     def fake_github_request(path: str, method: str = "GET", body: dict | None = None):
+        if path == "/repos/acme/docs":
+            return {
+                "owner": {"login": "acme"},
+                "name": "docs",
+                "default_branch": "main",
+                "permissions": {"pull": True, "push": True},
+            }
         if path == "/repos/acme/docs/contents":
             return [{"path": "guide.md", "type": "file", "sha": remote_sha["value"]}]
         if path == "/repos/acme/docs/contents/guide.md" and method == "GET":
@@ -1337,6 +1344,11 @@ def test_github_api_project_uses_cache_metadata_and_blocks_remote_conflicts(tmp_
     conflict = client.post(f"/api/projects/{project_id}/versions", json={"documentId": document_id, "title": "Publica guía"})
     assert conflict.status_code == 409
     assert conflict.json()["detail"]["code"] == "github_remote_changed"
+
+    verified = client.post(f"/api/projects/{project_id}/github/verify-connection")
+    assert verified.status_code == 200
+    assert verified.json()["state"] == "synced"
+    assert verified.json()["detail"] == "Conexión verificada con acme/docs."
 
     remote_sha["value"] = "remote-1"
     version = client.post(f"/api/projects/{project_id}/versions", json={"documentId": document_id, "title": "Publica guía"})

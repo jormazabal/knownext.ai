@@ -41,6 +41,7 @@ type CreateProjectDialogProps = {
   projectSyncStatus?: ProjectSyncStatus | null;
   onLoginGithub?: () => void;
   onLogoutGithub?: () => void;
+  onVerifyGithubConnection?: () => Promise<ProjectSyncStatus | null | void>;
   onRefreshGithubRepositories?: () => void;
 };
 
@@ -91,6 +92,7 @@ export function CreateProjectDialog({
   projectSyncStatus = null,
   onLoginGithub,
   onLogoutGithub,
+  onVerifyGithubConnection,
   onRefreshGithubRepositories,
 }: CreateProjectDialogProps) {
   const [name, setName] = useState("");
@@ -400,6 +402,7 @@ export function CreateProjectDialog({
                 githubSyncPreference={githubSyncPreference}
                 onLoginGithub={onLoginGithub}
                 onLogoutGithub={onLogoutGithub}
+                onVerifyGithubConnection={onVerifyGithubConnection}
                 onRefreshGithubRepositories={onRefreshGithubRepositories}
                 onGithubOwnerChange={setGithubOwner}
                 onGithubRepoChange={setGithubRepo}
@@ -1082,6 +1085,7 @@ function EditProjectForm({
   githubSyncPreference,
   onLoginGithub,
   onLogoutGithub,
+  onVerifyGithubConnection,
   onRefreshGithubRepositories,
   onGithubOwnerChange,
   onGithubRepoChange,
@@ -1122,6 +1126,7 @@ function EditProjectForm({
   githubSyncPreference: "manual" | "auto";
   onLoginGithub?: () => void;
   onLogoutGithub?: () => void;
+  onVerifyGithubConnection?: () => Promise<ProjectSyncStatus | null | void>;
   onRefreshGithubRepositories?: () => void;
   onGithubOwnerChange: (owner: string) => void;
   onGithubRepoChange: (repo: string) => void;
@@ -1270,6 +1275,7 @@ function EditProjectForm({
                     authStatus={authStatus}
                     onLoginGithub={onLoginGithub}
                     onLogoutGithub={onLogoutGithub}
+                    onVerifyGithubConnection={onVerifyGithubConnection}
                   />
                 ) : (
                   <DisconnectedGithubPanel
@@ -1542,6 +1548,7 @@ function ConnectedGithubPanel({
   authStatus,
   onLoginGithub,
   onLogoutGithub,
+  onVerifyGithubConnection,
 }: {
   repository: string;
   projectSyncStatus?: ProjectSyncStatus | null;
@@ -1549,9 +1556,32 @@ function ConnectedGithubPanel({
   authStatus: AuthStatus;
   onLoginGithub?: () => void;
   onLogoutGithub?: () => void;
+  onVerifyGithubConnection?: () => Promise<ProjectSyncStatus | null | void>;
 }) {
+  const [verificationState, setVerificationState] = useState<"idle" | "checking" | "success" | "error">("idle");
+  const [verificationMessage, setVerificationMessage] = useState<string | null>(null);
   const credentialIssue = isGithubCredentialIssue(projectSyncStatus);
   const hasRemoteIssue = credentialIssue || projectSyncStatus?.state === "error" || projectSyncStatus?.state === "offline";
+
+  async function handleVerifyConnection() {
+    if (!onVerifyGithubConnection || verificationState === "checking") return;
+    setVerificationState("checking");
+    setVerificationMessage("Comprobando acceso al repositorio con la cuenta conectada...");
+    try {
+      const status = await onVerifyGithubConnection();
+      if (status?.state === "error" || status?.state === "offline") {
+        setVerificationState("error");
+        setVerificationMessage(status.detail ?? "GitHub sigue rechazando la conexión. Conecta la cuenta de nuevo.");
+        return;
+      }
+      setVerificationState("success");
+      setVerificationMessage(status?.detail ?? `Conexión verificada. KnowNext.ai puede acceder a ${repository} con la cuenta actual.`);
+    } catch {
+      setVerificationState("error");
+      setVerificationMessage("No se pudo verificar la conexión. Revisa la cuenta conectada o inténtalo de nuevo.");
+    }
+  }
+
   return (
     <div className="space-y-3 rounded-md border border-line bg-panel px-3 py-3">
       <div className="flex items-start justify-between gap-3">
@@ -1573,9 +1603,9 @@ function ConnectedGithubPanel({
           <div className="flex items-start gap-2">
             <AlertTriangle size={14} className="mt-0.5 shrink-0 text-red-700" />
             <div className="min-w-0 flex-1">
-              <div className="text-[11px] font-semibold text-red-800">GitHub no acepta las credenciales guardadas</div>
+              <div className="text-[11px] font-semibold text-red-800">GitHub no acepta la conexión actual</div>
               <p className="mt-1 text-[10px] leading-4 text-red-700">
-                Vuelve a conectar GitHub para renovar el acceso. Si quieres usar otra cuenta, cierra sesión primero.
+                La cuenta conectada no permite acceder a este repositorio. Puedes probar la conexión actual o conectar de nuevo tu cuenta de GitHub.
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
                 <button
@@ -1584,7 +1614,16 @@ function ConnectedGithubPanel({
                   disabled={!onLoginGithub}
                   onClick={onLoginGithub}
                 >
-                  {authStatus.isAuthenticated ? "Revisar credenciales" : "Conectar GitHub"}
+                  {authStatus.isAuthenticated ? "Conectar cuenta de GitHub" : "Conectar GitHub"}
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-200 bg-white px-3 text-[11px] font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={!onVerifyGithubConnection || verificationState === "checking"}
+                  onClick={() => void handleVerifyConnection()}
+                >
+                  <RefreshCw size={13} className={verificationState === "checking" ? "animate-spin" : ""} />
+                  {verificationState === "checking" ? "Verificando..." : "Verificar conexión"}
                 </button>
                 {authStatus.isAuthenticated ? (
                   <button
@@ -1597,6 +1636,20 @@ function ConnectedGithubPanel({
                   </button>
                 ) : null}
               </div>
+              {verificationMessage ? (
+                <div
+                  className={[
+                    "mt-2 rounded-md border px-2 py-1.5 text-[10px] leading-4",
+                    verificationState === "success"
+                      ? "border-emerald-100 bg-emerald-50 text-emerald-800"
+                      : verificationState === "checking"
+                        ? "border-red-100 bg-white/70 text-red-700"
+                        : "border-red-100 bg-white text-red-700",
+                  ].join(" ")}
+                >
+                  {verificationMessage}
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
