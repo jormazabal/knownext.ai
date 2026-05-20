@@ -23,6 +23,7 @@ import {
   Presentation,
   FilePlus2,
   FileUp,
+  GitBranch,
   Settings,
   X,
   type LucideIcon,
@@ -47,11 +48,23 @@ type DocumentTreeProps = {
   onExpandTree: () => void;
   onCollapseTree: () => void;
   onConfigureProject: () => void;
+  onOpenProjectStatus?: () => void;
   onRenameNode: (nodeId: string, name: string) => void;
   onToggleNode: (nodeId: string) => void;
   onContextAction: (action: DocumentTreeAction, node: DocumentTreeNode) => void;
   onMoveNode: (node: DocumentTreeNode, targetFolderId: string | null) => void | Promise<void>;
   changeBadges?: Record<string, string>;
+  projectStatus?: ProjectTreeStatus | null;
+};
+
+export type ProjectTreeStatus = {
+  label: string;
+  detail: string;
+  badge?: string | null;
+  tone: "ok" | "info" | "warning" | "danger" | "muted";
+  showFooter?: boolean;
+  footerLabel?: string;
+  footerDetail?: string;
 };
 
 type TreeFilter = "all" | "documents" | "images";
@@ -88,11 +101,13 @@ export function DocumentTree({
   onExpandTree,
   onCollapseTree,
   onConfigureProject,
+  onOpenProjectStatus,
   onRenameNode,
   onToggleNode,
   onContextAction,
   onMoveNode,
   changeBadges = {},
+  projectStatus = null,
 }: DocumentTreeProps) {
   const closeTimer = useRef<number | null>(null);
   const expandTimer = useRef<number | null>(null);
@@ -239,6 +254,8 @@ export function DocumentTree({
         onExpandTree={onExpandTree}
         onCollapseTree={onCollapseTree}
         onConfigureProject={onConfigureProject}
+        onOpenProjectStatus={onOpenProjectStatus}
+        projectStatus={projectStatus}
       />
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pb-2" onScroll={() => setOpenMenu(null)}>
         {visibleNodes.length > 0 ? (
@@ -271,6 +288,18 @@ export function DocumentTree({
           </div>
         )}
       </div>
+      {projectStatus?.showFooter && onOpenProjectStatus ? (
+        <button
+          className={["mx-1 mt-1 flex min-h-11 items-center gap-2 rounded-md border px-2.5 py-2 text-left transition", getProjectStatusFooterClass(projectStatus.tone)].join(" ")}
+          onClick={onOpenProjectStatus}
+        >
+          <span className={["h-2 w-2 shrink-0 rounded-full", getProjectStatusDotClass(projectStatus.tone)].join(" ")} />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[11px] font-semibold">{projectStatus.footerLabel ?? projectStatus.label}</span>
+            <span className="block truncate text-[10px] opacity-80">{projectStatus.footerDetail ?? projectStatus.detail}</span>
+          </span>
+        </button>
+      ) : null}
       {draggedNode ? (
         <div
           className={[
@@ -738,6 +767,8 @@ function DocumentTreeToolbar({
   onExpandTree,
   onCollapseTree,
   onConfigureProject,
+  onOpenProjectStatus,
+  projectStatus,
 }: {
   filter: ExtendedTreeFilter;
   disabled: boolean;
@@ -749,6 +780,8 @@ function DocumentTreeToolbar({
   onExpandTree: () => void;
   onCollapseTree: () => void;
   onConfigureProject: () => void;
+  onOpenProjectStatus?: () => void;
+  projectStatus?: ProjectTreeStatus | null;
 }) {
   const [openPanel, setOpenPanel] = useState<"create" | "view" | null>(null);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
@@ -797,6 +830,16 @@ function DocumentTreeToolbar({
           disabled={disabled}
           onClick={() => setOpenPanel((currentPanel) => (currentPanel === "view" ? null : "view"))}
         />
+        {onOpenProjectStatus ? (
+          <ToolbarIconButton
+            label={projectStatus ? `Protección e historial: ${projectStatus.label}` : "Protección e historial"}
+            icon={GitBranch}
+            disabled={disabled}
+            badge={projectStatus?.badge}
+            tone={projectStatus?.tone}
+            onClick={onOpenProjectStatus}
+          />
+        ) : null}
         <ToolbarIconButton label="Ajustes del proyecto" icon={Settings} disabled={disabled} onClick={onConfigureProject} />
       </div>
       {openPanel === "create" ? (
@@ -832,19 +875,23 @@ function ToolbarIconButton({
   icon: Icon,
   active = false,
   disabled = false,
+  badge = null,
+  tone = "muted",
   onClick,
 }: {
   label: string;
   icon: LucideIcon;
   active?: boolean;
   disabled?: boolean;
+  badge?: string | null;
+  tone?: ProjectTreeStatus["tone"];
   onClick?: () => void;
 }) {
   return (
     <button
       className={[
-        "grid h-7 w-7 place-items-center rounded-md border border-transparent text-ink-secondary transition",
-        active ? "border-orange-100 bg-brand-hover text-brand-orange" : "hover:border-orange-100 hover:bg-brand-hover hover:text-brand-orange",
+        "relative grid h-7 w-7 place-items-center rounded-md border border-transparent transition",
+        active ? "border-orange-100 bg-brand-hover text-brand-orange" : getToolbarToneClass(tone),
         disabled ? "cursor-not-allowed opacity-40" : "",
       ].join(" ")}
       data-tooltip={label}
@@ -856,8 +903,40 @@ function ToolbarIconButton({
       }}
     >
       <Icon size={15} />
+      {badge ? (
+        <span className={["absolute -right-0.5 -top-0.5 min-w-3 rounded-full px-0.5 text-center text-[8px] font-bold leading-3", getBadgeToneClass(tone)].join(" ")}>
+          {badge}
+        </span>
+      ) : null}
     </button>
   );
+}
+
+function getToolbarToneClass(tone: ProjectTreeStatus["tone"]) {
+  if (tone === "ok") return "text-green-700 hover:border-green-100 hover:bg-green-50";
+  if (tone === "warning") return "text-brand-orange hover:border-orange-100 hover:bg-brand-hover";
+  if (tone === "danger") return "text-red-700 hover:border-red-100 hover:bg-red-50";
+  return "text-ink-secondary hover:border-orange-100 hover:bg-brand-hover hover:text-brand-orange";
+}
+
+function getBadgeToneClass(tone: ProjectTreeStatus["tone"]) {
+  if (tone === "danger") return "bg-red-600 text-white";
+  if (tone === "ok") return "bg-green-600 text-white";
+  return "bg-brand-orange text-white";
+}
+
+function getProjectStatusFooterClass(tone: ProjectTreeStatus["tone"]) {
+  if (tone === "danger") return "border-red-100 bg-red-50 text-red-800 hover:bg-red-100";
+  if (tone === "warning") return "border-orange-200 bg-brand-hover text-brand-orange hover:bg-orange-100";
+  if (tone === "ok") return "border-green-100 bg-green-50 text-green-800 hover:bg-green-100";
+  return "border-line bg-white text-ink-secondary hover:bg-panel";
+}
+
+function getProjectStatusDotClass(tone: ProjectTreeStatus["tone"]) {
+  if (tone === "danger") return "bg-red-600";
+  if (tone === "warning") return "bg-brand-orange";
+  if (tone === "ok") return "bg-green-600";
+  return "bg-slate-400";
 }
 
 function ToolbarMenu({ className, children }: { className: string; children: ReactNode }) {

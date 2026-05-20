@@ -14,7 +14,7 @@ export function ExternalChangesBanner({ changeSet, syncState, busy, onReview, on
 
   const needsReview = changeSet.requiresReview || changeSet.status === "needs-review" || changeSet.status === "blocked";
   const Icon = needsReview ? AlertTriangle : busy ? Loader2 : FolderInput;
-  const title = needsReview ? "Cambios externos requieren revisión" : "Cambios externos detectados";
+  const title = needsReview ? "Cambios para guardar requieren revisión" : "Cambios para guardar";
   const detail = formatChangeSummary(changeSet);
 
   return (
@@ -50,7 +50,7 @@ export function ExternalChangesBanner({ changeSet, syncState, busy, onReview, on
           disabled={busy}
           onClick={onImportSafe}
         >
-          Importar seguros
+          Guardar recomendados
         </button>
       ) : null}
     </div>

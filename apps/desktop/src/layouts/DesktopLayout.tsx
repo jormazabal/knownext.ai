@@ -5,9 +5,8 @@ import { AiPromptInput, type AiPromptExecutionOptions } from "../features/assist
 import { AiResponseBubble } from "../features/assistant/AiResponseBubble";
 import { DocumentStatusBar } from "../features/documents/DocumentStatusBar";
 import { DocumentTabs } from "../features/documents/DocumentTabs";
-import { DocumentTree, type DocumentTreeAction } from "../features/documents/DocumentTree";
+import { DocumentTree, type DocumentTreeAction, type ProjectTreeStatus } from "../features/documents/DocumentTree";
 import { ExternalChangesDrawer } from "../features/externalChanges/ExternalChangesDrawer";
-import { SyncStatusIndicator } from "../features/externalChanges/SyncStatusIndicator";
 import { ImageViewer } from "../features/documents/ImageViewer";
 import { MarkdownToolbar } from "../features/editor/MarkdownToolbar";
 import {
@@ -90,6 +89,7 @@ type DesktopLayoutProps = {
   externalChangesOpen: boolean;
   externalChangesBusy: boolean;
   projectSyncState: ProjectSyncState;
+  externalChangeSetAcknowledged: boolean;
   externalChangesMessage?: string | null;
   layoutConfig: LayoutConfig;
   onSelectProject: (project: Project) => void;
@@ -352,6 +352,10 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   const [imageInsertOpen, setImageInsertOpen] = useState(false);
 
   const externalChangeBadges = useMemo(() => buildExternalChangeBadges(props.externalChangeSet), [props.externalChangeSet]);
+  const projectTreeStatus = useMemo(
+    () => buildProjectTreeStatus(props.activeProject, props.externalChangeSet, props.projectSyncStatus, props.projectSyncState, props.externalChangesBusy, props.externalChangeSetAcknowledged),
+    [props.activeProject, props.externalChangeSet, props.projectSyncStatus, props.projectSyncState, props.externalChangesBusy, props.externalChangeSetAcknowledged],
+  );
 
   async function confirmRestoreVersion(strategy: RestoreStrategy) {
     if (!restoreTarget) return;
@@ -442,11 +446,13 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 onExpandTree={props.onExpandTree}
                 onCollapseTree={props.onCollapseTree}
                 onConfigureProject={props.onConfigureProject}
+                onOpenProjectStatus={props.onOpenExternalChanges}
                 onRenameNode={props.onRenameNode}
                 onToggleNode={props.onToggleNode}
                 onContextAction={props.onTreeContextAction}
                 onMoveNode={props.onMoveTreeNode}
                 changeBadges={externalChangeBadges}
+                projectStatus={projectTreeStatus}
               />
             ) : null}
           </div>
@@ -518,15 +524,6 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             onOpenNavigation={() => setNavigationOpen(true)}
             onSelectTab={props.onSelectTab}
             onCloseTab={props.onCloseTab}
-            rightSlot={
-              <SyncStatusIndicator
-                changeSet={props.externalChangeSet}
-                syncStatus={props.projectSyncStatus}
-                syncState={props.projectSyncState}
-                busy={props.externalChangesBusy}
-                onOpen={props.onOpenExternalChanges}
-              />
-            }
           />
               {hasReleaseNotes || hasAiConversation || hasOpenImage ? null : (
               <MarkdownToolbar
@@ -703,9 +700,12 @@ export function DesktopLayout(props: DesktopLayoutProps) {
               ) : null}
               <ExternalChangesDrawer
                 open={props.externalChangesOpen}
+                project={props.activeProject}
                 changeSet={props.externalChangeSet}
                 decisions={props.externalChangeDecisions}
+                syncStatus={props.projectSyncStatus}
                 syncState={props.projectSyncState}
+                acknowledged={props.externalChangeSetAcknowledged}
                 busy={props.externalChangesBusy}
                 message={props.externalChangesMessage}
                 onDecisionChange={props.onExternalChangeDecision}
@@ -1640,6 +1640,140 @@ function buildExternalChangeBadges(changeSet: ExternalChangeSet | null): Record<
     badges[item.path] = item.risk === "review" ? "Revisar" : item.changeType === "modified" ? "Modificado" : item.changeType === "deleted" ? "Eliminado" : "Nuevo";
     return badges;
   }, {});
+}
+
+function buildProjectTreeStatus(
+  project: Project | null,
+  changeSet: ExternalChangeSet | null,
+  syncStatus: ProjectSyncStatus | null,
+  syncState: ProjectSyncState,
+  busy: boolean,
+  acknowledged: boolean,
+): ProjectTreeStatus | null {
+  if (!project) return null;
+  const total = changeSet?.summary.total ?? 0;
+  const safe = changeSet?.summary.safe ?? 0;
+  const review = changeSet?.summary.review ?? 0;
+  const blocked = changeSet?.summary.blocked ?? 0;
+  const state = syncStatus?.state ?? syncState;
+  const hasGithub = Boolean(project.githubRepository) || project.syncMode === "manual-github" || project.syncMode === "auto-github";
+  const hasLocalGit = hasGithub || project.versioningMode === "local-git" || project.isGitRepository || project.syncMode === "manual-local" || project.syncMode === "auto-local";
+  const scopeLabel = hasGithub ? "GitHub conectado" : hasLocalGit ? "Historial local" : "Archivos locales";
+
+  if (acknowledged) {
+    return {
+      label: "Todo correcto",
+      detail: total > 0 ? `${total} omitidos aceptados` : scopeLabel,
+      badge: null,
+      tone: "ok",
+      showFooter: false,
+    };
+  }
+
+  if (busy) {
+    return {
+      label: "Comprobando",
+      detail: "Revisando protección e historial",
+      badge: "…",
+      tone: "warning",
+      showFooter: true,
+      footerLabel: "Comprobando",
+      footerDetail: "El estado se actualizará en unos segundos.",
+    };
+  }
+
+  if (state === "conflict" || syncStatus?.hasConflicts) {
+    const conflictCount = syncStatus?.conflicts.filter((conflict) => conflict.status === "open").length ?? 1;
+    return {
+      label: "Conflictos",
+      detail: `${conflictCount} conflictos requieren decisión`,
+      badge: String(conflictCount),
+      tone: "danger",
+      showFooter: true,
+      footerLabel: "Conflictos",
+      footerDetail: "Abre protección e historial para resolverlos.",
+    };
+  }
+
+  if (review > 0 || changeSet?.requiresReview) {
+    return {
+      label: "Revisión necesaria",
+      detail: `${review || total} cambios necesitan decisión`,
+      badge: String(review || total),
+      tone: "warning",
+      showFooter: true,
+      footerLabel: "Cambios para guardar",
+      footerDetail: "Hay archivos que revisar antes de guardarlos.",
+    };
+  }
+
+  if (blocked > 0 && safe === 0) {
+    return {
+      label: "Archivos protegidos",
+      detail: `${blocked} omitidos por seguridad`,
+      badge: String(blocked),
+      tone: "warning",
+      showFooter: true,
+      footerLabel: "Archivos omitidos",
+      footerDetail: "No requieren acción si esperabas excluirlos.",
+    };
+  }
+
+  if (safe > 0 || total > 0) {
+    return {
+      label: "Cambios pendientes",
+      detail: `${safe || total} cambios listos para guardar`,
+      badge: String(safe || total),
+      tone: "warning",
+      showFooter: true,
+      footerLabel: "Cambios para guardar",
+      footerDetail: "Puedes guardarlos en el historial.",
+    };
+  }
+
+  if (syncStatus?.pendingPull || state === "remote-available") {
+    return {
+      label: "Remoto pendiente",
+      detail: "Hay cambios en GitHub por incorporar",
+      badge: "1",
+      tone: "warning",
+      showFooter: true,
+      footerLabel: "GitHub tiene cambios",
+      footerDetail: "Revisa antes de actualizar la carpeta local.",
+    };
+  }
+
+  if (syncStatus?.pendingPush || state === "local-pending" || state === "pending") {
+    return {
+      label: "Sincronización pendiente",
+      detail: "Hay cambios locales pendientes de subir",
+      badge: "1",
+      tone: "warning",
+      showFooter: true,
+      footerLabel: "Pendiente de sincronizar",
+      footerDetail: "Abre protección e historial para ver el resumen.",
+    };
+  }
+
+  if (state === "offline" || state === "error") {
+    return {
+      label: state === "offline" ? "GitHub sin conexión" : "Error de sincronización",
+      detail: syncStatus?.detail ?? "No se pudo comprobar el estado remoto",
+      badge: "!",
+      tone: "danger",
+      showFooter: true,
+      footerLabel: state === "offline" ? "GitHub sin conexión" : "Error de sincronización",
+      footerDetail: "Abre protección e historial para ver el detalle.",
+    };
+  }
+
+  return {
+    label: "Todo correcto",
+    detail: scopeLabel,
+    badge: null,
+    tone: "ok",
+    showFooter: false,
+  };
 }
 
 function ImageWorkspaceStatusBar({
