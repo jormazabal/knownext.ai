@@ -2,6 +2,13 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.18.3 - 2026-05-20
+
+- Added a clear credential recovery state when GitHub rejects the saved credentials for a synchronized project.
+- Added direct actions to review GitHub credentials or close the current GitHub session from the project configuration modal.
+- Reworked the GitHub login flow so credential review can start a fresh authorization even when the app still has a previous GitHub session recorded.
+- Refreshed project synchronization status after reconnecting or signing out of GitHub so the project configuration reflects the new credential state.
+
 ## 0.18.2 - 2026-05-20
 
 - Improved Markdown document readability with paragraph spacing, proportional heading margins, and a slightly smaller top-level heading style.

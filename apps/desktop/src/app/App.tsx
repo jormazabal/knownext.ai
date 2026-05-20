@@ -1649,7 +1649,7 @@ export function App() {
 
   async function handleOpenGithubLogin() {
     setGithubLoginOpen(true);
-    if (!githubDevice && githubLoginState === "idle") {
+    if (!githubDevice && githubLoginState !== "starting" && githubLoginState !== "waiting") {
       await handleStartGithubLogin();
     }
   }
@@ -1680,6 +1680,7 @@ export function App() {
         setGithubLoginOpen(false);
         setGithubDevice(null);
         await refreshProjectCapabilityState();
+        await refreshProjectSyncStatus(activeProject?.id, { silent: true });
         return;
       }
       setGithubLoginState(response.status === "pending" ? "waiting" : response.status);
@@ -1710,8 +1711,11 @@ export function App() {
     try {
       const auth = await logoutGithub();
       setAuthStatus(auth);
+      setGithubDevice(null);
+      setGithubLoginState("idle");
       setHistoryOpen(false);
       await refreshProjectCapabilityState();
+      await refreshProjectSyncStatus(activeProject?.id, { silent: true });
     } catch (error) {
       showError(error, "No se pudo cerrar sesión de GitHub.");
     }
@@ -2798,6 +2802,7 @@ export function App() {
         githubRepositoriesLoading={githubRepositoriesLoading}
         projectSyncStatus={projectSyncStatus}
         onLoginGithub={() => void handleOpenGithubLogin()}
+        onLogoutGithub={() => void handleLogoutGithub()}
         onRefreshGithubRepositories={() => void refreshGithubRepositories()}
       />
       <DocumentFooterActionDialog
