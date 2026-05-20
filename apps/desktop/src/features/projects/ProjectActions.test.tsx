@@ -7,6 +7,27 @@ afterEach(() => {
 });
 
 describe("ProjectActions", () => {
+  it("matches the document viewer footer height and surface", () => {
+    const { container } = render(
+      <ProjectActions
+        appVersion="0.5.0"
+        authStatus={{ isAuthenticated: false, provider: null, user: null, scopes: [] }}
+        orphanDraftCount={0}
+        isCheckingForUpdates={false}
+        onLoginGithub={vi.fn()}
+        onLogout={vi.fn()}
+        onOpenAppSettings={vi.fn()}
+        onOpenRecoverableDrafts={vi.fn()}
+        onCheckForUpdates={vi.fn()}
+        onOpenReleaseNotes={vi.fn()}
+      />,
+    );
+
+    const footer = container.firstElementChild;
+
+    expect(footer).toHaveClass("h-10", "border-t", "border-line", "bg-white", "text-[11px]", "text-ink-secondary");
+  });
+
   it("starts a manual update check from the account menu", () => {
     const onCheckForUpdates = vi.fn();
 

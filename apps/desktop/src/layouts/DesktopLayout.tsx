@@ -188,6 +188,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   const [desktopNavigationVisible, setDesktopNavigationVisible] = useState(true);
   const [imageZoomPercent, setImageZoomPercent] = useState(100);
   const [imageFitToWindow, setImageFitToWindow] = useState(true);
+  const [markdownZoomPercent, setMarkdownZoomPercent] = useState(100);
   const [activeImageAsset, setActiveImageAsset] = useState<AssetMetadata | null>(null);
   const activeWorkspaceTab = props.tabs.find((tab) => tab.id === props.activeTabId);
   const hasOpenDocument = activeWorkspaceTab?.kind === "document" && Boolean(props.activeDocumentId);
@@ -532,9 +533,11 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 historyDisabledReason={getHistoryDisabledReason(props.activeProject, props.authStatus, props.versioningStatus)}
                 editorReady={activeEditorController !== null && !activeHistoryPreview}
                 extendedUnderlineEnabled={props.markdownExtendedUnderlineEnabled}
+                markdownZoomPercent={markdownZoomPercent}
                 activeActions={editorFormatState}
                 editorHistoryState={activeEditorHistoryState}
                 onRunEditorAction={handleRunEditorAction}
+                onMarkdownZoomChange={(nextZoom) => setMarkdownZoomPercent(clamp(Math.round(nextZoom), 80, 150))}
                 onToggleHistory={props.onToggleHistory}
               />
               )}
@@ -574,6 +577,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                         <HistoryPreviewWorkspace
                           preview={activeHistoryPreview}
                           currentMarkdown={props.activeMarkdown}
+                          markdownZoomPercent={markdownZoomPercent}
                           onModeChange={(mode) => setHistoryPreview((currentPreview) => (
                             currentPreview && currentPreview.documentId === props.activeDocumentId
                               ? { ...currentPreview, mode }
@@ -613,6 +617,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                                 }}
                                 onSelectionChange={(selection) => props.onDocumentSelectionChange(session.documentId, selection)}
                                 selectionFocus={toMarkdownEditorSelection(props.aiSelectionFocus, session.documentId)}
+                                zoomPercent={markdownZoomPercent}
                               />
                             </Suspense>
                           ) : (
@@ -800,12 +805,14 @@ export function DesktopLayout(props: DesktopLayoutProps) {
 function HistoryPreviewWorkspace({
   preview,
   currentMarkdown,
+  markdownZoomPercent,
   onModeChange,
   onRestore,
   onBackToCurrent,
 }: {
   preview: VersionPreview;
   currentMarkdown: string;
+  markdownZoomPercent: number;
   onModeChange: (mode: VersionPreviewMode) => void;
   onRestore: () => void;
   onBackToCurrent: () => void;
@@ -873,6 +880,7 @@ function HistoryPreviewWorkspace({
             markdown={preview.markdown}
             ariaLabel="Contenido de la versión seleccionada"
             emptyMessage="Esta versión no tiene contenido."
+            zoomPercent={markdownZoomPercent}
           />
         </section>
       ) : (

@@ -121,8 +121,8 @@ export function ProjectActions({
   }
 
   return (
-    <div className="relative z-[140] mt-auto border-t border-line">
-      <div ref={accountMenuRef} className="relative px-3 py-1">
+    <div className="relative z-[140] mt-auto flex h-10 shrink-0 items-center border-t border-line bg-white px-3 text-[11px] text-ink-secondary">
+      <div ref={accountMenuRef} className="relative w-full min-w-0">
         <button
           className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-1 text-left hover:bg-brand-hover"
           aria-expanded={accountMenuOpen}

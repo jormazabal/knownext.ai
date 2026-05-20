@@ -210,6 +210,14 @@ describe("DocumentTree", () => {
     await userEvent.click(screen.getByRole("button", { name: /^Importar archivo/ }));
 
     await userEvent.click(screen.getByRole("button", { name: "Vista del árbol" }));
+    await userEvent.click(screen.getByRole("button", { name: "Ocultar extensiones" }));
+    expect(screen.getByText("requisitos-funcionales")).toBeInTheDocument();
+    expect(screen.queryByText("requisitos-funcionales.md")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Vista del árbol" }));
+    await userEvent.click(screen.getByRole("button", { name: "Mostrar extensiones" }));
+    expect(screen.getByText("requisitos-funcionales.md")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Vista del árbol" }));
     await userEvent.click(screen.getByRole("button", { name: "Solo Markdown" }));
     expect(screen.queryByText("Archivo")).not.toBeInTheDocument();
     expect(screen.queryByText("brief.pdf")).not.toBeInTheDocument();

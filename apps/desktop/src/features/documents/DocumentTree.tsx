@@ -120,6 +120,7 @@ export function DocumentTree({
   const [draggedNode, setDraggedNode] = useState<DocumentTreeNode | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string | null; valid: boolean; label: string } | null>(null);
   const [filter, setFilter] = useState<ExtendedTreeFilter>("all");
+  const [showFileExtensions, setShowFileExtensions] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const visibleNodes = useMemo(() => filterTree(nodes, filter), [nodes, filter]);
   const selectedNodeId = activeTreeNodeId || activeDocumentId;
@@ -245,8 +246,10 @@ export function DocumentTree({
     >
       <DocumentTreeToolbar
         filter={filter}
+        showFileExtensions={showFileExtensions}
         disabled={!hasActiveProject}
         onFilterChange={setFilter}
+        onShowFileExtensionsChange={setShowFileExtensions}
         onCreateFolder={onCreateFolder}
         onCreateDocument={onCreateDocument}
         onImportFile={onImportFile}
@@ -280,6 +283,7 @@ export function DocumentTree({
               onFolderDragOver={handleFolderDragOver}
               onFolderDrop={handleFolderDrop}
               changeBadges={changeBadges}
+              showFileExtensions={showFileExtensions}
             />
           ))
         ) : (
@@ -367,6 +371,7 @@ type TreeNodeProps = {
   onFolderDragOver: (node: DocumentTreeNode, event: DragEvent<HTMLDivElement>) => void;
   onFolderDrop: (node: DocumentTreeNode, event: DragEvent<HTMLDivElement>) => void;
   changeBadges: Record<string, string>;
+  showFileExtensions: boolean;
 };
 
 function TreeNode({
@@ -388,6 +393,7 @@ function TreeNode({
   onFolderDragOver,
   onFolderDrop,
   changeBadges,
+  showFileExtensions,
 }: TreeNodeProps) {
   const isFolder = node.type === "folder";
   const isActive = node.id === activeNodeId;
@@ -396,6 +402,7 @@ function TreeNode({
   const isDropTarget = node.id === dropTarget?.id;
   const shouldRenderChildren = isFolder && node.open && node.children?.length;
   const changeBadge = node.path ? changeBadges[node.path] : undefined;
+  const displayName = getTreeNodeDisplayName(node, showFileExtensions);
 
   return (
     <div>
@@ -461,7 +468,9 @@ function TreeNode({
           />
         ) : (
           <>
-            <span className={["min-w-0 flex-1 truncate", isActive ? "font-semibold" : ""].join(" ")}>{node.name}</span>
+            <span className={["min-w-0 flex-1 truncate", isActive ? "font-semibold" : ""].join(" ")} title={displayName === node.name ? undefined : node.name}>
+              {displayName}
+            </span>
             {changeBadge ? (
               <span className="ml-1 max-w-[72px] shrink-0 truncate rounded bg-brand-hover px-1.5 py-0.5 text-[9px] font-semibold text-brand-orange">
                 {changeBadge}
@@ -469,7 +478,7 @@ function TreeNode({
             ) : null}
             <button
               className="grid h-5 w-5 place-items-center rounded-md opacity-0 hover:bg-white group-hover:opacity-100"
-              aria-label={`Abrir menú de ${node.name}`}
+              aria-label={`Abrir menú de ${displayName}`}
               onClick={(event) => {
                 event.stopPropagation();
                 onMenuEnter(node, event);
@@ -504,6 +513,7 @@ function TreeNode({
               onFolderDragOver={onFolderDragOver}
               onFolderDrop={onFolderDrop}
               changeBadges={changeBadges}
+              showFileExtensions={showFileExtensions}
             />
           ))
         : null}
@@ -758,8 +768,10 @@ function getParentId(nodes: DocumentTreeNode[], nodeId: string, parentId: string
 
 function DocumentTreeToolbar({
   filter,
+  showFileExtensions,
   disabled,
   onFilterChange,
+  onShowFileExtensionsChange,
   onCreateFolder,
   onCreateDocument,
   onImportFile,
@@ -771,8 +783,10 @@ function DocumentTreeToolbar({
   projectStatus,
 }: {
   filter: ExtendedTreeFilter;
+  showFileExtensions: boolean;
   disabled: boolean;
   onFilterChange: (filter: ExtendedTreeFilter) => void;
+  onShowFileExtensionsChange: (showFileExtensions: boolean) => void;
   onCreateFolder: () => void;
   onCreateDocument: () => void;
   onImportFile?: () => void;
@@ -861,6 +875,13 @@ function DocumentTreeToolbar({
           <ToolbarMenuItem icon={FileText} label="Solo Markdown" active={filter === "documents"} onClick={() => runAction(() => onFilterChange("documents"))} />
           <ToolbarMenuItem icon={Image} label="Solo imágenes" active={filter === "images"} onClick={() => runAction(() => onFilterChange("images"))} />
           <ToolbarMenuItem icon={File} label="Solo archivos" active={filter === "attachments"} onClick={() => runAction(() => onFilterChange("attachments"))} />
+          <div className="my-1 border-t border-line" />
+          <ToolbarMenuItem
+            icon={FileType}
+            label={showFileExtensions ? "Ocultar extensiones" : "Mostrar extensiones"}
+            active={showFileExtensions}
+            onClick={() => runAction(() => onShowFileExtensionsChange(!showFileExtensions))}
+          />
           <div className="my-1 border-t border-line" />
           <ToolbarMenuItem icon={ChevronDown} label="Expandir carpetas" onClick={() => runAction(onExpandTree)} />
           <ToolbarMenuItem icon={ChevronUp} label="Contraer carpetas" onClick={() => runAction(onCollapseTree)} />
@@ -991,6 +1012,13 @@ function filterTree(nodes: DocumentTreeNode[], filter: ExtendedTreeFilter): Docu
     if (children.length === 0) return [];
     return [{ ...node, children }];
   });
+}
+
+function getTreeNodeDisplayName(node: DocumentTreeNode, showFileExtensions: boolean) {
+  if (showFileExtensions || node.type === "folder") return node.name;
+  const extensionIndex = node.name.lastIndexOf(".");
+  if (extensionIndex <= 0) return node.name;
+  return node.name.slice(0, extensionIndex);
 }
 
 function containsNodeId(nodes: DocumentTreeNode[], nodeId: string): boolean {
