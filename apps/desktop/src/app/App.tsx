@@ -178,6 +178,7 @@ type DocumentFooterDialog =
 type UpdateState = "idle" | "checking" | "available" | "not-available" | "unsupported" | "downloading" | "installing" | "error";
 type GithubLoginState = "idle" | "starting" | "waiting" | "authenticated" | "error";
 const AI_CONVERSATION_TAB_ID = "project-ai-conversation" as const;
+const ACKNOWLEDGED_EXTERNAL_CHANGES_STORAGE_KEY = "knownext.acknowledgedExternalChanges";
 
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -249,7 +250,7 @@ export function App() {
   const [projectSyncState, setProjectSyncState] = useState<ProjectSyncState>("synced");
   const [projectSyncStatus, setProjectSyncStatus] = useState<ProjectSyncStatus | null>(null);
   const [externalChangesMessage, setExternalChangesMessage] = useState<string | null>(null);
-  const [mutedExternalChangeSetId, setMutedExternalChangeSetId] = useState<string | null>(null);
+  const [acknowledgedExternalChangeSets, setAcknowledgedExternalChangeSets] = useState<Record<string, string[]>>(readAcknowledgedExternalChangeSets);
   const [documentSyncStatuses, setDocumentSyncStatuses] = useState<Record<string, DocumentSyncStatus>>({});
   const [documentFooterDialog, setDocumentFooterDialog] = useState<DocumentFooterDialog | null>(null);
   const lastTraceLogRef = useRef<{ fingerprint: string; timestamp: number } | null>(null);
@@ -483,7 +484,6 @@ export function App() {
     if (!configLoaded || !activeProject) {
       setExternalChangeSet(null);
       setExternalChangeDecisions({});
-      setMutedExternalChangeSetId(null);
       setProjectSyncState("synced");
       setProjectSyncStatus(null);
       return;
@@ -494,7 +494,7 @@ export function App() {
       void refreshExternalChangeSet(activeProject.id, { refreshTreeOnChanges: true, silent: true });
     }, 8000);
     return () => window.clearInterval(interval);
-  }, [activeProject?.id, configLoaded, externalChangesBusy]);
+  }, [activeProject?.id, acknowledgedExternalChangeSets, configLoaded, externalChangesBusy]);
 
   useEffect(() => {
     if (!configLoaded || !activeProject) return;
@@ -774,10 +774,11 @@ export function App() {
     if (!projectId) return;
     try {
       const changeSet = options.silent ? await getExternalChanges(projectId) : await scanExternalChanges(projectId);
-      if (changeSet.summary.total > 0 && changeSet.id === mutedExternalChangeSetId) {
-        setExternalChangeSet(null);
-        setExternalChangeDecisions({});
-        setExternalChangesMessage(null);
+      const acknowledged = isAcknowledgedExternalChangeSet(projectId, changeSet, acknowledgedExternalChangeSets);
+      if (acknowledged) {
+        setExternalChangeSet(changeSet);
+        setExternalChangeDecisions(buildDefaultExternalChangeDecisions(changeSet));
+        setExternalChangesMessage("Cambios omitidos aceptados.");
         if (projectSyncState !== "pending") setProjectSyncState("synced");
         return;
       }
@@ -831,11 +832,14 @@ export function App() {
   }
 
   function handleOmitExternalChanges() {
-    if (externalChangeSet) setMutedExternalChangeSetId(externalChangeSet.id);
-    setExternalChangeSet(null);
-    setExternalChangeDecisions({});
+    if (!activeProject || !externalChangeSet) return;
+    setAcknowledgedExternalChangeSets((current) => {
+      const next = addAcknowledgedExternalChangeSet(current, activeProject.id, externalChangeSet.id);
+      writeAcknowledgedExternalChangeSets(next);
+      return next;
+    });
     setExternalChangesOpen(false);
-    setExternalChangesMessage("Cambios omitidos en esta revisión.");
+    setExternalChangesMessage("Cambios omitidos aceptados.");
     if (projectSyncState !== "pending") setProjectSyncState("synced");
   }
 
@@ -859,7 +863,7 @@ export function App() {
       if (!result.pendingRemoteSync) setExternalChangesOpen(false);
     } catch (error) {
       setProjectSyncState("error");
-      showError(error, "No se pudieron importar los cambios externos.");
+      showError(error, "No se pudieron guardar los cambios detectados.");
     } finally {
       setExternalChangesBusy(false);
     }
@@ -1413,7 +1417,6 @@ export function App() {
       setExternalChangeSet(null);
       setExternalChangeDecisions({});
       setExternalChangesMessage(null);
-      setMutedExternalChangeSetId(null);
       setProjectSyncState("synced");
       void refreshExternalChangeSet(active.id, { refreshTreeOnChanges: true, silent: true });
       if (!nextVersioningStatus.enabled) setHistoryOpen(false);
@@ -1621,7 +1624,6 @@ export function App() {
         setExternalChangeSet(null);
         setExternalChangeDecisions({});
         setExternalChangesMessage(null);
-        setMutedExternalChangeSetId(null);
         setProjectSyncState("synced");
         return;
       }
@@ -2626,6 +2628,7 @@ export function App() {
         externalChangesOpen={externalChangesOpen}
         externalChangesBusy={externalChangesBusy}
         projectSyncState={projectSyncState}
+        externalChangeSetAcknowledged={isAcknowledgedExternalChangeSet(activeProject?.id, externalChangeSet, acknowledgedExternalChangeSets)}
         externalChangesMessage={externalChangesMessage}
         layoutConfig={layoutConfig}
         onSelectProject={handleSelectProject}
@@ -3736,6 +3739,43 @@ function buildDefaultExternalChangeDecisions(changeSet: ExternalChangeSet): Reco
     decisions[item.id] = item.decision;
     return decisions;
   }, {});
+}
+
+function readAcknowledgedExternalChangeSets(): Record<string, string[]> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(ACKNOWLEDGED_EXTERNAL_CHANGES_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.entries(parsed).reduce<Record<string, string[]>>((result, [projectId, value]) => {
+      if (typeof projectId !== "string" || !Array.isArray(value)) return result;
+      result[projectId] = value.filter((item): item is string => typeof item === "string");
+      return result;
+    }, {});
+  } catch {
+    return {};
+  }
+}
+
+function writeAcknowledgedExternalChangeSets(value: Record<string, string[]>) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(ACKNOWLEDGED_EXTERNAL_CHANGES_STORAGE_KEY, JSON.stringify(value));
+  } catch {
+    // Best effort only; the file remains safely omitted even if persistence fails.
+  }
+}
+
+function addAcknowledgedExternalChangeSet(current: Record<string, string[]>, projectId: string, changeSetId: string) {
+  const projectIds = current[projectId] ?? [];
+  const nextProjectIds = [changeSetId, ...projectIds.filter((id) => id !== changeSetId)].slice(0, 20);
+  return { ...current, [projectId]: nextProjectIds };
+}
+
+function isAcknowledgedExternalChangeSet(projectId: string | null | undefined, changeSet: ExternalChangeSet | null, acknowledged: Record<string, string[]>) {
+  if (!projectId || !changeSet || changeSet.summary.total === 0) return false;
+  return Boolean(acknowledged[projectId]?.includes(changeSet.id));
 }
 
 function buildExternalImportDecisions(

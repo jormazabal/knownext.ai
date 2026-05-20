@@ -2,6 +2,14 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.18.1 - 2026-05-20
+
+- Replaced the project-level synchronization alert surface with a clearer `Protección e historial` entry next to project settings in the document tree.
+- Reworked the project protection modal into `Resumen`, `Cambios para guardar`, `Omitidos`, and `Detalles` tabs with editor-focused language instead of Git/import terminology.
+- Added acceptance for protected omitted files so expected private files such as `.env` no longer keep raising alerts while remaining visible for review.
+- Kept global project protection state separate from active-document sync state, reducing confusion between document actions and project backup/history status.
+- Updated validation for the new modal and copy in the in-app browser, including accepted omitted files and disabled save actions.
+
 ## 0.18.0 - 2026-05-20
 
 - Redesigned project creation and editing around three protection levels: local files, local files with Git history, and local files with Git plus GitHub synchronization.
