@@ -40,6 +40,7 @@ type CreateProjectDialogProps = {
   githubRepositoriesLoading?: boolean;
   projectSyncStatus?: ProjectSyncStatus | null;
   onLoginGithub?: () => void;
+  onLogoutGithub?: () => void;
   onRefreshGithubRepositories?: () => void;
 };
 
@@ -89,6 +90,7 @@ export function CreateProjectDialog({
   githubRepositoriesLoading = false,
   projectSyncStatus = null,
   onLoginGithub,
+  onLogoutGithub,
   onRefreshGithubRepositories,
 }: CreateProjectDialogProps) {
   const [name, setName] = useState("");
@@ -397,6 +399,7 @@ export function CreateProjectDialog({
                 githubPublishVisibility={githubPublishVisibility}
                 githubSyncPreference={githubSyncPreference}
                 onLoginGithub={onLoginGithub}
+                onLogoutGithub={onLogoutGithub}
                 onRefreshGithubRepositories={onRefreshGithubRepositories}
                 onGithubOwnerChange={setGithubOwner}
                 onGithubRepoChange={setGithubRepo}
@@ -1078,6 +1081,7 @@ function EditProjectForm({
   githubPublishVisibility,
   githubSyncPreference,
   onLoginGithub,
+  onLogoutGithub,
   onRefreshGithubRepositories,
   onGithubOwnerChange,
   onGithubRepoChange,
@@ -1117,6 +1121,7 @@ function EditProjectForm({
   githubPublishVisibility: GithubPublishVisibility;
   githubSyncPreference: "manual" | "auto";
   onLoginGithub?: () => void;
+  onLogoutGithub?: () => void;
   onRefreshGithubRepositories?: () => void;
   onGithubOwnerChange: (owner: string) => void;
   onGithubRepoChange: (repo: string) => void;
@@ -1262,6 +1267,9 @@ function EditProjectForm({
                     repository={`${githubRepository.owner}/${githubRepository.repo}`}
                     projectSyncStatus={projectSyncStatus}
                     syncMode={project?.syncMode ?? "manual-github"}
+                    authStatus={authStatus}
+                    onLoginGithub={onLoginGithub}
+                    onLogoutGithub={onLogoutGithub}
                   />
                 ) : (
                   <DisconnectedGithubPanel
@@ -1531,25 +1539,68 @@ function ConnectedGithubPanel({
   repository,
   projectSyncStatus,
   syncMode,
+  authStatus,
+  onLoginGithub,
+  onLogoutGithub,
 }: {
   repository: string;
   projectSyncStatus?: ProjectSyncStatus | null;
   syncMode: Project["syncMode"];
+  authStatus: AuthStatus;
+  onLoginGithub?: () => void;
+  onLogoutGithub?: () => void;
 }) {
+  const credentialIssue = isGithubCredentialIssue(projectSyncStatus);
+  const hasRemoteIssue = credentialIssue || projectSyncStatus?.state === "error" || projectSyncStatus?.state === "offline";
   return (
-    <div className="flex items-start justify-between gap-3 rounded-md border border-line bg-panel px-3 py-3">
-      <div className="flex min-w-0 items-start gap-3">
-        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-white text-ink-secondary">
-          <Github size={16} />
-        </span>
-        <div className="min-w-0">
-          <div className="truncate text-[12px] font-semibold text-ink-primary">{repository}</div>
-          <div className="mt-1 text-[10px] leading-4 text-ink-secondary">
-            {projectSyncStatus?.detail ?? (syncMode === "auto-github" ? "Sincronización automática configurada." : "Sincronización manual configurada.")}
+    <div className="space-y-3 rounded-md border border-line bg-panel px-3 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-white text-ink-secondary">
+            <Github size={16} />
+          </span>
+          <div className="min-w-0">
+            <div className="truncate text-[12px] font-semibold text-ink-primary">{repository}</div>
+            <div className="mt-1 text-[10px] leading-4 text-ink-secondary">
+              {projectSyncStatus?.detail ?? (syncMode === "auto-github" ? "Sincronización automática configurada." : "Sincronización manual configurada.")}
+            </div>
           </div>
         </div>
+        <StatusBadge label={projectSyncStatus?.label ?? syncModeLabel(syncMode)} tone={hasRemoteIssue || projectSyncStatus?.hasConflicts ? "danger" : projectSyncStatus?.pendingPull || projectSyncStatus?.pendingPush ? "warning" : "ok"} />
       </div>
-      <StatusBadge label={projectSyncStatus?.label ?? syncModeLabel(syncMode)} tone={projectSyncStatus?.hasConflicts ? "danger" : projectSyncStatus?.pendingPull || projectSyncStatus?.pendingPush ? "warning" : "ok"} />
+      {credentialIssue ? (
+        <div className="rounded-md border border-red-100 bg-red-50 px-3 py-2">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-red-700" />
+            <div className="min-w-0 flex-1">
+              <div className="text-[11px] font-semibold text-red-800">GitHub no acepta las credenciales guardadas</div>
+              <p className="mt-1 text-[10px] leading-4 text-red-700">
+                Vuelve a conectar GitHub para renovar el acceso. Si quieres usar otra cuenta, cierra sesión primero.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="h-8 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={!onLoginGithub}
+                  onClick={onLoginGithub}
+                >
+                  {authStatus.isAuthenticated ? "Revisar credenciales" : "Conectar GitHub"}
+                </button>
+                {authStatus.isAuthenticated ? (
+                  <button
+                    type="button"
+                    className="h-8 rounded-md border border-red-200 bg-white px-3 text-[11px] font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={!onLogoutGithub}
+                    onClick={onLogoutGithub}
+                  >
+                    Cerrar sesión
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2522,6 +2573,22 @@ function syncModeLabel(syncMode?: SyncMode) {
   if (syncMode === "auto-local") return "Automática local";
   if (syncMode === "manual-local") return "Manual local";
   return "Sin sincronización remota";
+}
+
+function isGithubCredentialIssue(projectSyncStatus?: ProjectSyncStatus | null) {
+  const detail = `${projectSyncStatus?.label ?? ""} ${projectSyncStatus?.detail ?? ""}`.toLowerCase();
+  return (
+    projectSyncStatus?.state === "error"
+    && (
+      detail.includes("credential")
+      || detail.includes("credencial")
+      || detail.includes("authentication failed")
+      || detail.includes("invalid credentials")
+      || detail.includes("bad credentials")
+      || detail.includes("401")
+      || detail.includes("403")
+    )
+  );
 }
 
 function versioningModeLabel(versioningMode: VersioningMode) {

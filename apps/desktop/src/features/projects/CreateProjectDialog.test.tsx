@@ -2,7 +2,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CreateProjectDialog } from "./CreateProjectDialog";
-import type { Project } from "../../types/domain";
+import type { Project, ProjectSyncStatus } from "../../types/domain";
 
 const openDialog = vi.hoisted(() => vi.fn());
 
@@ -145,6 +145,67 @@ describe("CreateProjectDialog", () => {
       },
       publishToGithub: null,
     });
+  });
+
+  it("offers GitHub credential recovery when sync credentials are rejected", async () => {
+    const onLoginGithub = vi.fn();
+    const onLogoutGithub = vi.fn();
+    const githubProject: Project = {
+      ...activeProject,
+      id: "project-github",
+      name: "Docs GitHub",
+      storageMode: "local-files",
+      versioningMode: "local-git",
+      syncMode: "manual-github",
+      authRequired: true,
+      githubRepository: {
+        owner: "knownext",
+        repo: "docs",
+        defaultRef: "main",
+        rootPath: "",
+        permissions: ["pull", "push"],
+      },
+    };
+    const syncStatus: ProjectSyncStatus = {
+      projectId: "project-github",
+      mode: "github-manual",
+      state: "error",
+      label: "Error de sincronización",
+      detail: "remote: invalid credentials fatal: Authentication failed for 'https://github.com/knownext/docs.git/'",
+      pendingPush: false,
+      pendingPull: false,
+      hasConflicts: false,
+      conflicts: [],
+    };
+
+    render(
+      <CreateProjectDialog
+        open
+        mode="edit"
+        project={githubProject}
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onUpdate={vi.fn()}
+        authStatus={{
+          isAuthenticated: true,
+          provider: "github",
+          user: { login: "knownext-user" },
+          scopes: ["repo"],
+        }}
+        projectSyncStatus={syncStatus}
+        onLoginGithub={onLoginGithub}
+        onLogoutGithub={onLogoutGithub}
+      />,
+    );
+
+    expect(screen.getByText(/github no acepta las credenciales guardadas/i)).toBeInTheDocument();
+    expect(screen.getByText(/vuelve a conectar github/i)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /revisar credenciales/i }));
+    await userEvent.click(screen.getByRole("button", { name: /cerrar sesión/i }));
+
+    expect(onLoginGithub).toHaveBeenCalledTimes(1);
+    expect(onLogoutGithub).toHaveBeenCalledTimes(1);
   });
 
   it("requires explicit confirmations before detaching GitHub and local Git", async () => {
