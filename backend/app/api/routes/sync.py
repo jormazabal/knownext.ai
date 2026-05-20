@@ -57,6 +57,11 @@ def connect_project_to_github(project_id: str, payload: ConnectGithubRequest) ->
     return sync_service.connect_github(project_id, payload)
 
 
+@router.post("/projects/{project_id}/github/verify-connection", response_model=ProjectSyncStatus)
+def verify_project_github_connection(project_id: str) -> ProjectSyncStatus:
+    return sync_service.verify_github_connection(project_id)
+
+
 @router.post("/projects/{project_id}/sync-mode", response_model=ProjectSyncStatus)
 def change_project_sync_mode(project_id: str, payload: ChangeSyncModeRequest) -> ProjectSyncStatus:
     return sync_service.change_sync_mode(project_id, payload)

@@ -2,6 +2,13 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.18.4 - 2026-05-21
+
+- Renamed the GitHub credential recovery action to `Conectar cuenta de GitHub` so the project configuration explains the real action.
+- Added `Verificar conexión` for GitHub-backed projects so users can test the current account and repository access before saving changes.
+- Added inline success and error feedback in the project configuration modal for repository connection checks.
+- Added backend-mediated GitHub repository access verification, keeping credential and repository checks out of React components.
+
 ## 0.18.3 - 2026-05-20
 
 - Added a clear credential recovery state when GitHub rejects the saved credentials for a synchronized project.

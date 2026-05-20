@@ -55,6 +55,10 @@ export async function connectProjectGithub(
   });
 }
 
+export async function verifyProjectGithubConnection(projectId: string): Promise<ProjectSyncStatus> {
+  return requestJson<ProjectSyncStatus>(`/api/projects/${projectId}/github/verify-connection`, { method: "POST" });
+}
+
 export async function publishProjectGithub(
   projectId: string,
   payload: {

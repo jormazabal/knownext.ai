@@ -270,6 +270,48 @@ class SyncService:
             project_service.store.write(registry)
             return self.scan(project_id, SyncScanRequest())
 
+    def verify_github_connection(self, project_id: str) -> ProjectSyncStatus:
+        project = self._project(project_id)
+        with self._lock_for(project_id):
+            try:
+                if project["syncMode"] not in {"manual-github", "auto-github"} or not project.get("githubRepository"):
+                    raise HTTPException(status_code=409, detail="Este proyecto no tiene repositorio GitHub configurado.")
+                auth_service.require_github_auth()
+
+                repository = GithubRepository(**project["githubRepository"])
+                if project["versioningMode"] == "github-api":
+                    github_service.verify_repository_access(repository)
+                    state = sync_state_service.update_project_state(
+                        project_id,
+                        {
+                            "state": "synced",
+                            "pendingPush": False,
+                            "pendingPull": False,
+                            "lastScanAt": _now_iso(),
+                            "lastError": None,
+                        },
+                    )
+                    return self._status_from_state(project, state).model_copy(
+                        update={"detail": f"Conexión verificada con {repository.owner}/{repository.repo}."}
+                    )
+
+                root = Path(project["folderPath"])
+                self._ensure_remote(root)
+                status = self.scan(project_id, SyncScanRequest())
+                if status.state in {"error", "offline"}:
+                    return status
+                return status.model_copy(update={"detail": f"Conexión verificada con {repository.owner}/{repository.repo}."})
+            except HTTPException as error:
+                state = sync_state_service.update_project_state(
+                    project_id,
+                    {
+                        "state": "offline" if error.status_code >= 500 else "error",
+                        "lastScanAt": _now_iso(),
+                        "lastError": str(error.detail),
+                    },
+                )
+                return self._status_from_state(project, state)
+
     def change_sync_mode(self, project_id: str, payload: ChangeSyncModeRequest) -> ProjectSyncStatus:
         from app.services.project_service import project_service
 

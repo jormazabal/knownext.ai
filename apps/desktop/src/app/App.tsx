@@ -65,7 +65,7 @@ import {
   saveDocumentDraft,
 } from "../lib/api/documents";
 import { getExternalChanges, importExternalChanges, scanExternalChanges } from "../lib/api/externalChanges";
-import { autoRunProjectSync, changeProjectSyncMode, connectProjectGithub, enableProjectHistory, getProjectSyncStatus, publishProjectGithub, scanProjectSync } from "../lib/api/sync";
+import { autoRunProjectSync, changeProjectSyncMode, connectProjectGithub, enableProjectHistory, getProjectSyncStatus, publishProjectGithub, scanProjectSync, verifyProjectGithubConnection } from "../lib/api/sync";
 import { APP_VERSION } from "../lib/appVersion";
 import { RELEASE_NOTES_MARKDOWN } from "../lib/releaseNotes";
 import { getAuthStatus, logout as logoutGithub, pollGithubDeviceFlow, startGithubDeviceFlow } from "../lib/api/auth";
@@ -825,6 +825,15 @@ export function App() {
     } catch (error) {
       if (!options.silent) showError(error, "No se pudo comprobar la sincronización del proyecto.");
     }
+  }
+
+  async function handleVerifyGithubConnection(projectId = activeProject?.id) {
+    if (!projectId) return null;
+    const status = await verifyProjectGithubConnection(projectId);
+    setProjectSyncStatus(status);
+    setProjectSyncState(status.state);
+    setExternalChangesMessage(status.detail ?? status.label);
+    return status;
   }
 
   function handleExternalChangeDecision(itemId: string, decision: ExternalChangeDecision) {
@@ -2803,6 +2812,7 @@ export function App() {
         projectSyncStatus={projectSyncStatus}
         onLoginGithub={() => void handleOpenGithubLogin()}
         onLogoutGithub={() => void handleLogoutGithub()}
+        onVerifyGithubConnection={() => handleVerifyGithubConnection()}
         onRefreshGithubRepositories={() => void refreshGithubRepositories()}
       />
       <DocumentFooterActionDialog

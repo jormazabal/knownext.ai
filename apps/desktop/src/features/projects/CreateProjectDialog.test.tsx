@@ -150,6 +150,17 @@ describe("CreateProjectDialog", () => {
   it("offers GitHub credential recovery when sync credentials are rejected", async () => {
     const onLoginGithub = vi.fn();
     const onLogoutGithub = vi.fn();
+    const onVerifyGithubConnection = vi.fn().mockResolvedValue({
+      projectId: "project-github",
+      mode: "github-manual",
+      state: "synced",
+      label: "Sincronizado",
+      detail: "Conexión verificada con knownext/docs.",
+      pendingPush: false,
+      pendingPull: false,
+      hasConflicts: false,
+      conflicts: [],
+    } satisfies ProjectSyncStatus);
     const githubProject: Project = {
       ...activeProject,
       id: "project-github",
@@ -195,17 +206,21 @@ describe("CreateProjectDialog", () => {
         projectSyncStatus={syncStatus}
         onLoginGithub={onLoginGithub}
         onLogoutGithub={onLogoutGithub}
+        onVerifyGithubConnection={onVerifyGithubConnection}
       />,
     );
 
-    expect(screen.getByText(/github no acepta las credenciales guardadas/i)).toBeInTheDocument();
-    expect(screen.getByText(/vuelve a conectar github/i)).toBeInTheDocument();
+    expect(screen.getByText(/github no acepta la conexión actual/i)).toBeInTheDocument();
+    expect(screen.getByText(/puedes probar la conexión actual/i)).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: /revisar credenciales/i }));
+    await userEvent.click(screen.getByRole("button", { name: /conectar cuenta de github/i }));
+    await userEvent.click(screen.getByRole("button", { name: /verificar conexión/i }));
     await userEvent.click(screen.getByRole("button", { name: /cerrar sesión/i }));
 
     expect(onLoginGithub).toHaveBeenCalledTimes(1);
+    expect(onVerifyGithubConnection).toHaveBeenCalledTimes(1);
     expect(onLogoutGithub).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText(/conexión verificada con knownext\/docs/i)).toBeInTheDocument();
   });
 
   it("requires explicit confirmations before detaching GitHub and local Git", async () => {
