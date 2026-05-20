@@ -22,6 +22,7 @@ import {
   Table,
   Undo2,
   Underline,
+  ZoomIn,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
@@ -72,15 +73,19 @@ const insertionTools = [
   { label: "Imagen", icon: Image, action: "image" },
 ] satisfies ToolbarAction[];
 
+const markdownZoomOptions = [80, 90, 100, 110, 125, 150];
+
 type MarkdownToolbarProps = {
   historyOpen: boolean;
   historyEnabled: boolean;
   historyDisabledReason: string;
   editorReady: boolean;
   extendedUnderlineEnabled?: boolean;
+  markdownZoomPercent: number;
   activeActions: MarkdownEditorFormatState;
   editorHistoryState: MarkdownEditorHistoryState;
   onRunEditorAction: (action: MarkdownEditorAction, options?: MarkdownEditorActionOptions) => void;
+  onMarkdownZoomChange: (zoomPercent: number) => void;
   onToggleHistory: () => void;
 };
 
@@ -90,12 +95,14 @@ export function MarkdownToolbar({
   historyDisabledReason,
   editorReady,
   extendedUnderlineEnabled = true,
+  markdownZoomPercent,
   activeActions,
   editorHistoryState,
   onRunEditorAction,
+  onMarkdownZoomChange,
   onToggleHistory,
 }: MarkdownToolbarProps) {
-  const [openMenu, setOpenMenu] = useState<"block" | "format" | "structure" | "insert" | "table" | null>(null);
+  const [openMenu, setOpenMenu] = useState<"block" | "format" | "structure" | "insert" | "table" | "zoom" | null>(null);
   const [hoveredTableSize, setHoveredTableSize] = useState({ rows: 3, columns: 4 });
   const toolbarRef = useRef<HTMLDivElement | null>(null);
 
@@ -330,6 +337,35 @@ export function MarkdownToolbar({
       </ToolbarActionGroup>
 
       <div className="ml-auto flex shrink-0 items-center gap-1">
+        <div className="relative shrink-0">
+          <button
+            className="toolbar-select knownext-markdown-zoom-select"
+            aria-label="Zoom del visualizador Markdown"
+            aria-haspopup="menu"
+            aria-expanded={openMenu === "zoom"}
+            onMouseDown={keepEditorSelection}
+            onClick={(event) => toggleMenu("zoom", event)}
+          >
+            <ZoomIn size={13} />
+            <span className="toolbar-select-label">{markdownZoomPercent}%</span>
+            <ChevronDown size={13} />
+          </button>
+          {openMenu === "zoom" ? (
+            <ToolbarMenu align="right">
+              {markdownZoomOptions.map((zoomPercent) => (
+                <ZoomMenuAction
+                  key={zoomPercent}
+                  zoomPercent={zoomPercent}
+                  active={zoomPercent === markdownZoomPercent}
+                  onRun={() => {
+                    setOpenMenu(null);
+                    onMarkdownZoomChange(zoomPercent);
+                  }}
+                />
+              ))}
+            </ToolbarMenu>
+          ) : null}
+        </div>
         <span
           className="inline-grid rounded-md focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-brand-orange"
           data-tooltip={editorHistoryState.canUndo ? "Deshacer" : "No hay cambios para deshacer"}
@@ -485,6 +521,27 @@ function BlockMenuAction({
       onClick={onRun}
     >
       <span className="min-w-0 flex-1 truncate">{action.label}</span>
+    </button>
+  );
+}
+
+function ZoomMenuAction({
+  zoomPercent,
+  active,
+  onRun,
+}: {
+  zoomPercent: number;
+  active: boolean;
+  onRun: () => void;
+}) {
+  return (
+    <button
+      className={`flex h-8 w-full items-center rounded px-2 text-left text-[11px] hover:bg-brand-hover ${active ? "bg-brand-hover font-semibold text-brand-orange" : "text-ink-primary"}`}
+      role="menuitem"
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onRun}
+    >
+      <span className="min-w-0 flex-1 truncate">{zoomPercent}%</span>
     </button>
   );
 }

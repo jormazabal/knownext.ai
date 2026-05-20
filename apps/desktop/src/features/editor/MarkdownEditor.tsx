@@ -7,7 +7,7 @@ import type { EditorState, Selection } from "@milkdown/kit/prose/state";
 import { Decoration, DecorationSet } from "@milkdown/kit/prose/view";
 import type { EditorView } from "@milkdown/kit/prose/view";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 import {
   createMarkdownEditorController,
   readMarkdownEditorHistoryState,
@@ -33,6 +33,7 @@ type MarkdownEditorProps = {
   onHistoryStateChange: (historyState: MarkdownEditorHistoryState) => void;
   onSelectionChange: (selection: MarkdownEditorSelection | null) => void;
   selectionFocus?: MarkdownEditorSelection | null;
+  zoomPercent: number;
 };
 
 export function MarkdownEditor(props: MarkdownEditorProps) {
@@ -47,7 +48,7 @@ const selectionFocusPluginKey = new PluginKey<SelectionFocusRange | null>("known
 const transientTextPluginKey = new PluginKey<TransientTextPreview | null>("knownext-transient-text-preview");
 const persistentCaretPluginKey = new PluginKey<PersistentCaretState>("knownext-persistent-caret");
 
-function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, selectionFocus }: MarkdownEditorProps) {
+function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, selectionFocus, zoomPercent }: MarkdownEditorProps) {
   const skipInitialUpdate = useRef(true);
   const lastMarkdownRef = useRef(markdown);
   const lastFormatStateRef = useRef<MarkdownEditorFormatState>({});
@@ -143,7 +144,7 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
   }, []);
 
   return (
-    <div className="knownext-editor">
+    <div className="knownext-editor" style={{ "--knownext-markdown-zoom": String(zoomPercent / 100) } as CSSProperties}>
       <Milkdown />
     </div>
   );

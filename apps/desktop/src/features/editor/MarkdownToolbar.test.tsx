@@ -15,6 +15,7 @@ describe("MarkdownToolbar", () => {
         historyEnabled
         historyDisabledReason="Historial no disponible"
         editorReady
+        markdownZoomPercent={100}
         activeActions={{
           "heading-2": true,
           bold: true,
@@ -23,6 +24,7 @@ describe("MarkdownToolbar", () => {
         }}
         editorHistoryState={{ canUndo: true, canRedo: false, undoDepth: 1, redoDepth: 0 }}
         onRunEditorAction={onRunEditorAction}
+        onMarkdownZoomChange={vi.fn()}
         onToggleHistory={vi.fn()}
       />,
     );
@@ -46,9 +48,11 @@ describe("MarkdownToolbar", () => {
         historyEnabled
         historyDisabledReason="Historial no disponible"
         editorReady
+        markdownZoomPercent={100}
         activeActions={{}}
         editorHistoryState={{ canUndo: false, canRedo: false, undoDepth: 0, redoDepth: 0 }}
         onRunEditorAction={onRunEditorAction}
+        onMarkdownZoomChange={vi.fn()}
         onToggleHistory={vi.fn()}
       />,
     );
@@ -72,14 +76,40 @@ describe("MarkdownToolbar", () => {
         historyDisabledReason="Historial no disponible"
         editorReady
         extendedUnderlineEnabled={false}
+        markdownZoomPercent={100}
         activeActions={{}}
         editorHistoryState={{ canUndo: false, canRedo: false, undoDepth: 0, redoDepth: 0 }}
         onRunEditorAction={vi.fn()}
+        onMarkdownZoomChange={vi.fn()}
         onToggleHistory={vi.fn()}
       />,
     );
 
     expect(screen.queryByRole("button", { name: "Subrayado" })).not.toBeInTheDocument();
+  });
+
+  it("changes the Markdown viewer zoom from the toolbar menu", async () => {
+    const onMarkdownZoomChange = vi.fn();
+
+    render(
+      <MarkdownToolbar
+        historyOpen={false}
+        historyEnabled
+        historyDisabledReason="Historial no disponible"
+        editorReady={false}
+        markdownZoomPercent={100}
+        activeActions={{}}
+        editorHistoryState={{ canUndo: false, canRedo: false, undoDepth: 0, redoDepth: 0 }}
+        onRunEditorAction={vi.fn()}
+        onMarkdownZoomChange={onMarkdownZoomChange}
+        onToggleHistory={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Zoom del visualizador Markdown" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "125%" }));
+
+    expect(onMarkdownZoomChange).toHaveBeenCalledWith(125);
   });
 
   it("enables undo and redo independently from editor readiness", async () => {
@@ -91,9 +121,11 @@ describe("MarkdownToolbar", () => {
         historyEnabled
         historyDisabledReason="Historial no disponible"
         editorReady
+        markdownZoomPercent={100}
         activeActions={{}}
         editorHistoryState={{ canUndo: false, canRedo: false, undoDepth: 0, redoDepth: 0 }}
         onRunEditorAction={onRunEditorAction}
+        onMarkdownZoomChange={vi.fn()}
         onToggleHistory={vi.fn()}
       />,
     );
@@ -107,9 +139,11 @@ describe("MarkdownToolbar", () => {
         historyEnabled
         historyDisabledReason="Historial no disponible"
         editorReady
+        markdownZoomPercent={100}
         activeActions={{}}
         editorHistoryState={{ canUndo: true, canRedo: false, undoDepth: 1, redoDepth: 0 }}
         onRunEditorAction={onRunEditorAction}
+        onMarkdownZoomChange={vi.fn()}
         onToggleHistory={vi.fn()}
       />,
     );
@@ -127,9 +161,11 @@ describe("MarkdownToolbar", () => {
         historyEnabled
         historyDisabledReason="Historial no disponible"
         editorReady
+        markdownZoomPercent={100}
         activeActions={{}}
         editorHistoryState={{ canUndo: false, canRedo: true, undoDepth: 0, redoDepth: 1 }}
         onRunEditorAction={onRunEditorAction}
+        onMarkdownZoomChange={vi.fn()}
         onToggleHistory={vi.fn()}
       />,
     );

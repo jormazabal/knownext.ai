@@ -767,6 +767,10 @@ input[type="range"]::-moz-range-thumb {
   display: flex;
 }
 
+.knownext-markdown-zoom-select {
+  min-width: 78px;
+}
+
 @media (max-width: 1120px) {
   .knownext-toolbar-wide-group {
     display: none;
@@ -855,6 +859,11 @@ input[type="range"]::-moz-range-thumb {
   font-family: Inter, ui-sans-serif, system-ui, "Segoe UI", Arial, sans-serif !important;
 }
 
+.knownext-editor .milkdown > .editor,
+.knownext-editor .milkdown > .ProseMirror {
+  zoom: var(--knownext-markdown-zoom, 1);
+}
+
 .knownext-editor .ProseMirror * {
   border-color: rgb(var(--app-border));
 }
@@ -913,12 +922,12 @@ input[type="range"]::-moz-range-thumb {
 
 .knownext-editor h1,
 .knownext-editor .ProseMirror h1 {
-  margin: 0 0 14px;
+  margin: 0.75em 0 0.44em;
   border-bottom: 1px solid rgb(var(--app-border));
   padding-bottom: 8px;
   color: rgb(var(--app-text));
   font-family: Inter, ui-sans-serif, system-ui, "Segoe UI", Arial, sans-serif !important;
-  font-size: 36px !important;
+  font-size: 32px !important;
   line-height: 1.15;
   font-weight: 760 !important;
   letter-spacing: 0;
@@ -926,7 +935,7 @@ input[type="range"]::-moz-range-thumb {
 
 .knownext-editor h2,
 .knownext-editor .ProseMirror h2 {
-  margin: 14px 0 6px;
+  margin: 0.9em 0 0.33em;
   color: rgb(var(--app-text));
   font-family: Inter, ui-sans-serif, system-ui, "Segoe UI", Arial, sans-serif !important;
   font-size: 18px !important;
@@ -936,7 +945,7 @@ input[type="range"]::-moz-range-thumb {
 
 .knownext-editor h3,
 .knownext-editor .ProseMirror h3 {
-  margin: 12px 0 6px;
+  margin: 0.85em 0 0.38em;
   color: rgb(var(--app-text));
   font-family: Inter, ui-sans-serif, system-ui, "Segoe UI", Arial, sans-serif !important;
   font-size: 16px !important;
@@ -945,7 +954,7 @@ input[type="range"]::-moz-range-thumb {
 
 .knownext-editor h4,
 .knownext-editor .ProseMirror h4 {
-  margin: 10px 0 5px;
+  margin: 0.8em 0 0.36em;
   color: rgb(var(--app-text));
   font-family: Inter, ui-sans-serif, system-ui, "Segoe UI", Arial, sans-serif !important;
   font-size: 14px !important;
@@ -956,11 +965,16 @@ input[type="range"]::-moz-range-thumb {
 .knownext-editor .ProseMirror h5,
 .knownext-editor h6,
 .knownext-editor .ProseMirror h6 {
-  margin: 8px 0 4px;
+  margin: 0.75em 0 0.33em;
   color: rgb(var(--app-text));
   font-family: Inter, ui-sans-serif, system-ui, "Segoe UI", Arial, sans-serif !important;
   font-size: 12px !important;
   font-weight: 700;
+}
+
+.knownext-editor .ProseMirror > :is(h1, h2, h3, h4, h5, h6):first-child,
+.knownext-editor .milkdown > .editor > :is(h1, h2, h3, h4, h5, h6):first-child {
+  margin-top: 0;
 }
 
 .knownext-editor p,
@@ -974,7 +988,12 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .knownext-editor .ProseMirror p {
+  margin: 0 0 8px !important;
   padding: 0 !important;
+}
+
+.knownext-editor .ProseMirror p:last-child {
+  margin-bottom: 0 !important;
 }
 
 [data-theme="dark"] .knownext-editor p,

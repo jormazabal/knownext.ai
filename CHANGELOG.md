@@ -2,6 +2,15 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.18.2 - 2026-05-20
+
+- Improved Markdown document readability with paragraph spacing, proportional heading margins, and a slightly smaller top-level heading style.
+- Added Markdown visualizer zoom controls and propagated the zoom setting across editable and readonly document views.
+- Added a document-tree option to show or hide file extensions without changing the underlying file names.
+- Made the custom Windows title bar behave like a native title bar by supporting double-click maximize and restore.
+- Hardened startup window restoration so saved positions and sizes are clamped to the visible desktop area.
+- Aligned the account footer with the document footer surface, height, typography, and border treatment.
+
 ## 0.18.1 - 2026-05-20
 
 - Replaced the project-level synchronization alert surface with a clearer `Protección e historial` entry next to project settings in the document tree.
