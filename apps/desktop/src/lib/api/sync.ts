@@ -74,3 +74,14 @@ export async function publishProjectGithub(
     body: JSON.stringify(payload),
   });
 }
+
+export async function resolveProjectSyncConflict(
+  projectId: string,
+  conflictId: string,
+  resolution: "keep-local" | "take-remote" | "save-local-copy-and-take-remote" | "manual-resolved",
+): Promise<ProjectSyncStatus> {
+  return requestJson<ProjectSyncStatus>(`/api/projects/${projectId}/sync/conflicts/${encodeURIComponent(conflictId)}/resolve`, {
+    method: "POST",
+    body: JSON.stringify({ resolution }),
+  });
+}

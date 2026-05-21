@@ -2,6 +2,13 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.18.10 - 2026-05-21
+
+- Added real GitHub conflict resolution actions in `Protección e historial` so users can synchronize instead of only opening the repository.
+- Reworked GitHub conflict copy and actions to distinguish first upload from true local/remote divergence.
+- Added confirmation dialogs for choosing whether to keep the local version or use the GitHub version.
+- Added backend conflict resolution paths for uploading the local history or resetting to the GitHub version with guardrails for unsaved local changes.
+
 ## 0.18.9 - 2026-05-21
 
 - Fixed the GitHub conflict action in `Protección e historial` so it no longer appears to do nothing when the user is already on the GitHub tab.
