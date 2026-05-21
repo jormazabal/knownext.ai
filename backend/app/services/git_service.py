@@ -116,9 +116,29 @@ class GitService:
         return self._run(root, ["git", "branch", "--show-current"], allow_empty=True).strip() or None
 
     def remote_ref(self, root: Path, branch: str | None = None) -> str | None:
-        branch_name = branch or self.current_branch(root) or "main"
-        remote = f"origin/{branch_name}"
-        return remote if self.rev_parse(root, remote) else None
+        branch_candidates = [branch, self.current_branch(root), "main", "master"]
+        for branch_name in branch_candidates:
+            if not branch_name:
+                continue
+            remote = f"origin/{branch_name}"
+            if self.rev_parse(root, remote):
+                return remote
+
+        try:
+            origin_head = self._run(root, ["git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], allow_empty=True).strip()
+        except HTTPException:
+            origin_head = ""
+        if origin_head and self.rev_parse(root, origin_head):
+            return origin_head
+
+        try:
+            output = self._run(root, ["git", "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin"], allow_empty=True)
+        except HTTPException:
+            output = ""
+        for remote in [line.strip() for line in output.splitlines() if line.strip() and line.strip() != "origin/HEAD"]:
+            if self.rev_parse(root, remote):
+                return remote
+        return None
 
     def rev_parse(self, root: Path, ref: str = "HEAD", short: bool = False) -> str | None:
         if not self.is_repository(root):
@@ -250,7 +270,10 @@ class GitService:
         return (
             "does not have any commits yet" in normalized
             or "needed a single revision" in normalized
-            or "ambiguous argument 'head'" in normalized
+            or "ambiguous argument" in normalized
+            or "unknown revision or path not in the working tree" in normalized
+            or "not a symbolic ref" in normalized
+            or "not a valid ref" in normalized
         )
 
     def _is_index_lock_error(self, message: str) -> bool:
