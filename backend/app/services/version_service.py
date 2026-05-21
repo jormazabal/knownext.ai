@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from app.schemas.version import CreateVersionRequest, CreateVersionResponse, RestoreVersionResponse, VersionContentResponse, VersionRecord
 from app.schemas.project import GithubRepository
 from app.services.auth_service import auth_service
+from app.services.activity_service import activity_service
 from app.services.document_service import document_service
 from app.services.filesystem_service import decode_document_id
 from app.services.git_service import git_service
@@ -32,6 +33,15 @@ class VersionService:
         _, relative_path = self._resolve_project_and_path(payload.documentId)
         if project["versioningMode"] == "local-git":
             version = git_service.create_version(Path(project["folderPath"]), relative_path, payload.title)
+            activity_service.record(
+                project_id,
+                event_type="local_version_created",
+                scope="history",
+                title="Versión local guardada",
+                message=f"Se guardó una nueva versión de {Path(relative_path).name} en el historial local.",
+                tone="success",
+                document_path=relative_path,
+            )
             return CreateVersionResponse(version=version)
         auth_service.require_github_auth()
         if project["versioningMode"] == "github-api" and project.get("githubRepository"):
@@ -42,6 +52,15 @@ class VersionService:
                 document.markdown,
                 payload.title,
                 Path(project["folderPath"]),
+            )
+            activity_service.record(
+                project_id,
+                event_type="github_document_version_created",
+                scope="github",
+                title="Documento guardado en GitHub",
+                message=f"Se guardó una nueva versión de {Path(relative_path).name} en GitHub.",
+                tone="success",
+                document_path=relative_path,
             )
             return CreateVersionResponse(version=version)
         raise HTTPException(status_code=409, detail="Unsupported versioning provider")
@@ -69,6 +88,15 @@ class VersionService:
         document_path.parent.mkdir(parents=True, exist_ok=True)
         document_path.write_text(markdown, encoding="utf-8")
         version = git_service.create_version(root, relative_path, f"Restaura versión anterior: {document_path.name}")
+        activity_service.record(
+            project["id"],
+            event_type="version_restored",
+            scope="history",
+            title="Versión restaurada",
+            message=f"Se restauró una versión anterior de {document_path.name}.",
+            tone="success",
+            document_path=relative_path,
+        )
         if project.get("syncMode") == "auto-github":
             from app.services.sync_service import sync_service
 

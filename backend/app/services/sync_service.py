@@ -22,6 +22,7 @@ from app.schemas.sync import (
     SyncScanRequest,
 )
 from app.services.auth_service import auth_service
+from app.services.activity_service import activity_service
 from app.services.git_service import git_service
 from app.services.github_service import github_service
 from app.services.credential_service import credential_service
@@ -71,14 +72,59 @@ class SyncService:
                 )
                 return self._status_from_state(project, state)
             try:
-                git_service.push(root, self._github_token())
+                git_service.fetch(root, self._github_token())
+                head = git_service.rev_parse(root, "HEAD")
+                remote_ref = git_service.remote_ref(root, self._project_branch(project))
+                remote = git_service.rev_parse(root, remote_ref) if remote_ref else None
+                if not head:
+                    state = sync_state_service.update_project_state(
+                        project_id,
+                        {"state": "synced", "pendingPush": False, "pendingPull": False, "lastScanAt": _now_iso(), "lastError": None},
+                    )
+                    return self._status_from_state(project, state)
+                if remote and not git_service.is_ancestor(root, remote, head):
+                    conflict = self._conflict(project_id, "", "push_rejected", "GitHub tiene cambios que no están en este equipo. Revisa antes de subir.")
+                    state = sync_state_service.update_project_state(
+                        project_id,
+                        {
+                            "state": "review-required",
+                            "pendingPush": True,
+                            "pendingPull": True,
+                            "conflicts": [conflict.model_dump()],
+                            "lastLocalHead": head[:7],
+                            "lastRemoteHead": remote[:7],
+                            "lastScanAt": _now_iso(),
+                            "lastError": None,
+                        },
+                    )
+                    return self._status_from_state(project, state)
+                git_service.push_current_to_remote_branch(root, self._target_remote_branch(project, root), self._github_token())
+                git_service.fetch(root, self._github_token())
                 state = self._record_git_heads(project, "synced", pending_push=False, pending_pull=False)
                 state["lastSuccessfulPushAt"] = _now_iso()
                 state["lastSyncAt"] = state["lastSuccessfulPushAt"]
                 state["lastError"] = None
                 sync_state_service.update_project_state(project_id, state)
+                activity_service.record(
+                    project_id,
+                    event_type="github_push_completed",
+                    scope="github",
+                    title="Historial subido a GitHub",
+                    message="El historial local se ha subido al repositorio conectado.",
+                    tone="success",
+                    repository=self._repository_label(project),
+                )
                 return self.status(project_id)
             except HTTPException as error:
+                activity_service.record(
+                    project_id,
+                    event_type="github_push_failed",
+                    scope="github",
+                    title="No se pudo subir a GitHub",
+                    message="GitHub no aceptó la sincronización. Revisa la conexión o los cambios pendientes.",
+                    tone="warning",
+                    repository=self._repository_label(project),
+                )
                 conflict = self._conflict(project_id, "", "push_rejected", "GitHub rechazó la subida. Trae cambios antes de volver a subir.")
                 state = sync_state_service.update_project_state(
                     project_id,
@@ -126,6 +172,15 @@ class SyncService:
             state["lastSyncAt"] = state["lastSuccessfulPullAt"]
             state["lastError"] = None
             sync_state_service.update_project_state(project_id, state)
+            activity_service.record(
+                project_id,
+                event_type="github_pull_completed",
+                scope="github",
+                title="Actualizado desde GitHub",
+                message="Se han descargado los cambios de GitHub en este equipo.",
+                tone="success",
+                repository=self._repository_label(project),
+            )
             return self.status(project_id)
 
     def auto_run(self, project_id: str, payload: SyncScanRequest | None = None) -> ProjectSyncStatus:
@@ -205,6 +260,14 @@ class SyncService:
                 project_id,
                 {"state": "local-history", "pendingPush": False, "lastLocalHead": git_service.rev_parse(root, "HEAD", short=True), "lastError": None},
             )
+            activity_service.record(
+                project_id,
+                event_type="history_enabled",
+                scope="history",
+                title="Historial local activado",
+                message="KnowNext.ai empezó a guardar versiones locales de este proyecto.",
+                tone="success",
+            )
         return EnableHistoryResponse(projectId=project_id, message="Historial local activado.", versionHash=version_hash)
 
     def publish_to_github(self, project_id: str, payload: PublishGithubRequest) -> ProjectSyncStatus:
@@ -268,7 +331,20 @@ class SyncService:
                 }
             )
             project_service.store.write(registry)
-            return self.scan(project_id, SyncScanRequest())
+            if payload.syncMode == "auto-github":
+                status = self._try_auto_push(project)
+            else:
+                status = self.scan(project_id, SyncScanRequest())
+            activity_service.record(
+                project_id,
+                event_type="github_connected",
+                scope="github",
+                title="GitHub conectado",
+                message="Se ha conectado el repositorio GitHub al proyecto.",
+                tone="success" if status.state == "synced" else "warning",
+                repository=self._repository_label(project),
+            )
+            return status
 
     def verify_github_connection(self, project_id: str) -> ProjectSyncStatus:
         project = self._project(project_id)
@@ -300,8 +376,26 @@ class SyncService:
                 status = self.scan(project_id, SyncScanRequest())
                 if status.state in {"error", "offline"}:
                     return status
+                activity_service.record(
+                    project_id,
+                    event_type="github_connection_verified",
+                    scope="github",
+                    title="Conexión GitHub verificada",
+                    message="La cuenta conectada puede acceder al repositorio del proyecto.",
+                    tone="success",
+                    repository=self._repository_label(project),
+                )
                 return status.model_copy(update={"detail": f"Conexión verificada con {repository.owner}/{repository.repo}."})
             except HTTPException as error:
+                activity_service.record(
+                    project_id,
+                    event_type="github_connection_failed",
+                    scope="github",
+                    title="No se pudo verificar GitHub",
+                    message="La conexión actual no permite acceder al repositorio del proyecto.",
+                    tone="danger",
+                    repository=self._repository_label(project),
+                )
                 state = sync_state_service.update_project_state(
                     project_id,
                     {
@@ -413,13 +507,35 @@ class SyncService:
                 conflict = self._conflict(project_id, "", "push_rejected", "GitHub tiene cambios nuevos. Trae cambios antes de subir.")
                 state = sync_state_service.update_project_state(project_id, {"state": "review-required", "pendingPush": True, "pendingPull": True, "conflicts": [conflict.model_dump()]})
                 return self._status_from_state(project, state)
-            git_service.push(root, self._github_token())
+            if not head:
+                state = sync_state_service.update_project_state(project_id, {"state": "synced", "pendingPush": False, "pendingPull": False, "lastScanAt": _now_iso(), "lastError": None})
+                return self._status_from_state(project, state)
+            git_service.push_current_to_remote_branch(root, self._target_remote_branch(project, root), self._github_token())
+            git_service.fetch(root, self._github_token())
             state = self._record_git_heads(project, "synced", pending_push=False, pending_pull=False)
             now = _now_iso()
             state.update({"lastSyncAt": now, "lastSuccessfulPushAt": now, "lastError": None})
             sync_state_service.update_project_state(project_id, state)
+            activity_service.record(
+                project_id,
+                event_type="github_auto_push_completed",
+                scope="github",
+                title="Historial subido a GitHub",
+                message="KnowNext.ai sincronizó automáticamente el historial local con GitHub.",
+                tone="success",
+                repository=self._repository_label(project),
+            )
             return self.status(project_id)
         except HTTPException as error:
+            activity_service.record(
+                project_id,
+                event_type="github_auto_push_pending",
+                scope="github",
+                title="Subida a GitHub pendiente",
+                message="No se pudo completar la subida automática. El historial local sigue guardado en este equipo.",
+                tone="warning",
+                repository=self._repository_label(project),
+            )
             state = sync_state_service.update_project_state(project_id, {"state": "local-pending", "pendingPush": True, "lastError": str(error.detail)})
             return self._status_from_state(project, state)
 
@@ -539,6 +655,15 @@ class SyncService:
         if isinstance(repository, dict):
             return repository.get("defaultRef")
         return None
+
+    def _repository_label(self, project: dict) -> str | None:
+        repository = project.get("githubRepository")
+        if isinstance(repository, dict) and repository.get("owner") and repository.get("repo"):
+            return f"{repository['owner']}/{repository['repo']}"
+        return None
+
+    def _target_remote_branch(self, project: dict, root: Path) -> str:
+        return self._project_branch(project) or git_service.current_branch(root) or "main"
 
     def _project(self, project_id: str) -> dict:
         from app.services.project_service import project_service

@@ -159,6 +159,9 @@
 - [ ] In tablet/mobile width, open version history and confirm it appears as a floating right drawer over the editor without a resize divider.
 - [ ] In tablet/mobile width, confirm version history closes from its X button, by clicking outside it, and by pressing Escape.
 - [ ] Confirm latest version appears first and has Actual.
+- [ ] Open Protección e historial and confirm Resumen, Historial local, GitHub, Omitidos, Actividad, and Detalles tabs are available.
+- [ ] In Protección e historial, open Actividad and confirm recent synchronization, backup, GitHub, restore, and ignored-file actions are grouped by day with user-facing copy and no Git branch names or command output.
+- [ ] Perform a project synchronization action and confirm Actividad updates after refreshing the protection state.
 - [ ] Close the version history panel.
 - [ ] Write text in the AI prompt input.
 - [ ] Submit the prompt.

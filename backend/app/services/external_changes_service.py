@@ -14,6 +14,7 @@ from app.schemas.project import (
     ExternalChangeSummary,
 )
 from app.services.filesystem_service import DOCUMENT_SUFFIXES, EXCLUDED_DIRS, IMAGE_SUFFIXES, filesystem_service
+from app.services.activity_service import activity_service
 from app.services.git_service import git_service
 from app.services.project_service import project_service
 from app.services.credential_service import credential_service
@@ -103,6 +104,15 @@ class ExternalChangesService:
                 pending_remote_sync = True
                 status = "pending"
                 message = "Versión local guardada. No hay remoto GitHub configurado para sincronizar."
+
+        activity_service.record(
+            project_id,
+            event_type="external_changes_saved",
+            scope="history",
+            title="Cambios guardados en historial",
+            message=f"Se guardaron {len(selected_paths)} cambios locales en una nueva versión.",
+            tone="success" if not pending_remote_sync else "warning",
+        )
 
         return ExternalChangeImportResult(
             status=status,

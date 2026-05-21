@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
@@ -42,7 +43,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.18.7"
+    assert payload["version"] == "0.18.8"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -373,6 +374,68 @@ def test_git_service_missing_remote_ref_is_not_a_sync_error(tmp_path) -> None:
     git_service.set_remote_origin(tmp_path, "https://github.com/acme/docs.git")
 
     assert git_service.remote_ref(tmp_path, "main") is None
+
+
+def test_git_service_pushes_local_history_to_empty_remote_branch(tmp_path) -> None:
+    from app.services.git_service import git_service
+
+    project_root = tmp_path / "project"
+    remote_root = tmp_path / "remote.git"
+    project_root.mkdir()
+    subprocess.run(["git", "init", "--bare", str(remote_root)], text=True, capture_output=True, check=True)
+
+    (project_root / "intro.md").write_text("# Intro\n", encoding="utf-8")
+    git_service.create_project_version(project_root, ["intro.md"], "Initial")
+    git_service.set_remote_origin(project_root, str(remote_root))
+
+    git_service.push_current_to_remote_branch(project_root, "main")
+    git_service.fetch(project_root)
+
+    remote_ref = git_service.remote_ref(project_root, "main")
+    assert remote_ref == "origin/main"
+    assert git_service.rev_parse(project_root, "HEAD") == git_service.rev_parse(project_root, remote_ref)
+
+
+def test_project_activity_records_user_facing_events(tmp_path) -> None:
+    docs_root = tmp_path / "activity-docs"
+    created = client.post(
+        "/api/projects",
+        json={
+            "name": "Activity Docs",
+            "folderPath": str(docs_root),
+            "icon": "folder",
+            "iconColor": "#F37021",
+            "creationMode": "new-local",
+            "storageMode": "local-files",
+            "versioningMode": "local-git",
+            "syncMode": "manual-local",
+        },
+    )
+    assert created.status_code == 201
+    project_id = created.json()["id"]
+    document = client.post(f"/api/projects/{project_id}/documents", json={"parentId": None, "name": "intro.md", "markdown": "# Intro\n"})
+    assert document.status_code == 200
+
+    version = client.post(f"/api/projects/{project_id}/versions", json={"documentId": document.json()["node"]["id"], "title": "Initial"})
+    assert version.status_code == 200
+
+    custom_event = client.post(
+        f"/api/projects/{project_id}/activity",
+        json={
+            "type": "omitted_changes_accepted",
+            "scope": "security",
+            "title": "Archivos omitidos aceptados",
+            "message": "Se confirmó que los archivos omitidos deben mantenerse fuera del historial.",
+            "tone": "success",
+        },
+    )
+    assert custom_event.status_code == 200
+
+    activity = client.get(f"/api/projects/{project_id}/activity")
+    assert activity.status_code == 200
+    titles = [event["title"] for event in activity.json()["events"]]
+    assert titles[0] == "Archivos omitidos aceptados"
+    assert "Versión local guardada" in titles
 
 
 def test_external_changes_scan_classifies_and_imports_safe_git_changes(tmp_path) -> None:

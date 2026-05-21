@@ -54,6 +54,7 @@ import {
   uploadAiContextFiles,
 } from "../lib/api/ai";
 import { API_BASE_URL, ApiError, getApiErrorMessage, isApiConnectionError, isBackendEnabled, waitForApiReady } from "../lib/api/client";
+import { getProjectActivity, recordProjectActivity } from "../lib/api/activity";
 import {
   discardDocumentDraft,
   discardOrphanDraft,
@@ -123,6 +124,7 @@ import type {
   AiUsageSummaryResponse,
   AppearanceConfig,
   AppUtilityTabId,
+  ActivityEvent,
   DiagnosticsConfig,
   AssetImportResponse,
   DocumentSyncStatus,
@@ -249,6 +251,7 @@ export function App() {
   const [externalChangesBusy, setExternalChangesBusy] = useState(false);
   const [projectSyncState, setProjectSyncState] = useState<ProjectSyncState>("synced");
   const [projectSyncStatus, setProjectSyncStatus] = useState<ProjectSyncStatus | null>(null);
+  const [projectActivity, setProjectActivity] = useState<ActivityEvent[]>([]);
   const [externalChangesMessage, setExternalChangesMessage] = useState<string | null>(null);
   const [acknowledgedExternalChangeSets, setAcknowledgedExternalChangeSets] = useState<Record<string, string[]>>(readAcknowledgedExternalChangeSets);
   const [documentSyncStatuses, setDocumentSyncStatuses] = useState<Record<string, DocumentSyncStatus>>({});
@@ -486,6 +489,7 @@ export function App() {
       setExternalChangeDecisions({});
       setProjectSyncState("synced");
       setProjectSyncStatus(null);
+      setProjectActivity([]);
       return;
     }
     if (externalChangesBusy) return;
@@ -495,6 +499,14 @@ export function App() {
     }, 8000);
     return () => window.clearInterval(interval);
   }, [activeProject?.id, acknowledgedExternalChangeSets, configLoaded, externalChangesBusy]);
+
+  useEffect(() => {
+    if (!configLoaded || !activeProject) {
+      setProjectActivity([]);
+      return;
+    }
+    void refreshProjectActivity(activeProject.id);
+  }, [activeProject?.id, configLoaded]);
 
   useEffect(() => {
     if (!configLoaded || !activeProject) return;
@@ -833,6 +845,7 @@ export function App() {
     setProjectSyncStatus(status);
     setProjectSyncState(status.state);
     setExternalChangesMessage(status.detail ?? status.label);
+    await refreshProjectActivity(projectId);
     return status;
   }
 
@@ -849,6 +862,13 @@ export function App() {
     });
     setExternalChangesOpen(false);
     setExternalChangesMessage("Cambios omitidos aceptados.");
+    void recordProjectActivity(activeProject.id, {
+      type: "omitted_changes_accepted",
+      scope: "security",
+      title: "Archivos omitidos aceptados",
+      message: "Se confirmó que los archivos omitidos deben mantenerse fuera del historial.",
+      tone: "success",
+    }).then(() => refreshProjectActivity(activeProject.id));
     if (projectSyncState !== "pending") setProjectSyncState("synced");
   }
 
@@ -867,6 +887,7 @@ export function App() {
       setExternalChangesMessage(result.message);
       await refreshProjectCapabilityState(activeProject.id);
       await refreshExternalChangeSet(activeProject.id, { silent: true });
+      await refreshProjectActivity(activeProject.id);
       setProjectSyncState(result.status);
       setExternalChangesMessage(result.message);
       if (!result.pendingRemoteSync) setExternalChangesOpen(false);
@@ -1597,6 +1618,7 @@ export function App() {
         setActiveTreeNodeId(nextProjectTabs.activeDocumentId);
         if (!nextVersioningStatus.enabled) setHistoryOpen(false);
         await refreshProjectSyncStatus(projectId, { autoRun: isAutomaticSyncMode(updatedProject?.syncMode), silent: true });
+        await refreshProjectActivity(projectId);
       }
       setEditProjectOpen(false);
     } catch (error) {
@@ -1733,32 +1755,66 @@ export function App() {
   async function handlePullProject() {
     if (!activeProject || syncState !== "idle") return;
     setSyncState("pulling");
+    setExternalChangesBusy(true);
+    setExternalChangesMessage("Actualizando el proyecto desde GitHub.");
     try {
       const response = await pullProject(activeProject.id);
       setProjectTree(activeProject.id, await getProjectTree(activeProject.id));
       await refreshProjectCapabilityState(activeProject.id);
       await refreshExternalChangeSet(activeProject.id, { silent: true });
-      setNotice({ title: "Sincronización completada", message: response.message, tone: "info" });
+      await refreshProjectSyncStatus(activeProject.id, { silent: true });
+      await refreshProjectActivity(activeProject.id);
+      setExternalChangesMessage(response.message);
     } catch (error) {
       showError(error, "No se pudo traer cambios del proveedor remoto.");
     } finally {
       setSyncState("idle");
+      setExternalChangesBusy(false);
+    }
+  }
+
+  async function refreshProjectActivity(projectId = activeProject?.id) {
+    if (!projectId) return;
+    try {
+      const activity = await getProjectActivity(projectId);
+      setProjectActivity(activity.events);
+    } catch {
+      setProjectActivity([]);
+    }
+  }
+
+  async function handleRefreshProtectionState(projectId = activeProject?.id) {
+    if (!projectId) return;
+    setExternalChangesBusy(true);
+    try {
+      await Promise.all([
+        refreshExternalChangeSet(projectId, { refreshTreeOnChanges: true }),
+        refreshProjectSyncStatus(projectId, { autoRun: isAutomaticSyncMode(activeProject?.syncMode), silent: true }),
+        refreshProjectActivity(projectId),
+      ]);
+    } finally {
+      setExternalChangesBusy(false);
     }
   }
 
   async function handlePushProject() {
     if (!activeProject || syncState !== "idle") return;
     setSyncState("pushing");
+    setExternalChangesBusy(true);
+    setExternalChangesMessage("Subiendo el historial local a GitHub.");
     try {
       const response = await pushProject(activeProject.id);
       await refreshProjectCapabilityState(activeProject.id);
-      setProjectSyncState("synced");
+      await refreshProjectSyncStatus(activeProject.id, { silent: true });
+      await refreshExternalChangeSet(activeProject.id, { silent: true });
+      await refreshProjectActivity(activeProject.id);
       setExternalChangesMessage(response.message);
-      setNotice({ title: "Sincronización completada", message: response.message, tone: "info" });
+      if (response.status === "synced") setExternalChangesOpen(false);
     } catch (error) {
       showError(error, "No se pudieron enviar cambios al proveedor remoto.");
     } finally {
       setSyncState("idle");
+      setExternalChangesBusy(false);
     }
   }
 
@@ -2638,6 +2694,7 @@ export function App() {
         projectSyncStatus={projectSyncStatus}
         externalChangeSet={externalChangeSet}
         externalChangeDecisions={externalChangeDecisions}
+        projectActivity={projectActivity}
         externalChangesOpen={externalChangesOpen}
         externalChangesBusy={externalChangesBusy}
         projectSyncState={projectSyncState}
@@ -2672,7 +2729,7 @@ export function App() {
         onPushProject={() => void handlePushProject()}
         onOpenExternalChanges={() => setExternalChangesOpen(true)}
         onCloseExternalChanges={() => setExternalChangesOpen(false)}
-        onRefreshExternalChanges={() => void refreshExternalChangeSet(activeProject?.id, { refreshTreeOnChanges: true })}
+        onRefreshExternalChanges={() => void handleRefreshProtectionState(activeProject?.id)}
         onExternalChangeDecision={handleExternalChangeDecision}
         onImportExternalChanges={() => void handleImportExternalChanges()}
         onImportSafeExternalChanges={() => void handleImportExternalChanges({ safeOnly: true })}
