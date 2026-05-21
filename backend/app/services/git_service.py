@@ -103,6 +103,12 @@ class GitService:
             raise HTTPException(status_code=409, detail="Project is not a Git repository")
         return self._run(root, self._with_auth_header(["git", "push"], auth_token), allow_empty=True)
 
+    def push_current_to_remote_branch(self, root: Path, branch: str, auth_token: str | None = None) -> str:
+        if not self.is_repository(root):
+            raise HTTPException(status_code=409, detail="Project is not a Git repository")
+        branch_name = self._safe_branch_name(branch)
+        return self._run(root, self._with_auth_header(["git", "push", "-u", "origin", f"HEAD:refs/heads/{branch_name}"], auth_token), allow_empty=True)
+
     def fetch(self, root: Path, auth_token: str | None = None) -> str:
         if not self.is_repository(root):
             raise HTTPException(status_code=409, detail="Project is not a Git repository")
@@ -255,6 +261,12 @@ class GitService:
             f"http.extraHeader=Authorization: Basic {basic_token}",
             *command[1:],
         ]
+
+    def _safe_branch_name(self, branch: str) -> str:
+        branch_name = (branch or "").strip()
+        if not branch_name or branch_name.startswith("-") or any(char.isspace() for char in branch_name):
+            raise HTTPException(status_code=400, detail="Invalid Git branch name")
+        return branch_name
 
     def _lock_for(self, root: Path) -> threading.RLock:
         key = str(root.resolve()).lower()

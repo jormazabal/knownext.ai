@@ -74,6 +74,26 @@ export type ExternalChangeRisk = "safe" | "review" | "blocked";
 export type ExternalChangeDecision = "include" | "omit" | "review";
 export type ExternalChangeSetStatus = "none" | "safe" | "needs-review" | "blocked";
 export type ProductProjectMode = "local-files" | "local-history" | "github-manual" | "github-auto";
+export type ActivityTone = "success" | "warning" | "danger" | "info";
+export type ActivityScope = "project" | "history" | "github" | "security" | "document";
+
+export type ActivityEvent = {
+  id: string;
+  projectId: string;
+  type: string;
+  scope: ActivityScope;
+  title: string;
+  message: string;
+  tone: ActivityTone;
+  createdAt: string;
+  documentPath?: string | null;
+  repository?: string | null;
+};
+
+export type ActivityEventList = {
+  projectId: string;
+  events: ActivityEvent[];
+};
 
 export type ProjectSyncState =
   | "unconfigured"

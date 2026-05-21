@@ -28,7 +28,7 @@ import { formatVersionFullDate, VersionHistoryPanel, type VersionPreview, type V
 import { BrandMark } from "../components/brand/BrandMark";
 import { TitleBar } from "../components/window/TitleBar";
 import { getProjectImageContentUrl } from "../lib/api/projects";
-import type { AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentSyncStatus, DocumentTreeNode, ExternalChangeDecision, ExternalChangeSet, InsertImageReferenceResponse, LayoutConfig, Project, ProjectSyncState, ProjectSyncStatus, ProjectVersioningStatus, VersionRecord, WorkspaceTab } from "../types/domain";
+import type { ActivityEvent, AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentSyncStatus, DocumentTreeNode, ExternalChangeDecision, ExternalChangeSet, InsertImageReferenceResponse, LayoutConfig, Project, ProjectSyncState, ProjectSyncStatus, ProjectVersioningStatus, VersionRecord, WorkspaceTab } from "../types/domain";
 
 const sidebarWidthConfig = {
   defaultWidth: 338,
@@ -86,6 +86,7 @@ type DesktopLayoutProps = {
   projectSyncStatus: ProjectSyncStatus | null;
   externalChangeSet: ExternalChangeSet | null;
   externalChangeDecisions: Record<string, ExternalChangeDecision>;
+  projectActivity: ActivityEvent[];
   externalChangesOpen: boolean;
   externalChangesBusy: boolean;
   projectSyncState: ProjectSyncState;
@@ -708,6 +709,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 project={props.activeProject}
                 changeSet={props.externalChangeSet}
                 decisions={props.externalChangeDecisions}
+                activityEvents={props.projectActivity}
                 syncStatus={props.projectSyncStatus}
                 syncState={props.projectSyncState}
                 acknowledged={props.externalChangeSetAcknowledged}
@@ -717,6 +719,8 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 onImport={props.onImportExternalChanges}
                 onImportSafe={props.onImportSafeExternalChanges}
                 onOmitAll={props.onOmitExternalChanges}
+                onPushGithub={props.onPushProject}
+                onPullGithub={props.onPullProject}
                 onRefresh={props.onRefreshExternalChanges}
                 onClose={props.onCloseExternalChanges}
               />

@@ -2,6 +2,13 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.18.8 - 2026-05-21
+
+- Added an `Actividad` tab to `Protección e historial` so users can review recent backup, synchronization, ignored-file, and restore events in non-technical language.
+- Added backend activity persistence and API contracts for project history, GitHub connection, synchronization, external-change, and restore events.
+- Improved GitHub-first-upload handling so local Git history can be pushed to a missing or empty remote branch without exposing branch or command details in the UI.
+- Updated project protection copy and actions so pending GitHub upload is presented as a clear next step instead of a technical conflict.
+
 ## 0.18.7 - 2026-05-21
 
 - Cleared stale Git error details when GitHub verification correctly transitions to `Pendiente de subir`.
