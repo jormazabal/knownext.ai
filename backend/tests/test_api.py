@@ -42,7 +42,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.18.4"
+    assert payload["version"] == "0.18.5"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -348,6 +348,21 @@ def test_git_service_retries_transient_index_lock(tmp_path, monkeypatch) -> None
 
     assert git_service._run(tmp_path, ["git", "status"]) == "ok\n"
     assert calls == 2
+
+
+def test_git_service_uses_basic_token_auth_for_github_https() -> None:
+    from app.services.git_service import git_service
+
+    command = git_service._with_auth_header(["git", "fetch", "origin"], "gho_example_token")
+    expected_token = base64.b64encode(b"x-access-token:gho_example_token").decode("ascii")
+
+    assert command == [
+        "git",
+        "-c",
+        f"http.extraHeader=Authorization: Basic {expected_token}",
+        "fetch",
+        "origin",
+    ]
 
 
 def test_external_changes_scan_classifies_and_imports_safe_git_changes(tmp_path) -> None:

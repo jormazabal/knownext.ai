@@ -2,6 +2,12 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.18.5 - 2026-05-21
+
+- Fixed GitHub synchronization for local Git projects after reconnecting the GitHub account.
+- Changed backend Git HTTPS authentication to use the token format expected by GitHub for `fetch`, `pull`, and `push`.
+- Added backend coverage so GitHub tokens are passed to local Git without falling back to stale system credentials.
+
 ## 0.18.4 - 2026-05-21
 
 - Renamed the GitHub credential recovery action to `Conectar cuenta de GitHub` so the project configuration explains the real action.
