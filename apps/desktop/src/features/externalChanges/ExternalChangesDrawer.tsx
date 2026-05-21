@@ -50,6 +50,7 @@ type ExternalChangesDrawerProps = {
   onOmitAll: () => void;
   onPushGithub: () => void;
   onPullGithub: () => void;
+  onResolveGithubConflict: (resolution: "keep-local" | "take-remote") => void;
   onOpenGithubRepository: () => void;
   onRefresh: () => void;
   onClose: () => void;
@@ -96,12 +97,14 @@ export function ExternalChangesDrawer({
   onOmitAll,
   onPushGithub,
   onPullGithub,
+  onResolveGithubConflict,
   onOpenGithubRepository,
   onRefresh,
   onClose,
 }: ExternalChangesDrawerProps) {
   const [activeTab, setActiveTab] = useState<ProtectionTab>("summary");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<ExternalChangeKind>>(new Set(["ignored", "unsupported"]));
+  const [pendingConflictResolution, setPendingConflictResolution] = useState<"keep-local" | "take-remote" | null>(null);
   const items = changeSet?.items ?? [];
   const saveableItems = useMemo(() => items.filter((item) => item.risk !== "blocked"), [items]);
   const omittedItems = useMemo(() => items.filter((item) => item.risk === "blocked"), [items]);
@@ -118,7 +121,7 @@ export function ExternalChangesDrawer({
   return (
     <div className="knownext-modal-overlay fixed inset-0 z-[80] flex items-center justify-center bg-black/20 px-4 py-8" onMouseDown={onClose}>
       <section
-        className="flex max-h-[min(820px,calc(100vh-56px))] w-[min(920px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
+        className="relative flex max-h-[min(820px,calc(100vh-56px))] w-[min(920px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
         role="dialog"
         aria-modal="true"
         aria-labelledby="protection-history-title"
@@ -215,6 +218,7 @@ export function ExternalChangesDrawer({
               busy={busy}
               onPushGithub={onPushGithub}
               onPullGithub={onPullGithub}
+              onRequestResolveGithubConflict={setPendingConflictResolution}
               onOpenGithubRepository={onOpenGithubRepository}
               onRefresh={onRefresh}
             />
@@ -271,6 +275,17 @@ export function ExternalChangesDrawer({
             ) : null}
           </div>
         </footer>
+        {pendingConflictResolution ? (
+          <GithubConflictConfirmationDialog
+            resolution={pendingConflictResolution}
+            busy={busy}
+            onCancel={() => setPendingConflictResolution(null)}
+            onConfirm={() => {
+              onResolveGithubConflict(pendingConflictResolution);
+              setPendingConflictResolution(null);
+            }}
+          />
+        ) : null}
       </section>
     </div>
   );
@@ -501,6 +516,7 @@ function GithubTab({
   busy,
   onPushGithub,
   onPullGithub,
+  onRequestResolveGithubConflict,
   onOpenGithubRepository,
   onRefresh,
 }: {
@@ -510,12 +526,16 @@ function GithubTab({
   busy: boolean;
   onPushGithub: () => void;
   onPullGithub: () => void;
+  onRequestResolveGithubConflict: (resolution: "keep-local" | "take-remote") => void;
   onOpenGithubRepository: () => void;
   onRefresh: () => void;
 }) {
   const repository = project?.githubRepository ? `${project.githubRepository.owner}/${project.githubRepository.repo}` : "No conectado";
   const openConflict = syncStatus?.conflicts.find((conflict) => conflict.status === "open");
   const isConflict = syncStatus?.state === "conflict" || syncStatus?.hasConflicts;
+  const localHash = openConflict?.localHash ?? syncStatus?.lastLocalVersionHash?.slice(0, 7) ?? null;
+  const remoteHash = openConflict?.remoteHash ?? syncStatus?.lastRemoteHash?.slice(0, 7) ?? null;
+  const hasRemoteVersion = Boolean(remoteHash);
   return (
     <section className="space-y-3">
       <div className={["rounded-md border px-4 py-4", summary.calloutClass].join(" ")}>
@@ -526,34 +546,29 @@ function GithubTab({
           <div className="min-w-0 flex-1">
             <h3 className="text-[14px] font-semibold text-ink-primary">{summary.githubTitle}</h3>
             <p className="mt-1 text-[12px] leading-5 text-ink-secondary">{summary.githubDetail}</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {summary.primaryAction === "review-github" ? (
-                <button className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy || !project?.githubRepository} onClick={onOpenGithubRepository}>
-                  <Github size={14} />
-                  Abrir repositorio en GitHub
-                </button>
-              ) : (
-                <PrimarySummaryAction
-                  action={summary.primaryAction}
-                  busy={busy}
-                  canSaveRecommended={false}
-                  canAcceptOmitted={false}
-                  selectedCount={0}
-                  onImportSafe={() => undefined}
-                  onImport={() => undefined}
-                  onOmitAll={() => undefined}
-                  onPushGithub={onPushGithub}
-                  onPullGithub={onPullGithub}
-                  onRefresh={onRefresh}
-                  onTabChange={() => undefined}
-                />
-              )}
-              {summary.primaryAction !== "refresh" ? (
-                <button className="h-9 rounded-md border border-line px-3 text-[11px] font-medium hover:bg-panel" disabled={busy} onClick={onRefresh}>
-                  Comprobar de nuevo
-                </button>
-              ) : null}
-            </div>
+            {!isConflict ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                  <PrimarySummaryAction
+                    action={summary.primaryAction}
+                    busy={busy}
+                    canSaveRecommended={false}
+                    canAcceptOmitted={false}
+                    selectedCount={0}
+                    onImportSafe={() => undefined}
+                    onImport={() => undefined}
+                    onOmitAll={() => undefined}
+                    onPushGithub={onPushGithub}
+                    onPullGithub={onPullGithub}
+                    onRefresh={onRefresh}
+                    onTabChange={() => undefined}
+                  />
+                {summary.primaryAction !== "refresh" ? (
+                  <button className="h-9 rounded-md border border-line px-3 text-[11px] font-medium hover:bg-panel" disabled={busy} onClick={onRefresh}>
+                    Comprobar de nuevo
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -570,22 +585,41 @@ function GithubTab({
           <div className="flex items-start gap-3">
             <AlertTriangle size={18} className="mt-0.5 shrink-0 text-red-700 dark:text-red-300" />
             <div className="min-w-0 flex-1">
-              <h4 className="font-semibold text-red-900 dark:text-red-100">No se puede sincronizar automáticamente</h4>
+              <h4 className="font-semibold text-red-900 dark:text-red-100">{hasRemoteVersion ? "Elige qué versión debe quedar como válida" : "Listo para subir el historial local"}</h4>
               <p className="mt-1 leading-5 text-red-800 dark:text-red-200">
-                Hay cambios guardados en este equipo y también en GitHub. Para evitar sobrescribir trabajo, KnowNext.ai bloquea la subida y la descarga automáticas hasta que la diferencia quede resuelta.
+                {hasRemoteVersion
+                  ? "Hay cambios guardados en este equipo y también en GitHub. KnowNext.ai necesita que elijas una dirección para evitar sobrescribir trabajo sin permiso."
+                  : "KnowNext.ai no ha encontrado una versión útil en GitHub para comparar. Puedes sincronizar subiendo el historial guardado en este equipo al repositorio conectado."}
               </p>
               <div className="mt-3 grid gap-2 text-[11px] md:grid-cols-2">
-                <DetailItem label="Este equipo" value={openConflict?.localHash ?? syncStatus?.lastLocalVersionHash?.slice(0, 7) ?? "No disponible"} />
-                <DetailItem label="GitHub" value={openConflict?.remoteHash ?? syncStatus?.lastRemoteHash?.slice(0, 7) ?? "No disponible"} />
+                <DetailItem label="Este equipo" value={localHash ?? "No disponible"} />
+                <DetailItem label="GitHub" value={remoteHash ?? "No disponible"} />
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
-                <button className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy || !project?.githubRepository} onClick={onOpenGithubRepository}>
-                  <Github size={14} />
-                  Abrir GitHub
-                </button>
+                {hasRemoteVersion ? (
+                  <>
+                    <button className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy} onClick={() => onRequestResolveGithubConflict("keep-local")}>
+                      {busy ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                      Usar este equipo
+                    </button>
+                    <button className="inline-flex h-9 items-center gap-2 rounded-md border border-red-200 bg-white px-3 text-[11px] font-semibold text-red-900 hover:bg-red-50 disabled:opacity-50 dark:border-red-900/70 dark:bg-transparent dark:text-red-100 dark:hover:bg-red-950/40" disabled={busy} onClick={() => onRequestResolveGithubConflict("take-remote")}>
+                      <Download size={14} />
+                      Usar GitHub
+                    </button>
+                  </>
+                ) : (
+                  <button className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy} onClick={onPushGithub}>
+                    {busy ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                    Sincronizar con GitHub
+                  </button>
+                )}
                 <button className="inline-flex h-9 items-center gap-2 rounded-md border border-red-200 bg-white px-3 text-[11px] font-semibold text-red-900 hover:bg-red-50 disabled:opacity-50 dark:border-red-900/70 dark:bg-transparent dark:text-red-100 dark:hover:bg-red-950/40" disabled={busy} onClick={onRefresh}>
                   {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                   Comprobar de nuevo
+                </button>
+                <button className="inline-flex h-9 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-medium text-ink-primary hover:bg-panel disabled:opacity-50 dark:bg-transparent" disabled={busy || !project?.githubRepository} onClick={onOpenGithubRepository}>
+                  <Github size={14} />
+                  Abrir repositorio
                 </button>
               </div>
             </div>
@@ -593,6 +627,50 @@ function GithubTab({
         </section>
       ) : null}
     </section>
+  );
+}
+
+function GithubConflictConfirmationDialog({
+  resolution,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  resolution: "keep-local" | "take-remote";
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const keepLocal = resolution === "keep-local";
+  return (
+    <div className="knownext-modal-overlay absolute inset-0 z-10 grid place-items-center bg-black/25 px-4" onMouseDown={onCancel}>
+      <section className="w-[min(480px,calc(100vw-56px))] rounded-lg border border-line bg-white p-5 shadow-menu" role="dialog" aria-modal="true" aria-labelledby="github-conflict-confirm-title" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="flex items-start gap-3">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-red-50 text-red-700">
+            <AlertTriangle size={18} />
+          </span>
+          <div className="min-w-0">
+            <h3 id="github-conflict-confirm-title" className="text-[15px] font-semibold text-ink-primary">
+              {keepLocal ? "Usar la versión de este equipo" : "Usar la versión de GitHub"}
+            </h3>
+            <p className="mt-2 text-[12px] leading-5 text-ink-secondary">
+              {keepLocal
+                ? "KnowNext.ai subirá el historial local y GitHub quedará alineado con esta copia. Los cambios que solo existan en GitHub dejarán de ser la versión principal."
+                : "KnowNext.ai descargará la versión de GitHub y esta copia local quedará alineada con el repositorio remoto. Los cambios locales que no estén en GitHub dejarán de ser la versión principal."}
+            </p>
+          </div>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button className="h-9 rounded-md border border-line px-4 text-[12px] font-medium hover:bg-panel" disabled={busy} onClick={onCancel}>
+            Cancelar
+          </button>
+          <button className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-orange px-4 text-[12px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy} onClick={onConfirm}>
+            {busy ? <Loader2 size={14} className="animate-spin" /> : keepLocal ? <Upload size={14} /> : <Download size={14} />}
+            Confirmar
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -1013,23 +1091,32 @@ function getProtectionSummary(
   }
 
   if (state === "conflict" || syncStatus?.hasConflicts) {
+    const hasRemoteVersion = Boolean(syncStatus?.conflicts.find((conflict) => conflict.status === "open")?.remoteHash ?? syncStatus?.lastRemoteHash);
     return {
       ...common,
-      icon: AlertTriangle,
-      iconClass: "bg-red-50 text-red-700",
-      statusIcon: AlertTriangle,
-      status: "Conflicto",
-      tone: "danger" as const,
-      calloutClass: "border-red-100 bg-red-50",
+      icon: hasRemoteVersion ? AlertTriangle : Upload,
+      iconClass: hasRemoteVersion ? "bg-red-50 text-red-700" : "bg-brand-hover text-brand-orange",
+      statusIcon: hasRemoteVersion ? AlertTriangle : Upload,
+      status: hasRemoteVersion ? "Decisión necesaria" : "Pendiente de subir",
+      tone: hasRemoteVersion ? "danger" as const : "warning" as const,
+      calloutClass: hasRemoteVersion ? "border-red-100 bg-red-50" : "border-orange-200 bg-brand-hover",
       needsAttention: true,
-      primaryAction: "review-github" as ProtectionPrimaryAction,
-      footerText: "Hay conflictos que requieren decisión.",
-      recommendationTitle: "Hay cambios incompatibles que resolver",
-      recommendationDetail: "Revisa los archivos afectados antes de continuar guardando o sincronizando.",
-      userExplanation: "Hay diferencias entre la carpeta local y el historial remoto que KnowNext.ai no puede resolver automáticamente sin riesgo de perder información.",
-      actionDetail: "Revisa el detalle y resuelve el conflicto antes de continuar.",
-      githubTitle: "Hay diferencias entre este equipo y GitHub",
-      githubDetail: "El historial local y GitHub han avanzado por separado. KnowNext.ai necesita que revises la situación antes de subir o descargar cambios.",
+      primaryAction: hasRemoteVersion ? "review-github" as ProtectionPrimaryAction : "push-github" as ProtectionPrimaryAction,
+      footerText: hasRemoteVersion ? "Hay diferencias que requieren decisión." : "Hay historial local pendiente de subir.",
+      recommendationTitle: hasRemoteVersion ? "Elige qué versión debe quedar como válida" : "Falta sincronizar este equipo con GitHub",
+      recommendationDetail: hasRemoteVersion
+        ? "El historial local y GitHub han avanzado por separado. Elige si quieres conservar lo de este equipo o descargar lo de GitHub."
+        : "GitHub no muestra una versión comparable. Puedes subir el historial guardado en este equipo para dejar el repositorio sincronizado.",
+      userExplanation: hasRemoteVersion
+        ? "Hay diferencias entre la carpeta local y el historial remoto que KnowNext.ai no puede resolver automáticamente sin riesgo de perder información."
+        : "La documentación está guardada en el historial local, pero todavía falta completar la copia en GitHub.",
+      actionDetail: hasRemoteVersion
+        ? "Abre la pestaña GitHub y elige una de las dos opciones de sincronización."
+        : "Pulsa Sincronizar con GitHub para subir el historial local al repositorio conectado.",
+      githubTitle: hasRemoteVersion ? "Hay diferencias entre este equipo y GitHub" : "GitHub está conectado, pero falta sincronizar",
+      githubDetail: hasRemoteVersion
+        ? "El historial local y GitHub han avanzado por separado. KnowNext.ai necesita que elijas una dirección de sincronización."
+        : "Sube el historial local para que GitHub tenga la misma versión que este equipo.",
     };
   }
 

@@ -430,19 +430,91 @@ class SyncService:
         return self.scan(project_id, SyncScanRequest(allowAutoApply=payload.syncMode in {"auto-local", "auto-github"}))
 
     def resolve_conflict(self, project_id: str, conflict_id: str, payload: ResolveConflictRequest) -> ProjectSyncStatus:
-        state = sync_state_service.get_project_state(project_id)
-        conflicts = []
-        for conflict in state.get("conflicts", []):
-            if conflict.get("id") == conflict_id:
-                conflicts.append({**conflict, "status": "resolved", "updatedAt": _now_iso(), "resolution": payload.resolution})
+        project = self._versioned_project(project_id)
+        auth_service.require_github_auth()
+        with self._lock_for(project_id):
+            state = sync_state_service.get_project_state(project_id)
+            conflict = next((item for item in state.get("conflicts", []) if item.get("id") == conflict_id), None)
+            if not conflict:
+                raise HTTPException(status_code=404, detail="Sync conflict not found")
+
+            if payload.resolution == "keep-local":
+                status = self._resolve_conflict_keep_local(project, conflict_id, state)
+            elif payload.resolution == "take-remote":
+                status = self._resolve_conflict_take_remote(project, conflict_id, state)
             else:
-                conflicts.append(conflict)
+                status = self._mark_conflict_resolved(project, conflict_id, state, payload.resolution)
+            return status
+
+    def _resolve_conflict_keep_local(self, project: dict, conflict_id: str, state: dict) -> ProjectSyncStatus:
+        root = Path(project["folderPath"])
+        self._ensure_remote(root)
+        git_service.fetch(root, self._github_token())
+        head = git_service.rev_parse(root, "HEAD")
+        if not head:
+            raise HTTPException(status_code=409, detail="No hay historial local para subir a GitHub.")
+        target_branch = self._target_remote_branch(project, root)
+        git_service.push_current_to_remote_branch(root, target_branch, self._github_token(), force_with_lease=True)
+        git_service.fetch(root, self._github_token())
+        resolved = self._resolved_conflicts(state, conflict_id, "keep-local")
+        next_state = self._record_git_heads(project, "synced", pending_push=False, pending_pull=False)
+        now = _now_iso()
+        next_state.update({"conflicts": resolved, "lastSyncAt": now, "lastSuccessfulPushAt": now, "lastError": None})
+        sync_state_service.update_project_state(project["id"], next_state)
+        activity_service.record(
+            project["id"],
+            event_type="github_conflict_keep_local",
+            scope="github",
+            title="GitHub actualizado con este equipo",
+            message="Se ha subido el historial local y GitHub queda alineado con esta copia.",
+            tone="success",
+            repository=self._repository_label(project),
+        )
+        return self.status(project["id"])
+
+    def _resolve_conflict_take_remote(self, project: dict, conflict_id: str, state: dict) -> ProjectSyncStatus:
+        root = Path(project["folderPath"])
+        self._ensure_remote(root)
+        git_service.fetch(root, self._github_token())
+        remote_ref = git_service.remote_ref(root, self._project_branch(project))
+        if not remote_ref:
+            raise HTTPException(status_code=409, detail="GitHub no tiene una versión disponible para descargar.")
+        if git_service.working_tree_dirty(root):
+            raise HTTPException(status_code=409, detail="Hay cambios locales sin guardar. Guárdalos en el historial o descártalos antes de usar la versión de GitHub.")
+        git_service.reset_hard(root, remote_ref)
+        resolved = self._resolved_conflicts(state, conflict_id, "take-remote")
+        next_state = self._record_git_heads(project, "synced", pending_push=False, pending_pull=False)
+        now = _now_iso()
+        next_state.update({"conflicts": resolved, "lastSyncAt": now, "lastSuccessfulPullAt": now, "lastError": None})
+        sync_state_service.update_project_state(project["id"], next_state)
+        activity_service.record(
+            project["id"],
+            event_type="github_conflict_take_remote",
+            scope="github",
+            title="Proyecto actualizado desde GitHub",
+            message="Se ha descargado la versión de GitHub y esta copia queda alineada con el repositorio remoto.",
+            tone="success",
+            repository=self._repository_label(project),
+        )
+        return self.status(project["id"])
+
+    def _mark_conflict_resolved(self, project: dict, conflict_id: str, state: dict, resolution: str) -> ProjectSyncStatus:
+        conflicts = self._resolved_conflicts(state, conflict_id, resolution)
         open_conflicts = [conflict for conflict in conflicts if conflict.get("status") == "open"]
-        state = sync_state_service.update_project_state(
-            project_id,
+        next_state = sync_state_service.update_project_state(
+            project["id"],
             {"conflicts": conflicts, "state": "conflict" if open_conflicts else "local-pending" if state.get("pendingPush") else "synced"},
         )
-        return self._status_from_state(self._project(project_id), state)
+        return self._status_from_state(project, next_state)
+
+    def _resolved_conflicts(self, state: dict, conflict_id: str, resolution: str) -> list[dict]:
+        resolved: list[dict] = []
+        for conflict in state.get("conflicts", []):
+            if conflict.get("id") == conflict_id:
+                resolved.append({**conflict, "status": "resolved", "updatedAt": _now_iso(), "resolution": resolution})
+            else:
+                resolved.append(conflict)
+        return resolved
 
     def _scan_locked(self, project: dict, payload: SyncScanRequest) -> ProjectSyncStatus:
         project_id = project["id"]

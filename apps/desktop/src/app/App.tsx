@@ -66,7 +66,7 @@ import {
   saveDocumentDraft,
 } from "../lib/api/documents";
 import { getExternalChanges, importExternalChanges, scanExternalChanges } from "../lib/api/externalChanges";
-import { autoRunProjectSync, changeProjectSyncMode, connectProjectGithub, enableProjectHistory, getProjectSyncStatus, publishProjectGithub, scanProjectSync, verifyProjectGithubConnection } from "../lib/api/sync";
+import { autoRunProjectSync, changeProjectSyncMode, connectProjectGithub, enableProjectHistory, getProjectSyncStatus, publishProjectGithub, resolveProjectSyncConflict, scanProjectSync, verifyProjectGithubConnection } from "../lib/api/sync";
 import { APP_VERSION } from "../lib/appVersion";
 import { RELEASE_NOTES_MARKDOWN } from "../lib/releaseNotes";
 import { getAuthStatus, logout as logoutGithub, pollGithubDeviceFlow, startGithubDeviceFlow } from "../lib/api/auth";
@@ -1818,6 +1818,32 @@ export function App() {
     }
   }
 
+  async function handleResolveProjectGithubConflict(resolution: "keep-local" | "take-remote") {
+    if (!activeProject || syncState !== "idle") return;
+    const conflict = projectSyncStatus?.conflicts.find((item) => item.status === "open");
+    if (!conflict) {
+      await handleRefreshProtectionState(activeProject.id);
+      return;
+    }
+    setSyncState(resolution === "keep-local" ? "pushing" : "pulling");
+    setExternalChangesBusy(true);
+    setExternalChangesMessage(resolution === "keep-local" ? "Sincronizando GitHub con este equipo." : "Actualizando este equipo desde GitHub.");
+    try {
+      await resolveProjectSyncConflict(activeProject.id, conflict.id, resolution);
+      setProjectTree(activeProject.id, await getProjectTree(activeProject.id));
+      await refreshProjectCapabilityState(activeProject.id);
+      await refreshProjectSyncStatus(activeProject.id, { silent: true });
+      await refreshExternalChangeSet(activeProject.id, { silent: true });
+      await refreshProjectActivity(activeProject.id);
+      setExternalChangesMessage(resolution === "keep-local" ? "GitHub queda sincronizado con este equipo." : "Este equipo queda sincronizado con GitHub.");
+    } catch (error) {
+      showError(error, resolution === "keep-local" ? "No se pudo sincronizar GitHub con este equipo." : "No se pudo actualizar este equipo desde GitHub.");
+    } finally {
+      setSyncState("idle");
+      setExternalChangesBusy(false);
+    }
+  }
+
   async function handleOpenProjectGithub() {
     const repository = activeProject?.githubRepository;
     if (!repository) return;
@@ -2733,6 +2759,7 @@ export function App() {
         onLogout={() => void handleLogoutGithub()}
         onPullProject={() => void handlePullProject()}
         onPushProject={() => void handlePushProject()}
+        onResolveProjectGithubConflict={(resolution) => void handleResolveProjectGithubConflict(resolution)}
         onOpenProjectGithub={() => void handleOpenProjectGithub()}
         onOpenExternalChanges={() => setExternalChangesOpen(true)}
         onCloseExternalChanges={() => setExternalChangesOpen(false)}

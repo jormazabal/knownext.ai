@@ -111,6 +111,7 @@ type DesktopLayoutProps = {
   onLogout: () => void;
   onPullProject: () => void;
   onPushProject: () => void;
+  onResolveProjectGithubConflict: (resolution: "keep-local" | "take-remote") => void;
   onOpenProjectGithub: () => void;
   onOpenExternalChanges: () => void;
   onCloseExternalChanges: () => void;
@@ -722,6 +723,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 onOmitAll={props.onOmitExternalChanges}
                 onPushGithub={props.onPushProject}
                 onPullGithub={props.onPullProject}
+                onResolveGithubConflict={props.onResolveProjectGithubConflict}
                 onOpenGithubRepository={props.onOpenProjectGithub}
                 onRefresh={props.onRefreshExternalChanges}
                 onClose={props.onCloseExternalChanges}

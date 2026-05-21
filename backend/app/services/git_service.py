@@ -103,11 +103,15 @@ class GitService:
             raise HTTPException(status_code=409, detail="Project is not a Git repository")
         return self._run(root, self._with_auth_header(["git", "push"], auth_token), allow_empty=True)
 
-    def push_current_to_remote_branch(self, root: Path, branch: str, auth_token: str | None = None) -> str:
+    def push_current_to_remote_branch(self, root: Path, branch: str, auth_token: str | None = None, force_with_lease: bool = False) -> str:
         if not self.is_repository(root):
             raise HTTPException(status_code=409, detail="Project is not a Git repository")
         branch_name = self._safe_branch_name(branch)
-        return self._run(root, self._with_auth_header(["git", "push", "-u", "origin", f"HEAD:refs/heads/{branch_name}"], auth_token), allow_empty=True)
+        command = ["git", "push", "-u"]
+        if force_with_lease:
+            command.append("--force-with-lease")
+        command.extend(["origin", f"HEAD:refs/heads/{branch_name}"])
+        return self._run(root, self._with_auth_header(command, auth_token), allow_empty=True)
 
     def fetch(self, root: Path, auth_token: str | None = None) -> str:
         if not self.is_repository(root):
@@ -174,6 +178,11 @@ class GitService:
             return []
         output = self._run(root, ["git", "diff", "--name-only", left, right], allow_empty=True)
         return [line.strip().replace("\\", "/") for line in output.splitlines() if line.strip()]
+
+    def reset_hard(self, root: Path, ref: str) -> str:
+        if not self.is_repository(root):
+            raise HTTPException(status_code=409, detail="Project is not a Git repository")
+        return self._run(root, ["git", "reset", "--hard", ref], allow_empty=True)
 
     def has_changes_for_path(self, root: Path, relative_path: str) -> bool:
         if not self.is_repository(root):
