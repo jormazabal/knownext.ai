@@ -368,7 +368,7 @@ class SyncService:
             remote_ref = git_service.remote_ref(root, self._project_branch(project))
             remote = git_service.rev_parse(root, remote_ref) if remote_ref else None
             if not head or not remote:
-                state = sync_state_service.update_project_state(project_id, {"state": "local-pending", "pendingPush": True, "lastScanAt": _now_iso()})
+                state = sync_state_service.update_project_state(project_id, {"state": "local-pending", "pendingPush": True, "pendingPull": False, "lastScanAt": _now_iso(), "lastLocalHead": head[:7] if head else None, "lastRemoteHead": None, "lastError": None})
                 return self._status_from_state(project, state)
             if head == remote:
                 state = sync_state_service.update_project_state(project_id, {"state": "synced", "pendingPush": False, "pendingPull": False, "lastScanAt": _now_iso(), "lastLocalHead": head[:7], "lastRemoteHead": remote[:7], "lastError": None})
@@ -376,7 +376,7 @@ class SyncService:
             if git_service.is_ancestor(root, remote, head):
                 if project["syncMode"] == "auto-github" and payload.allowAutoApply:
                     return self._try_auto_push(project)
-                state = sync_state_service.update_project_state(project_id, {"state": "local-pending", "pendingPush": True, "pendingPull": False, "lastScanAt": _now_iso(), "lastLocalHead": head[:7], "lastRemoteHead": remote[:7]})
+                state = sync_state_service.update_project_state(project_id, {"state": "local-pending", "pendingPush": True, "pendingPull": False, "lastScanAt": _now_iso(), "lastLocalHead": head[:7], "lastRemoteHead": remote[:7], "lastError": None})
                 return self._status_from_state(project, state)
             if git_service.is_ancestor(root, head, remote):
                 remote_paths = git_service.changed_paths_between(root, head, remote)
@@ -391,7 +391,7 @@ class SyncService:
                     state["lastSyncAt"] = state["lastSuccessfulPullAt"]
                     sync_state_service.update_project_state(project_id, state)
                     return self.status(project_id)
-                state = sync_state_service.update_project_state(project_id, {"state": "remote-available", "pendingPull": True, "pendingPush": False, "lastScanAt": _now_iso(), "lastLocalHead": head[:7], "lastRemoteHead": remote[:7]})
+                state = sync_state_service.update_project_state(project_id, {"state": "remote-available", "pendingPull": True, "pendingPush": False, "lastScanAt": _now_iso(), "lastLocalHead": head[:7], "lastRemoteHead": remote[:7], "lastError": None})
                 return self._status_from_state(project, state)
 
             conflict = self._conflict(project_id, "", "diverged_history", "El historial local y GitHub avanzaron por separado. Revisa antes de sincronizar.")

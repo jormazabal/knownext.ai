@@ -2,6 +2,12 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.18.7 - 2026-05-21
+
+- Cleared stale Git error details when GitHub verification correctly transitions to `Pendiente de subir`.
+- Replaced inherited technical Git messages in project configuration with user-facing synchronization state copy.
+- Added backend coverage for reconnecting a local Git project whose remote branch is still missing.
+
 ## 0.18.6 - 2026-05-21
 
 - Fixed GitHub verification for projects whose remote branch has not been fetched or does not expose `origin/main`.
