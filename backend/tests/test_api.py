@@ -42,7 +42,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.18.6"
+    assert payload["version"] == "0.18.7"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -1306,6 +1306,51 @@ def test_local_folder_can_create_new_github_repository(tmp_path, monkeypatch) ->
     assert status.status_code == 200
     assert status.json()["statusLabel"] == "Sincronizado"
     assert status.json()["lastVersionHash"] is None
+
+
+def test_local_git_github_scan_clears_stale_error_when_remote_branch_is_missing(tmp_path, monkeypatch) -> None:
+    from app.services.git_service import git_service
+    from app.services.sync_state_service import sync_state_service
+
+    device = client.post("/api/auth/github/device/start")
+    client.post("/api/auth/github/device/poll", json={"deviceCode": device.json()["deviceCode"]})
+    docs_root = tmp_path / "local-github-docs"
+
+    created = client.post(
+        "/api/projects",
+        json={
+            "name": "Local GitHub Docs",
+            "folderPath": str(docs_root),
+            "icon": "folder",
+            "iconColor": "#F37021",
+            "creationMode": "new-local",
+            "storageMode": "local-files",
+            "versioningMode": "local-git",
+            "syncMode": "none",
+        },
+    )
+    assert created.status_code == 201
+    project_id = created.json()["id"]
+    document = client.post(f"/api/projects/{project_id}/documents", json={"parentId": None, "name": "intro.md", "markdown": "# Intro\n"})
+    assert document.status_code == 200
+    assert client.post(f"/api/projects/{project_id}/versions", json={"documentId": document.json()["node"]["id"], "title": "Initial"}).status_code == 200
+
+    monkeypatch.setattr(git_service, "fetch", lambda _root, _token=None: "")
+    connected = client.post(
+        f"/api/projects/{project_id}/github/connect",
+        json={"owner": "acme", "repo": "docs", "defaultRef": "main", "syncMode": "manual-github"},
+    )
+    assert connected.status_code == 200
+    assert connected.json()["state"] == "local-pending"
+    assert connected.json()["detail"] is None
+
+    sync_state_service.update_project_state(project_id, {"state": "error", "lastError": "fatal: ambiguous argument 'origin/main'"})
+    scanned = client.post(f"/api/projects/{project_id}/sync/scan", json={})
+
+    assert scanned.status_code == 200
+    assert scanned.json()["state"] == "local-pending"
+    assert scanned.json()["pendingPush"] is True
+    assert scanned.json()["detail"] is None
 
 
 def test_github_api_project_uses_cache_metadata_and_blocks_remote_conflicts(tmp_path, monkeypatch) -> None:

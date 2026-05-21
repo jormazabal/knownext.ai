@@ -1562,6 +1562,7 @@ function ConnectedGithubPanel({
   const [verificationMessage, setVerificationMessage] = useState<string | null>(null);
   const credentialIssue = isGithubCredentialIssue(projectSyncStatus);
   const hasRemoteIssue = credentialIssue || projectSyncStatus?.state === "error" || projectSyncStatus?.state === "offline";
+  const statusDetail = githubStatusDetail(projectSyncStatus, syncMode);
 
   async function handleVerifyConnection() {
     if (!onVerifyGithubConnection || verificationState === "checking") return;
@@ -1592,7 +1593,7 @@ function ConnectedGithubPanel({
           <div className="min-w-0">
             <div className="truncate text-[12px] font-semibold text-ink-primary">{repository}</div>
             <div className="mt-1 text-[10px] leading-4 text-ink-secondary">
-              {projectSyncStatus?.detail ?? (syncMode === "auto-github" ? "Sincronización automática configurada." : "Sincronización manual configurada.")}
+              {statusDetail}
             </div>
           </div>
         </div>
@@ -2642,6 +2643,20 @@ function isGithubCredentialIssue(projectSyncStatus?: ProjectSyncStatus | null) {
       || detail.includes("403")
     )
   );
+}
+
+function githubStatusDetail(projectSyncStatus: ProjectSyncStatus | null | undefined, syncMode: Project["syncMode"]) {
+  if (projectSyncStatus?.detail) return projectSyncStatus.detail;
+  if (projectSyncStatus?.state === "local-pending" || projectSyncStatus?.pendingPush) {
+    return "Hay una versión local lista para subir a GitHub.";
+  }
+  if (projectSyncStatus?.state === "remote-available" || projectSyncStatus?.pendingPull) {
+    return "GitHub tiene cambios disponibles para revisar.";
+  }
+  if (projectSyncStatus?.state === "synced") {
+    return "GitHub está conectado y sincronizado.";
+  }
+  return syncMode === "auto-github" ? "Sincronización automática configurada." : "Sincronización manual configurada.";
 }
 
 function versioningModeLabel(versioningMode: VersioningMode) {
