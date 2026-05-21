@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import os
 import subprocess
 import threading
@@ -227,10 +228,11 @@ class GitService:
             return command
         if len(command) < 2 or command[0] != "git":
             return command
+        basic_token = base64.b64encode(f"x-access-token:{auth_token}".encode("utf-8")).decode("ascii")
         return [
             "git",
             "-c",
-            f"http.extraHeader=Authorization: Bearer {auth_token}",
+            f"http.extraHeader=Authorization: Basic {basic_token}",
             *command[1:],
         ]
 
