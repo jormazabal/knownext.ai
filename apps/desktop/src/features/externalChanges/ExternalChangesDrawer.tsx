@@ -50,6 +50,7 @@ type ExternalChangesDrawerProps = {
   onOmitAll: () => void;
   onPushGithub: () => void;
   onPullGithub: () => void;
+  onOpenGithubRepository: () => void;
   onRefresh: () => void;
   onClose: () => void;
 };
@@ -95,6 +96,7 @@ export function ExternalChangesDrawer({
   onOmitAll,
   onPushGithub,
   onPullGithub,
+  onOpenGithubRepository,
   onRefresh,
   onClose,
 }: ExternalChangesDrawerProps) {
@@ -213,6 +215,7 @@ export function ExternalChangesDrawer({
               busy={busy}
               onPushGithub={onPushGithub}
               onPullGithub={onPullGithub}
+              onOpenGithubRepository={onOpenGithubRepository}
               onRefresh={onRefresh}
             />
           ) : null}
@@ -454,8 +457,9 @@ function PrimarySummaryAction({
   }
   if (action === "review-github") {
     return (
-      <button className="h-9 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark" onClick={() => onTabChange("github")}>
-        Ver diferencias en GitHub
+      <button className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark" onClick={() => onTabChange("github")}>
+        <Github size={14} />
+        Revisar GitHub
       </button>
     );
   }
@@ -497,6 +501,7 @@ function GithubTab({
   busy,
   onPushGithub,
   onPullGithub,
+  onOpenGithubRepository,
   onRefresh,
 }: {
   project: Project | null;
@@ -505,9 +510,12 @@ function GithubTab({
   busy: boolean;
   onPushGithub: () => void;
   onPullGithub: () => void;
+  onOpenGithubRepository: () => void;
   onRefresh: () => void;
 }) {
   const repository = project?.githubRepository ? `${project.githubRepository.owner}/${project.githubRepository.repo}` : "No conectado";
+  const openConflict = syncStatus?.conflicts.find((conflict) => conflict.status === "open");
+  const isConflict = syncStatus?.state === "conflict" || syncStatus?.hasConflicts;
   return (
     <section className="space-y-3">
       <div className={["rounded-md border px-4 py-4", summary.calloutClass].join(" ")}>
@@ -519,20 +527,27 @@ function GithubTab({
             <h3 className="text-[14px] font-semibold text-ink-primary">{summary.githubTitle}</h3>
             <p className="mt-1 text-[12px] leading-5 text-ink-secondary">{summary.githubDetail}</p>
             <div className="mt-3 flex flex-wrap gap-2">
-              <PrimarySummaryAction
-                action={summary.primaryAction}
-                busy={busy}
-                canSaveRecommended={false}
-                canAcceptOmitted={false}
-                selectedCount={0}
-                onImportSafe={() => undefined}
-                onImport={() => undefined}
-                onOmitAll={() => undefined}
-                onPushGithub={onPushGithub}
-                onPullGithub={onPullGithub}
-                onRefresh={onRefresh}
-                onTabChange={() => undefined}
-              />
+              {summary.primaryAction === "review-github" ? (
+                <button className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy || !project?.githubRepository} onClick={onOpenGithubRepository}>
+                  <Github size={14} />
+                  Abrir repositorio en GitHub
+                </button>
+              ) : (
+                <PrimarySummaryAction
+                  action={summary.primaryAction}
+                  busy={busy}
+                  canSaveRecommended={false}
+                  canAcceptOmitted={false}
+                  selectedCount={0}
+                  onImportSafe={() => undefined}
+                  onImport={() => undefined}
+                  onOmitAll={() => undefined}
+                  onPushGithub={onPushGithub}
+                  onPullGithub={onPullGithub}
+                  onRefresh={onRefresh}
+                  onTabChange={() => undefined}
+                />
+              )}
               {summary.primaryAction !== "refresh" ? (
                 <button className="h-9 rounded-md border border-line px-3 text-[11px] font-medium hover:bg-panel" disabled={busy} onClick={onRefresh}>
                   Comprobar de nuevo
@@ -550,6 +565,33 @@ function GithubTab({
         <DetailItem label="Versión local" value={syncStatus?.lastLocalVersionHash?.slice(0, 7) ?? "No disponible"} />
         <DetailItem label="Versión en GitHub" value={syncStatus?.lastRemoteHash?.slice(0, 7) ?? "No disponible"} />
       </dl>
+      {isConflict ? (
+        <section className="rounded-md border border-red-200 bg-red-50 px-4 py-4 text-[12px] dark:border-red-900/70 dark:bg-red-950/30">
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={18} className="mt-0.5 shrink-0 text-red-700 dark:text-red-300" />
+            <div className="min-w-0 flex-1">
+              <h4 className="font-semibold text-red-900 dark:text-red-100">No se puede sincronizar automáticamente</h4>
+              <p className="mt-1 leading-5 text-red-800 dark:text-red-200">
+                Hay cambios guardados en este equipo y también en GitHub. Para evitar sobrescribir trabajo, KnowNext.ai bloquea la subida y la descarga automáticas hasta que la diferencia quede resuelta.
+              </p>
+              <div className="mt-3 grid gap-2 text-[11px] md:grid-cols-2">
+                <DetailItem label="Este equipo" value={openConflict?.localHash ?? syncStatus?.lastLocalVersionHash?.slice(0, 7) ?? "No disponible"} />
+                <DetailItem label="GitHub" value={openConflict?.remoteHash ?? syncStatus?.lastRemoteHash?.slice(0, 7) ?? "No disponible"} />
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy || !project?.githubRepository} onClick={onOpenGithubRepository}>
+                  <Github size={14} />
+                  Abrir GitHub
+                </button>
+                <button className="inline-flex h-9 items-center gap-2 rounded-md border border-red-200 bg-white px-3 text-[11px] font-semibold text-red-900 hover:bg-red-50 disabled:opacity-50 dark:border-red-900/70 dark:bg-transparent dark:text-red-100 dark:hover:bg-red-950/40" disabled={busy} onClick={onRefresh}>
+                  {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                  Comprobar de nuevo
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      ) : null}
     </section>
   );
 }

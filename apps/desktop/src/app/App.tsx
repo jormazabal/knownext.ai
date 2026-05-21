@@ -1818,6 +1818,12 @@ export function App() {
     }
   }
 
+  async function handleOpenProjectGithub() {
+    const repository = activeProject?.githubRepository;
+    if (!repository) return;
+    await openExternalUrl(`https://github.com/${repository.owner}/${repository.repo}`);
+  }
+
   async function handleSynchronizeActiveDocument(options: { preserveDraft?: boolean } = {}) {
     if (!activeProject || !activeDocumentId || !versioningStatus?.enabled) return;
     const session = documentSessions[activeDocumentId];
@@ -2727,6 +2733,7 @@ export function App() {
         onLogout={() => void handleLogoutGithub()}
         onPullProject={() => void handlePullProject()}
         onPushProject={() => void handlePushProject()}
+        onOpenProjectGithub={() => void handleOpenProjectGithub()}
         onOpenExternalChanges={() => setExternalChangesOpen(true)}
         onCloseExternalChanges={() => setExternalChangesOpen(false)}
         onRefreshExternalChanges={() => void handleRefreshProtectionState(activeProject?.id)}

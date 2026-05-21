@@ -83,7 +83,14 @@ class SyncService:
                     )
                     return self._status_from_state(project, state)
                 if remote and not git_service.is_ancestor(root, remote, head):
-                    conflict = self._conflict(project_id, "", "push_rejected", "GitHub tiene cambios que no están en este equipo. Revisa antes de subir.")
+                    conflict = self._conflict(
+                        project_id,
+                        "",
+                        "push_rejected",
+                        "GitHub tiene cambios que no están en este equipo. Revisa antes de subir.",
+                        local_hash=head,
+                        remote_hash=remote,
+                    )
                     state = sync_state_service.update_project_state(
                         project_id,
                         {
@@ -488,7 +495,14 @@ class SyncService:
                 state = sync_state_service.update_project_state(project_id, {"state": "remote-available", "pendingPull": True, "pendingPush": False, "lastScanAt": _now_iso(), "lastLocalHead": head[:7], "lastRemoteHead": remote[:7], "lastError": None})
                 return self._status_from_state(project, state)
 
-            conflict = self._conflict(project_id, "", "diverged_history", "El historial local y GitHub avanzaron por separado. Revisa antes de sincronizar.")
+            conflict = self._conflict(
+                project_id,
+                "",
+                "diverged_history",
+                "El historial local y GitHub avanzaron por separado. Revisa antes de sincronizar.",
+                local_hash=head,
+                remote_hash=remote,
+            )
             state = sync_state_service.update_project_state(project_id, {"state": "conflict", "pendingPush": True, "pendingPull": True, "conflicts": [conflict.model_dump()], "lastScanAt": _now_iso(), "lastLocalHead": head[:7], "lastRemoteHead": remote[:7]})
             return self._status_from_state(project, state)
         except HTTPException as error:
@@ -504,7 +518,14 @@ class SyncService:
             head = git_service.rev_parse(root, "HEAD")
             remote = git_service.rev_parse(root, remote_ref) if remote_ref else None
             if remote and head and not git_service.is_ancestor(root, remote, head):
-                conflict = self._conflict(project_id, "", "push_rejected", "GitHub tiene cambios nuevos. Trae cambios antes de subir.")
+                conflict = self._conflict(
+                    project_id,
+                    "",
+                    "push_rejected",
+                    "GitHub tiene cambios nuevos. Trae cambios antes de subir.",
+                    local_hash=head,
+                    remote_hash=remote,
+                )
                 state = sync_state_service.update_project_state(project_id, {"state": "review-required", "pendingPush": True, "pendingPull": True, "conflicts": [conflict.model_dump()]})
                 return self._status_from_state(project, state)
             if not head:
@@ -626,10 +647,28 @@ class SyncService:
             return "local-history"
         return "synced"
 
-    def _conflict(self, project_id: str, path: str, conflict_type: str, message: str) -> SyncConflict:
+    def _conflict(
+        self,
+        project_id: str,
+        path: str,
+        conflict_type: str,
+        message: str,
+        local_hash: str | None = None,
+        remote_hash: str | None = None,
+    ) -> SyncConflict:
         now = _now_iso()
         digest = hashlib.sha1(f"{project_id}:{path}:{conflict_type}:{now}".encode("utf-8")).hexdigest()[:16]
-        return SyncConflict(id=f"sync-conflict-{digest}", projectId=project_id, path=path, type=conflict_type, message=message, createdAt=now, updatedAt=now)
+        return SyncConflict(
+            id=f"sync-conflict-{digest}",
+            projectId=project_id,
+            path=path,
+            type=conflict_type,
+            localHash=local_hash[:7] if local_hash else None,
+            remoteHash=remote_hash[:7] if remote_hash else None,
+            message=message,
+            createdAt=now,
+            updatedAt=now,
+        )
 
     def _all_project_paths(self, root: Path) -> list[str]:
         excluded = {".git", ".knownext-github-cache.json"}
