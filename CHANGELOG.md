@@ -2,6 +2,12 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.18.6 - 2026-05-21
+
+- Fixed GitHub verification for projects whose remote branch has not been fetched or does not expose `origin/main`.
+- Treated a missing remote reference as a pending first upload instead of showing Git's technical `ambiguous argument 'origin/main'` error.
+- Added remote branch fallback handling for `origin/HEAD`, `main`, `master`, and other fetched origin branches.
+
 ## 0.18.5 - 2026-05-21
 
 - Fixed GitHub synchronization for local Git projects after reconnecting the GitHub account.

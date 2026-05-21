@@ -42,7 +42,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.18.5"
+    assert payload["version"] == "0.18.6"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -363,6 +363,16 @@ def test_git_service_uses_basic_token_auth_for_github_https() -> None:
         "fetch",
         "origin",
     ]
+
+
+def test_git_service_missing_remote_ref_is_not_a_sync_error(tmp_path) -> None:
+    from app.services.git_service import git_service
+
+    (tmp_path / "README.md").write_text("# Docs\n", encoding="utf-8")
+    git_service.create_project_version(tmp_path, ["README.md"], "Initial")
+    git_service.set_remote_origin(tmp_path, "https://github.com/acme/docs.git")
+
+    assert git_service.remote_ref(tmp_path, "main") is None
 
 
 def test_external_changes_scan_classifies_and_imports_safe_git_changes(tmp_path) -> None:
