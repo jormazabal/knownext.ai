@@ -1,7 +1,9 @@
-import { requestJson } from "./client";
+import { API_BASE_URL, ApiError, initializeApiBaseUrl, requestJson } from "./client";
 import type {
   DocumentRecord,
   DraftResponse,
+  ExportDocumentPayload,
+  ExportDocumentResponse,
   OrphanDraft,
   RestoreDraftResponse,
   SaveDocumentPayload,
@@ -32,6 +34,35 @@ export async function discardDocumentDraft(documentId: string): Promise<void> {
   await requestJson<void>(`/api/documents/${encodeURIComponent(documentId)}/draft`, {
     method: "DELETE",
   });
+}
+
+export async function exportDocument(documentId: string, payload: ExportDocumentPayload): Promise<ExportDocumentResponse> {
+  return requestJson<ExportDocumentResponse>(`/api/documents/${encodeURIComponent(documentId)}/export`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function exportDocumentContent(documentId: string, payload: Omit<ExportDocumentPayload, "outputPath">): Promise<Blob> {
+  await initializeApiBaseUrl();
+  const response = await fetch(`${API_BASE_URL}/api/documents/${encodeURIComponent(documentId)}/export/content`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    let detail: unknown;
+    try {
+      const body = await response.json();
+      if (body?.detail) detail = body.detail;
+    } catch {
+      // Some errors do not return a JSON body.
+    }
+    throw new ApiError(response.status, response.statusText, detail);
+  }
+
+  return response.blob();
 }
 
 export async function getDocumentsSyncStatus(documents: SyncStatusDocument[]): Promise<SyncStatusResponse> {

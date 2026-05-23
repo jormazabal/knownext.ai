@@ -95,7 +95,7 @@
 - [ ] Confirm the AI prompt remains visible with project documentation wording when no document tab is open.
 - [ ] Switch projects and confirm each project restores its own open tabs and active document.
 - [ ] Confirm folder context menu shows Nueva carpeta, Nuevo documento, Importar archivo, Renombrar, Eliminar.
-- [ ] Confirm document context menu shows Renombrar, Duplicar, Mover, Eliminar.
+- [ ] Confirm document context menu shows Exportar MD, Exportar PDF, Exportar DOCX, Renombrar, Duplicar, Mover, Eliminar.
 - [ ] Confirm image context menu shows Abrir, Insertar en documento, Usar como contexto IA, Copiar referencia, Renombrar, Mover, Eliminar.
 - [ ] Confirm support-file context menu shows Usar como contexto IA, Copiar ruta, Renombrar, Mover, Eliminar, and does not show Abrir or Insertar en documento.
 - [ ] Use the folder context menu to create a folder and document, then confirm they exist on disk.
@@ -116,6 +116,10 @@
 - [ ] Confirm the toolbar uses a block-format dropdown with Texto normal and Título 1 through Título 6 instead of separate H1/H2/H3 buttons.
 - [ ] Confirm inline code and block code are separate toolbar actions.
 - [ ] Open Tabla and confirm the 5 x 5 visual picker shows the hovered size, can insert the selected size, and includes Personalizar.
+- [ ] Open Exportar from the editor toolbar and confirm MD, PDF, and DOCX options appear.
+- [ ] Export the active document as MD, PDF, and DOCX and confirm the native save dialog appears each time with the Markdown file name and the target extension by default.
+- [ ] Export a Markdown document from its tree context menu as MD, PDF, and DOCX and confirm the files are written to the selected folder.
+- [ ] Export a document containing headings, bold, italic, strikethrough, underline, inline code, code blocks, links, images, blockquotes, ordered lists, bullet lists, checklists, tables, and horizontal rules; confirm PDF and DOCX preserve readable formatting for every supported element.
 - [ ] Resize the window narrower and confirm the toolbar stays one row while lower-priority actions move into Formato, Estructura, or Insertar menus instead of causing vertical scroll.
 - [ ] Confirm the status changes to Cambios sin guardar.
 - [ ] Confirm Deshacer and Rehacer start disabled on a newly opened editor session.
@@ -215,6 +219,11 @@
 - [ ] In Apariencia, select several Color principal options and confirm primary buttons, active states, focus rings, soft highlights, and the preview use the selected accent while project icon colors remain independent.
 - [ ] Restart the app after changing Tema and Color principal, then confirm both preferences are restored from `config.json`.
 - [ ] In Apariencia, confirm `Mostrar subrayado en el editor` is enabled by default, explains that underline is not standard Markdown and uses inline HTML, then disable and re-enable it to confirm the preference persists and the editor toolbar shows or hides `Subrayado` accordingly.
+- [ ] In Exportar, adjust normal text typography, heading typography, colors, line spacing, margins, page size, link color, and separator color; export PDF and DOCX again and confirm the styling changes apply.
+- [ ] Export a Markdown document with several empty lines between paragraphs and confirm PDF and DOCX keep visible blank-line spacing without adding the file name as a title.
+- [ ] In the installed Tauri app, export MD, PDF, and DOCX from the editor toolbar and from the Markdown document tree menu; confirm each action opens the native system "Save as" dialog with the original Markdown filename and the target extension.
+- [ ] In the browser development build, export a Markdown document and confirm the browser save picker appears when supported, or the file is downloaded without console errors when the embedded browser does not expose save-picker support.
+- [ ] In Exportar, confirm the ASCII JSON template path is visible, reset the template, and confirm the defaults are restored.
 - [ ] In IA, save an OpenAI API key and confirm only configured/preview status is shown, never the full key.
 - [ ] In the browser development build, save an OpenAI API key and confirm the request succeeds through the web backend profile without a CORS or `Failed to fetch` error.
 - [ ] In IA, confirm the model selector shows intelligence and cost indicators, select a different model, close/reopen settings, and confirm the selected model persists.

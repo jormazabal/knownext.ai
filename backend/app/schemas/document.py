@@ -11,6 +11,7 @@ DocumentVersionState = Literal[
     "diverged",
     "unsupported",
 ]
+DocumentExportFormat = Literal["md", "pdf", "docx"]
 
 
 class DocumentFingerprint(BaseModel):
@@ -46,6 +47,24 @@ class SaveDocumentRequest(BaseModel):
 class SaveDraftRequest(BaseModel):
     markdown: str
     baseFingerprint: DocumentFingerprint | None = None
+
+
+class ExportDocumentRequest(BaseModel):
+    format: DocumentExportFormat
+    outputPath: str
+    markdown: str | None = None
+
+
+class ExportDocumentContentRequest(BaseModel):
+    format: DocumentExportFormat
+    markdown: str | None = None
+
+
+class ExportDocumentResponse(BaseModel):
+    documentId: str
+    format: DocumentExportFormat
+    outputPath: str
+    exportedAt: str
 
 
 class DraftResponse(BaseModel):

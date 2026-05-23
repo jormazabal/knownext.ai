@@ -129,10 +129,14 @@ describe("DocumentTree", () => {
     );
 
     await userEvent.hover(screen.getByRole("button", { name: /abrir menú de requisitos-funcionales\.md/i }));
-    await waitFor(() => expect(screen.getByText("Mover")).toBeInTheDocument());
-    await userEvent.click(screen.getByText("Mover"));
+    await waitFor(() => expect(screen.getByText("Exportar")).toBeInTheDocument());
+    expect(screen.queryByText("Exportar PDF")).not.toBeInTheDocument();
 
-    expect(onContextAction).toHaveBeenCalledWith("move", documentNode);
+    await userEvent.hover(screen.getByText("Exportar"));
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: /pdf/i })).toBeInTheDocument());
+    await userEvent.click(screen.getByRole("menuitem", { name: /pdf/i }));
+
+    expect(onContextAction).toHaveBeenCalledWith("export-pdf", documentNode);
   });
 
   it("moves a document by dragging it onto a folder", () => {

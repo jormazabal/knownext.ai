@@ -21,6 +21,7 @@ AppearanceAccentColor = Literal[
     "rose",
     "red",
 ]
+ExportTextFormat = Literal["normal", "bold", "underline", "bold_underline"]
 
 
 class LayoutConfig(BaseModel):
@@ -38,6 +39,59 @@ class AppearanceConfig(BaseModel):
 
 class DiagnosticsConfig(BaseModel):
     traceLoggingEnabled: bool = False
+
+
+class ExportTextStyle(BaseModel):
+    fontFamily: str
+    fontSizePt: float
+    color: str
+    textFormat: ExportTextFormat = "normal"
+
+
+class ExportPageMargins(BaseModel):
+    topMm: float
+    rightMm: float
+    bottomMm: float
+    leftMm: float
+
+
+class ExportPageConfig(BaseModel):
+    size: Literal["A4", "Letter"] = "A4"
+    margins: ExportPageMargins
+
+
+class ExportParagraphConfig(BaseModel):
+    lineSpacing: float
+    spaceAfterPt: float
+
+
+class ExportDocumentOptions(BaseModel):
+    includeTitle: bool
+    linkColor: str
+    horizontalRuleColor: str
+
+
+class ExportTemplateConfig(BaseModel):
+    schemaVersion: int
+    name: str
+    page: ExportPageConfig
+    normal: ExportTextStyle
+    headingFontFamily: str
+    headings: dict[str, ExportTextStyle]
+    code: ExportTextStyle
+    paragraph: ExportParagraphConfig
+    document: ExportDocumentOptions
+    updatedAt: str
+
+
+class ExportTemplateUpdate(BaseModel):
+    page: ExportPageConfig | None = None
+    normal: ExportTextStyle | None = None
+    headingFontFamily: str | None = None
+    headings: dict[str, ExportTextStyle] | None = None
+    code: ExportTextStyle | None = None
+    paragraph: ExportParagraphConfig | None = None
+    document: ExportDocumentOptions | None = None
 
 
 class OpenTabConfig(BaseModel):

@@ -2,6 +2,16 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.19.0 - 2026-05-23
+
+- Added Markdown document export to MD, PDF, and DOCX from the editor toolbar and document tree.
+- Added native save-as export flows with browser-compatible fallback handling.
+- Added a configurable export template for page setup, typography, colors, line spacing, heading styles, and an editable ASCII JSON template.
+- Improved export output fidelity for supported Markdown elements, including blank lines, tables, lists, task lists, code blocks, blockquotes, rules, links, images, and inline formatting.
+- Reworked the export settings panel into a compact operational layout with controlled font choices and per-heading formatting.
+- Consolidated document tree export actions under a single `Exportar` submenu.
+- Updated export backend contracts, frontend runtime dialogs, component coverage, architecture docs, and manual validation steps.
+
 ## 0.18.10 - 2026-05-21
 
 - Added real GitHub conflict resolution actions in `Protección e historial` so users can synchronize instead of only opening the repository.

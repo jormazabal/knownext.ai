@@ -3,6 +3,7 @@ import {
   CheckSquare,
   Code2,
   ChevronDown,
+  Download,
   Heading1,
   Heading2,
   Heading3,
@@ -27,6 +28,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import type { MarkdownEditorAction, MarkdownEditorActionOptions, MarkdownEditorFormatState, MarkdownEditorHistoryState } from "./editorTypes";
+import type { ExportFormat } from "../../types/domain";
 
 type ToolbarAction = {
   label: string;
@@ -85,6 +87,7 @@ type MarkdownToolbarProps = {
   activeActions: MarkdownEditorFormatState;
   editorHistoryState: MarkdownEditorHistoryState;
   onRunEditorAction: (action: MarkdownEditorAction, options?: MarkdownEditorActionOptions) => void;
+  onExportDocument: (format: ExportFormat) => void;
   onMarkdownZoomChange: (zoomPercent: number) => void;
   onToggleHistory: () => void;
 };
@@ -99,10 +102,11 @@ export function MarkdownToolbar({
   activeActions,
   editorHistoryState,
   onRunEditorAction,
+  onExportDocument,
   onMarkdownZoomChange,
   onToggleHistory,
 }: MarkdownToolbarProps) {
-  const [openMenu, setOpenMenu] = useState<"block" | "format" | "structure" | "insert" | "table" | "zoom" | null>(null);
+  const [openMenu, setOpenMenu] = useState<"block" | "format" | "structure" | "insert" | "table" | "export" | "zoom" | null>(null);
   const [hoveredTableSize, setHoveredTableSize] = useState({ rows: 3, columns: 4 });
   const toolbarRef = useRef<HTMLDivElement | null>(null);
 
@@ -334,6 +338,32 @@ export function MarkdownToolbar({
         >
           <History size={15} />
         </button>
+        <div className="relative">
+          <ToolbarMenuButton
+            label="Exportar documento"
+            icon={Download}
+            disabled={!editorReady}
+            expanded={openMenu === "export"}
+            onMouseDown={keepEditorSelection}
+            onClick={(event) => toggleMenu("export", event)}
+          />
+          {openMenu === "export" ? (
+            <ToolbarMenu align="right">
+              <ExportMenuAction label="Markdown (.md)" format="md" onRun={(format) => {
+                setOpenMenu(null);
+                onExportDocument(format);
+              }} />
+              <ExportMenuAction label="PDF (.pdf)" format="pdf" onRun={(format) => {
+                setOpenMenu(null);
+                onExportDocument(format);
+              }} />
+              <ExportMenuAction label="Word (.docx)" format="docx" onRun={(format) => {
+                setOpenMenu(null);
+                onExportDocument(format);
+              }} />
+            </ToolbarMenu>
+          ) : null}
+        </div>
       </ToolbarActionGroup>
 
       <div className="ml-auto flex shrink-0 items-center gap-1">
@@ -398,6 +428,20 @@ export function MarkdownToolbar({
         </span>
       </div>
     </div>
+  );
+}
+
+function ExportMenuAction({ label, format, onRun }: { label: string; format: ExportFormat; onRun: (format: ExportFormat) => void }) {
+  return (
+    <button
+      className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] text-ink-primary hover:bg-brand-hover"
+      role="menuitem"
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={() => onRun(format)}
+    >
+      <Download size={14} />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+    </button>
   );
 }
 

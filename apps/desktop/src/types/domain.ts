@@ -284,6 +284,63 @@ export type DiagnosticsConfig = {
   traceLoggingEnabled: boolean;
 };
 
+export type ExportFormat = "md" | "pdf" | "docx";
+export type ExportTextFormat = "normal" | "bold" | "underline" | "bold_underline";
+
+export type ExportTextStyle = {
+  fontFamily: string;
+  fontSizePt: number;
+  color: string;
+  textFormat: ExportTextFormat;
+};
+
+export type ExportTemplateConfig = {
+  schemaVersion: number;
+  name: string;
+  page: {
+    size: "A4" | "Letter";
+    margins: {
+      topMm: number;
+      rightMm: number;
+      bottomMm: number;
+      leftMm: number;
+    };
+  };
+  normal: ExportTextStyle;
+  headingFontFamily: string;
+  headings: Record<"h1" | "h2" | "h3" | "h4" | "h5" | "h6", ExportTextStyle>;
+  code: ExportTextStyle;
+  paragraph: {
+    lineSpacing: number;
+    spaceAfterPt: number;
+  };
+  document: {
+    includeTitle: boolean;
+    linkColor: string;
+    horizontalRuleColor: string;
+  };
+  updatedAt: string;
+};
+
+export type ExportTemplateUpdate = Partial<
+  Pick<ExportTemplateConfig, "page" | "normal" | "headingFontFamily" | "code" | "paragraph" | "document">
+> & {
+  headings?: Partial<ExportTemplateConfig["headings"]>;
+};
+
+export type ExportDocumentPayload = {
+  format: ExportFormat;
+  outputPath: string;
+  markdown?: string | null;
+};
+
+export type ExportDocumentResponse = {
+  documentId: string;
+  format: ExportFormat;
+  outputPath: string;
+  exportedAt: string;
+};
+
 export type AiPermissionsConfig = {
   editDocuments: boolean;
   createFolders: boolean;

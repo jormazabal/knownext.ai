@@ -2,7 +2,9 @@ import base64
 import json
 import os
 import subprocess
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -43,7 +45,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.18.10"
+    assert payload["version"] == "0.19.0"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -316,6 +318,101 @@ def test_project_tree_reads_local_folder_and_manages_files(tmp_path) -> None:
     deleted = client.delete(f"/api/projects/{project_id}/nodes/{renamed_id}")
     assert deleted.status_code == 200
     assert not (docs_root / "Guides" / "notes-renamed.md").exists()
+
+
+def test_document_export_writes_markdown_pdf_docx_and_template(tmp_path) -> None:
+    from app.services.export_service import _parse_blocks
+
+    docs_root = tmp_path / "export-docs"
+    docs_root.mkdir()
+    (docs_root / "diagram.png").write_bytes(TINY_PNG)
+    markdown = """# Intro
+
+Texto **negrita**, *cursiva*, ~~tachado~~, `codigo` y [enlace](https://example.com).
+
+- [x] Tarea lista
+- Elemento normal
+
+| Campo | Valor |
+| --- | --- |
+| Estado | OK |
+
+> Nota importante
+
+Primer parrafo con espacio despues.
+
+
+
+Segundo parrafo separado por varias lineas vacias.
+
+![Diagrama](diagram.png)
+
+---
+
+```python
+print("ok")
+```
+"""
+    (docs_root / "intro.md").write_text(markdown, encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "Export Docs", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    document_id = _find_tree_node(client.get(f"/api/projects/{project_id}/tree").json(), "intro.md")["id"]
+
+    template = client.get("/api/config/export-template")
+    assert template.status_code == 200
+    assert template.json()["name"] == "basic"
+    assert template.json()["document"]["includeTitle"] is False
+    updated = client.put(
+        "/api/config/export-template",
+        json={"normal": {"fontFamily": "Arial", "fontSizePt": 12, "color": "#111827"}, "paragraph": {"lineSpacing": 1.4, "spaceAfterPt": 7}},
+    )
+    assert updated.status_code == 200
+    rejected_font = client.put(
+        "/api/config/export-template",
+        json={"normal": {"fontFamily": "Comic Sans MS", "fontSizePt": 12, "color": "#111827"}},
+    )
+    assert rejected_font.status_code == 200
+    assert rejected_font.json()["normal"]["fontFamily"] == "Arial"
+    styled_heading = client.put(
+        "/api/config/export-template",
+        json={"headings": {"h1": {"fontFamily": "Arial", "fontSizePt": 22, "color": "#111827", "textFormat": "bold_underline"}}},
+    )
+    assert styled_heading.status_code == 200
+    assert styled_heading.json()["headings"]["h1"]["textFormat"] == "bold_underline"
+    template_path = client.get("/api/config/export-template/path").json()["path"]
+    assert Path(template_path).read_bytes().isascii()
+
+    md_path = tmp_path / "out.md"
+    md_export = client.post(f"/api/documents/{document_id}/export", json={"format": "md", "outputPath": str(md_path), "markdown": "# Unsaved\n"})
+    assert md_export.status_code == 200
+    assert md_path.read_text(encoding="utf-8") == "# Unsaved\n"
+
+    pdf_path = tmp_path / "out.pdf"
+    pdf_export = client.post(f"/api/documents/{document_id}/export", json={"format": "pdf", "outputPath": str(pdf_path)})
+    assert pdf_export.status_code == 200
+    assert pdf_path.read_bytes().startswith(b"%PDF")
+
+    pdf_content = client.post(f"/api/documents/{document_id}/export/content", json={"format": "pdf"})
+    assert pdf_content.status_code == 200
+    assert pdf_content.headers["content-type"] == "application/pdf"
+    assert "intro.pdf" in pdf_content.headers["content-disposition"]
+    assert pdf_content.content.startswith(b"%PDF")
+
+    docx_path = tmp_path / "out.docx"
+    docx_export = client.post(f"/api/documents/{document_id}/export", json={"format": "docx", "outputPath": str(docx_path)})
+    assert docx_export.status_code == 200
+    assert zipfile.is_zipfile(docx_path)
+    with zipfile.ZipFile(docx_path) as package:
+        document_xml = package.read("word/document.xml").decode("utf-8")
+    assert "Intro" in document_xml
+    assert "intro.md" not in document_xml
+    assert "Estado" in document_xml
+    assert "<w:u " in document_xml
+    assert document_xml.count('xml:space="preserve"> </w:t>') >= 1
+    assert [block.kind for block in _parse_blocks(markdown)].count("blank_line") >= 2
 
 
 def test_external_changes_decode_git_quoted_utf8_paths() -> None:

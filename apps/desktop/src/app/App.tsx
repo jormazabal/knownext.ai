@@ -21,13 +21,18 @@ import {
   defaultAppearanceConfig,
   defaultAiConfig,
   defaultDiagnosticsConfig,
+  defaultExportTemplateConfig,
   defaultLayoutConfig,
   defaultProjectTabsConfig,
   getAppConfig,
   getAiConfig,
+  getExportTemplate,
+  getExportTemplatePath,
   readLocalAppPreferences,
+  resetExportTemplate,
   updateAppConfig,
   updateAiConfig,
+  updateExportTemplate,
   writeLocalAppPreferences,
 } from "../lib/api/config";
 import {
@@ -58,6 +63,8 @@ import { getProjectActivity, recordProjectActivity } from "../lib/api/activity";
 import {
   discardDocumentDraft,
   discardOrphanDraft,
+  exportDocument,
+  exportDocumentContent,
   getDocument,
   getDocumentsSyncStatus,
   listOrphanDrafts,
@@ -81,6 +88,7 @@ import {
 } from "../lib/runtime/updater";
 import { getTraceLogStatus, openTraceLogFolder, recordTraceLog, type TraceLogStatus } from "../lib/runtime/logging";
 import { openExternalUrl } from "../lib/runtime/links";
+import { isTauriRuntime, selectBrowserExportTarget, selectExportFilePath, withExportExtension } from "../lib/runtime/exportDialogs";
 import { getRuntimeServiceStatus, restartBackendService, updateBackendPortConfig, type BackendPortConfig, type RuntimeServicesStatus } from "../lib/runtime/services";
 import { applyAppearanceAttributes, useResolvedAppearanceTheme } from "../lib/theme/appearance";
 import { ArchiveRestore, FileWarning, RefreshCw, Trash2, X } from "lucide-react";
@@ -130,6 +138,9 @@ import type {
   DocumentSyncStatus,
   DocumentRecord,
   DocumentTreeNode,
+  ExportFormat,
+  ExportTemplateConfig,
+  ExportTemplateUpdate,
   FileOperationResult,
   InsertImageReferenceResponse,
   LayoutConfig,
@@ -204,6 +215,8 @@ export function App() {
   const [layoutConfig, setLayoutConfig] = useState<LayoutConfig>(defaultLayoutConfig);
   const [appearanceConfig, setAppearanceConfig] = useState<AppearanceConfig>(defaultAppearanceConfig);
   const [diagnosticsConfig, setDiagnosticsConfig] = useState<DiagnosticsConfig>(defaultDiagnosticsConfig);
+  const [exportTemplateConfig, setExportTemplateConfig] = useState<ExportTemplateConfig>(defaultExportTemplateConfig);
+  const [exportTemplatePath, setExportTemplatePath] = useState("");
   const [aiConfig, setAiConfig] = useState<AiConfigStatus>({ ...defaultAiConfig, openaiKeyConfigured: false, openaiKeyPreview: null });
   const aiConfigSaveSequence = useRef(0);
   const [aiConversationEvents, setAiConversationEvents] = useState<AiConversationEvent[]>([]);
@@ -266,12 +279,14 @@ export function App() {
       const localPreferences = readLocalAppPreferences();
       try {
         await waitForApiReady();
-        const [projectList, appConfig, auth, capabilities, loadedAiConfig, loadedAiUsageSummary] = await Promise.all([
+        const [projectList, appConfig, auth, capabilities, loadedAiConfig, loadedExportTemplate, loadedExportTemplatePath, loadedAiUsageSummary] = await Promise.all([
           listProjects(),
           getAppConfig(),
           getAuthStatus(),
           getProjectCapabilities(),
           getAiConfig(),
+          getExportTemplate(),
+          getExportTemplatePath(),
           loadAiUsageSummary("app.startup.aiUsageSummary"),
         ]);
         const active = projectList.find((project) => project.active) ?? projectList[0];
@@ -330,6 +345,8 @@ export function App() {
         setLayoutConfig(appConfig.layout);
         setAppearanceConfig(appConfig.appearance ?? defaultAppearanceConfig);
         setDiagnosticsConfig(appConfig.diagnostics ?? defaultDiagnosticsConfig);
+        setExportTemplateConfig(loadedExportTemplate);
+        setExportTemplatePath(loadedExportTemplatePath);
         setAiConfig(loadedAiConfig);
         setAiUsageSummary(loadedAiUsageSummary);
         setConfigPersistenceAvailable(true);
@@ -363,6 +380,8 @@ export function App() {
         setActiveTreeNodeId("");
         setAppearanceConfig(localPreferences.appearance ?? defaultAppearanceConfig);
         setDiagnosticsConfig(localPreferences.diagnostics ?? defaultDiagnosticsConfig);
+        setExportTemplateConfig(defaultExportTemplateConfig);
+        setExportTemplatePath("");
         setAiConfig({ ...(localPreferences.ai ?? defaultAiConfig), openaiKeyConfigured: false, openaiKeyPreview: null });
         setAiUsageSummary(null);
         setConfigPersistenceAvailable(false);
@@ -2121,6 +2140,37 @@ export function App() {
     });
   }
 
+  function handleExportTemplateChange(nextExportTemplate: ExportTemplateUpdate) {
+    setExportTemplateConfig((currentTemplate) => {
+      const updatedTemplate: ExportTemplateConfig = {
+        ...currentTemplate,
+        ...nextExportTemplate,
+        page: nextExportTemplate.page ?? currentTemplate.page,
+        normal: nextExportTemplate.normal ?? currentTemplate.normal,
+        headings: nextExportTemplate.headings
+          ? { ...currentTemplate.headings, ...nextExportTemplate.headings }
+          : currentTemplate.headings,
+        code: nextExportTemplate.code ?? currentTemplate.code,
+        paragraph: nextExportTemplate.paragraph ?? currentTemplate.paragraph,
+        document: nextExportTemplate.document ?? currentTemplate.document,
+        headingFontFamily: nextExportTemplate.headingFontFamily ?? currentTemplate.headingFontFamily,
+      };
+      void updateExportTemplate(nextExportTemplate)
+        .then(setExportTemplateConfig)
+        .catch((error) => showError(error, "No se pudo guardar la plantilla de exportación.", { source: "app.exportTemplate" }));
+      return updatedTemplate;
+    });
+  }
+
+  async function handleResetExportTemplate() {
+    try {
+      setExportTemplateConfig(await resetExportTemplate());
+      setExportTemplatePath(await getExportTemplatePath());
+    } catch (error) {
+      showError(error, "No se pudo restablecer la plantilla de exportación.", { source: "app.exportTemplate.reset" });
+    }
+  }
+
   async function refreshAiState(projectId = activeProject?.id) {
     try {
       const nextAiConfig = await getAiConfig();
@@ -2326,6 +2376,12 @@ export function App() {
   }
 
   function handleTreeContextAction(action: DocumentTreeAction, node: DocumentTreeNode) {
+    if (action === "export-md" || action === "export-pdf" || action === "export-docx") {
+      const format = action === "export-md" ? "md" : action === "export-pdf" ? "pdf" : "docx";
+      void handleExportDocument(node.id, format);
+      return;
+    }
+
     if (action === "rename") {
       updateCurrentProjectTree((currentTree) => markNodeEditing(currentTree, node.id));
       return;
@@ -2400,6 +2456,45 @@ export function App() {
 
     if (action === "move") {
       setMoveNode(node);
+    }
+  }
+
+  async function handleExportDocument(documentId: string, format: ExportFormat) {
+    const session = documentSessions[documentId];
+    const documentName = session?.document?.name ?? findNodeById(tree, documentId)?.name ?? "documento.md";
+
+    try {
+      if (!isTauriRuntime()) {
+        const exportTarget = await selectBrowserExportTarget(documentName, format);
+        if (!exportTarget) return;
+        const blob = await exportDocumentContent(documentId, {
+          format,
+          markdown: session?.markdown ?? null,
+        });
+        await exportTarget.save(blob);
+        setNotice({
+          title: "Documento exportado",
+          message: exportTarget.fileName,
+          tone: "info",
+        });
+        return;
+      }
+
+      const outputPath = await selectExportFilePath(withExportExtension(documentName, format), format);
+      if (!outputPath) return;
+
+      const response = await exportDocument(documentId, {
+        format,
+        outputPath,
+        markdown: session?.markdown ?? null,
+      });
+      setNotice({
+        title: "Documento exportado",
+        message: response.outputPath,
+        tone: "info",
+      });
+    } catch (error) {
+      showError(error, "No se pudo exportar el documento.", { source: "app.documentExport" });
     }
   }
 
@@ -2794,6 +2889,7 @@ export function App() {
         onSelectTab={handleSelectTab}
         onCloseTab={handleCloseTab}
         onTreeContextAction={handleTreeContextAction}
+        onExportDocument={handleExportDocument}
         onMoveTreeNode={handleMoveTreeNodeDrop}
         onImportProjectImage={handleImportProjectImage}
         onBuildImageReference={handleBuildImageReference}
@@ -2821,6 +2917,8 @@ export function App() {
         open={appSettingsOpen}
         appearance={appearanceConfig}
         diagnostics={diagnosticsConfig}
+        exportTemplate={exportTemplateConfig}
+        exportTemplatePath={exportTemplatePath}
         ai={aiConfig}
         aiIndexStatus={aiIndexStatus}
         traceLogStatus={traceLogStatus}
@@ -2829,6 +2927,8 @@ export function App() {
         onClose={() => setAppSettingsOpen(false)}
         onAppearanceChange={handleAppearanceConfigChange}
         onDiagnosticsChange={handleDiagnosticsConfigChange}
+        onExportTemplateChange={handleExportTemplateChange}
+        onResetExportTemplate={() => void handleResetExportTemplate()}
         onAiChange={handleAiConfigChange}
         onSaveOpenAiKey={(apiKey) => void handleSaveOpenAiKey(apiKey)}
         onDeleteOpenAiKey={() => void handleDeleteOpenAiKey()}
