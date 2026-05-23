@@ -56,7 +56,7 @@
 - [ ] Click Buscar and confirm a compact modal opens with the input focused, a close X, and no search field permanently added to the sidebar.
 - [ ] Type a middle or ending fragment of a folder name, for example `quis` for `Requisitos`, and confirm matching folders/documents/images/support files appear even when the fragment is not at the start.
 - [ ] Type a middle or ending fragment of a document name, select the result with Enter, and confirm the modal closes, the document opens, parent folders expand, and the document is selected in the tree.
-- [ ] Type part of a support-file name, select the result with Enter, and confirm the modal closes, parent folders expand, the file is selected in the tree, and no document/image viewer opens.
+- [ ] Type part of a non-previewable support-file name, select the result with Enter, and confirm the modal closes, parent folders expand, the file is selected in the tree, and no document/image viewer opens.
 - [ ] Select a folder result from search and confirm the modal closes, parent folders expand, that folder expands and is selected, while the current document remains open.
 - [ ] Confirm document search results show the document name plus a secondary parent-folder route for disambiguation, and that the route is not itself searched as content/name.
 - [ ] Confirm Up/Down changes the active search result, Tab and Enter select the active result, and Escape closes the search modal.
@@ -97,10 +97,17 @@
 - [ ] Confirm folder context menu shows Nueva carpeta, Nuevo documento, Importar archivo, Renombrar, Eliminar.
 - [ ] Confirm document context menu shows Exportar MD, Exportar PDF, Exportar DOCX, Renombrar, Duplicar, Mover, Eliminar.
 - [ ] Confirm image context menu shows Abrir, Insertar en documento, Usar como contexto IA, Copiar referencia, Renombrar, Mover, Eliminar.
-- [ ] Confirm support-file context menu shows Usar como contexto IA, Copiar ruta, Renombrar, Mover, Eliminar, and does not show Abrir or Insertar en documento.
+- [ ] Confirm support-file context menu shows Abrir vista, Usar como contexto IA, Copiar ruta, Renombrar, Mover, Eliminar, and does not show Insertar en documento.
 - [ ] Use the folder context menu to create a folder and document, then confirm they exist on disk.
 - [ ] Use Importar archivo from a folder menu to import an image and confirm the image is copied to that folder, appears in the tree, and opens in the image viewer tab.
-- [ ] Use Importar archivo from a folder menu to import a PDF, CSV, or TXT file and confirm the file is copied to that folder, appears in the tree with a file-specific icon, can be renamed/moved/deleted, and does not open a viewer tab.
+- [ ] Use Importar archivo from a folder menu to import a CSV or TXT file and confirm the file is copied to that folder, appears in the tree with a file-specific icon, can be renamed/moved/deleted, and does not open a viewer tab.
+- [ ] Use Importar archivo from a folder menu to import a PDF and confirm it opens as a `Solo lectura` reference-document tab with PDF.js-rendered pages, zoom, page navigation, fit-width/fit-page controls, search state, refresh, and Abrir externo.
+- [ ] Import a DOCX and confirm it opens as a `Solo lectura` reference-document tab, shows `Vista generada desde Word`, uses the same paginated controls as PDF, and when LibreOffice is not available still renders a basic read-only PDF fallback with a visible fidelity warning and Abrir externo.
+- [ ] Import an XLSX and confirm it opens as a `Solo lectura` reference-document tab directly in the sheet grid, without a `Páginas` mode.
+- [ ] In XLSX, confirm sheet selection works from the toolbar dropdown, the read-only grid updates, cells are selectable/copyable, formulas appear in cell tooltips where present, basic search highlighting works, and no editing behavior is available.
+- [ ] Modify an open PDF/DOCX/XLSX on disk, return to KnowNext.ai, refresh/open the tab, and confirm `Vista desactualizada` appears with an Actualizar action.
+- [ ] Try opening a protected, corrupt, or too-large PDF/DOCX/XLSX and confirm the state is human-readable and offers Reintentar and Abrir externo without modifying the source file.
+- [ ] Switch between a Markdown tab, an image tab, and a reference-document tab and confirm Milkdown state, dirty markers, toolbar visibility, and document context are preserved.
 - [ ] Rename a folder or document from the tree and confirm the disk item is renamed.
 - [ ] Duplicate, move, and delete a document from the file context menu and confirm the disk changes.
 - [ ] Edit content in Milkdown visual mode.

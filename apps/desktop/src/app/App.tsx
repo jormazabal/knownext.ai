@@ -205,6 +205,8 @@ export function App() {
   const [activeTreeNodeId, setActiveTreeNodeId] = useState(defaultProjectTabsConfig.activeDocumentId);
   const [imageTabs, setImageTabs] = useState<Array<{ id: string; name: string; path: string }>>([]);
   const [activeImageId, setActiveImageId] = useState("");
+  const [referenceDocumentTabs, setReferenceDocumentTabs] = useState<Array<{ id: string; name: string; path: string; format: "pdf" | "docx" | "xlsx" }>>([]);
+  const [activeReferenceDocumentId, setActiveReferenceDocumentId] = useState("");
   const [documentSessions, setDocumentSessions] = useState<Record<string, DocumentSession>>({});
   const [historyOpen, setHistoryOpen] = useState(false);
   const [createDocumentOpen, setCreateDocumentOpen] = useState(false);
@@ -684,6 +686,7 @@ export function App() {
       : []),
     ...tabs.map((tab) => ({ ...tab, kind: "document" as const })),
     ...imageTabs.map((tab) => ({ ...tab, kind: "image" as const })),
+    ...referenceDocumentTabs.map((tab) => ({ ...tab, kind: "reference-document" as const, readonly: true as const })),
     ...(openUtilityTabs.includes(RELEASE_NOTES_UTILITY_TAB_ID)
       ? [{
         kind: "release-notes" as const,
@@ -693,8 +696,8 @@ export function App() {
         readonly: true as const,
       }]
       : []),
-  ], [activeProject, imageTabs, openUtilityTabs, tabs]);
-  const activeTabId = activeUtilityTab === RELEASE_NOTES_UTILITY_TAB_ID ? RELEASE_NOTES_WORKSPACE_TAB_ID : activeImageId || activeDocumentId || (activeProject ? AI_CONVERSATION_TAB_ID : "");
+  ], [activeProject, imageTabs, openUtilityTabs, referenceDocumentTabs, tabs]);
+  const activeTabId = activeUtilityTab === RELEASE_NOTES_UTILITY_TAB_ID ? RELEASE_NOTES_WORKSPACE_TAB_ID : activeReferenceDocumentId || activeImageId || activeDocumentId || (activeProject ? AI_CONVERSATION_TAB_ID : "");
   const activeSession = activeDocumentId ? documentSessions[activeDocumentId] : undefined;
   const activeDocumentSyncStatus = activeDocumentId ? documentSyncStatuses[activeDocumentId] ?? null : null;
   useEffect(() => {
@@ -758,6 +761,7 @@ export function App() {
     setActiveDocumentId(documentId);
     revealTreeNode(documentId);
     setActiveImageId("");
+    setActiveReferenceDocumentId("");
     setActiveUtilityTab(null);
   }
 
@@ -767,6 +771,10 @@ export function App() {
     if (type === "image") {
       const imageNode = findNodeById(tree, nodeId);
       if (imageNode?.path) handleOpenImage(nodeId, name, imageNode.path);
+    }
+    if (type === "attachment") {
+      const referenceNode = findNodeById(tree, nodeId);
+      if (referenceNode?.path && isReferenceDocumentPath(referenceNode.path)) handleOpenReferenceDocument(nodeId, name, referenceNode.path);
     }
   }
 
@@ -782,9 +790,32 @@ export function App() {
     ));
     if (options?.activate !== false) {
       setActiveImageId(assetId);
+      setActiveReferenceDocumentId("");
       setActiveTreeNodeId(assetId);
       setActiveUtilityTab(null);
     }
+  }
+
+  function handleOpenReferenceDocument(nodeId: string, name: string, path: string) {
+    const format = referenceDocumentFormat(path);
+    if (!format) {
+      setActiveTreeNodeId(nodeId);
+      setNotice({ title: "Vista no disponible", message: "Este archivo de apoyo no tiene visor integrado.", tone: "info" });
+      return;
+    }
+    setReferenceDocumentTabs((currentTabs) => (
+      currentTabs.some((tab) => tab.id === nodeId)
+        ? currentTabs.map((tab) => (tab.id === nodeId ? { id: nodeId, name, path, format } : tab))
+        : [...currentTabs, { id: nodeId, name, path, format }]
+    ));
+    if (activeDocumentId && documentSessions[activeDocumentId]) {
+      void persistDraft(activeDocumentId, documentSessions[activeDocumentId]);
+    }
+    setActiveReferenceDocumentId(nodeId);
+    setActiveImageId("");
+    setActiveDocumentId("");
+    setActiveTreeNodeId(nodeId);
+    setActiveUtilityTab(null);
   }
 
   async function refreshProjectCapabilityState(projectId = activeProject?.id) {
@@ -953,6 +984,13 @@ export function App() {
       return;
     }
 
+    if (referenceDocumentTabs.some((tab) => tab.id === tabId)) {
+      const nextReferenceTabs = referenceDocumentTabs.filter((tab) => tab.id !== tabId);
+      setReferenceDocumentTabs(nextReferenceTabs);
+      if (activeReferenceDocumentId === tabId) setActiveReferenceDocumentId(nextReferenceTabs[0]?.id ?? "");
+      return;
+    }
+
     const documentId = tabId;
     if (documentSessions[documentId]?.isDirty) {
       setCloseDocumentId(documentId);
@@ -987,6 +1025,7 @@ export function App() {
       }
       setActiveUtilityTab(null);
       setActiveImageId("");
+      setActiveReferenceDocumentId("");
       setActiveDocumentId("");
       setActiveTreeNodeId("");
       return;
@@ -996,6 +1035,7 @@ export function App() {
       setOpenUtilityTabs((currentTabs) => ensureReleaseNotesTab(currentTabs));
       setActiveUtilityTab(RELEASE_NOTES_UTILITY_TAB_ID);
       setActiveImageId("");
+      setActiveReferenceDocumentId("");
       setActiveTreeNodeId("");
       return;
     }
@@ -1006,6 +1046,19 @@ export function App() {
       }
       setActiveUtilityTab(null);
       setActiveImageId(tabId);
+      setActiveReferenceDocumentId("");
+      setActiveTreeNodeId(tabId);
+      return;
+    }
+
+    if (referenceDocumentTabs.some((tab) => tab.id === tabId)) {
+      if (activeDocumentId && documentSessions[activeDocumentId]) {
+        void persistDraft(activeDocumentId, documentSessions[activeDocumentId]);
+      }
+      setActiveUtilityTab(null);
+      setActiveImageId("");
+      setActiveReferenceDocumentId(tabId);
+      setActiveDocumentId("");
       setActiveTreeNodeId(tabId);
       return;
     }
@@ -1016,6 +1069,7 @@ export function App() {
     }
     setActiveUtilityTab(null);
     setActiveImageId("");
+    setActiveReferenceDocumentId("");
     setActiveDocumentId(documentId);
     revealTreeNode(documentId);
   }
@@ -1023,6 +1077,8 @@ export function App() {
   function handleOpenReleaseNotes() {
     setOpenUtilityTabs((currentTabs) => ensureReleaseNotesTab(currentTabs));
     setActiveUtilityTab(RELEASE_NOTES_UTILITY_TAB_ID);
+    setActiveReferenceDocumentId("");
+    setActiveImageId("");
     setActiveTreeNodeId("");
   }
 
@@ -1463,6 +1519,8 @@ export function App() {
       setActiveTreeNodeId(nextProjectTabs.activeDocumentId);
       setImageTabs([]);
       setActiveImageId("");
+      setReferenceDocumentTabs([]);
+      setActiveReferenceDocumentId("");
       setExternalChangeSet(null);
       setExternalChangeDecisions({});
       setExternalChangesMessage(null);
@@ -1559,6 +1617,8 @@ export function App() {
       setTabs(nextProjectTabs.openTabs);
       setActiveDocumentId(nextProjectTabs.activeDocumentId);
       setActiveTreeNodeId(nextProjectTabs.activeDocumentId);
+      setReferenceDocumentTabs([]);
+      setActiveReferenceDocumentId("");
       setTabsByProject((currentTabsByProject) => ({
         ...currentTabsByProject,
         [nextProject.id]: nextProjectTabs,
@@ -1635,6 +1695,8 @@ export function App() {
         setTabs(nextProjectTabs.openTabs);
         setActiveDocumentId(nextProjectTabs.activeDocumentId);
         setActiveTreeNodeId(nextProjectTabs.activeDocumentId);
+        setReferenceDocumentTabs([]);
+        setActiveReferenceDocumentId("");
         if (!nextVersioningStatus.enabled) setHistoryOpen(false);
         await refreshProjectSyncStatus(projectId, { autoRun: isAutomaticSyncMode(updatedProject?.syncMode), silent: true });
         await refreshProjectActivity(projectId);
@@ -1669,6 +1731,10 @@ export function App() {
         setTabs([]);
         setActiveDocumentId("");
         setActiveTreeNodeId("");
+        setImageTabs([]);
+        setActiveImageId("");
+        setReferenceDocumentTabs([]);
+        setActiveReferenceDocumentId("");
         setDocumentSessions({});
         setHistoryOpen(false);
         setExternalChangeSet(null);
@@ -1691,6 +1757,10 @@ export function App() {
       setTabs(nextProjectTabs.openTabs);
       setActiveDocumentId(nextProjectTabs.activeDocumentId);
       setActiveTreeNodeId(nextProjectTabs.activeDocumentId);
+      setImageTabs([]);
+      setActiveImageId("");
+      setReferenceDocumentTabs([]);
+      setActiveReferenceDocumentId("");
       if (!nextVersioningStatus.enabled) setHistoryOpen(false);
     } catch (error) {
       showError(error, "No se pudo eliminar el proyecto.");
@@ -2413,6 +2483,11 @@ export function App() {
       return;
     }
 
+    if (action === "open-reference-document" && node.path) {
+      handleOpenReferenceDocument(node.id, node.name, node.path);
+      return;
+    }
+
     if (action === "add-image-context") {
       void handleAddProjectImageContext(node.id);
       return;
@@ -2884,6 +2959,7 @@ export function App() {
         isSyncingProject={syncState !== "idle"}
         onOpenDocument={handleOpenDocument}
         onOpenImage={handleOpenImage}
+        onOpenReferenceDocument={handleOpenReferenceDocument}
         onActivateTreeNode={handleActivateTreeNode}
         onSelectTreeNode={handleSelectTreeNode}
         onSelectTab={handleSelectTab}
@@ -4141,4 +4217,14 @@ function isNoVersionChangesError(error: unknown) {
   if (!(error instanceof ApiError) || error.status !== 409) return false;
   const detail = typeof error.detail === "string" ? error.detail : error.message;
   return detail.includes("No document changes") || detail.includes("No selected changes");
+}
+
+function referenceDocumentFormat(path: string): "pdf" | "docx" | "xlsx" | null {
+  const extension = path.split(".").pop()?.toLowerCase();
+  if (extension === "pdf" || extension === "docx" || extension === "xlsx") return extension;
+  return null;
+}
+
+function isReferenceDocumentPath(path: string) {
+  return referenceDocumentFormat(path) !== null;
 }

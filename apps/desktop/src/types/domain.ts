@@ -552,6 +552,15 @@ export type ImageWorkspaceTab = {
   path: string;
 };
 
+export type ReferenceDocumentWorkspaceTab = {
+  kind: "reference-document";
+  id: string;
+  name: string;
+  path: string;
+  format: "pdf" | "docx" | "xlsx";
+  readonly: true;
+};
+
 export type AiConversationWorkspaceTab = {
   kind: "ai-conversation";
   id: "project-ai-conversation";
@@ -559,7 +568,82 @@ export type AiConversationWorkspaceTab = {
   readonly: true;
 };
 
-export type WorkspaceTab = AiConversationWorkspaceTab | DocumentWorkspaceTab | ImageWorkspaceTab | ReleaseNotesWorkspaceTab;
+export type WorkspaceTab = AiConversationWorkspaceTab | DocumentWorkspaceTab | ImageWorkspaceTab | ReferenceDocumentWorkspaceTab | ReleaseNotesWorkspaceTab;
+
+export type PreviewFormat = "pdf" | "docx" | "xlsx";
+
+export type PreviewStatus =
+  | "queued"
+  | "processing"
+  | "ready"
+  | "error"
+  | "unsupported"
+  | "protected"
+  | "stale";
+
+export type PreviewRendition =
+  | "pdf"
+  | "text"
+  | "workbook"
+  | "thumbnails";
+
+export type SpreadsheetSheetSummary = {
+  id: string;
+  name: string;
+  rowCount: number;
+  columnCount: number;
+  hidden: boolean;
+};
+
+export type DocumentPreview = {
+  id: string;
+  projectId: string;
+  path: string;
+  name: string;
+  format: PreviewFormat;
+  status: PreviewStatus;
+  readonly: true;
+  sourceFingerprint: DocumentFingerprint;
+  availableRenditions: PreviewRendition[];
+  pageCount?: number | null;
+  sheets?: SpreadsheetSheetSummary[] | null;
+  warnings: string[];
+  generatedAt?: string | null;
+  error?: string | null;
+};
+
+export type DocumentPreviewMode = "document" | "spreadsheet";
+
+export type DocumentPreviewTextResponse = {
+  previewId: string;
+  text: string;
+  searchable: boolean;
+  warnings: string[];
+};
+
+export type SpreadsheetCell = {
+  row: number;
+  column: number;
+  address: string;
+  value?: string | number | boolean | null;
+  displayValue?: string | null;
+  formula?: string | null;
+};
+
+export type SpreadsheetSheetResponse = {
+  previewId: string;
+  sheetId: string;
+  name: string;
+  rowCount: number;
+  columnCount: number;
+  cells: SpreadsheetCell[];
+  warnings: string[];
+};
+
+export type SpreadsheetSheetsResponse = {
+  previewId: string;
+  sheets: SpreadsheetSheetSummary[];
+};
 
 export type VersionRecord = {
   id: string;

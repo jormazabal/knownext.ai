@@ -19,6 +19,7 @@ client = TestClient(app)
 TINY_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 )
+MINIMAL_PDF = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n"
 
 
 @pytest.fixture(autouse=True)
@@ -38,6 +39,52 @@ def _find_tree_node(nodes: list[dict], name: str) -> dict:
     return {}
 
 
+def _write_minimal_xlsx(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as package:
+        package.writestr(
+            "[Content_Types].xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>""",
+        )
+        package.writestr(
+            "xl/workbook.xml",
+            """<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Resumen" sheetId="1" r:id="rId1"/>
+    <sheet name="Detalle" sheetId="2" r:id="rId2"/>
+  </sheets>
+</workbook>""",
+        )
+        package.writestr(
+            "xl/_rels/workbook.xml.rels",
+            """<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Target="worksheets/sheet1.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"/>
+  <Relationship Id="rId2" Target="worksheets/sheet2.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"/>
+</Relationships>""",
+        )
+        package.writestr(
+            "xl/worksheets/sheet1.xml",
+            """<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1" t="inlineStr"><is><t>Concepto</t></is></c><c r="B1" t="inlineStr"><is><t>Total</t></is></c></row>
+    <row r="2"><c r="A2" t="inlineStr"><is><t>Licencias</t></is></c><c r="B2"><v>1200</v></c></row>
+  </sheetData>
+</worksheet>""",
+        )
+        package.writestr(
+            "xl/worksheets/sheet2.xml",
+            """<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Detalle</t></is></c></row></sheetData>
+</worksheet>""",
+        )
+
+
 def test_health() -> None:
     response = client.get("/health")
     assert response.status_code == 200
@@ -45,7 +92,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.19.0"
+    assert payload["version"] == "0.20.0"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -413,6 +460,121 @@ print("ok")
     assert "<w:u " in document_xml
     assert document_xml.count('xml:space="preserve"> </w:t>') >= 1
     assert [block.kind for block in _parse_blocks(markdown)].count("blank_line") >= 2
+
+
+def test_reference_document_preview_serves_pdf_and_blocks_path_traversal(tmp_path) -> None:
+    docs_root = tmp_path / "preview-pdf"
+    docs_root.mkdir()
+    (docs_root / "spec.pdf").write_bytes(MINIMAL_PDF)
+    (tmp_path / "secret.pdf").write_bytes(MINIMAL_PDF)
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "Preview PDF", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    ).json()["id"]
+
+    blocked = client.post(f"/api/projects/{project_id}/previews", json={"path": "../secret.pdf"})
+    assert blocked.status_code == 400
+
+    created = client.post(f"/api/projects/{project_id}/previews", json={"path": "spec.pdf"})
+    assert created.status_code == 200
+    preview = created.json()
+    assert preview["format"] == "pdf"
+    assert preview["status"] == "ready"
+    assert "pdf" in preview["availableRenditions"]
+    assert preview["pageCount"] == 1
+    assert preview["readonly"] is True
+
+    pdf = client.get(f"/api/projects/{project_id}/previews/{preview['id']}/pdf")
+    assert pdf.status_code == 200
+    assert pdf.headers["content-type"] == "application/pdf"
+    assert pdf.content.startswith(b"%PDF")
+
+
+def test_reference_document_preview_generates_docx_fallback_without_converter(tmp_path, monkeypatch) -> None:
+    from app.services.document_preview_service import office_conversion_service
+
+    docs_root = tmp_path / "preview-docx"
+    docs_root.mkdir()
+    docx_path = docs_root / "contract.docx"
+    with zipfile.ZipFile(docx_path, "w") as package:
+        package.writestr("[Content_Types].xml", "<Types xmlns='http://schemas.openxmlformats.org/package/2006/content-types'/>")
+        package.writestr(
+            "word/document.xml",
+            "<w:document xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'><w:body><w:p><w:r><w:t>Contrato</w:t></w:r></w:p></w:body></w:document>",
+        )
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "Preview DOCX", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    ).json()["id"]
+    monkeypatch.setattr(office_conversion_service, "find_converter", lambda: None)
+
+    created = client.post(f"/api/projects/{project_id}/previews", json={"path": "contract.docx"})
+
+    assert created.status_code == 200
+    payload = created.json()
+    assert payload["format"] == "docx"
+    assert payload["status"] == "ready"
+    assert payload["error"] is None
+    assert "pdf" in payload["availableRenditions"]
+    assert "text" in payload["availableRenditions"]
+    assert any("LibreOffice" in warning for warning in payload["warnings"])
+
+    pdf = client.get(f"/api/projects/{project_id}/previews/{payload['id']}/pdf")
+    assert pdf.status_code == 200
+    assert pdf.content.startswith(b"%PDF")
+
+
+def test_reference_document_preview_reads_xlsx_multiple_sheets(tmp_path) -> None:
+    from app.services.spreadsheet_preview_service import resolve_workbook_relation_target
+
+    assert resolve_workbook_relation_target("/xl/worksheets/sheet1.xml") == "xl/worksheets/sheet1.xml"
+    assert resolve_workbook_relation_target("worksheets/sheet1.xml") == "xl/worksheets/sheet1.xml"
+
+    docs_root = tmp_path / "preview-xlsx"
+    docs_root.mkdir()
+    _write_minimal_xlsx(docs_root / "budget.xlsx")
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "Preview XLSX", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    ).json()["id"]
+
+    created = client.post(f"/api/projects/{project_id}/previews", json={"path": "budget.xlsx", "preferredMode": "spreadsheet"})
+    assert created.status_code == 200
+    preview = created.json()
+    assert preview["format"] == "xlsx"
+    assert preview["status"] == "ready"
+    assert "workbook" in preview["availableRenditions"]
+    assert "pdf" not in preview["availableRenditions"]
+    assert preview["pageCount"] is None
+    assert not any("LibreOffice" in warning for warning in preview["warnings"])
+    assert [sheet["name"] for sheet in preview["sheets"]] == ["Resumen", "Detalle"]
+
+    sheets = client.get(f"/api/projects/{project_id}/previews/{preview['id']}/sheets")
+    assert sheets.status_code == 200
+    first_sheet_id = sheets.json()["sheets"][0]["id"]
+    sheet = client.get(f"/api/projects/{project_id}/previews/{preview['id']}/sheets/{first_sheet_id}")
+    assert sheet.status_code == 200
+    values = {cell["address"]: cell["displayValue"] for cell in sheet.json()["cells"]}
+    assert values["A1"] == "Concepto"
+    assert values["B2"] == "1200"
+
+
+def test_reference_document_preview_marks_stale_when_source_changes(tmp_path) -> None:
+    docs_root = tmp_path / "preview-stale"
+    docs_root.mkdir()
+    source = docs_root / "spec.pdf"
+    source.write_bytes(MINIMAL_PDF)
+    project_id = client.post(
+        "/api/projects",
+        json={"name": "Preview Stale", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    ).json()["id"]
+    preview = client.post(f"/api/projects/{project_id}/previews", json={"path": "spec.pdf"}).json()
+
+    source.write_bytes(MINIMAL_PDF + b"\n% changed")
+    stale = client.get(f"/api/projects/{project_id}/previews/{preview['id']}")
+
+    assert stale.status_code == 200
+    assert stale.json()["status"] == "stale"
 
 
 def test_external_changes_decode_git_quoted_utf8_paths() -> None:
