@@ -8,6 +8,7 @@ import { DocumentTabs } from "../features/documents/DocumentTabs";
 import { DocumentTree, type DocumentTreeAction, type ProjectTreeStatus } from "../features/documents/DocumentTree";
 import { ExternalChangesDrawer } from "../features/externalChanges/ExternalChangesDrawer";
 import { ImageViewer } from "../features/documents/ImageViewer";
+import { ReferenceDocumentViewer } from "../features/documentPreview/ReferenceDocumentViewer";
 import { MarkdownToolbar } from "../features/editor/MarkdownToolbar";
 import {
   emptyMarkdownEditorHistoryState,
@@ -141,6 +142,7 @@ type DesktopLayoutProps = {
   isSyncingProject: boolean;
   onOpenDocument: (documentId: string, name: string) => void;
   onOpenImage: (assetId: string, name: string, path: string) => void;
+  onOpenReferenceDocument: (nodeId: string, name: string, path: string) => void;
   onActivateTreeNode: (nodeId: string) => void;
   onSelectTreeNode: (nodeId: string, type: DocumentTreeNode["type"], name: string) => void;
   onSelectTab: (documentId: string) => void;
@@ -197,9 +199,10 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   const activeWorkspaceTab = props.tabs.find((tab) => tab.id === props.activeTabId);
   const hasOpenDocument = activeWorkspaceTab?.kind === "document" && Boolean(props.activeDocumentId);
   const hasOpenImage = activeWorkspaceTab?.kind === "image" && Boolean(props.activeImageId);
+  const hasOpenReferenceDocument = activeWorkspaceTab?.kind === "reference-document";
   const hasReleaseNotes = activeWorkspaceTab?.kind === "release-notes";
   const hasAiConversation = activeWorkspaceTab?.kind === "ai-conversation";
-  const hasOpenTab = hasOpenDocument || hasOpenImage || hasReleaseNotes || hasAiConversation;
+  const hasOpenTab = hasOpenDocument || hasOpenImage || hasOpenReferenceDocument || hasReleaseNotes || hasAiConversation;
   const activeEditorController = editorControllers[props.activeDocumentId] ?? null;
   const activeEditorHistoryState = editorHistoryStates[props.activeDocumentId] ?? emptyMarkdownEditorHistoryState;
   const [historyPreview, setHistoryPreview] = useState<VersionPreview | null>(null);
@@ -443,6 +446,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 hasActiveProject={Boolean(props.activeProject)}
                 onOpenDocument={handleOpenDocument}
                 onOpenImage={props.onOpenImage}
+                onOpenReferenceDocument={props.onOpenReferenceDocument}
                 onActivateTreeNode={props.onActivateTreeNode}
                 onSelectTreeNode={props.onSelectTreeNode}
                 onCreateFolder={props.onCreateFolder}
@@ -530,7 +534,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             onSelectTab={props.onSelectTab}
             onCloseTab={props.onCloseTab}
           />
-              {hasReleaseNotes || hasAiConversation || hasOpenImage ? null : (
+              {hasReleaseNotes || hasAiConversation || hasOpenImage || hasOpenReferenceDocument ? null : (
               <MarkdownToolbar
                 historyOpen={props.historyOpen}
                 historyEnabled={props.historyEnabled}
@@ -552,8 +556,8 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             <section className={["relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", hasOpenTab ? "bg-white" : "bg-panel"].join(" ")}>
               {hasOpenTab ? (
                 <>
-                  <div className={hasAiConversation || hasOpenImage ? "mb-[54px] min-h-0 flex-1 overflow-hidden" : "mb-[54px] min-h-0 flex-1 overflow-y-auto px-8 pb-6 pt-4"}>
-                    <div className={hasAiConversation || hasOpenImage ? "h-full min-h-0 w-full" : "mx-auto max-w-[900px]"}>
+                  <div className={hasAiConversation || hasOpenImage || hasOpenReferenceDocument ? "mb-[54px] min-h-0 flex-1 overflow-hidden" : "mb-[54px] min-h-0 flex-1 overflow-y-auto px-8 pb-6 pt-4"}>
+                    <div className={hasAiConversation || hasOpenImage || hasOpenReferenceDocument ? "h-full min-h-0 w-full" : "mx-auto max-w-[900px]"}>
                       {hasReleaseNotes ? (
                         <ReleaseNotesViewer markdown={props.releaseNotesMarkdown} />
                       ) : hasAiConversation ? (
@@ -578,6 +582,8 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                           onAssetMetadataChange={setActiveImageAsset}
                           onOpenReference={handleOpenDocument}
                         />
+                      ) : hasOpenReferenceDocument && activeWorkspaceTab?.kind === "reference-document" && props.activeProject ? (
+                        <ReferenceDocumentViewer project={props.activeProject} tab={activeWorkspaceTab} />
                       ) : activeHistoryPreview ? (
                         <HistoryPreviewWorkspace
                           preview={activeHistoryPreview}
@@ -755,6 +761,12 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                     setImageZoomPercent(clamp(Math.round(nextZoom), 10, 200));
                   }}
                   onFitToWindow={() => setImageFitToWindow(true)}
+                />
+              ) : hasOpenReferenceDocument && activeWorkspaceTab?.kind === "reference-document" ? (
+                <WorkspaceStatusBar
+                  kind={activeWorkspaceTab.format.toUpperCase()}
+                  title="Solo lectura"
+                  detail={activeWorkspaceTab.path}
                 />
               ) : hasOpenTab ? (
                 <WorkspaceStatusBar

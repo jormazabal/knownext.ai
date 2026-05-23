@@ -2,6 +2,17 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.20.0 - 2026-05-24
+
+- Added a native read-only reference document viewer for PDF, DOCX, and XLSX files inside the workspace.
+- Added FastAPI-mediated preview contracts, validation, cache-backed renditions, PDF serving, DOCX conversion fallback handling, and XLSX workbook extraction.
+- Integrated reference documents into the document tree and workspace tabs without replacing Milkdown or making non-Markdown files editable.
+- Added a compact document preview toolbar, read-only footer status, XLSX sheet selector, flush spreadsheet grid layout, external-open actions, and human error states.
+- Improved XLSX viewing by removing the unnecessary pages mode and side panel, keeping sheet selection directly in the toolbar.
+- Added PDF/DOCX search result highlighting over the document preview surface.
+- Reworked overflowing workspace tabs so they avoid horizontal scrollbars and provide a floating tab list plus adjacent-tab navigation controls.
+- Updated backend/frontend tests, product architecture documentation, and the manual validation checklist for reference document previews.
+
 ## 0.19.0 - 2026-05-23
 
 - Added Markdown document export to MD, PDF, and DOCX from the editor toolbar and document tree.

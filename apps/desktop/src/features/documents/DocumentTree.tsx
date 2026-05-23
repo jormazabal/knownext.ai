@@ -41,6 +41,7 @@ type DocumentTreeProps = {
   hasActiveProject?: boolean;
   onOpenDocument: (documentId: string, name: string) => void;
   onOpenImage?: (assetId: string, name: string, path: string) => void;
+  onOpenReferenceDocument?: (nodeId: string, name: string, path: string) => void;
   onActivateTreeNode: (nodeId: string) => void;
   onSelectTreeNode: (nodeId: string, type: DocumentTreeNode["type"], name: string) => void;
   onCreateFolder: () => void;
@@ -77,6 +78,7 @@ export type DocumentTreeAction =
   | "import-image"
   | "import-file"
   | "open-image"
+  | "open-reference-document"
   | "insert-image"
   | "add-image-context"
   | "add-attachment-context"
@@ -97,6 +99,7 @@ export function DocumentTree({
   hasActiveProject = true,
   onOpenDocument,
   onOpenImage,
+  onOpenReferenceDocument,
   onActivateTreeNode,
   onSelectTreeNode,
   onCreateFolder,
@@ -274,6 +277,7 @@ export function DocumentTree({
               activeNodeId={selectedNodeId}
               onOpenDocument={onOpenDocument}
               onOpenImage={onOpenImage}
+              onOpenReferenceDocument={onOpenReferenceDocument}
               onActivateTreeNode={onActivateTreeNode}
               onRenameNode={onRenameNode}
               onToggleNode={onToggleNode}
@@ -362,6 +366,7 @@ type TreeNodeProps = {
   activeNodeId: string;
   onOpenDocument: (documentId: string, name: string) => void;
   onOpenImage?: (assetId: string, name: string, path: string) => void;
+  onOpenReferenceDocument?: (nodeId: string, name: string, path: string) => void;
   onActivateTreeNode: (nodeId: string) => void;
   onRenameNode: (nodeId: string, name: string) => void;
   onToggleNode: (nodeId: string) => void;
@@ -384,6 +389,7 @@ function TreeNode({
   activeNodeId,
   onOpenDocument,
   onOpenImage,
+  onOpenReferenceDocument,
   onActivateTreeNode,
   onRenameNode,
   onToggleNode,
@@ -439,7 +445,10 @@ function TreeNode({
           }
           if (node.type === "document") onOpenDocument(node.id, node.name);
           if (node.type === "image" && node.path) onOpenImage?.(node.id, node.name, node.path);
-          if (node.type === "attachment") onActivateTreeNode(node.id);
+          if (node.type === "attachment") {
+            if (node.path && isReferenceDocumentName(node.name)) onOpenReferenceDocument?.(node.id, node.name, node.path);
+            else onActivateTreeNode(node.id);
+          }
         }}
       >
         <span className="mr-0.5 grid h-5 w-4 place-items-center">
@@ -504,6 +513,7 @@ function TreeNode({
               activeNodeId={activeNodeId}
               onOpenDocument={onOpenDocument}
               onOpenImage={onOpenImage}
+              onOpenReferenceDocument={onOpenReferenceDocument}
               onActivateTreeNode={onActivateTreeNode}
               onRenameNode={onRenameNode}
               onToggleNode={onToggleNode}
@@ -1050,6 +1060,10 @@ function containsNode(node: DocumentTreeNode, nodeId: string): boolean {
   return false;
 }
 
+function isReferenceDocumentName(name: string) {
+  return /\.(pdf|docx|xlsx)$/i.test(name);
+}
+
 function ContextMenu({
   type,
   x,
@@ -1100,6 +1114,7 @@ function ContextMenu({
     { label: "Eliminar", icon: Trash2, action: "delete" },
   ];
   const attachmentItems = [
+    { label: "Abrir vista", icon: Eye, action: "open-reference-document" },
     { label: "Usar como contexto IA", icon: Copy, action: "add-attachment-context" },
     { label: "Copiar ruta", icon: Copy, action: "copy-path" },
     { label: "Renombrar", icon: Pencil, action: "rename" },

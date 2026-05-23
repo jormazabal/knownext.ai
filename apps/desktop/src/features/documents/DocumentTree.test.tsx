@@ -396,6 +396,7 @@ describe("DocumentTree", () => {
   it("dispatches attachment context menu actions without opening an editor", async () => {
     const onContextAction = vi.fn();
     const onActivateTreeNode = vi.fn();
+    const onOpenReferenceDocument = vi.fn();
     const attachmentNode = nodes[2];
 
     render(
@@ -403,6 +404,7 @@ describe("DocumentTree", () => {
         nodes={nodes}
         activeDocumentId=""
         onOpenDocument={vi.fn()}
+        onOpenReferenceDocument={onOpenReferenceDocument}
         onActivateTreeNode={onActivateTreeNode}
         onSelectTreeNode={vi.fn()}
         onCreateFolder={vi.fn()}
@@ -418,10 +420,12 @@ describe("DocumentTree", () => {
     );
 
     await userEvent.click(screen.getByText("brief.pdf"));
-    expect(onActivateTreeNode).toHaveBeenCalledWith("attachment-brief");
+    expect(onOpenReferenceDocument).toHaveBeenCalledWith("attachment-brief", "brief.pdf", "brief.pdf");
+    expect(onActivateTreeNode).not.toHaveBeenCalled();
 
     await userEvent.hover(screen.getByRole("button", { name: /abrir menú de brief\.pdf/i }));
-    await waitFor(() => expect(screen.getByText("Usar como contexto IA")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Abrir vista")).toBeInTheDocument());
+    expect(screen.getByText("Usar como contexto IA")).toBeInTheDocument();
     await userEvent.click(screen.getByText("Usar como contexto IA"));
 
     expect(onContextAction).toHaveBeenCalledWith("add-attachment-context", attachmentNode);
