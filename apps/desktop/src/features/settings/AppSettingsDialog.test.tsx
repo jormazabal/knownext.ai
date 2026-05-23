@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { defaultAiConfig, defaultAppearanceConfig, defaultDiagnosticsConfig } from "../../lib/api/config";
+import { defaultAiConfig, defaultAppearanceConfig, defaultDiagnosticsConfig, defaultExportTemplateConfig } from "../../lib/api/config";
 import type { AiConfigStatus } from "../../types/domain";
 import { AppSettingsDialog } from "./AppSettingsDialog";
 
@@ -13,6 +13,8 @@ const baseProps = {
   open: true,
   appearance: defaultAppearanceConfig,
   diagnostics: defaultDiagnosticsConfig,
+  exportTemplate: defaultExportTemplateConfig,
+  exportTemplatePath: "C:\\Users\\user\\AppData\\Roaming\\KnowNext.ai\\export-template-basic.json",
   ai: { ...defaultAiConfig, openaiKeyConfigured: false, openaiKeyPreview: null },
   aiIndexStatus: null,
   traceLogStatus: null,
@@ -20,6 +22,8 @@ const baseProps = {
   onClose: vi.fn(),
   onAppearanceChange: vi.fn(),
   onDiagnosticsChange: vi.fn(),
+  onExportTemplateChange: vi.fn(),
+  onResetExportTemplate: vi.fn(),
   onAiChange: vi.fn(),
   onSaveOpenAiKey: vi.fn(),
   onDeleteOpenAiKey: vi.fn(),
@@ -327,6 +331,64 @@ describe("AppSettingsDialog", () => {
     fireEvent.click(screen.getByRole("switch", { name: "Activar subrayado extendido" }));
 
     expect(onAppearanceChange).toHaveBeenCalledWith({ markdownExtendedUnderlineEnabled: false });
+  });
+
+  it("updates export template settings from the export panel", () => {
+    const onExportTemplateChange = vi.fn();
+    const onResetExportTemplate = vi.fn();
+
+    render(
+      <AppSettingsDialog
+        {...baseProps}
+        runtimeServicesStatus={null}
+        onExportTemplateChange={onExportTemplateChange}
+        onResetExportTemplate={onResetExportTemplate}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Exportar" }));
+    const fontSelect = screen.getByLabelText("Tipografia") as HTMLSelectElement;
+    expect(fontSelect.tagName).toBe("SELECT");
+    expect(Array.from(fontSelect.options).map((option) => option.value)).toEqual([
+      "Arial",
+      "Calibri",
+      "Aptos",
+      "Times New Roman",
+      "Georgia",
+      "Verdana",
+      "Courier New",
+      "Consolas",
+    ]);
+    expect(fontSelect).toHaveStyle({ fontFamily: "Arial" });
+    expect(Array.from(fontSelect.options).map((option) => option.style.fontFamily)).toEqual([
+      "Arial",
+      "Calibri",
+      "Aptos",
+      "Times New Roman",
+      "Georgia",
+      "Verdana",
+      "Courier New",
+      "Consolas",
+    ]);
+
+    fireEvent.change(fontSelect, { target: { value: "Calibri" } });
+    fireEvent.change(screen.getByLabelText("Formato Titulo 1"), { target: { value: "bold_underline" } });
+    fireEvent.change(screen.getByLabelText("Interlineado"), { target: { value: "1.5" } });
+    expect(onExportTemplateChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
+    fireEvent.click(screen.getByRole("button", { name: "Restablecer plantilla" }));
+
+    expect(onExportTemplateChange).toHaveBeenCalledWith(expect.objectContaining({
+      normal: expect.objectContaining({ fontFamily: "Calibri" }),
+      headings: expect.objectContaining({
+        h1: expect.objectContaining({ fontFamily: "Arial", textFormat: "bold_underline" }),
+        h6: expect.objectContaining({ fontSizePt: 11 }),
+      }),
+    }));
+    expect(onExportTemplateChange).toHaveBeenCalledWith(expect.objectContaining({
+      paragraph: expect.objectContaining({ lineSpacing: 1.5 }),
+    }));
+    expect(onResetExportTemplate).toHaveBeenCalledTimes(1);
   });
 
   it("allows changing theme mode and primary color from appearance settings", () => {

@@ -4,6 +4,7 @@ import {
   ChevronUp,
   Check,
   Copy,
+  Download,
   File,
   FileArchive,
   FileImage,
@@ -81,6 +82,9 @@ export type DocumentTreeAction =
   | "add-attachment-context"
   | "copy-image-reference"
   | "copy-path"
+  | "export-md"
+  | "export-pdf"
+  | "export-docx"
   | "rename"
   | "delete"
   | "duplicate"
@@ -1061,6 +1065,17 @@ function ContextMenu({
   onMouseEnter: () => void;
   onMouseLeave: () => void;
 }) {
+  type ContextMenuItem = {
+    label: string;
+    icon: LucideIcon;
+    action?: DocumentTreeAction;
+    submenu?: Array<{
+      label: string;
+      icon: LucideIcon;
+      action: DocumentTreeAction;
+    }>;
+  };
+  const [openSubmenu, setOpenSubmenu] = useState<string | null>(null);
   const folderItems = [
     { label: "Nueva carpeta", icon: FolderPlus, action: "create-folder" },
     { label: "Nuevo documento", icon: FilePlus2, action: "create-document" },
@@ -1069,7 +1084,16 @@ function ContextMenu({
     { label: "Mover", icon: MoveRight, action: "move" },
     { label: "Eliminar", icon: Trash2, action: "delete" },
   ];
-  const documentItems = [
+  const documentItems: ContextMenuItem[] = [
+    {
+      label: "Exportar",
+      icon: Download,
+      submenu: [
+        { label: "Markdown (.md)", icon: Download, action: "export-md" },
+        { label: "PDF", icon: Download, action: "export-pdf" },
+        { label: "DOCX", icon: Download, action: "export-docx" },
+      ],
+    },
     { label: "Renombrar", icon: Pencil, action: "rename" },
     { label: "Duplicar", icon: Copy, action: "duplicate" },
     { label: "Mover", icon: MoveRight, action: "move" },
@@ -1095,21 +1119,58 @@ function ContextMenu({
 
   return (
     <div
-      className="fixed z-50 w-[168px] rounded-md border border-line bg-white p-1 shadow-menu"
+      className="fixed z-50 w-[176px] rounded-md border border-line bg-white p-1 shadow-menu"
       style={{ left: x, top: y }}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
-      {items.map((item) => (
-        <button
-          key={item.label}
-          className="flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
-          onClick={() => onSelect(item.action as DocumentTreeAction)}
-        >
-          <item.icon size={13} />
-          {item.label}
-        </button>
-      ))}
+      {items.map((item) => {
+        const hasSubmenu = "submenu" in item && item.submenu;
+        const isOpen = hasSubmenu && openSubmenu === item.label;
+
+        return (
+          <div key={item.label} className="group relative">
+            <button
+              className="flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover focus:bg-brand-hover focus:outline-none"
+              aria-haspopup={hasSubmenu ? "menu" : undefined}
+              aria-expanded={hasSubmenu ? isOpen : undefined}
+              onMouseEnter={() => setOpenSubmenu(hasSubmenu ? item.label : null)}
+              onFocus={() => setOpenSubmenu(hasSubmenu ? item.label : null)}
+              onClick={() => {
+                if (hasSubmenu) {
+                  setOpenSubmenu(isOpen ? null : item.label);
+                  return;
+                }
+                if (item.action) onSelect(item.action as DocumentTreeAction);
+              }}
+            >
+              <item.icon size={13} />
+              <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              {hasSubmenu ? <ChevronRight size={13} className="text-muted" /> : null}
+            </button>
+            {hasSubmenu ? (
+              <div
+                className={`absolute left-full top-0 z-50 ml-1.5 w-[150px] rounded-md border border-line bg-white p-1 shadow-menu ${
+                  isOpen ? "block" : "hidden group-hover:block group-focus-within:block"
+                }`}
+                role="menu"
+              >
+                {item.submenu?.map((submenuItem) => (
+                  <button
+                    key={submenuItem.action}
+                    className="flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover focus:bg-brand-hover focus:outline-none"
+                    role="menuitem"
+                    onClick={() => onSelect(submenuItem.action)}
+                  >
+                    <submenuItem.icon size={13} />
+                    <span className="min-w-0 truncate">{submenuItem.label}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }

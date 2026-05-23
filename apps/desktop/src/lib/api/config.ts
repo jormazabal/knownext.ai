@@ -1,4 +1,4 @@
-import type { AiConfig, AiConfigStatus, AiImageGenerationModelId, AiModelId, AppConfig, AppConfigUpdate, AppearanceAccentColor, AppearanceConfig, AppearanceThemeMode, DiagnosticsConfig, LayoutConfig, ProjectTabsConfig } from "../../types/domain";
+import type { AiConfig, AiConfigStatus, AiImageGenerationModelId, AiModelId, AppConfig, AppConfigUpdate, AppearanceAccentColor, AppearanceConfig, AppearanceThemeMode, DiagnosticsConfig, ExportTemplateConfig, ExportTemplateUpdate, LayoutConfig, ProjectTabsConfig } from "../../types/domain";
 import { requestJson } from "./client";
 
 export const defaultLayoutConfig: LayoutConfig = {
@@ -17,6 +17,64 @@ export const defaultAppearanceConfig: AppearanceConfig = {
 export const defaultDiagnosticsConfig: DiagnosticsConfig = {
   traceLoggingEnabled: false,
 };
+
+export const defaultExportTemplateConfig: ExportTemplateConfig = {
+  schemaVersion: 2,
+  name: "basic",
+  page: {
+    size: "A4",
+    margins: {
+      topMm: 20,
+      rightMm: 18,
+      bottomMm: 20,
+      leftMm: 18,
+    },
+  },
+  normal: {
+    fontFamily: "Arial",
+    fontSizePt: 11,
+    color: "#111827",
+    textFormat: "normal",
+  },
+  headingFontFamily: "Arial",
+  headings: {
+    h1: { fontFamily: "Arial", fontSizePt: 22, color: "#111827", textFormat: "bold" },
+    h2: { fontFamily: "Arial", fontSizePt: 18, color: "#111827", textFormat: "bold" },
+    h3: { fontFamily: "Arial", fontSizePt: 15, color: "#111827", textFormat: "bold" },
+    h4: { fontFamily: "Arial", fontSizePt: 13, color: "#111827", textFormat: "bold" },
+    h5: { fontFamily: "Arial", fontSizePt: 12, color: "#111827", textFormat: "bold" },
+    h6: { fontFamily: "Arial", fontSizePt: 11, color: "#111827", textFormat: "bold" },
+  },
+  code: {
+    fontFamily: "Consolas",
+    fontSizePt: 9.5,
+    color: "#111827",
+    textFormat: "normal",
+  },
+  paragraph: {
+    lineSpacing: 1.2,
+    spaceAfterPt: 3,
+  },
+  document: {
+    includeTitle: false,
+    linkColor: "#D85A12",
+    horizontalRuleColor: "#E5E7EB",
+  },
+  updatedAt: new Date(0).toISOString(),
+};
+
+const exportFontFamilies = new Set([
+  "Arial",
+  "Calibri",
+  "Aptos",
+  "Times New Roman",
+  "Georgia",
+  "Verdana",
+  "Courier New",
+  "Consolas",
+]);
+
+const exportTextFormats = new Set(["normal", "bold", "underline", "bold_underline"]);
 
 export const defaultAiConfig: AiConfig = {
   provider: "openai",
@@ -120,6 +178,28 @@ export async function updateAiConfig(payload: AiConfig): Promise<AiConfigStatus>
   });
 }
 
+export async function getExportTemplate(): Promise<ExportTemplateConfig> {
+  return normalizeExportTemplate(await requestJson<ExportTemplateConfig>("/api/config/export-template"));
+}
+
+export async function updateExportTemplate(payload: ExportTemplateUpdate): Promise<ExportTemplateConfig> {
+  return normalizeExportTemplate(await requestJson<ExportTemplateConfig>("/api/config/export-template", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  }));
+}
+
+export async function resetExportTemplate(): Promise<ExportTemplateConfig> {
+  return normalizeExportTemplate(await requestJson<ExportTemplateConfig>("/api/config/export-template/reset", {
+    method: "POST",
+  }));
+}
+
+export async function getExportTemplatePath(): Promise<string> {
+  const response = await requestJson<{ path: string }>("/api/config/export-template/path");
+  return response.path;
+}
+
 const localPreferencesKey = "knownext.app.preferences";
 
 type LocalAppPreferences = {
@@ -217,6 +297,69 @@ function normalizeDiagnostics(diagnostics: DiagnosticsConfig | undefined): Diagn
   return {
     traceLoggingEnabled: Boolean(diagnostics.traceLoggingEnabled),
   };
+}
+
+function normalizeExportTemplate(template: ExportTemplateConfig | undefined): ExportTemplateConfig {
+  if (!template) return defaultExportTemplateConfig;
+  const headingFontFamily = normalizeFontFamily(template.headingFontFamily, defaultExportTemplateConfig.headingFontFamily);
+  const headings = (["h1", "h2", "h3", "h4", "h5", "h6"] as const).reduce<ExportTemplateConfig["headings"]>((result, level) => {
+    result[level] = normalizeExportTextStyle(template.headings?.[level], {
+      ...defaultExportTemplateConfig.headings[level],
+      fontFamily: headingFontFamily,
+    });
+    return result;
+  }, { ...defaultExportTemplateConfig.headings });
+
+  return {
+    schemaVersion: 2,
+    name: "basic",
+    page: {
+      size: template.page?.size === "Letter" ? "Letter" : "A4",
+      margins: {
+        topMm: clampNumber(template.page?.margins?.topMm, 5, 50, defaultExportTemplateConfig.page.margins.topMm),
+        rightMm: clampNumber(template.page?.margins?.rightMm, 5, 50, defaultExportTemplateConfig.page.margins.rightMm),
+        bottomMm: clampNumber(template.page?.margins?.bottomMm, 5, 50, defaultExportTemplateConfig.page.margins.bottomMm),
+        leftMm: clampNumber(template.page?.margins?.leftMm, 5, 50, defaultExportTemplateConfig.page.margins.leftMm),
+      },
+    },
+    normal: normalizeExportTextStyle(template.normal, defaultExportTemplateConfig.normal),
+    headingFontFamily,
+    headings,
+    code: normalizeExportTextStyle(template.code, defaultExportTemplateConfig.code),
+    paragraph: {
+      lineSpacing: clampNumber(template.paragraph?.lineSpacing, 1, 2.5, defaultExportTemplateConfig.paragraph.lineSpacing),
+      spaceAfterPt: clampNumber(template.paragraph?.spaceAfterPt, 0, 24, defaultExportTemplateConfig.paragraph.spaceAfterPt),
+    },
+    document: {
+      includeTitle: false,
+      linkColor: normalizeColor(template.document?.linkColor, defaultExportTemplateConfig.document.linkColor),
+      horizontalRuleColor: normalizeColor(template.document?.horizontalRuleColor, defaultExportTemplateConfig.document.horizontalRuleColor),
+    },
+    updatedAt: template.updatedAt ?? defaultExportTemplateConfig.updatedAt,
+  };
+}
+
+function normalizeExportTextStyle(style: ExportTemplateConfig["normal"] | undefined, fallback: ExportTemplateConfig["normal"]): ExportTemplateConfig["normal"] {
+  return {
+    fontFamily: normalizeFontFamily(style?.fontFamily, fallback.fontFamily),
+    fontSizePt: clampNumber(style?.fontSizePt, 6, 60, fallback.fontSizePt),
+    color: normalizeColor(style?.color, fallback.color),
+    textFormat: normalizeTextFormat(style?.textFormat, fallback.textFormat),
+  };
+}
+
+function normalizeFontFamily(value: unknown, fallback: string) {
+  const normalized = String(value ?? "").trim().replace(/\s+/g, " ");
+  return exportFontFamilies.has(normalized) ? normalized : fallback;
+}
+
+function normalizeColor(value: unknown, fallback: string) {
+  return /^#[0-9a-fA-F]{6}$/.test(String(value)) ? String(value) : fallback;
+}
+
+function normalizeTextFormat(value: unknown, fallback: ExportTemplateConfig["normal"]["textFormat"]) {
+  const normalized = String(value ?? "").trim();
+  return exportTextFormats.has(normalized) ? normalized as ExportTemplateConfig["normal"]["textFormat"] : fallback;
 }
 
 function normalizeAi(ai: AiConfig | undefined): AiConfig | undefined {

@@ -24,6 +24,7 @@ describe("MarkdownToolbar", () => {
         }}
         editorHistoryState={{ canUndo: true, canRedo: false, undoDepth: 1, redoDepth: 0 }}
         onRunEditorAction={onRunEditorAction}
+        onExportDocument={vi.fn()}
         onMarkdownZoomChange={vi.fn()}
         onToggleHistory={vi.fn()}
       />,
@@ -52,6 +53,7 @@ describe("MarkdownToolbar", () => {
         activeActions={{}}
         editorHistoryState={{ canUndo: false, canRedo: false, undoDepth: 0, redoDepth: 0 }}
         onRunEditorAction={onRunEditorAction}
+        onExportDocument={vi.fn()}
         onMarkdownZoomChange={vi.fn()}
         onToggleHistory={vi.fn()}
       />,
@@ -80,6 +82,7 @@ describe("MarkdownToolbar", () => {
         activeActions={{}}
         editorHistoryState={{ canUndo: false, canRedo: false, undoDepth: 0, redoDepth: 0 }}
         onRunEditorAction={vi.fn()}
+        onExportDocument={vi.fn()}
         onMarkdownZoomChange={vi.fn()}
         onToggleHistory={vi.fn()}
       />,
@@ -101,6 +104,7 @@ describe("MarkdownToolbar", () => {
         activeActions={{}}
         editorHistoryState={{ canUndo: false, canRedo: false, undoDepth: 0, redoDepth: 0 }}
         onRunEditorAction={vi.fn()}
+        onExportDocument={vi.fn()}
         onMarkdownZoomChange={onMarkdownZoomChange}
         onToggleHistory={vi.fn()}
       />,
@@ -125,6 +129,7 @@ describe("MarkdownToolbar", () => {
         activeActions={{}}
         editorHistoryState={{ canUndo: false, canRedo: false, undoDepth: 0, redoDepth: 0 }}
         onRunEditorAction={onRunEditorAction}
+        onExportDocument={vi.fn()}
         onMarkdownZoomChange={vi.fn()}
         onToggleHistory={vi.fn()}
       />,
@@ -143,6 +148,7 @@ describe("MarkdownToolbar", () => {
         activeActions={{}}
         editorHistoryState={{ canUndo: true, canRedo: false, undoDepth: 1, redoDepth: 0 }}
         onRunEditorAction={onRunEditorAction}
+        onExportDocument={vi.fn()}
         onMarkdownZoomChange={vi.fn()}
         onToggleHistory={vi.fn()}
       />,
@@ -165,6 +171,7 @@ describe("MarkdownToolbar", () => {
         activeActions={{}}
         editorHistoryState={{ canUndo: false, canRedo: true, undoDepth: 0, redoDepth: 1 }}
         onRunEditorAction={onRunEditorAction}
+        onExportDocument={vi.fn()}
         onMarkdownZoomChange={vi.fn()}
         onToggleHistory={vi.fn()}
       />,

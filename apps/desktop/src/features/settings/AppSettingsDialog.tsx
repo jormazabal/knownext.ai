@@ -1,19 +1,32 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Activity, ArrowRight, Brain, Check, ChevronDown, Copy, Eye, FolderOpen, Gauge, Globe2, Grid2X2, Image as ImageIcon, KeyRound, Languages, ListChecks, Mic, Monitor, Moon, Paintbrush, RefreshCw, RotateCcw, Server, Settings, ShieldCheck, Sun, Trash2, Underline, Wrench, X } from "lucide-react";
+import { Activity, ArrowRight, Brain, Check, ChevronDown, Copy, Download, Eye, FileText, FolderOpen, Gauge, Globe2, Grid2X2, Image as ImageIcon, Info, KeyRound, Languages, ListChecks, Mic, Monitor, Moon, Paintbrush, RefreshCw, RotateCcw, Server, Settings, ShieldCheck, Sun, Trash2, Type as TypeIcon, Underline, Wrench, X } from "lucide-react";
 import { AiModelSelector, type AiModelSelectorOption, type AiModelSelectorTone } from "../../components/ai/AiModelSelector";
 import { defaultAiConfig } from "../../lib/api/config";
 import { accentPalettes } from "../../lib/theme/appearance";
-import type { AiConfigStatus, AiImageGenerationModelId, AiIndexStatusResponse, AiModelId, AiTranscriptionLanguage, AiVisionModelId, AppearanceAccentColor, AppearanceConfig, AppearanceThemeMode, DiagnosticsConfig } from "../../types/domain";
+import type { AiConfigStatus, AiImageGenerationModelId, AiIndexStatusResponse, AiModelId, AiTranscriptionLanguage, AiVisionModelId, AppearanceAccentColor, AppearanceConfig, AppearanceThemeMode, DiagnosticsConfig, ExportTemplateConfig, ExportTemplateUpdate, ExportTextFormat } from "../../types/domain";
 import type { TraceLogStatus } from "../../lib/runtime/logging";
 import type { BackendPortConfig, RuntimeServicesStatus } from "../../lib/runtime/services";
 
-type AppSettingsSection = "summary" | "interface" | "ai" | "capabilities" | "system";
+type AppSettingsSection = "summary" | "interface" | "export" | "ai" | "capabilities" | "system";
+
+const exportFontOptions: Array<[string, string]> = [
+  ["Arial", "Arial"],
+  ["Calibri", "Calibri"],
+  ["Aptos", "Aptos"],
+  ["Times New Roman", "Times New Roman"],
+  ["Georgia", "Georgia"],
+  ["Verdana", "Verdana"],
+  ["Courier New", "Courier New"],
+  ["Consolas", "Consolas"],
+];
 
 type AppSettingsDialogProps = {
   open: boolean;
   appearance: AppearanceConfig;
   diagnostics: DiagnosticsConfig;
+  exportTemplate: ExportTemplateConfig;
+  exportTemplatePath: string;
   ai: AiConfigStatus;
   aiIndexStatus: AiIndexStatusResponse | null;
   traceLogStatus: TraceLogStatus | null;
@@ -22,6 +35,8 @@ type AppSettingsDialogProps = {
   onClose: () => void;
   onAppearanceChange: (appearance: Partial<AppearanceConfig>) => void;
   onDiagnosticsChange: (diagnostics: Partial<DiagnosticsConfig>) => void;
+  onExportTemplateChange: (template: ExportTemplateUpdate) => void;
+  onResetExportTemplate: () => void;
   onAiChange: (ai: AiConfigStatus) => void;
   onSaveOpenAiKey: (apiKey: string) => void;
   onDeleteOpenAiKey: () => void;
@@ -99,6 +114,8 @@ export function AppSettingsDialog({
   open,
   appearance,
   diagnostics,
+  exportTemplate,
+  exportTemplatePath,
   ai,
   aiIndexStatus,
   traceLogStatus,
@@ -107,6 +124,8 @@ export function AppSettingsDialog({
   onClose,
   onAppearanceChange,
   onDiagnosticsChange,
+  onExportTemplateChange,
+  onResetExportTemplate,
   onAiChange,
   onSaveOpenAiKey,
   onDeleteOpenAiKey,
@@ -125,6 +144,7 @@ export function AppSettingsDialog({
     { id: "interface", label: text.interfaceNav, description: text.interfaceNavDescription, icon: Monitor },
     { id: "ai", label: text.aiNav, description: text.aiNavDescription, icon: Brain },
     { id: "capabilities", label: text.capabilitiesNav, description: text.capabilitiesNavDescription, icon: Wrench },
+    { id: "export", label: text.exportNav, description: text.exportNavDescription, icon: Download },
     { id: "system", label: text.systemNav, description: text.systemNavDescription, icon: Settings },
   ];
 
@@ -133,7 +153,7 @@ export function AppSettingsDialog({
   return (
     <div className="knownext-modal-overlay fixed inset-0 z-[95] grid place-items-center bg-black/20 px-4 py-6">
       <section
-        className="flex max-h-[min(760px,calc(100vh-48px))] w-[min(780px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
+        className="flex max-h-[min(760px,calc(100vh-48px))] w-[min(1000px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
         role="dialog"
         aria-modal="true"
         aria-labelledby="app-settings-title"
@@ -204,6 +224,14 @@ export function AppSettingsDialog({
               />
             ) : activeSection === "interface" ? (
               <AppearanceSettings appearance={appearance} text={text} onAppearanceChange={onAppearanceChange} />
+            ) : activeSection === "export" ? (
+              <ExportSettings
+                template={exportTemplate}
+                templatePath={exportTemplatePath}
+                text={text}
+                onExportTemplateChange={onExportTemplateChange}
+                onResetExportTemplate={onResetExportTemplate}
+              />
             ) : activeSection === "ai" ? (
               <AiDocumentalSettings
                 ai={ai}
@@ -2368,6 +2396,406 @@ function AppearanceSettings({
   );
 }
 
+function ExportSettings({
+  template,
+  templatePath,
+  text,
+  onExportTemplateChange,
+  onResetExportTemplate,
+}: {
+  template: ExportTemplateConfig;
+  templatePath: string;
+  text: SettingsCopy;
+  onExportTemplateChange: (template: ExportTemplateUpdate) => void;
+  onResetExportTemplate: () => void;
+}) {
+  const headingLevels = ["h1", "h2", "h3", "h4", "h5", "h6"] as const;
+  const [draft, setDraft] = useState<ExportTemplateConfig>(() => cloneExportTemplate(template));
+
+  useEffect(() => {
+    setDraft(cloneExportTemplate(template));
+  }, [template]);
+
+  function updateHeading(level: typeof headingLevels[number], patch: Partial<ExportTemplateConfig["headings"][typeof level]>) {
+    setDraft((current) => ({
+      ...current,
+      headings: {
+        ...current.headings,
+        [level]: {
+          ...current.headings[level],
+          ...patch,
+        },
+      },
+    }));
+  }
+
+  function updateNormal(patch: Partial<ExportTemplateConfig["normal"]>) {
+    setDraft((current) => ({ ...current, normal: { ...current.normal, ...patch } }));
+  }
+
+  function updatePage(patch: Partial<ExportTemplateConfig["page"]>) {
+    setDraft((current) => ({ ...current, page: { ...current.page, ...patch } }));
+  }
+
+  function updateMargins(patch: Partial<ExportTemplateConfig["page"]["margins"]>) {
+    setDraft((current) => ({ ...current, page: { ...current.page, margins: { ...current.page.margins, ...patch } } }));
+  }
+
+  function updateParagraph(patch: Partial<ExportTemplateConfig["paragraph"]>) {
+    setDraft((current) => ({ ...current, paragraph: { ...current.paragraph, ...patch } }));
+  }
+
+  function updateDocument(patch: Partial<ExportTemplateConfig["document"]>) {
+    setDraft((current) => ({ ...current, document: { ...current.document, ...patch } }));
+  }
+
+  function saveDraft() {
+    onExportTemplateChange(exportTemplateUpdateFromConfig(draft));
+  }
+
+  function headingLabel(level: typeof headingLevels[number]) {
+    const headingNumber = Number(level.slice(1));
+    return text.exportHeadingLevelName.replace("{level}", String(headingNumber));
+  }
+
+  const dirty = JSON.stringify(exportTemplateUpdateFromConfig(draft)) !== JSON.stringify(exportTemplateUpdateFromConfig(template));
+
+  return (
+    <div className="space-y-5">
+      <section className="flex items-start gap-3">
+        <Download size={26} className="mt-1 shrink-0 text-brand-orange" />
+        <div className="min-w-0">
+          <h3 className="text-[20px] font-semibold tracking-normal text-ink-primary">{text.exportNav}</h3>
+          <p className="mt-2 text-[12px] leading-5 text-ink-secondary">{text.exportDescription}</p>
+        </div>
+      </section>
+
+      <div className="space-y-4">
+        <ExportPanel icon={FileText} title={text.exportPageHeading}>
+          <div className="grid gap-4 md:grid-cols-4">
+            <LabeledSelect
+              label={text.exportPageSize}
+              value={draft.page.size}
+              onChange={(value) => updatePage({ size: value as ExportTemplateConfig["page"]["size"] })}
+              options={[["A4", "A4"], ["Letter", "Letter"]]}
+            />
+            <LabeledNumber
+              label={text.exportMarginMm}
+              value={draft.page.margins.leftMm}
+              min={5}
+              max={50}
+              step={1}
+              onChange={(leftMm) => updateMargins({ leftMm, rightMm: leftMm })}
+            />
+            <LabeledNumber
+              label={text.exportTopMarginMm}
+              value={draft.page.margins.topMm}
+              min={5}
+              max={50}
+              step={1}
+              onChange={(topMm) => updateMargins({ topMm })}
+            />
+            <LabeledNumber
+              label={text.exportBottomMarginMm}
+              value={draft.page.margins.bottomMm}
+              min={5}
+              max={50}
+              step={1}
+              onChange={(bottomMm) => updateMargins({ bottomMm })}
+            />
+          </div>
+        </ExportPanel>
+
+        <ExportPanel icon={TypeIcon} title={text.exportTextHeading}>
+          <div className="grid gap-4 md:grid-cols-[1.45fr_0.75fr_1fr_1fr]">
+            <LabeledSelect label={text.exportFontFamily} value={draft.normal.fontFamily} onChange={(fontFamily) => updateNormal({ fontFamily })} options={exportFontOptions} previewOptionFont />
+            <LabeledSelect
+              label={text.exportNormalSize}
+              value={String(draft.normal.fontSizePt)}
+              onChange={(fontSizePt) => updateNormal({ fontSizePt: Number(fontSizePt) })}
+              options={exportSizeOptions}
+            />
+            <LabeledNumber
+              label={text.exportLineSpacing}
+              value={draft.paragraph.lineSpacing}
+              min={1}
+              max={2.5}
+              step={0.05}
+              onChange={(lineSpacing) => updateParagraph({ lineSpacing })}
+            />
+            <LabeledNumber
+              label={text.exportSpaceAfter}
+              value={draft.paragraph.spaceAfterPt}
+              min={0}
+              max={24}
+              step={1}
+              onChange={(spaceAfterPt) => updateParagraph({ spaceAfterPt })}
+            />
+          </div>
+          <div className="mt-4 grid gap-4 md:grid-cols-3">
+            <LabeledColor label={text.exportTextColor} value={draft.normal.color} onChange={(color) => updateNormal({ color })} />
+            <LabeledColor label={text.exportLinkColor} value={draft.document.linkColor} onChange={(linkColor) => updateDocument({ linkColor })} />
+            <LabeledColor label={text.exportRuleColor} value={draft.document.horizontalRuleColor} onChange={(horizontalRuleColor) => updateDocument({ horizontalRuleColor })} />
+          </div>
+        </ExportPanel>
+
+        <ExportPanel title={text.exportHeadingsHeading} description={text.exportHeadingsDescription}>
+          <div className="grid gap-2">
+            <div className="hidden grid-cols-[130px_minmax(150px,1.3fr)_minmax(150px,1fr)_minmax(90px,0.7fr)_minmax(150px,1fr)] gap-4 px-0.5 text-[11px] font-medium text-ink-secondary md:grid">
+              <span>{text.exportHeadingLevel}</span>
+              <span>{text.exportHeadingFontFamily}</span>
+              <span>{text.exportHeadingFormat}</span>
+              <span>{text.exportHeadingSize}</span>
+              <span>{text.exportHeadingColor}</span>
+            </div>
+            {headingLevels.map((level) => (
+              <div key={level} className="grid gap-3 md:grid-cols-[130px_minmax(150px,1.3fr)_minmax(150px,1fr)_minmax(90px,0.7fr)_minmax(150px,1fr)] md:gap-4">
+                <div className="flex h-10 items-center rounded-md border border-line bg-panel px-3 text-[13px] font-semibold text-ink-primary">
+                  {headingLabel(level)}
+                </div>
+                <LabeledSelect
+                  label={`${text.exportHeadingFontFamily} ${headingLabel(level)}`}
+                  hideLabel
+                  value={draft.headings[level].fontFamily}
+                  onChange={(fontFamily) => updateHeading(level, { fontFamily })}
+                  options={exportFontOptions}
+                  previewOptionFont
+                />
+                <LabeledSelect
+                  label={`${text.exportHeadingFormat} ${headingLabel(level)}`}
+                  hideLabel
+                  value={draft.headings[level].textFormat}
+                  onChange={(textFormat) => updateHeading(level, { textFormat: textFormat as ExportTextFormat })}
+                  options={exportTextFormatOptions(text)}
+                />
+                <LabeledNumber
+                  label={`${text.exportHeadingSize} ${headingLabel(level)}`}
+                  hideLabel
+                  value={draft.headings[level].fontSizePt}
+                  min={8}
+                  max={60}
+                  step={0.5}
+                  onChange={(fontSizePt) => updateHeading(level, { fontSizePt })}
+                />
+                <LabeledColor
+                  label={`${text.exportHeadingColor} ${headingLabel(level)}`}
+                  hideLabel
+                  value={draft.headings[level].color}
+                  onChange={(color) => updateHeading(level, { color })}
+                />
+              </div>
+            ))}
+          </div>
+        </ExportPanel>
+
+        <ExportPanel icon={Download} title={text.exportTemplateFileHeading}>
+          <div className="grid items-center gap-4 lg:grid-cols-[220px_1fr_auto]">
+            <p className="text-[12px] leading-5 text-ink-secondary">{text.exportTemplateFileDescription}</p>
+            <p className="min-w-0 truncate rounded-md border border-line bg-panel px-3 py-2 font-mono text-[10px] leading-5 text-ink-secondary">{templatePath || text.unavailableValue}</p>
+            <button
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-brand-orange bg-white px-4 text-[12px] font-semibold text-brand-orange hover:bg-brand-hover"
+              type="button"
+              onClick={onResetExportTemplate}
+            >
+              <RotateCcw size={15} />
+              {text.exportResetTemplate}
+            </button>
+          </div>
+        </ExportPanel>
+      </div>
+
+      <div className="flex flex-col gap-3 border-t border-line pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="flex min-w-0 items-start gap-2 text-[11px] leading-5 text-ink-secondary">
+          <Info size={14} className="mt-0.5 shrink-0" />
+          <span>{text.exportSettingsNote}</span>
+        </p>
+        <div className="flex shrink-0 items-center justify-end gap-3">
+          <button
+            className="inline-flex h-10 min-w-[110px] items-center justify-center rounded-md border border-line bg-white px-4 text-[12px] font-semibold text-ink-secondary hover:bg-panel disabled:cursor-not-allowed disabled:opacity-60"
+            type="button"
+            disabled={!dirty}
+            onClick={() => setDraft(cloneExportTemplate(template))}
+          >
+            {text.exportCancel}
+          </button>
+          <button
+            className="inline-flex h-10 min-w-[150px] items-center justify-center gap-2 rounded-md bg-brand-orange px-5 text-[12px] font-semibold text-white shadow-sm hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
+            type="button"
+            disabled={!dirty}
+            onClick={saveDraft}
+          >
+            <Check size={15} />
+            {text.exportSaveChanges}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function cloneExportTemplate(template: ExportTemplateConfig): ExportTemplateConfig {
+  return {
+    ...template,
+    page: {
+      ...template.page,
+      margins: { ...template.page.margins },
+    },
+    normal: { ...template.normal },
+    headings: Object.fromEntries(
+      Object.entries(template.headings).map(([level, style]) => [level, { ...style }]),
+    ) as ExportTemplateConfig["headings"],
+    code: { ...template.code },
+    paragraph: { ...template.paragraph },
+    document: { ...template.document },
+  };
+}
+
+function exportTemplateUpdateFromConfig(template: ExportTemplateConfig): ExportTemplateUpdate {
+  return {
+    page: template.page,
+    normal: template.normal,
+    headingFontFamily: template.headings.h1.fontFamily,
+    headings: template.headings,
+    code: template.code,
+    paragraph: template.paragraph,
+    document: template.document,
+  };
+}
+
+function ExportPanel({
+  icon: Icon,
+  title,
+  description,
+  children,
+}: {
+  icon?: typeof FileText;
+  title: string;
+  description?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-md border border-line bg-white">
+      <div className="flex items-start gap-2 px-5 py-4">
+        {Icon ? <Icon size={17} className="mt-0.5 shrink-0 text-ink-secondary" /> : null}
+        <div className="min-w-0">
+          <h4 className="text-[15px] font-semibold text-ink-primary">{title}</h4>
+          {description ? <p className="mt-2 text-[12px] leading-5 text-ink-secondary">{description}</p> : null}
+        </div>
+      </div>
+      <div className="px-5 pb-5">
+        {children}
+      </div>
+    </section>
+  );
+}
+
+const exportSizeOptions: Array<[string, string]> = [
+  ["9", "9"],
+  ["10", "10"],
+  ["11", "11"],
+  ["12", "12"],
+  ["13", "13"],
+  ["14", "14"],
+  ["15", "15"],
+  ["16", "16"],
+  ["18", "18"],
+  ["20", "20"],
+  ["22", "22"],
+  ["24", "24"],
+];
+
+function exportTextFormatOptions(text: SettingsCopy): Array<[ExportTextFormat, string]> {
+  return [
+    ["normal", text.exportTextFormatNormal],
+    ["bold", text.exportTextFormatBold],
+    ["underline", text.exportTextFormatUnderline],
+    ["bold_underline", text.exportTextFormatBoldUnderline],
+  ];
+}
+
+function LabeledNumber({
+  label,
+  value,
+  min,
+  max,
+  step,
+  hideLabel = false,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  hideLabel?: boolean;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="block text-[11px] font-medium text-ink-secondary">
+      <span className={hideLabel ? "sr-only" : ""}>{label}</span>
+      <input
+        className={`${hideLabel ? "" : "mt-1"} h-10 w-full rounded-md border border-line bg-white px-3 text-[12px] text-ink-primary outline-none focus:border-brand-orange`}
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(event) => onChange(Number(event.currentTarget.value))}
+      />
+    </label>
+  );
+}
+
+function LabeledColor({ label, value, hideLabel = false, onChange }: { label: string; value: string; hideLabel?: boolean; onChange: (value: string) => void }) {
+  return (
+    <label className="block text-[11px] font-medium text-ink-secondary">
+      <span className={hideLabel ? "sr-only" : ""}>{label}</span>
+      <span className={`${hideLabel ? "" : "mt-1"} flex h-10 items-center gap-2 rounded-md border border-line bg-white px-3`}>
+        <input className="h-5 w-8 shrink-0 cursor-pointer border-0 bg-transparent p-0" type="color" value={value} onChange={(event) => onChange(event.currentTarget.value)} />
+        <input
+          className="min-w-0 flex-1 bg-transparent font-mono text-[12px] text-ink-primary outline-none"
+          value={value}
+          onChange={(event) => onChange(event.currentTarget.value)}
+        />
+      </span>
+    </label>
+  );
+}
+
+function LabeledSelect({
+  label,
+  value,
+  options,
+  previewOptionFont = false,
+  hideLabel = false,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: Array<[string, string]>;
+  previewOptionFont?: boolean;
+  hideLabel?: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block text-[11px] font-medium text-ink-secondary">
+      <span className={hideLabel ? "sr-only" : ""}>{label}</span>
+      <select
+        className={`${hideLabel ? "" : "mt-1"} h-10 w-full rounded-md border border-line bg-white px-3 text-[12px] text-ink-primary outline-none focus:border-brand-orange`}
+        style={previewOptionFont ? { fontFamily: value } : undefined}
+        value={value}
+        onChange={(event) => onChange(event.currentTarget.value)}
+      >
+        {options.map(([optionValue, optionLabel]) => (
+          <option key={optionValue} value={optionValue} style={previewOptionFont ? { fontFamily: optionValue } : undefined}>
+            {optionLabel}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function AppearancePanel({ title, description, action, className = "", children }: { title: string; description: string; action?: ReactNode; className?: string; children?: ReactNode }) {
   return (
     <section className={["rounded-md border border-line bg-white px-4 py-4", className].join(" ")}>
@@ -3250,6 +3678,8 @@ const settingsCopy = {
     summaryNavDescription: "Vista general de configuración",
     interfaceNav: "Interfaz",
     interfaceNavDescription: "Apariencia y comportamiento",
+    exportNav: "Exportar",
+    exportNavDescription: "PDF, DOCX y Markdown",
     capabilitiesNav: "Capacidades",
     capabilitiesNavDescription: "Funciones avanzadas de IA",
     systemNav: "Sistema y diagnóstico",
@@ -3333,6 +3763,45 @@ const settingsCopy = {
     previewFavorites: "Favoritos",
     previewTrash: "Papelera",
     resetAppearance: "Restablecer apariencia",
+    exportDescription: "Define la plantilla comun usada al exportar documentos Markdown a PDF y DOCX.",
+    exportPageHeading: "Pagina",
+    exportPageDescription: "Tamano y margenes del documento exportado.",
+    exportPageSize: "Tamano",
+    exportMarginMm: "Margen lateral (mm)",
+    exportTopMarginMm: "Margen superior (mm)",
+    exportBottomMarginMm: "Margen inferior (mm)",
+    exportTextHeading: "Texto",
+    exportTextDescription: "Tipografia, color e interlineado del cuerpo.",
+    exportNormalTextHeading: "Texto normal",
+    exportFontFamily: "Tipografia",
+    exportNormalSize: "Tamano",
+    exportTextColor: "Color texto",
+    exportLineSpacing: "Interlineado",
+    exportSpaceAfter: "Espaciado posterior",
+    exportHeadingsHeading: "Titulos",
+    exportHeadingsDescription: "Tipografia comun y estilos principales para titulos.",
+    exportHeadingLevel: "Nivel",
+    exportHeadingLevelName: "Titulo {level}",
+    exportHeadingFontFamily: "Tipografia",
+    exportHeadingFormat: "Formato",
+    exportHeadingSize: "Tamano",
+    exportHeadingColor: "Color",
+    exportTextFormatNormal: "Normal",
+    exportTextFormatBold: "Negrita",
+    exportTextFormatUnderline: "Subrayado",
+    exportTextFormatBoldUnderline: "Negrita y subrayado",
+    exportGeneralHeading: "General",
+    exportGeneralDescription: "Opciones comunes de salida.",
+    exportIncludeTitle: "Incluir titulo del archivo",
+    exportIncludeTitleDescription: "Anade el nombre del documento al inicio del PDF o DOCX.",
+    exportLinkColor: "Color enlaces",
+    exportRuleColor: "Color separador",
+    exportTemplateFileHeading: "Archivo ASCII",
+    exportTemplateFileDescription: "La plantilla basica se guarda como JSON editable por fuera de la app.",
+    exportResetTemplate: "Restablecer plantilla",
+    exportSettingsNote: "Estos ajustes se aplican unicamente a las exportaciones realizadas desde esta instalacion.",
+    exportCancel: "Cancelar",
+    exportSaveChanges: "Guardar cambios",
     languageLabel: "Idioma",
     languageDescription: "Selecciona el idioma para la interfaz.",
     zoomLabel: "Zoom de la interfaz",
@@ -3620,6 +4089,8 @@ const settingsCopy = {
     summaryNavDescription: "Configuration overview",
     interfaceNav: "Interface",
     interfaceNavDescription: "Appearance and behavior",
+    exportNav: "Export",
+    exportNavDescription: "PDF, DOCX, and Markdown",
     capabilitiesNav: "Capabilities",
     capabilitiesNavDescription: "Advanced AI functions",
     systemNav: "System and diagnostics",
@@ -3703,6 +4174,45 @@ const settingsCopy = {
     previewFavorites: "Favorites",
     previewTrash: "Trash",
     resetAppearance: "Reset appearance",
+    exportDescription: "Define the shared template used when exporting Markdown documents to PDF and DOCX.",
+    exportPageHeading: "Page",
+    exportPageDescription: "Exported document size and margins.",
+    exportPageSize: "Size",
+    exportMarginMm: "Side margin (mm)",
+    exportTopMarginMm: "Top margin (mm)",
+    exportBottomMarginMm: "Bottom margin (mm)",
+    exportTextHeading: "Text",
+    exportTextDescription: "Body typography, color, and line spacing.",
+    exportNormalTextHeading: "Normal text",
+    exportFontFamily: "Font",
+    exportNormalSize: "Size",
+    exportTextColor: "Text color",
+    exportLineSpacing: "Line spacing",
+    exportSpaceAfter: "Space after",
+    exportHeadingsHeading: "Headings",
+    exportHeadingsDescription: "Shared heading font and main heading styles.",
+    exportHeadingLevel: "Level",
+    exportHeadingLevelName: "Heading {level}",
+    exportHeadingFontFamily: "Font",
+    exportHeadingFormat: "Format",
+    exportHeadingSize: "Size",
+    exportHeadingColor: "Color",
+    exportTextFormatNormal: "Normal",
+    exportTextFormatBold: "Bold",
+    exportTextFormatUnderline: "Underline",
+    exportTextFormatBoldUnderline: "Bold and underline",
+    exportGeneralHeading: "General",
+    exportGeneralDescription: "Common output options.",
+    exportIncludeTitle: "Include file title",
+    exportIncludeTitleDescription: "Adds the document name at the start of the PDF or DOCX.",
+    exportLinkColor: "Link color",
+    exportRuleColor: "Rule color",
+    exportTemplateFileHeading: "ASCII file",
+    exportTemplateFileDescription: "The basic template is saved as JSON and can be edited outside the app.",
+    exportResetTemplate: "Reset template",
+    exportSettingsNote: "These settings apply only to exports made from this installation.",
+    exportCancel: "Cancel",
+    exportSaveChanges: "Save changes",
     languageLabel: "Language",
     languageDescription: "Select the interface language.",
     zoomLabel: "Interface zoom",

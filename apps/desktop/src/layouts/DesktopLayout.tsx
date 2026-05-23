@@ -28,7 +28,7 @@ import { formatVersionFullDate, VersionHistoryPanel, type VersionPreview, type V
 import { BrandMark } from "../components/brand/BrandMark";
 import { TitleBar } from "../components/window/TitleBar";
 import { getProjectImageContentUrl } from "../lib/api/projects";
-import type { ActivityEvent, AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentSyncStatus, DocumentTreeNode, ExternalChangeDecision, ExternalChangeSet, InsertImageReferenceResponse, LayoutConfig, Project, ProjectSyncState, ProjectSyncStatus, ProjectVersioningStatus, VersionRecord, WorkspaceTab } from "../types/domain";
+import type { ActivityEvent, AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentSyncStatus, DocumentTreeNode, ExportFormat, ExternalChangeDecision, ExternalChangeSet, InsertImageReferenceResponse, LayoutConfig, Project, ProjectSyncState, ProjectSyncStatus, ProjectVersioningStatus, VersionRecord, WorkspaceTab } from "../types/domain";
 
 const sidebarWidthConfig = {
   defaultWidth: 338,
@@ -146,6 +146,7 @@ type DesktopLayoutProps = {
   onSelectTab: (documentId: string) => void;
   onCloseTab: (documentId: string) => void;
   onTreeContextAction: (action: DocumentTreeAction, node: DocumentTreeNode) => void;
+  onExportDocument: (documentId: string, format: ExportFormat) => void | Promise<void>;
   onMoveTreeNode: (node: DocumentTreeNode, targetFolderId: string | null) => void | Promise<void>;
   onImportProjectImage: (parentId: string | null, file: File) => Promise<AssetImportResponse>;
   onBuildImageReference: (documentId: string, assetId: string, altText?: string | null) => Promise<InsertImageReferenceResponse>;
@@ -540,6 +541,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 activeActions={editorFormatState}
                 editorHistoryState={activeEditorHistoryState}
                 onRunEditorAction={handleRunEditorAction}
+                onExportDocument={(format) => props.onExportDocument(props.activeDocumentId, format)}
                 onMarkdownZoomChange={(nextZoom) => setMarkdownZoomPercent(clamp(Math.round(nextZoom), 80, 150))}
                 onToggleHistory={props.onToggleHistory}
               />
