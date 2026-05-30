@@ -2,6 +2,17 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 0.21.0 - 2026-05-30
+
+- Added the persistent user `Notas` workspace tab as a Markdown surface that autosaves outside the project document tree and stays pinned next to IA.
+- Added fixed IA/Notas utility tabs and drag-and-drop reordering for ordinary document tabs.
+- Added drag-and-drop movement for files and folders in the document tree, plus drag-and-drop from the tree into the prompt input as AI context.
+- Extended AI context handling for project attachments and external files, including XLSX support, removal race protection, and clearer current-context behavior.
+- Treated AI document edits like user edits by marking sessions dirty, persisting drafts, and preserving generated changes across refreshes.
+- Improved the prompt input so selected text and attached context chips are contained inside the prompt shell without moving the active document layout.
+- Added reusable countdown close buttons for app notices and AI response bubbles, with smooth notice transitions and softer notice styling.
+- Updated backend contracts, frontend component coverage, and manual validation coverage for notes, context sources, drag-and-drop, tabs, and AI editing.
+
 ## 0.20.0 - 2026-05-24
 
 - Added a native read-only reference document viewer for PDF, DOCX, and XLSX files inside the workspace.

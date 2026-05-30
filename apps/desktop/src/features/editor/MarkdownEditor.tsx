@@ -102,7 +102,7 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
       listener.markdownUpdated((_ctx, nextMarkdown) => {
         if (skipInitialUpdate.current) {
           skipInitialUpdate.current = false;
-          return;
+          if (nextMarkdown === lastMarkdownRef.current) return;
         }
         if (nextMarkdown === lastMarkdownRef.current) return;
 

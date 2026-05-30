@@ -28,7 +28,9 @@ from app.schemas.project import CreateDocumentRequest, TreeNode
 from app.services.app_storage import JsonFileStore, get_app_data_dir
 from app.services.document_service import document_service
 from app.services.filesystem_service import IMAGE_SUFFIXES, decode_document_id, decode_node_id, encode_node_id
+from app.services.preview_text_service import preview_text_service
 from app.services.project_service import project_service
+from app.services.spreadsheet_preview_service import spreadsheet_preview_service
 
 
 CONTEXT_TTL_MINUTES = 60
@@ -36,7 +38,7 @@ EXPIRING_THRESHOLD_MINUTES = 10
 MAX_PREVIEW_CHARS = 2400
 MAX_CONTEXT_CHARS_LIGHT = 12000
 MAX_CONTEXT_CHARS_HIGH = 36000
-SUPPORTED_EXTENSIONS = {".md", ".txt", ".pdf", ".docx", ".pptx", ".png", ".jpg", ".jpeg", ".webp", ".gif"}
+SUPPORTED_EXTENSIONS = {".md", ".txt", ".pdf", ".docx", ".pptx", ".xlsx", ".png", ".jpg", ".jpeg", ".webp", ".gif"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 
 
@@ -462,6 +464,13 @@ class AiContextService:
             text = _extract_pdf_text(path)
             warning = None if len(text.strip()) > 40 else "El PDF no tiene texto extraíble suficiente; puede ser escaneado."
             return {"text": text, "metadata": {"format": "pdf"}, "warning": warning}
+        if extension == ".xlsx":
+            workbook = spreadsheet_preview_service.read_workbook(path, f"context-{path.stem}")
+            text, warnings = preview_text_service.extract_xlsx_text(workbook)
+            warning = warnings[0] if warnings else None
+            if not text.strip():
+                warning = "El XLSX no contiene texto extraíble."
+            return {"text": text, "metadata": {"format": "xlsx", "sheets": len(workbook.get("sheets", []))}, "warning": warning}
         return {"text": "", "metadata": {"format": extension.lstrip(".")}, "warning": "Tipo de archivo parcialmente soportado."}
 
     def _record_by_id(self, project_id: str, source_id: str) -> dict[str, Any]:

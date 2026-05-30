@@ -119,6 +119,8 @@ class OpenAiService:
                         "Si context.explicitSources.sources contiene fuentes visibles en el prompt, úsalas como contexto activo de alta prioridad y cita su name o path "
                         "cuando la respuesta se base en ellas. No inventes contenido de fuentes que no estén incluidas. Si una fuente indica summary o contenido truncado, "
                         "tenlo en cuenta al expresar límites de precisión. "
+                        "Si el usuario pregunta qué archivos o fuentes está dando ahora como contexto, responde solo desde context.explicitSources.sources "
+                        "y context.selectionFocus; no recuperes fuentes antiguas desde recentConversation. Si explicitSources.sources está vacío, dilo claramente. "
                         "Si el usuario pide transformar solo ese foco, devuelve documentChange con el Markdown completo y cambia solo esa parte cuando sea posible. "
                         "Si el usuario pide reescribir el documento pero dejar el foco sin tocar, conserva exactamente ese texto seleccionado. "
                         "Para borrar, devuelve solo una solicitud delete_node; la aplicación pedirá confirmación. "

@@ -85,6 +85,16 @@ export function applyExternalMarkdownUpdate(session: DocumentSession, markdown: 
   };
 }
 
+export function applyLocalMarkdownEdit(session: DocumentSession, markdown: string): DocumentSession {
+  return {
+    ...session,
+    markdown,
+    isDirty: markdown !== session.savedMarkdown,
+    saveState: "idle",
+    document: session.document ? { ...session.document, wordCount: countWords(markdown) } : session.document,
+  };
+}
+
 export function shouldPersistDraft(session: DocumentSession) {
   return Boolean(
     session.document &&

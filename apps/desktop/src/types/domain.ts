@@ -438,7 +438,7 @@ export type ProjectTabsConfig = {
   activeDocumentId: string;
 };
 
-export type AppUtilityTabId = "release-notes";
+export type AppUtilityTabId = "release-notes" | "notes";
 
 export type AppConfig = {
   schemaVersion: number;
@@ -545,6 +545,13 @@ export type ReleaseNotesWorkspaceTab = {
   readonly: true;
 };
 
+export type NotesWorkspaceTab = {
+  kind: "notes";
+  id: "user-notes";
+  name: "Notas";
+  utilityTabId: "notes";
+};
+
 export type ImageWorkspaceTab = {
   kind: "image";
   id: string;
@@ -568,7 +575,12 @@ export type AiConversationWorkspaceTab = {
   readonly: true;
 };
 
-export type WorkspaceTab = AiConversationWorkspaceTab | DocumentWorkspaceTab | ImageWorkspaceTab | ReferenceDocumentWorkspaceTab | ReleaseNotesWorkspaceTab;
+export type WorkspaceTab = AiConversationWorkspaceTab | NotesWorkspaceTab | DocumentWorkspaceTab | ImageWorkspaceTab | ReferenceDocumentWorkspaceTab | ReleaseNotesWorkspaceTab;
+
+export type UserNotes = {
+  markdown: string;
+  updatedAt: string;
+};
 
 export type PreviewFormat = "pdf" | "docx" | "xlsx";
 

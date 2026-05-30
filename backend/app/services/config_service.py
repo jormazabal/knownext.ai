@@ -412,6 +412,8 @@ def _normalize_utility_tabs(value: object) -> list[str]:
 
 
 def _normalize_active_utility_tab(value: object, open_utility_tabs: list[str]) -> str | None:
+    if value == "notes":
+        return "notes"
     return "release-notes" if value == "release-notes" and "release-notes" in open_utility_tabs else None
 
 

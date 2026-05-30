@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from app.schemas.ai import AiConfig
 
 
-AppUtilityTabId = Literal["release-notes"]
+AppUtilityTabId = Literal["release-notes", "notes"]
 AppearanceThemeMode = Literal["system", "light", "dark"]
 AppearanceAccentColor = Literal[
     "orange",

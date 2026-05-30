@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.routes import activity, ai, auth, config, document_previews, documents, github, projects, runtime, sync, transcription, versions
+from app.api.routes import activity, ai, auth, config, document_previews, documents, github, notes, projects, runtime, sync, transcription, versions
 
 api_router = APIRouter()
 api_router.include_router(config.router, tags=["config"])
@@ -13,5 +13,6 @@ api_router.include_router(document_previews.router, tags=["document-previews"])
 api_router.include_router(versions.router, tags=["versions"])
 api_router.include_router(github.router, tags=["github"])
 api_router.include_router(ai.router, tags=["ai"])
+api_router.include_router(notes.router, tags=["notes"])
 api_router.include_router(runtime.router, tags=["runtime"])
 api_router.include_router(transcription.router, tags=["transcription"])

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DocumentTree } from "./DocumentTree";
 import type { DocumentTreeNode } from "../../types/domain";
+import { DOCUMENT_TREE_FILE_DRAG_MIME, DOCUMENT_TREE_NODE_DRAG_MIME } from "../../lib/dragData";
 
 const nodes: DocumentTreeNode[] = [
   {
@@ -169,10 +170,136 @@ describe("DocumentTree", () => {
 
     const dataTransfer = createDataTransfer();
     fireEvent.dragStart(documentRow!, { dataTransfer });
+    expect(dataTransfer.effectAllowed).toBe("copyMove");
+    expect(JSON.parse(dataTransfer.getData(DOCUMENT_TREE_NODE_DRAG_MIME))).toMatchObject({ id: "doc-functional", type: "document" });
+    expect(JSON.parse(dataTransfer.getData(DOCUMENT_TREE_FILE_DRAG_MIME))).toMatchObject({ id: "doc-functional", type: "document" });
     fireEvent.dragOver(folderRow!, { dataTransfer });
     fireEvent.drop(folderRow!, { dataTransfer });
 
     expect(onMoveNode).toHaveBeenCalledWith(documentNode, "folder-archive");
+  });
+
+  it("moves a folder by dragging it onto another folder", () => {
+    const onMoveNode = vi.fn();
+    const folderNodes: DocumentTreeNode[] = [
+      {
+        id: "folder-source",
+        name: "Origen",
+        type: "folder",
+        open: true,
+        children: [{ id: "doc-child", name: "child.md", type: "document" }],
+      },
+      {
+        id: "folder-target",
+        name: "Destino",
+        type: "folder",
+        open: true,
+        children: [],
+      },
+    ];
+
+    render(
+      <DocumentTree
+        nodes={folderNodes}
+        activeDocumentId=""
+        onOpenDocument={vi.fn()}
+        onActivateTreeNode={vi.fn()}
+        onSelectTreeNode={vi.fn()}
+        onCreateFolder={vi.fn()}
+        onCreateDocument={vi.fn()}
+        onExpandTree={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onConfigureProject={vi.fn()}
+        onRenameNode={vi.fn()}
+        onToggleNode={vi.fn()}
+        onContextAction={vi.fn()}
+        onMoveNode={onMoveNode}
+      />,
+    );
+
+    const sourceRow = screen.getByText("Origen").closest(".tree-row");
+    const targetRow = screen.getByText("Destino").closest(".tree-row");
+    expect(sourceRow).not.toBeNull();
+    expect(targetRow).not.toBeNull();
+
+    const dataTransfer = createDataTransfer();
+    fireEvent.dragStart(sourceRow!, { dataTransfer });
+    expect(dataTransfer.effectAllowed).toBe("move");
+    fireEvent.dragOver(targetRow!, { dataTransfer });
+    fireEvent.drop(targetRow!, { dataTransfer });
+
+    expect(onMoveNode).toHaveBeenCalledWith(folderNodes[0], "folder-target");
+  });
+
+  it("moves a file to the target file parent when dropped onto a file row", () => {
+    const onMoveNode = vi.fn();
+    const attachmentNode = nodes[2];
+
+    render(
+      <DocumentTree
+        nodes={nodes}
+        activeDocumentId=""
+        onOpenDocument={vi.fn()}
+        onActivateTreeNode={vi.fn()}
+        onSelectTreeNode={vi.fn()}
+        onCreateFolder={vi.fn()}
+        onCreateDocument={vi.fn()}
+        onExpandTree={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onConfigureProject={vi.fn()}
+        onRenameNode={vi.fn()}
+        onToggleNode={vi.fn()}
+        onContextAction={vi.fn()}
+        onMoveNode={onMoveNode}
+      />,
+    );
+
+    const attachmentRow = screen.getByText("brief.pdf").closest(".tree-row");
+    const targetFileRow = screen.getByText("requisitos-funcionales.md").closest(".tree-row");
+    expect(attachmentRow).not.toBeNull();
+    expect(targetFileRow).not.toBeNull();
+
+    const dataTransfer = createDataTransfer();
+    fireEvent.dragStart(attachmentRow!, { dataTransfer });
+    fireEvent.dragOver(targetFileRow!, { dataTransfer });
+    fireEvent.drop(targetFileRow!, { dataTransfer });
+
+    expect(onMoveNode).toHaveBeenCalledWith(attachmentNode, "folder-requirements");
+  });
+
+  it("moves a nested file to the project root by dropping it outside tree rows", () => {
+    const onMoveNode = vi.fn();
+    const documentNode = nodes[0].children![0];
+
+    render(
+      <DocumentTree
+        nodes={nodes}
+        activeDocumentId=""
+        onOpenDocument={vi.fn()}
+        onActivateTreeNode={vi.fn()}
+        onSelectTreeNode={vi.fn()}
+        onCreateFolder={vi.fn()}
+        onCreateDocument={vi.fn()}
+        onExpandTree={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onConfigureProject={vi.fn()}
+        onRenameNode={vi.fn()}
+        onToggleNode={vi.fn()}
+        onContextAction={vi.fn()}
+        onMoveNode={onMoveNode}
+      />,
+    );
+
+    const documentRow = screen.getByText("requisitos-funcionales.md").closest(".tree-row");
+    const rootDropArea = screen.getByTestId("document-tree-root-drop");
+    expect(documentRow).not.toBeNull();
+
+    const dataTransfer = createDataTransfer();
+    fireEvent.dragStart(documentRow!, { dataTransfer });
+    fireEvent.dragOver(rootDropArea, { dataTransfer });
+    fireEvent.drop(rootDropArea, { dataTransfer });
+
+    expect(onMoveNode).toHaveBeenCalledWith(documentNode, null);
   });
 
   it("groups project commands and tree visibility controls in the file toolbar", async () => {
@@ -435,9 +562,13 @@ describe("DocumentTree", () => {
 function createDataTransfer() {
   const data = new Map<string, string>();
   return {
+    types: [] as string[],
     effectAllowed: "",
     dropEffect: "",
-    setData: (key: string, value: string) => data.set(key, value),
+    setData(key: string, value: string) {
+      data.set(key, value);
+      if (!this.types.includes(key)) this.types.push(key);
+    },
     getData: (key: string) => data.get(key) ?? "",
   };
 }

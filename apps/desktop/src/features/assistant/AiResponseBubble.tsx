@@ -1,5 +1,5 @@
-import { X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { CountdownCloseButton } from "../../components/ui/CountdownCloseButton";
 import { AiPendingIntentActions } from "./AiPendingIntentActions";
 import type { AiIntentActionType, AiPendingIntent } from "../../types/domain";
 
@@ -60,13 +60,13 @@ export function AiResponseBubble({ bubble, pendingIntent = null, onIntentAction,
             />
           ) : null}
         </div>
-        <button
-          className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
-          aria-label="Cerrar respuesta IA"
-          onClick={onClose}
-        >
-          <X size={14} />
-        </button>
+        <CountdownCloseButton
+          ariaLabel="Cerrar respuesta IA"
+          className="text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
+          durationMs={10_000}
+          onClose={onClose}
+          resetKey={visibleBubble.id}
+        />
       </div>
     </div>
   );

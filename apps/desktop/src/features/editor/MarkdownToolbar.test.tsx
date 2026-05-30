@@ -91,6 +91,31 @@ describe("MarkdownToolbar", () => {
     expect(screen.queryByRole("button", { name: "Subrayado" })).not.toBeInTheDocument();
   });
 
+  it("can hide project document actions for the fixed notes editor", () => {
+    render(
+      <MarkdownToolbar
+        historyOpen={false}
+        historyEnabled
+        historyDisabledReason="Historial no disponible"
+        editorReady
+        imageInsertionEnabled={false}
+        documentActionsEnabled={false}
+        markdownZoomPercent={100}
+        activeActions={{}}
+        editorHistoryState={{ canUndo: false, canRedo: false, undoDepth: 0, redoDepth: 0 }}
+        onRunEditorAction={vi.fn()}
+        onExportDocument={vi.fn()}
+        onMarkdownZoomChange={vi.fn()}
+        onToggleHistory={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Negrita" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Imagen" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Histórico de versiones" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Exportar documento" })).not.toBeInTheDocument();
+  });
+
   it("changes the Markdown viewer zoom from the toolbar menu", async () => {
     const onMarkdownZoomChange = vi.fn();
 

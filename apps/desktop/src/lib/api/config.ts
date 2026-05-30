@@ -250,6 +250,7 @@ function normalizeAppearance(appearance: AppearanceConfig | undefined): Appearan
 
 function normalizeAppConfig(config: AppConfig): AppConfig {
   const normalizedConfig = { ...defaultAppConfig, ...config };
+  const openUtilityTabs = normalizeUtilityTabs(config.openUtilityTabs);
   return {
     ...normalizedConfig,
     layout: config.layout ?? defaultLayoutConfig,
@@ -258,11 +259,21 @@ function normalizeAppConfig(config: AppConfig): AppConfig {
     ai: normalizeAi(config.ai) ?? defaultAiConfig,
     tabsByProject: config.tabsByProject ?? {},
     treeOpenPathsByProject: normalizeTreeOpenPathsByProject(config.treeOpenPathsByProject),
-    openUtilityTabs: config.openUtilityTabs ?? [],
-    activeUtilityTab: config.activeUtilityTab ?? null,
+    openUtilityTabs,
+    activeUtilityTab: normalizeActiveUtilityTab(config.activeUtilityTab, openUtilityTabs),
     lastRunAppVersion: config.lastRunAppVersion ?? null,
     lastSeenReleaseNotesVersion: config.lastSeenReleaseNotesVersion ?? null,
   };
+}
+
+function normalizeUtilityTabs(value: unknown): AppConfig["openUtilityTabs"] {
+  return Array.isArray(value) && value.includes("release-notes") ? ["release-notes"] : [];
+}
+
+function normalizeActiveUtilityTab(value: unknown, openUtilityTabs: AppConfig["openUtilityTabs"]): AppConfig["activeUtilityTab"] {
+  if (value === "notes") return "notes";
+  if (value === "release-notes" && openUtilityTabs.includes("release-notes")) return "release-notes";
+  return null;
 }
 
 function normalizeTreeOpenPathsByProject(value: unknown): Record<string, string[]> {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyExternalMarkdownUpdate,
+  applyLocalMarkdownEdit,
   createLoadedDocumentSession,
   shouldPersistDraft,
   updateSession,
@@ -37,12 +38,20 @@ describe("documentSessions", () => {
   it("marks an edited session as needing draft persistence", () => {
     const session = createLoadedDocumentSession({ ...baseDocument, hasDraft: false, isDirty: false, diskMarkdown: null });
     const sessions: Record<string, DocumentSession> = { "doc-a": session };
-    const nextSessions = updateSession(sessions, "doc-a", {
-      markdown: "# Draft\n\nNew",
-      isDirty: true,
-    });
+    const nextSessions = updateSession(sessions, "doc-a", applyLocalMarkdownEdit(session, "# Draft\n\nNew"));
 
     expect(shouldPersistDraft(nextSessions["doc-a"])).toBe(true);
+  });
+
+  it("treats AI edits on an open document like local edits without remounting the editor", () => {
+    const session = createLoadedDocumentSession({ ...baseDocument, hasDraft: false, isDirty: false, diskMarkdown: null });
+    const updated = applyLocalMarkdownEdit(session, "# AI update\n\nVisible in editor");
+
+    expect(updated.markdown).toBe("# AI update\n\nVisible in editor");
+    expect(updated.loadVersion).toBe(session.loadVersion);
+    expect(updated.isDirty).toBe(true);
+    expect(updated.document?.wordCount).toBe(6);
+    expect(shouldPersistDraft(updated)).toBe(true);
   });
 
   it("bumps the load version when markdown is replaced by an external source", () => {

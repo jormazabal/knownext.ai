@@ -69,6 +69,8 @@ INTENT_DECISIONS = {"create_intent", "confirm_intent", "update_intent", "cancel_
 INTENT_STATUSES = {"awaiting_decision", "awaiting_web_permission", "ready", "running", "completed", "cancelled"}
 INTENT_ACTIONS = {"replace_document", "edit_document", "create_document", "project_operation", "research_then_write"}
 INTENT_TTL_HOURS = 24
+USER_NOTES_DOCUMENT_ID = "user-notes"
+USER_NOTES_PATH = "Notas"
 
 
 class AiService:
@@ -1123,6 +1125,7 @@ class AiService:
             "explicitSources": {
                 "purpose": "Fuentes visibles como chips en el prompt. Si aparecen aquí, el usuario espera que se usen como contexto activo.",
                 "priority": "Prioridad alta después del documento activo y del prompt actual. Cita name/path cuando bases una afirmación en una fuente.",
+                "emptyStateRule": "Si sources está vacío, no hay archivos adjuntos al prompt como contexto explícito.",
                 "sources": explicit_context_sources or [],
             },
             "recentConversation": self._recent_conversation_context(project_id, payload),
@@ -1130,17 +1133,26 @@ class AiService:
             "clientContext": payload.clientContext.model_dump() if payload.clientContext else None,
         }
         if payload.documentId:
-            try:
-                document = document_service.get_document(payload.documentId)
+            if payload.documentId == USER_NOTES_DOCUMENT_ID:
                 context["activeDocument"] = {
-                    "id": document.id,
-                    "path": document.path,
-                    "markdown": payload.activeMarkdown or document.markdown,
-                    "conflictStatus": document.conflictStatus,
+                    "id": USER_NOTES_DOCUMENT_ID,
+                    "path": USER_NOTES_PATH,
+                    "markdown": payload.activeMarkdown or "",
+                    "conflictStatus": None,
+                    "kind": "user_notes",
                 }
-                context["activeDocumentFolder"] = self._active_document_folder_context(tree, document.path)
-            except HTTPException:
-                context["activeDocument"] = {"id": payload.documentId, "markdown": payload.activeMarkdown}
+            else:
+                try:
+                    document = document_service.get_document(payload.documentId)
+                    context["activeDocument"] = {
+                        "id": document.id,
+                        "path": document.path,
+                        "markdown": payload.activeMarkdown or document.markdown,
+                        "conflictStatus": document.conflictStatus,
+                    }
+                    context["activeDocumentFolder"] = self._active_document_folder_context(tree, document.path)
+                except HTTPException:
+                    context["activeDocument"] = {"id": payload.documentId, "markdown": payload.activeMarkdown}
         return context
 
     def _selection_focus_context(self, payload: AiInteractionRequest) -> dict[str, Any] | None:
@@ -1401,7 +1413,7 @@ class AiService:
             or (payload.clientContext.lastDocumentId if payload.clientContext else None)
             or (current_intent.targetDocumentId if current_intent else None)
         )
-        if target_document_id and not self._document_id_belongs_to_project(project_id, target_document_id):
+        if target_document_id and target_document_id != USER_NOTES_DOCUMENT_ID and not self._document_id_belongs_to_project(project_id, target_document_id):
             target_document_id = None
         target_path = raw_intent.get("targetPath") if isinstance(raw_intent.get("targetPath"), str) else None
         if not target_path and target_document_id:
@@ -1447,6 +1459,8 @@ class AiService:
             payload.clientContext.lastDocumentId if payload.clientContext else None,
         ]
         for candidate in candidates:
+            if candidate == USER_NOTES_DOCUMENT_ID:
+                return candidate
             if candidate and self._document_id_belongs_to_project(project_id, candidate):
                 return candidate
         return None
@@ -1598,6 +1612,8 @@ class AiService:
         return default
 
     def _document_path(self, document_id: str) -> str:
+        if document_id == USER_NOTES_DOCUMENT_ID:
+            return USER_NOTES_PATH
         try:
             _, relative_path = decode_document_id(document_id)
             return relative_path
