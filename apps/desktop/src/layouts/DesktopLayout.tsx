@@ -68,6 +68,11 @@ type DesktopLayoutProps = {
   activeTreeNodeId: string;
   activeImageId: string;
   editorSessions: EditorDocumentSession[];
+  notesMarkdown: string;
+  notesUpdatedAt: string | null;
+  notesEditorKey: string;
+  notesLoaded: boolean;
+  notesSaveState: "idle" | "saving" | "error";
   releaseNotesMarkdown: string;
   activeDocument: DocumentRecord | null;
   activeMarkdown: string;
@@ -147,6 +152,7 @@ type DesktopLayoutProps = {
   onSelectTreeNode: (nodeId: string, type: DocumentTreeNode["type"], name: string) => void;
   onSelectTab: (documentId: string) => void;
   onCloseTab: (documentId: string) => void;
+  onReorderDocumentTabs: (draggedTabId: string, targetTabId: string, placement: "before" | "after") => void;
   onTreeContextAction: (action: DocumentTreeAction, node: DocumentTreeNode) => void;
   onExportDocument: (documentId: string, format: ExportFormat) => void | Promise<void>;
   onMoveTreeNode: (node: DocumentTreeNode, targetFolderId: string | null) => void | Promise<void>;
@@ -154,6 +160,7 @@ type DesktopLayoutProps = {
   onBuildImageReference: (documentId: string, assetId: string, altText?: string | null) => Promise<InsertImageReferenceResponse>;
   onInsertImageIntoActiveDocument: (assetId: string) => void | Promise<void>;
   onMarkdownChange: (documentId: string, markdown: string) => void;
+  onNotesMarkdownChange: (markdown: string) => void;
   onEditorOperationApplied: (operationId: string) => void;
   onEditorOperationFailed: (operation: MarkdownEditorExternalOperation) => void;
   onDocumentSelectionChange: (documentId: string, selection: MarkdownEditorSelection | null) => void;
@@ -201,14 +208,18 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   const hasOpenImage = activeWorkspaceTab?.kind === "image" && Boolean(props.activeImageId);
   const hasOpenReferenceDocument = activeWorkspaceTab?.kind === "reference-document";
   const hasReleaseNotes = activeWorkspaceTab?.kind === "release-notes";
+  const hasNotes = activeWorkspaceTab?.kind === "notes";
   const hasAiConversation = activeWorkspaceTab?.kind === "ai-conversation";
-  const hasOpenTab = hasOpenDocument || hasOpenImage || hasOpenReferenceDocument || hasReleaseNotes || hasAiConversation;
-  const activeEditorController = editorControllers[props.activeDocumentId] ?? null;
-  const activeEditorHistoryState = editorHistoryStates[props.activeDocumentId] ?? emptyMarkdownEditorHistoryState;
+  const hasOpenTab = hasOpenDocument || hasOpenImage || hasOpenReferenceDocument || hasReleaseNotes || hasNotes || hasAiConversation;
+  const activeEditorId = hasNotes ? "user-notes" : props.activeDocumentId;
+  const activeEditorController = editorControllers[activeEditorId] ?? null;
+  const activeEditorHistoryState = editorHistoryStates[activeEditorId] ?? emptyMarkdownEditorHistoryState;
   const [historyPreview, setHistoryPreview] = useState<VersionPreview | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<VersionRecord | null>(null);
   const [restoringVersion, setRestoringVersion] = useState(false);
   const activeHistoryPreview = historyPreview?.documentId === props.activeDocumentId ? historyPreview : null;
+  const promptDocumentId = hasOpenDocument ? props.activeDocumentId : hasNotes && props.activeProject ? "user-notes" : undefined;
+  const promptMarkdown = hasOpenDocument ? props.activeMarkdown : hasNotes ? props.notesMarkdown : "";
   const sidebar = useResizablePanelWidth({
     ...sidebarWidthConfig,
     width: props.layoutConfig.sidebarWidth,
@@ -237,8 +248,8 @@ export function DesktopLayout(props: DesktopLayoutProps) {
 
     activeEditorController.run(action, options);
     setEditorFormatState((currentFormatState) => keepStableFormatState(currentFormatState, activeEditorController.getFormatState()));
-    setEditorHistoryStates((currentHistoryStates) => keepStableHistoryStateForDocument(currentHistoryStates, props.activeDocumentId, activeEditorController.getHistoryState()));
-  }, [activeEditorController, props.activeDocumentId]);
+    setEditorHistoryStates((currentHistoryStates) => keepStableHistoryStateForDocument(currentHistoryStates, activeEditorId, activeEditorController.getHistoryState()));
+  }, [activeEditorController, activeEditorId]);
 
   const handlePreviewDocumentDictation = useCallback((text: string) => {
     activeEditorController?.setTransientTextPreview(text);
@@ -249,8 +260,8 @@ export function DesktopLayout(props: DesktopLayoutProps) {
     activeEditorController.clearTransientTextPreview();
     activeEditorController.insertText(text, { addToHistory: true });
     setEditorFormatState((currentFormatState) => keepStableFormatState(currentFormatState, activeEditorController.getFormatState()));
-    setEditorHistoryStates((currentHistoryStates) => keepStableHistoryStateForDocument(currentHistoryStates, props.activeDocumentId, activeEditorController.getHistoryState()));
-  }, [activeEditorController, props.activeDocumentId]);
+    setEditorHistoryStates((currentHistoryStates) => keepStableHistoryStateForDocument(currentHistoryStates, activeEditorId, activeEditorController.getHistoryState()));
+  }, [activeEditorController, activeEditorId]);
 
   const handleClearDocumentDictationPreview = useCallback(() => {
     activeEditorController?.clearTransientTextPreview();
@@ -264,7 +275,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
       }
       return { ...currentControllers, [documentId]: controller };
     });
-    if (documentId === props.activeDocumentId) {
+    if (documentId === activeEditorId) {
       setEditorFormatState((currentFormatState) =>
         keepStableFormatState(currentFormatState, controller ? controller.getFormatState() : emptyMarkdownEditorFormatState),
       );
@@ -278,16 +289,16 @@ export function DesktopLayout(props: DesktopLayoutProps) {
         return nextHistoryStates;
       });
     }
-  }, [props.activeDocumentId]);
+  }, [activeEditorId]);
 
   useEffect(() => {
     setEditorFormatState((currentFormatState) =>
       keepStableFormatState(currentFormatState, activeEditorController ? activeEditorController.getFormatState() : emptyMarkdownEditorFormatState),
     );
     setEditorHistoryStates((currentHistoryStates) =>
-      keepStableHistoryStateForDocument(currentHistoryStates, props.activeDocumentId, activeEditorController ? activeEditorController.getHistoryState() : emptyMarkdownEditorHistoryState),
+      keepStableHistoryStateForDocument(currentHistoryStates, activeEditorId, activeEditorController ? activeEditorController.getHistoryState() : emptyMarkdownEditorHistoryState),
     );
-  }, [activeEditorController, props.activeDocumentId]);
+  }, [activeEditorController, activeEditorId]);
 
   useEffect(() => {
     if (props.pendingEditorOperations.length === 0) return;
@@ -297,7 +308,10 @@ export function DesktopLayout(props: DesktopLayoutProps) {
       if (!controller) continue;
 
       const session = props.editorSessions.find((candidate) => candidate.documentId === operation.documentId);
-      const markdown = session?.document
+      const isNotesOperation = operation.documentId === "user-notes";
+      const markdown = isNotesOperation
+        ? operation.markdown
+        : session?.document
         ? materializeProjectImageReferences(operation.markdown, props.activeProject?.id ?? "", session.document.path, props.tree)
         : operation.markdown;
       const applied = controller.replaceMarkdown(markdown, { addToHistory: operation.addToHistory ?? true });
@@ -309,14 +323,14 @@ export function DesktopLayout(props: DesktopLayoutProps) {
       setEditorHistoryStates((currentHistoryStates) =>
         keepStableHistoryStateForDocument(currentHistoryStates, operation.documentId, controller.getHistoryState()),
       );
-      if (operation.documentId === props.activeDocumentId) {
+      if (operation.documentId === activeEditorId) {
         setEditorFormatState((currentFormatState) => keepStableFormatState(currentFormatState, controller.getFormatState()));
       }
       props.onEditorOperationApplied(operation.id);
     }
   }, [
     editorControllers,
-    props.activeDocumentId,
+    activeEditorId,
     props.activeProject?.id,
     props.editorSessions,
     props.onEditorOperationApplied,
@@ -533,6 +547,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             onOpenNavigation={() => setNavigationOpen(true)}
             onSelectTab={props.onSelectTab}
             onCloseTab={props.onCloseTab}
+            onReorderDocumentTabs={props.onReorderDocumentTabs}
           />
               {hasReleaseNotes || hasAiConversation || hasOpenImage || hasOpenReferenceDocument ? null : (
               <MarkdownToolbar
@@ -544,6 +559,8 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 markdownZoomPercent={markdownZoomPercent}
                 activeActions={editorFormatState}
                 editorHistoryState={activeEditorHistoryState}
+                imageInsertionEnabled={!hasNotes}
+                documentActionsEnabled={!hasNotes}
                 onRunEditorAction={handleRunEditorAction}
                 onExportDocument={(format) => props.onExportDocument(props.activeDocumentId, format)}
                 onMarkdownZoomChange={(nextZoom) => setMarkdownZoomPercent(clamp(Math.round(nextZoom), 80, 150))}
@@ -569,6 +586,33 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                           pendingIntent={props.aiPendingIntent}
                           onIntentAction={props.onAiIntentAction}
                         />
+                      ) : hasNotes ? (
+                        props.notesLoaded ? (
+                          <Suspense fallback={<div className="pt-6 text-[11px] text-ink-secondary">Cargando editor...</div>}>
+                            <MarkdownEditor
+                              key={props.notesEditorKey}
+                              documentKey={props.notesEditorKey}
+                              markdown={props.notesMarkdown}
+                              onChange={props.onNotesMarkdownChange}
+                              onControllerChange={(controller) => handleEditorControllerChange("user-notes", controller)}
+                              onFormatStateChange={(formatState) => {
+                                if (hasNotes) {
+                                  setEditorFormatState((currentFormatState) => keepStableFormatState(currentFormatState, formatState));
+                                }
+                              }}
+                              onHistoryStateChange={(historyState) => {
+                                setEditorHistoryStates((currentHistoryStates) =>
+                                  keepStableHistoryStateForDocument(currentHistoryStates, "user-notes", historyState),
+                                );
+                              }}
+                              onSelectionChange={(selection) => props.onDocumentSelectionChange("user-notes", selection)}
+                              selectionFocus={toMarkdownEditorSelection(props.aiSelectionFocus, "user-notes")}
+                              zoomPercent={markdownZoomPercent}
+                            />
+                          </Suspense>
+                        ) : (
+                          <div className="pt-6 text-[11px] text-ink-secondary">Cargando notas...</div>
+                        )
                       ) : hasOpenImage && activeWorkspaceTab?.kind === "image" && props.activeProject ? (
                         <ImageViewer
                           project={props.activeProject}
@@ -660,14 +704,14 @@ export function DesktopLayout(props: DesktopLayoutProps) {
               )}
               {!activeHistoryPreview ? (
               <AiPromptInput
-                documentId={hasOpenDocument ? props.activeDocumentId : undefined}
+                documentId={promptDocumentId}
                 projectId={props.activeProject?.id}
-                markdown={hasOpenDocument ? props.activeMarkdown : ""}
+                markdown={promptMarkdown}
                 providerReady={props.aiConfig.openaiKeyConfigured}
                 transcriptionConfig={props.aiConfig.transcription}
-                documentDictationReady={Boolean(hasOpenDocument && activeEditorController?.canInsertText())}
-                appliedChangeSummary={props.aiAppliedChange?.documentId === props.activeDocumentId ? props.aiAppliedChange.summary : null}
-                selectionFocus={props.aiSelectionFocus?.documentId === props.activeDocumentId ? props.aiSelectionFocus : null}
+                documentDictationReady={Boolean((hasOpenDocument || hasNotes) && activeEditorController?.canInsertText())}
+                appliedChangeSummary={props.aiAppliedChange?.documentId === activeEditorId ? props.aiAppliedChange.summary : null}
+                selectionFocus={props.aiSelectionFocus?.documentId === activeEditorId ? props.aiSelectionFocus : null}
                 activeContextSources={props.aiContextSources}
                 onSubmit={props.onSendAiPrompt}
                 onTranscriptionConfigChange={props.onAiTranscriptionChange}
@@ -749,6 +793,12 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                   onSynchronize={props.onSynchronizeDocument}
                   onUpdateFromRemote={props.onUpdateDocumentFromRemote}
                   onDiscardPendingChanges={props.onDiscardPendingDocumentChanges}
+                />
+              ) : hasNotes ? (
+                <WorkspaceStatusBar
+                  kind="MD"
+                  title="Notas"
+                  detail={`${countWords(props.notesMarkdown)} palabras · ${getNotesSaveDetail(props.notesSaveState, props.notesUpdatedAt)}`}
                 />
               ) : hasOpenImage && activeWorkspaceTab?.kind === "image" ? (
                 <ImageWorkspaceStatusBar
@@ -1663,6 +1713,23 @@ function countWords(markdown: string) {
   return markdown.trim().split(/\s+/).filter(Boolean).length;
 }
 
+function formatCompactDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "ahora";
+  return date.toLocaleString(undefined, {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function getNotesSaveDetail(saveState: "idle" | "saving" | "error", updatedAt: string | null) {
+  if (saveState === "saving") return "Guardando automaticamente";
+  if (saveState === "error") return "No se pudieron autoguardar";
+  return `Autoguardado${updatedAt ? ` · ${formatCompactDateTime(updatedAt)}` : ""}`;
+}
+
 function buildExternalChangeBadges(changeSet: ExternalChangeSet | null): Record<string, string> {
   if (!changeSet?.items.length) return {};
   return changeSet.items.reduce<Record<string, string>>((badges, item) => {
@@ -1913,6 +1980,7 @@ function WorkspaceStatusBar({ kind, title, detail }: { kind: string; title: stri
 
 function getWorkspaceStatusKind(kind: WorkspaceTab["kind"] | undefined) {
   if (kind === "release-notes") return "Notas";
+  if (kind === "notes") return "MD";
   if (kind === "ai-conversation") return "IA";
   if (kind === "image") return "Imagen";
   return "Workspace";
@@ -1920,6 +1988,7 @@ function getWorkspaceStatusKind(kind: WorkspaceTab["kind"] | undefined) {
 
 function getWorkspaceStatusTitle(tab: WorkspaceTab | undefined, openaiKeyConfigured: boolean) {
   if (tab?.kind === "release-notes") return "Notas de release";
+  if (tab?.kind === "notes") return "Notas";
   if (tab?.kind === "ai-conversation") return openaiKeyConfigured ? "Asistente documental activo" : "Asistente sin clave OpenAI";
   if (tab?.kind === "image") return tab.name;
   return tab?.name ?? "Vista activa";
@@ -1927,6 +1996,7 @@ function getWorkspaceStatusTitle(tab: WorkspaceTab | undefined, openaiKeyConfigu
 
 function getWorkspaceStatusDetail(tab: WorkspaceTab | undefined, projectName?: string) {
   if (tab?.kind === "release-notes") return "Solo lectura";
+  if (tab?.kind === "notes") return "Autoguardado";
   if (tab?.kind === "ai-conversation") return projectName ? `Proyecto: ${projectName}` : "Conversación del proyecto";
   if (tab?.kind === "image") return tab.path || "Activo del proyecto";
   return "Listo";

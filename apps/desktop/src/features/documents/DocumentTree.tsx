@@ -32,6 +32,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { DocumentNameSearchResult, DocumentTreeNode } from "../../types/domain";
+import { setDocumentTreeDragData } from "../../lib/dragData";
 import { getInlineNameCompletion, searchDocumentTreeByName } from "./documentNameSearch";
 
 type DocumentTreeProps = {
@@ -185,8 +186,9 @@ export function DocumentTree({
     clearCloseTimer();
     setOpenMenu(null);
     setDraggedNode(node);
-    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.effectAllowed = node.type === "folder" ? "move" : "copyMove";
     event.dataTransfer.setData("text/plain", node.id);
+    setDocumentTreeDragData(event.dataTransfer, node);
   }
 
   function finishDrag() {
@@ -198,30 +200,32 @@ export function DocumentTree({
 
   function handleRootDragOver(event: DragEvent<HTMLDivElement>) {
     if (!draggedNode) return;
+    if (isDragOverTreeRow(event)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
-    const parentId = getParentId(nodes, draggedNode.id);
+    const valid = canMoveToParent(nodes, draggedNode, null);
     setDropTarget({
       id: null,
-      valid: parentId !== null && parentId !== undefined,
+      valid,
       label: "Raíz del proyecto",
     });
   }
 
   function handleRootDrop(event: DragEvent<HTMLDivElement>) {
     if (!draggedNode) return;
+    if (isDragOverTreeRow(event)) return;
     event.preventDefault();
-    const parentId = getParentId(nodes, draggedNode.id);
-    const valid = parentId !== null && parentId !== undefined;
+    const valid = canMoveToParent(nodes, draggedNode, null);
     if (valid) void onMoveNode(draggedNode, null);
     finishDrag();
   }
 
-  function handleFolderDragOver(targetNode: DocumentTreeNode, event: DragEvent<HTMLDivElement>) {
+  function handleNodeDragOver(targetNode: DocumentTreeNode, event: DragEvent<HTMLDivElement>) {
     if (!draggedNode) return;
     event.preventDefault();
     event.stopPropagation();
-    const valid = isValidFolderDrop(nodes, draggedNode, targetNode);
+    const targetFolderId = getNodeDropTargetFolderId(nodes, draggedNode, targetNode);
+    const valid = targetFolderId !== undefined;
     event.dataTransfer.dropEffect = valid ? "move" : "none";
     setDropTarget({ id: targetNode.id, valid, label: targetNode.name });
 
@@ -234,12 +238,13 @@ export function DocumentTree({
     }
   }
 
-  function handleFolderDrop(targetNode: DocumentTreeNode, event: DragEvent<HTMLDivElement>) {
+  function handleNodeDrop(targetNode: DocumentTreeNode, event: DragEvent<HTMLDivElement>) {
     if (!draggedNode) return;
     event.preventDefault();
     event.stopPropagation();
-    if (isValidFolderDrop(nodes, draggedNode, targetNode)) {
-      void onMoveNode(draggedNode, targetNode.id);
+    const targetFolderId = getNodeDropTargetFolderId(nodes, draggedNode, targetNode);
+    if (targetFolderId !== undefined) {
+      void onMoveNode(draggedNode, targetFolderId);
     }
     finishDrag();
   }
@@ -267,7 +272,16 @@ export function DocumentTree({
         onOpenProjectStatus={onOpenProjectStatus}
         projectStatus={projectStatus}
       />
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pb-2" onScroll={() => setOpenMenu(null)}>
+      <div
+        className={[
+          "min-h-0 flex-1 overflow-y-auto overflow-x-hidden pb-2",
+          draggedNode && dropTarget?.id === null && dropTarget.valid ? "rounded-md bg-brand-hover/45" : "",
+        ].join(" ")}
+        data-testid="document-tree-root-drop"
+        onScroll={() => setOpenMenu(null)}
+        onDragOver={handleRootDragOver}
+        onDrop={handleRootDrop}
+      >
         {visibleNodes.length > 0 ? (
           visibleNodes.map((node) => (
             <TreeNode
@@ -288,8 +302,8 @@ export function DocumentTree({
               onMenuLeave={scheduleCloseMenu}
               onDragStart={startDrag}
               onDragEnd={finishDrag}
-              onFolderDragOver={handleFolderDragOver}
-              onFolderDrop={handleFolderDrop}
+              onNodeDragOver={handleNodeDragOver}
+              onNodeDrop={handleNodeDrop}
               changeBadges={changeBadges}
               showFileExtensions={showFileExtensions}
             />
@@ -320,7 +334,14 @@ export function DocumentTree({
               ? "border-brand-orange bg-brand-hover text-brand-orange"
               : "border-line bg-white text-ink-secondary hover:border-orange-200 hover:bg-brand-hover",
           ].join(" ")}
-          onDragOver={handleRootDragOver}
+          onDragOver={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!draggedNode) return;
+            const valid = canMoveToParent(nodes, draggedNode, null);
+            event.dataTransfer.dropEffect = valid ? "move" : "none";
+            setDropTarget({ id: null, valid, label: "Raíz del proyecto" });
+          }}
           onDrop={handleRootDrop}
         >
           Soltar en la raíz del proyecto
@@ -377,8 +398,8 @@ type TreeNodeProps = {
   onMenuLeave: () => void;
   onDragStart: (node: DocumentTreeNode, event: DragEvent<HTMLDivElement>) => void;
   onDragEnd: () => void;
-  onFolderDragOver: (node: DocumentTreeNode, event: DragEvent<HTMLDivElement>) => void;
-  onFolderDrop: (node: DocumentTreeNode, event: DragEvent<HTMLDivElement>) => void;
+  onNodeDragOver: (node: DocumentTreeNode, event: DragEvent<HTMLDivElement>) => void;
+  onNodeDrop: (node: DocumentTreeNode, event: DragEvent<HTMLDivElement>) => void;
   changeBadges: Record<string, string>;
   showFileExtensions: boolean;
 };
@@ -400,8 +421,8 @@ function TreeNode({
   onMenuLeave,
   onDragStart,
   onDragEnd,
-  onFolderDragOver,
-  onFolderDrop,
+  onNodeDragOver,
+  onNodeDrop,
   changeBadges,
   showFileExtensions,
 }: TreeNodeProps) {
@@ -434,8 +455,8 @@ function TreeNode({
         draggable={!node.isEditing}
         onDragStart={(event) => onDragStart(node, event)}
         onDragEnd={onDragEnd}
-        onDragOver={isFolder ? (event) => onFolderDragOver(node, event) : undefined}
-        onDrop={isFolder ? (event) => onFolderDrop(node, event) : undefined}
+        onDragOver={(event) => onNodeDragOver(node, event)}
+        onDrop={(event) => onNodeDrop(node, event)}
         data-tree-node-id={node.id}
         onClick={() => {
           if (node.isEditing) return;
@@ -524,8 +545,8 @@ function TreeNode({
               onMenuLeave={onMenuLeave}
               onDragStart={onDragStart}
               onDragEnd={onDragEnd}
-              onFolderDragOver={onFolderDragOver}
-              onFolderDrop={onFolderDrop}
+              onNodeDragOver={onNodeDragOver}
+              onNodeDrop={onNodeDrop}
               changeBadges={changeBadges}
               showFileExtensions={showFileExtensions}
             />
@@ -1043,12 +1064,47 @@ function containsNodeId(nodes: DocumentTreeNode[], nodeId: string): boolean {
   return false;
 }
 
-function isValidFolderDrop(nodes: DocumentTreeNode[], draggedNode: DocumentTreeNode, targetNode: DocumentTreeNode) {
-  if (targetNode.type !== "folder") return false;
-  if (draggedNode.id === targetNode.id) return false;
-  if (getParentId(nodes, draggedNode.id) === targetNode.id) return false;
-  if (draggedNode.type === "folder" && containsNode(draggedNode, targetNode.id)) return false;
-  return true;
+function isDragOverTreeRow(event: DragEvent<HTMLDivElement>) {
+  return event.target instanceof Element && event.target.closest(".tree-row") !== null;
+}
+
+function getNodeDropTargetFolderId(
+  nodes: DocumentTreeNode[],
+  draggedNode: DocumentTreeNode,
+  targetNode: DocumentTreeNode,
+): string | null | undefined {
+  if (draggedNode.id === targetNode.id) return undefined;
+
+  if (targetNode.type === "folder") {
+    return canMoveToParent(nodes, draggedNode, targetNode.id) ? targetNode.id : undefined;
+  }
+
+  const targetParentId = getParentId(nodes, targetNode.id);
+  if (targetParentId === undefined) return undefined;
+  return canMoveToParent(nodes, draggedNode, targetParentId) ? targetParentId : undefined;
+}
+
+function canMoveToParent(nodes: DocumentTreeNode[], draggedNode: DocumentTreeNode, targetFolderId: string | null) {
+  const currentParentId = getParentId(nodes, draggedNode.id);
+  if (currentParentId === undefined) return false;
+  if (currentParentId === targetFolderId) return false;
+  if (targetFolderId === null) return true;
+  if (draggedNode.id === targetFolderId) return false;
+  if (draggedNode.type === "folder" && containsNode(draggedNode, targetFolderId)) return false;
+
+  const targetFolder = findNodeById(nodes, targetFolderId);
+  return targetFolder?.type === "folder";
+}
+
+function findNodeById(nodes: DocumentTreeNode[], nodeId: string): DocumentTreeNode | null {
+  for (const node of nodes) {
+    if (node.id === nodeId) return node;
+    if (node.children) {
+      const childNode = findNodeById(node.children, nodeId);
+      if (childNode) return childNode;
+    }
+  }
+  return null;
 }
 
 function containsNode(node: DocumentTreeNode, nodeId: string): boolean {

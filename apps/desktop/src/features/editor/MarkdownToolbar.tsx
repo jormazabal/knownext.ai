@@ -86,6 +86,8 @@ type MarkdownToolbarProps = {
   markdownZoomPercent: number;
   activeActions: MarkdownEditorFormatState;
   editorHistoryState: MarkdownEditorHistoryState;
+  imageInsertionEnabled?: boolean;
+  documentActionsEnabled?: boolean;
   onRunEditorAction: (action: MarkdownEditorAction, options?: MarkdownEditorActionOptions) => void;
   onExportDocument: (format: ExportFormat) => void;
   onMarkdownZoomChange: (zoomPercent: number) => void;
@@ -101,6 +103,8 @@ export function MarkdownToolbar({
   markdownZoomPercent,
   activeActions,
   editorHistoryState,
+  imageInsertionEnabled = true,
+  documentActionsEnabled = true,
   onRunEditorAction,
   onExportDocument,
   onMarkdownZoomChange,
@@ -286,13 +290,15 @@ export function MarkdownToolbar({
           onRun={() => runAction(insertionTools[0].action)}
         />
         <div className="knownext-toolbar-wide-group flex items-center gap-0.5">
-          <ToolbarIconButton
-            tool={insertionTools[1]}
-            active={Boolean(activeActions[insertionTools[1].action])}
-            disabled={!editorReady}
-            onMouseDown={keepEditorSelection}
-            onRun={() => runAction(insertionTools[1].action)}
-          />
+          {imageInsertionEnabled ? (
+            <ToolbarIconButton
+              tool={insertionTools[1]}
+              active={Boolean(activeActions[insertionTools[1].action])}
+              disabled={!editorReady}
+              onMouseDown={keepEditorSelection}
+              onRun={() => runAction(insertionTools[1].action)}
+            />
+          ) : null}
         </div>
         <div className="relative">
           <ToolbarMenuButton
@@ -323,47 +329,51 @@ export function MarkdownToolbar({
           />
           {openMenu === "insert" ? (
             <ToolbarMenu align="right">
-              <MenuAction action={insertionTools[1]} active={false} onRun={() => runAction("image")} />
+              {imageInsertionEnabled ? <MenuAction action={insertionTools[1]} active={false} onRun={() => runAction("image")} /> : null}
               <MenuAction action={structureTools[5]} active={false} onRun={() => runAction("horizontal-rule")} />
             </ToolbarMenu>
           ) : null}
         </div>
-        <button
-          className={`toolbar-button knownext-history-button ml-1 ${historyOpen ? "border-brand-orange text-brand-orange" : ""} ${historyEnabled ? "" : "opacity-40"}`}
-          data-tooltip={historyEnabled ? "Histórico de versiones" : historyDisabledReason}
-          aria-label="Histórico de versiones"
-          onMouseDown={keepEditorSelection}
-          onClick={historyEnabled ? onToggleHistory : undefined}
-          disabled={!historyEnabled}
-        >
-          <History size={15} />
-        </button>
-        <div className="relative">
-          <ToolbarMenuButton
-            label="Exportar documento"
-            icon={Download}
-            disabled={!editorReady}
-            expanded={openMenu === "export"}
-            onMouseDown={keepEditorSelection}
-            onClick={(event) => toggleMenu("export", event)}
-          />
-          {openMenu === "export" ? (
-            <ToolbarMenu align="right">
-              <ExportMenuAction label="Markdown (.md)" format="md" onRun={(format) => {
-                setOpenMenu(null);
-                onExportDocument(format);
-              }} />
-              <ExportMenuAction label="PDF (.pdf)" format="pdf" onRun={(format) => {
-                setOpenMenu(null);
-                onExportDocument(format);
-              }} />
-              <ExportMenuAction label="Word (.docx)" format="docx" onRun={(format) => {
-                setOpenMenu(null);
-                onExportDocument(format);
-              }} />
-            </ToolbarMenu>
-          ) : null}
-        </div>
+        {documentActionsEnabled ? (
+          <>
+            <button
+              className={`toolbar-button knownext-history-button ml-1 ${historyOpen ? "border-brand-orange text-brand-orange" : ""} ${historyEnabled ? "" : "opacity-40"}`}
+              data-tooltip={historyEnabled ? "Histórico de versiones" : historyDisabledReason}
+              aria-label="Histórico de versiones"
+              onMouseDown={keepEditorSelection}
+              onClick={historyEnabled ? onToggleHistory : undefined}
+              disabled={!historyEnabled}
+            >
+              <History size={15} />
+            </button>
+            <div className="relative">
+              <ToolbarMenuButton
+                label="Exportar documento"
+                icon={Download}
+                disabled={!editorReady}
+                expanded={openMenu === "export"}
+                onMouseDown={keepEditorSelection}
+                onClick={(event) => toggleMenu("export", event)}
+              />
+              {openMenu === "export" ? (
+                <ToolbarMenu align="right">
+                  <ExportMenuAction label="Markdown (.md)" format="md" onRun={(format) => {
+                    setOpenMenu(null);
+                    onExportDocument(format);
+                  }} />
+                  <ExportMenuAction label="PDF (.pdf)" format="pdf" onRun={(format) => {
+                    setOpenMenu(null);
+                    onExportDocument(format);
+                  }} />
+                  <ExportMenuAction label="Word (.docx)" format="docx" onRun={(format) => {
+                    setOpenMenu(null);
+                    onExportDocument(format);
+                  }} />
+                </ToolbarMenu>
+              ) : null}
+            </div>
+          </>
+        ) : null}
       </ToolbarActionGroup>
 
       <div className="ml-auto flex shrink-0 items-center gap-1">

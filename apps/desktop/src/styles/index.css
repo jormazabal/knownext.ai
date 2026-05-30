@@ -973,7 +973,9 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .knownext-editor .ProseMirror > :is(h1, h2, h3, h4, h5, h6):first-child,
-.knownext-editor .milkdown > .editor > :is(h1, h2, h3, h4, h5, h6):first-child {
+.knownext-editor .milkdown > .editor > :is(h1, h2, h3, h4, h5, h6):first-child,
+.knownext-editor .ProseMirror > :is(.ProseMirror-widget, .prosemirror-virtual-cursor):first-child + :is(h1, h2, h3, h4, h5, h6),
+.knownext-editor .milkdown > .editor > :is(.ProseMirror-widget, .prosemirror-virtual-cursor):first-child + :is(h1, h2, h3, h4, h5, h6) {
   margin-top: 0;
 }
 

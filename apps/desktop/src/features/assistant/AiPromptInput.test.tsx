@@ -1,6 +1,7 @@
-import { cleanup, render, screen, waitForElementToBeRemoved } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitForElementToBeRemoved } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DOCUMENT_TREE_FILE_DRAG_MIME } from "../../lib/dragData";
 import { AiPromptInput } from "./AiPromptInput";
 
 afterEach(() => cleanup());
@@ -83,6 +84,10 @@ describe("AiPromptInput", () => {
 
     expect(screen.getByText("Texto seleccionado")).toBeInTheDocument();
     expect(screen.queryByText("texto seleccionado importante")).not.toBeInTheDocument();
+    const contextStrip = screen.getByText("Texto seleccionado").closest(".knownext-ai-context-strip") as HTMLElement | null;
+    expect(contextStrip).not.toHaveClass("absolute", "bottom-full");
+    expect(contextStrip).not.toHaveClass("border-b");
+    expect(screen.getByText("Texto seleccionado").closest(".knownext-ai-prompt")).toContainElement(contextStrip);
 
     await userEvent.type(screen.getByPlaceholderText(/Pregunta algo sobre este documento/), "Ponlo en negrita");
     await userEvent.click(screen.getByLabelText("Enviar"));
@@ -91,6 +96,42 @@ describe("AiPromptInput", () => {
 
     await userEvent.click(screen.getByLabelText("Quitar texto seleccionado del contexto IA"));
     expect(onClearSelectionFocus).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders attached context files inside the prompt container", () => {
+    render(
+      <AiPromptInput
+        documentId="doc-1"
+        projectId="project-1"
+        markdown="Contenido"
+        providerReady
+        activeContextSources={[{
+          id: "source-1",
+          projectId: "project-1",
+          name: "alcaldes_tolosaldea_perfiles_cv_revisado.xlsx",
+          kind: "external_file",
+          status: "ready",
+          weight: "high",
+          sizeBytes: 12000,
+          createdAt: "2026-05-30T12:00:00Z",
+          updatedAt: "2026-05-30T12:00:00Z",
+          expiresAt: null,
+          lastUsedAt: null,
+          mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          path: null,
+        }]}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    const chip = screen.getByText("alcaldes_tolosaldea_perfiles_cv_revisado.xlsx");
+    const contextStrip = chip.closest(".knownext-ai-context-strip") as HTMLElement | null;
+    const promptShell = screen.getByPlaceholderText(/Pregunta algo sobre este documento/).closest(".knownext-ai-prompt") as HTMLElement | null;
+
+    expect(contextStrip).not.toHaveClass("absolute", "bottom-full");
+    expect(contextStrip).not.toHaveClass("border-b");
+    expect(promptShell).toContainElement(contextStrip);
+    expect(screen.getByText(/Fuentes · 1/)).toBeInTheDocument();
   });
 
   it("allows choosing reasoning mode and depth from the prompt", async () => {
@@ -113,6 +154,56 @@ describe("AiPromptInput", () => {
     await userEvent.click(screen.getByLabelText("Enviar"));
 
     expect(onSubmit).toHaveBeenCalledWith("Investiga y redacta", null, { executionMode: "reasoning", reasoningDepth: "deep" });
+  });
+
+  it("adds project files dropped from the document tree as AI context", () => {
+    const onAddProjectDocumentContext = vi.fn();
+    const onUploadContextFiles = vi.fn();
+
+    render(
+      <AiPromptInput
+        documentId="doc-1"
+        projectId="project-1"
+        markdown="Contenido"
+        providerReady
+        onSubmit={vi.fn()}
+        onAddProjectDocumentContext={onAddProjectDocumentContext}
+        onUploadContextFiles={onUploadContextFiles}
+      />,
+    );
+
+    const promptShell = screen.getByPlaceholderText(/Pregunta algo sobre este documento/).closest(".knownext-ai-prompt");
+    expect(promptShell).not.toBeNull();
+
+    const dataTransfer = createProjectFileDataTransfer({
+      id: "doc-functional",
+      type: "document",
+      name: "requisitos-funcionales.md",
+      path: "docs/requisitos-funcionales.md",
+    });
+
+    fireEvent.dragEnter(promptShell!, { dataTransfer });
+    expect(screen.getByText("Suelta archivos para usarlos como contexto IA")).toBeInTheDocument();
+
+    fireEvent.drop(promptShell!, { dataTransfer });
+
+    expect(onAddProjectDocumentContext).toHaveBeenCalledWith("doc-functional");
+    expect(onUploadContextFiles).not.toHaveBeenCalled();
+  });
+
+  it("allows XLSX files in the context file picker", () => {
+    const { container } = render(
+      <AiPromptInput
+        documentId="doc-1"
+        projectId="project-1"
+        markdown="Contenido"
+        providerReady
+        onSubmit={vi.fn()}
+        onUploadContextFiles={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector('input[type="file"]')).toHaveAttribute("accept", expect.stringContaining(".xlsx"));
   });
 
   it("lets the microphone menu choose transcription target and language", async () => {
@@ -147,3 +238,15 @@ describe("AiPromptInput", () => {
     expect(onTranscriptionConfigChange).toHaveBeenCalledWith({ defaultLanguage: "es" });
   });
 });
+
+function createProjectFileDataTransfer(payload: { id: string; type: string; name: string; path: string }) {
+  const data = new Map<string, string>([[DOCUMENT_TREE_FILE_DRAG_MIME, JSON.stringify(payload)]]);
+  return {
+    types: [DOCUMENT_TREE_FILE_DRAG_MIME],
+    files: [],
+    effectAllowed: "",
+    dropEffect: "",
+    setData: (key: string, value: string) => data.set(key, value),
+    getData: (key: string) => data.get(key) ?? "",
+  };
+}

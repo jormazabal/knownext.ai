@@ -1,6 +1,7 @@
 import { AlertCircle, Brain, Check, ChevronDown, Clock3, File, FileText, Image, MessageSquare, Mic, Plus, Search, SendHorizontal, SlidersHorizontal, Sparkles, Square, X, Zap } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type RefObject } from "react";
 import type { AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiExecutionMode, AiReasoningDepth, AiSelectionFocus, AiTranscriptionLanguage, AiTranscriptionTarget } from "../../types/domain";
+import { getDocumentTreeFileDragData, hasDocumentTreeFileDragData } from "../../lib/dragData";
 import { useRealtimeTranscription } from "../transcription/useRealtimeTranscription";
 
 export type AiPromptExecutionOptions = {
@@ -344,9 +345,26 @@ export function AiPromptInput({
     setContextMenuOpen(false);
   }
 
+  function isContextDrop(event: DragEvent<HTMLDivElement>) {
+    return hasDocumentTreeFileDragData(event.dataTransfer) || Array.from(event.dataTransfer.types ?? []).includes("Files");
+  }
+
+  async function addDroppedProjectFile(dataTransfer: DataTransfer) {
+    const projectFile = getDocumentTreeFileDragData(dataTransfer);
+    if (!projectFile || !onAddProjectDocumentContext) return false;
+    await onAddProjectDocumentContext(projectFile.id);
+    setContextMenuOpen(false);
+    textareaRef.current?.focus();
+    return true;
+  }
+
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setDragActive(false);
+    if (getDocumentTreeFileDragData(event.dataTransfer)) {
+      void addDroppedProjectFile(event.dataTransfer);
+      return;
+    }
     const files = Array.from(event.dataTransfer.files ?? []);
     void uploadFiles(files);
   }
@@ -399,11 +417,14 @@ export function AiPromptInput({
           dragActive ? "border-brand-orange bg-brand-hover/60" : "border-line/90",
         ].join(" ")}
         onDragEnter={(event) => {
+          if (!isContextDrop(event)) return;
           event.preventDefault();
           setDragActive(true);
         }}
         onDragOver={(event) => {
+          if (!isContextDrop(event)) return;
           event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
           setDragActive(true);
         }}
         onDragLeave={(event) => {
@@ -412,7 +433,7 @@ export function AiPromptInput({
         onDrop={handleDrop}
       >
         {selectionFocus || activeContextSources.length > 0 ? (
-          <div className="mx-1 mb-1.5 flex max-h-[52px] flex-wrap items-center gap-1 overflow-hidden">
+          <div className="knownext-ai-context-strip pointer-events-auto flex max-h-[52px] w-full flex-wrap items-center gap-1 overflow-hidden px-1 pb-1.5 pt-0.5">
             {selectionFocus ? (
             <span className="inline-flex items-center gap-1.5 rounded-full border border-orange-200 bg-brand-hover px-2 py-1 text-[10px] font-semibold text-brand-orange">
               Texto seleccionado
@@ -487,7 +508,7 @@ export function AiPromptInput({
             className="hidden"
             type="file"
             multiple
-            accept=".md,.txt,.csv,.pdf,.docx,.pptx,image/png,image/jpeg,image/webp,image/gif"
+            accept=".md,.txt,.csv,.pdf,.docx,.pptx,.xlsx,image/png,image/jpeg,image/webp,image/gif"
             onChange={(event) => {
               const files = Array.from(event.currentTarget.files ?? []);
               event.currentTarget.value = "";

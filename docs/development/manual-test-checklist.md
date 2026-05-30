@@ -90,6 +90,7 @@
 - [ ] Change active tab to `decision-tecnologica.md`.
 - [ ] Collapse the parent folder of an already open document, activate that document's tab, and confirm the tree expands its parent folders, selects the document node, and scrolls it into view.
 - [ ] Close and open document tabs, then restart the app and confirm the same tabs, active document, and tab order are restored from `config.json`.
+- [ ] Drag Markdown document tabs to reorder them and confirm `IA` and `Notas` remain fixed at the beginning and cannot be moved.
 - [ ] Close every document tab and confirm the tab bar, editor toolbar, document canvas, and status bar disappear.
 - [ ] Confirm the empty workspace area is very light gray and shows the gray KnowNext.ai watermark logo.
 - [ ] Confirm the AI prompt remains visible with project documentation wording when no document tab is open.
@@ -178,6 +179,10 @@
 - [ ] Submit the prompt.
 - [ ] Submit the AI prompt with no document open and confirm it is accepted as a project documentation prompt.
 - [ ] Confirm the fixed first tab is `IA`, uses the AI icon, and cannot be closed.
+- [ ] Confirm the fixed `Notas` tab is always visible next to `IA`, uses the notes icon, and cannot be closed.
+- [ ] Open `Notas`, edit its Milkdown content, and confirm there is no Guardar action, sync control, version history, export control, or image insertion action.
+- [ ] Edit `Notas`, wait for autoguardado, reload/restart, and confirm the content returns exactly as left without appearing in the project folder/document tree.
+- [ ] From `Notas`, submit an AI edit with document-edit permissions enabled and confirm the Notes editor updates and autoguards like a user edit.
 - [ ] Open the `IA` tab and confirm conversation messages are grouped by day.
 - [ ] Submit an informational AI prompt and confirm the response appears in a right-aligned bubble above the prompt with an X close button.
 - [ ] Submit a second AI prompt and confirm the previous bubble disappears before the new response is shown.
@@ -190,12 +195,12 @@
 - [ ] Remove the selected-text context chip and confirm the prompt can be sent without selected-text focus.
 - [ ] In the AI prompt, type `@` plus part of a filename and confirm a compact project-document picker opens above the prompt, filters results while typing, supports keyboard selection, and adds the selected document as a visible context chip.
 - [ ] In the AI prompt, type `@` plus part of an image filename and confirm project images appear with image icons, can be selected, and become visible image context chips.
-- [ ] In the AI prompt, type `@` plus part of a readable support-file name such as PDF, TXT, DOCX, PPTX, CSV, TSV, JSON, YAML, or XML and confirm it appears with a file icon, can be selected, and becomes a visible project context chip after backend extraction.
+- [ ] In the AI prompt, type `@` plus part of a readable support-file name such as PDF, TXT, DOCX, PPTX, or XLSX and confirm it appears with a file icon, can be selected, and becomes a visible project context chip after backend extraction.
 - [ ] Try adding an unreadable support file such as an archive as AI context and confirm KnowNext.ai shows a clear warning/error instead of adding silent empty context.
 - [ ] Open an image from the project tree and use `Usar como contexto IA`; confirm the prompt receives the image context chip without leaving the image viewer.
 - [ ] Confirm every visible context chip in the prompt is treated as active context, remains visible after sending, and can be removed with its X button.
 - [ ] Add several context sources and confirm the prompt stays compact, shows `Fuentes · N · peso`, and opens a sources popover with status, origin, expiry, preview, remove, and extend actions.
-- [ ] Attach external `.md`, `.pdf`, `.docx`, `.pptx`, and image files to the AI prompt where available, and confirm each appears as a chip with clear `Listo`, `Procesando`, `Aviso`, or `No se pudo leer` state.
+- [ ] Attach external `.md`, `.txt`, `.pdf`, `.docx`, `.pptx`, `.xlsx`, and image files to the AI prompt where available, and confirm each appears as a chip with clear `Listo`, `Procesando`, `Aviso`, or `No se pudo leer` state.
 - [ ] Confirm external context sources show expiry timing, display an orange warning state when close to expiry, and disappear from active context after backend expiry or when removed by the user.
 - [ ] Open an external source preview from the prompt and confirm extracted text or image readiness is visible without leaving the editor.
 - [ ] Use `Añadir al proyecto` from an external text source and confirm KnowNext.ai creates a Markdown document in the project, refreshes the tree, and opens the new document.

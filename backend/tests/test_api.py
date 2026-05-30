@@ -92,7 +92,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.20.0"
+    assert payload["version"] == "0.21.0"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -177,6 +177,36 @@ def test_app_config_persists_project_tree_open_paths() -> None:
         "project-2": ["Archive"],
     }
     assert client.get("/api/config").json()["treeOpenPathsByProject"] == updated.json()["treeOpenPathsByProject"]
+
+
+def test_app_config_keeps_notes_as_fixed_active_utility_tab() -> None:
+    updated = client.put(
+        "/api/config",
+        json={
+            "openUtilityTabs": ["notes", "release-notes"],
+            "activeUtilityTab": "notes",
+        },
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["openUtilityTabs"] == ["release-notes"]
+    assert updated.json()["activeUtilityTab"] == "notes"
+    assert client.get("/api/config").json()["activeUtilityTab"] == "notes"
+
+
+def test_user_notes_always_exist_and_persist_outside_projects(tmp_path) -> None:
+    initial = client.get("/api/notes")
+    assert initial.status_code == 200
+    assert initial.json()["markdown"] == ""
+    assert initial.json()["updatedAt"]
+
+    updated = client.put("/api/notes", json={"markdown": "# Notas\n\nPendiente"})
+
+    assert updated.status_code == 200
+    assert updated.json()["markdown"] == "# Notas\n\nPendiente"
+    assert client.get("/api/notes").json()["markdown"] == "# Notas\n\nPendiente"
+    assert (tmp_path / "notes.json").exists()
+    assert not list(tmp_path.glob("projects/**/notes.json"))
 
 
 def test_json_file_store_handles_concurrent_writes(tmp_path) -> None:
@@ -869,6 +899,37 @@ def test_ai_context_project_attachment_source_is_resolved(tmp_path) -> None:
     preview = client.get(f"/api/projects/{project_id}/ai/context/sources/{source.json()['id']}/preview")
     assert preview.status_code == 200
     assert "Texto de apoyo" in preview.json()["previewText"]
+
+
+def test_ai_context_project_xlsx_attachment_source_is_resolved(tmp_path) -> None:
+    docs_root = tmp_path / "project-ai-context-xlsx-attachment"
+    docs_root.mkdir()
+    _write_minimal_xlsx(docs_root / "budget.xlsx")
+    created = client.post(
+        "/api/projects",
+        json={"name": "Project AI XLSX Attachment", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    attachment_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
+
+    search = client.get(f"/api/projects/{project_id}/ai/context/search?q=budget")
+    assert search.status_code == 200
+    assert search.json()[0]["kind"] == "external_file"
+    assert search.json()[0]["path"] == "budget.xlsx"
+
+    source = client.post(
+        f"/api/projects/{project_id}/ai/context/project-attachments",
+        json={"documentId": attachment_id},
+    )
+    assert source.status_code == 200
+    assert source.json()["kind"] == "external_file"
+    assert source.json()["status"] == "ready"
+    assert source.json()["path"] == "budget.xlsx"
+
+    preview = client.get(f"/api/projects/{project_id}/ai/context/sources/{source.json()['id']}/preview")
+    assert preview.status_code == 200
+    assert "Hoja: Resumen" in preview.json()["previewText"]
+    assert "A2: Licencias" in preview.json()["previewText"]
 
 
 def test_image_references_are_built_tracked_and_rewritten_when_image_moves(tmp_path) -> None:
@@ -2135,6 +2196,65 @@ def test_ai_context_project_document_source_is_resolved_and_traced(tmp_path) -> 
     assert payload["contextSources"][0]["lastUsedAt"]
 
 
+def test_removed_ai_context_source_is_not_sent_as_current_context(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "project-ai-context-removed"
+    docs_root.mkdir()
+    (docs_root / "old-context.md").write_text("# Old\n\nContexto antiguo.", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "Project AI Removed Context", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    document_id = client.get(f"/api/projects/{project_id}/tree").json()[0]["id"]
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+    captured_contexts: list[dict] = []
+
+    def fake_plan(payload, context, rag, model=None):
+        captured_contexts.append(context)
+        return {"display": "bubble", "answer": "Respuesta", "operations": []}
+
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+
+    source = client.post(
+        f"/api/projects/{project_id}/ai/context/project-documents",
+        json={"documentId": document_id},
+    ).json()
+
+    used = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "prompt": "Usa la fuente",
+            "activeMarkdown": "",
+            "mode": "project",
+            "clientMessageId": "client-context-used",
+            "contextSourceIds": [source["id"]],
+        },
+    )
+    assert used.status_code == 200
+
+    removed = client.delete(f"/api/projects/{project_id}/ai/context/sources/{source['id']}")
+    assert removed.status_code == 200
+    assert removed.json()["sources"] == []
+
+    current = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "prompt": "Que archivos estoy dando de contexto?",
+            "activeMarkdown": "",
+            "mode": "project",
+            "clientMessageId": "client-context-current",
+            "contextSourceIds": [],
+        },
+    )
+    assert current.status_code == 200
+    assert captured_contexts[-1]["explicitSources"]["sources"] == []
+    assert captured_contexts[-1]["explicitSources"]["emptyStateRule"]
+
+
 def test_ai_context_external_markdown_preview_and_add_to_project(tmp_path) -> None:
     docs_root = tmp_path / "project-ai-context-external"
     docs_root.mkdir()
@@ -2164,6 +2284,40 @@ def test_ai_context_external_markdown_preview_and_add_to_project(tmp_path) -> No
     assert added.status_code == 200
     assert added.json()["path"] == "brief-extraido.md"
     assert (docs_root / "brief-extraido.md").exists()
+
+
+def test_ai_context_external_xlsx_preview(tmp_path) -> None:
+    docs_root = tmp_path / "project-ai-context-external-xlsx"
+    docs_root.mkdir()
+    xlsx_path = tmp_path / "budget.xlsx"
+    _write_minimal_xlsx(xlsx_path)
+    created = client.post(
+        "/api/projects",
+        json={"name": "Project AI External XLSX", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+
+    uploaded = client.post(
+        f"/api/projects/{project_id}/ai/context/files",
+        files={
+            "files": (
+                "budget.xlsx",
+                xlsx_path.read_bytes(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert uploaded.status_code == 200
+    source = uploaded.json()["sources"][0]
+    assert source["kind"] == "external_file"
+    assert source["status"] == "ready"
+    assert source["mimeType"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+    preview = client.get(f"/api/projects/{project_id}/ai/context/sources/{source['id']}/preview")
+    assert preview.status_code == 200
+    assert "Hoja: Resumen" in preview.json()["previewText"]
+    assert "B2: 1200" in preview.json()["previewText"]
+    assert preview.json()["metadata"]["format"] == "xlsx"
 
 
 def test_ai_usage_summary_starts_empty() -> None:
@@ -2788,6 +2942,64 @@ def test_ai_document_change_contract_updates_active_document_without_writing_dis
     assert payload["answer"] == "He actualizado el documento."
     assert payload["interactionType"] == "document_edit"
     assert document_path.read_text(encoding="utf-8") == "# Borrador\n"
+
+
+def test_ai_document_change_contract_updates_user_notes_without_project_document(tmp_path, monkeypatch) -> None:
+    from app.services.ai_service import openai_service
+
+    docs_root = tmp_path / "ai-notes-edit"
+    docs_root.mkdir()
+    (docs_root / "readme.md").write_text("# Proyecto\n", encoding="utf-8")
+    created = client.post(
+        "/api/projects",
+        json={"name": "AI Notes", "folderPath": str(docs_root), "icon": "folder", "iconColor": "#F37021"},
+    )
+    project_id = created.json()["id"]
+    client.put("/api/credentials/openai-key", json={"apiKey": "sk-test-secret-1234"})
+
+    def fake_plan(payload, context, rag, model=None):
+        assert context["activeDocument"]["id"] == "user-notes"
+        assert context["activeDocument"]["path"] == "Notas"
+        assert context["activeDocument"]["kind"] == "user_notes"
+        return {
+            "display": "bubble",
+            "uiPlacement": "document_bubble",
+            "interactionType": "document_edit",
+            "confidence": "high",
+            "executionScope": "direct_action",
+            "intentDecision": "execute_now",
+            "routeToAiTab": False,
+            "needsUserClarification": False,
+            "answer": "He actualizado las notas.",
+            "documentChange": {
+                "updatedMarkdown": "# Notas\n\n- Tarea revisada\n",
+                "summary": "Notas actualizadas.",
+            },
+            "task": None,
+            "operations": [],
+        }
+
+    monkeypatch.setattr(openai_service, "plan_interaction", fake_plan)
+
+    response = client.post(
+        f"/api/projects/{project_id}/ai/interactions",
+        json={
+            "projectId": project_id,
+            "documentId": "user-notes",
+            "prompt": "Reordena mis notas",
+            "activeMarkdown": "# Notas\n\n- Tarea\n",
+            "executionMode": "quick",
+            "mode": "document",
+            "clientMessageId": "client-notes-edit",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["updatedDocument"]["documentId"] == "user-notes"
+    assert payload["updatedDocument"]["markdown"] == "# Notas\n\n- Tarea revisada\n"
+    assert payload["operations"][0]["message"] == "Documento modificado: Notas"
+    assert (docs_root / "readme.md").read_text(encoding="utf-8") == "# Proyecto\n"
 
 
 def test_ai_quick_document_edit_executes_without_pending_intent(tmp_path, monkeypatch) -> None:

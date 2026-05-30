@@ -6,11 +6,12 @@ import { CreateDocumentDialog } from "../features/documents/CreateDocumentDialog
 import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
 import { AppSettingsDialog } from "../features/settings/AppSettingsDialog";
 import { BrandMark } from "../components/brand/BrandMark";
+import { CountdownCloseButton } from "../components/ui/CountdownCloseButton";
 import { GlobalTooltip } from "../components/ui/GlobalTooltip";
 import { DesktopLayout } from "../layouts/DesktopLayout";
 import {
   applyExternalMarkdownUpdate,
-  countWords,
+  applyLocalMarkdownEdit,
   createEmptyDocumentSession,
   createLoadedDocumentSession,
   shouldPersistDraft,
@@ -72,6 +73,7 @@ import {
   saveDocument,
   saveDocumentDraft,
 } from "../lib/api/documents";
+import { getUserNotes, saveUserNotes } from "../lib/api/notes";
 import { getExternalChanges, importExternalChanges, scanExternalChanges } from "../lib/api/externalChanges";
 import { autoRunProjectSync, changeProjectSyncMode, connectProjectGithub, enableProjectHistory, getProjectSyncStatus, publishProjectGithub, resolveProjectSyncConflict, scanProjectSync, verifyProjectGithubConnection } from "../lib/api/sync";
 import { APP_VERSION } from "../lib/appVersion";
@@ -91,7 +93,7 @@ import { openExternalUrl } from "../lib/runtime/links";
 import { isTauriRuntime, selectBrowserExportTarget, selectExportFilePath, withExportExtension } from "../lib/runtime/exportDialogs";
 import { getRuntimeServiceStatus, restartBackendService, updateBackendPortConfig, type BackendPortConfig, type RuntimeServicesStatus } from "../lib/runtime/services";
 import { applyAppearanceAttributes, useResolvedAppearanceTheme } from "../lib/theme/appearance";
-import { ArchiveRestore, FileWarning, RefreshCw, Trash2, X } from "lucide-react";
+import { AlertCircle, ArchiveRestore, FileWarning, Info, RefreshCw, Trash2, X } from "lucide-react";
 import {
   createFolder,
   createProjectDocument,
@@ -170,6 +172,8 @@ import {
   removeReleaseNotesTab,
   shouldOpenReleaseNotesAfterStartup,
 } from "./releaseNotesState";
+import { NOTES_TITLE, NOTES_UTILITY_TAB_ID, NOTES_WORKSPACE_TAB_ID } from "./notesState";
+import { getPromptContextSourceIds, getVisibleAiContextSources } from "./aiContextState";
 import {
   applyTreeOpenState,
   updateTreeOpenPathsForProject,
@@ -190,6 +194,7 @@ type DocumentFooterDialog =
 
 type UpdateState = "idle" | "checking" | "available" | "not-available" | "unsupported" | "downloading" | "installing" | "error";
 type GithubLoginState = "idle" | "starting" | "waiting" | "authenticated" | "error";
+type NotesSaveState = "idle" | "saving" | "error";
 const AI_CONVERSATION_TAB_ID = "project-ai-conversation" as const;
 const ACKNOWLEDGED_EXTERNAL_CHANGES_STORAGE_KEY = "knownext.acknowledgedExternalChanges";
 
@@ -223,6 +228,7 @@ export function App() {
   const aiConfigSaveSequence = useRef(0);
   const [aiConversationEvents, setAiConversationEvents] = useState<AiConversationEvent[]>([]);
   const [aiContextSources, setAiContextSources] = useState<AiContextSource[]>([]);
+  const [removingAiContextSourceIds, setRemovingAiContextSourceIds] = useState<Set<string>>(() => new Set());
   const [aiIndexStatus, setAiIndexStatus] = useState<AiIndexStatusResponse | null>(null);
   const [aiUsageSummary, setAiUsageSummary] = useState<AiUsageSummaryResponse | null>(null);
   const [aiPendingDelete, setAiPendingDelete] = useState<AiPendingDelete | null>(null);
@@ -235,6 +241,12 @@ export function App() {
   const [treeOpenPathsByProject, setTreeOpenPathsByProject] = useState<TreeOpenPathsByProject>({});
   const [openUtilityTabs, setOpenUtilityTabs] = useState<AppUtilityTabId[]>([]);
   const [activeUtilityTab, setActiveUtilityTab] = useState<AppUtilityTabId | null>(null);
+  const [notesMarkdown, setNotesMarkdown] = useState("");
+  const [notesSavedMarkdown, setNotesSavedMarkdown] = useState("");
+  const [notesUpdatedAt, setNotesUpdatedAt] = useState<string | null>(null);
+  const [notesLoaded, setNotesLoaded] = useState(false);
+  const [notesSaveState, setNotesSaveState] = useState<NotesSaveState>("idle");
+  const [notesLoadVersion, setNotesLoadVersion] = useState(0);
   const [lastRunAppVersion, setLastRunAppVersion] = useState<string | null>(null);
   const [lastSeenReleaseNotesVersion, setLastSeenReleaseNotesVersion] = useState<string | null>(null);
   const [configLoaded, setConfigLoaded] = useState(false);
@@ -281,7 +293,7 @@ export function App() {
       const localPreferences = readLocalAppPreferences();
       try {
         await waitForApiReady();
-        const [projectList, appConfig, auth, capabilities, loadedAiConfig, loadedExportTemplate, loadedExportTemplatePath, loadedAiUsageSummary] = await Promise.all([
+        const [projectList, appConfig, auth, capabilities, loadedAiConfig, loadedExportTemplate, loadedExportTemplatePath, loadedAiUsageSummary, loadedNotes] = await Promise.all([
           listProjects(),
           getAppConfig(),
           getAuthStatus(),
@@ -290,6 +302,7 @@ export function App() {
           getExportTemplate(),
           getExportTemplatePath(),
           loadAiUsageSummary("app.startup.aiUsageSummary"),
+          getUserNotes(),
         ]);
         const active = projectList.find((project) => project.active) ?? projectList[0];
         let projectTree: DocumentTreeNode[] = [];
@@ -351,6 +364,11 @@ export function App() {
         setExportTemplatePath(loadedExportTemplatePath);
         setAiConfig(loadedAiConfig);
         setAiUsageSummary(loadedAiUsageSummary);
+        setNotesMarkdown(loadedNotes.markdown);
+        setNotesSavedMarkdown(loadedNotes.markdown);
+        setNotesUpdatedAt(loadedNotes.updatedAt);
+        setNotesLoaded(true);
+        setNotesSaveState("idle");
         setConfigPersistenceAvailable(true);
         setTabsByProject(appConfig.tabsByProject);
         setTreeOpenPathsByProject(appConfig.treeOpenPathsByProject);
@@ -390,6 +408,11 @@ export function App() {
         setTreeOpenPathsByProject({});
         setOpenUtilityTabs([]);
         setActiveUtilityTab(null);
+        setNotesMarkdown("");
+        setNotesSavedMarkdown("");
+        setNotesUpdatedAt(null);
+        setNotesLoaded(true);
+        setNotesSaveState("error");
       } finally {
         setConfigLoaded(true);
       }
@@ -542,9 +565,11 @@ export function App() {
     if (!configLoaded || !activeProject) {
       setAiConversationEvents([]);
       setAiContextSources([]);
+      setRemovingAiContextSourceIds(new Set());
       setAiIndexStatus(null);
       return;
     }
+    setRemovingAiContextSourceIds(new Set());
     void refreshAiState(activeProject.id);
   }, [activeProject?.id, configLoaded]);
 
@@ -587,11 +612,19 @@ export function App() {
           keepalive: true,
         });
       }
+      if (notesLoaded && notesMarkdown !== notesSavedMarkdown) {
+        void fetch(`${API_BASE_URL}/api/notes`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ markdown: notesMarkdown }),
+          keepalive: true,
+        });
+      }
     }
 
     window.addEventListener("pagehide", handlePageHide);
     return () => window.removeEventListener("pagehide", handlePageHide);
-  }, [documentSessions]);
+  }, [documentSessions, notesLoaded, notesMarkdown, notesSavedMarkdown]);
 
   useEffect(() => {
     if (!configLoaded || !activeProject) return;
@@ -617,10 +650,11 @@ export function App() {
   }, [activeDocumentId, documentSessions]);
 
   useEffect(() => {
+    const activeSelectionDocumentId = activeUtilityTab === NOTES_UTILITY_TAB_ID ? NOTES_WORKSPACE_TAB_ID : activeDocumentId;
     setAiSelectionFocus((currentSelection) => (
-      currentSelection && currentSelection.documentId !== activeDocumentId ? null : currentSelection
+      currentSelection && currentSelection.documentId !== activeSelectionDocumentId ? null : currentSelection
     ));
-  }, [activeDocumentId]);
+  }, [activeDocumentId, activeUtilityTab]);
 
   useEffect(() => {
     if (!configLoaded) return;
@@ -649,6 +683,16 @@ export function App() {
 
     return () => window.clearTimeout(timeout);
   }, [documentSessions]);
+
+  useEffect(() => {
+    if (!notesLoaded || notesMarkdown === notesSavedMarkdown) return;
+
+    const timeout = window.setTimeout(() => {
+      void persistNotes(notesMarkdown);
+    }, 800);
+
+    return () => window.clearTimeout(timeout);
+  }, [notesLoaded, notesMarkdown, notesSavedMarkdown]);
 
   useEffect(() => {
     if (!configLoaded) return;
@@ -684,6 +728,12 @@ export function App() {
         readonly: true as const,
       }]
       : []),
+    {
+      kind: "notes" as const,
+      id: NOTES_WORKSPACE_TAB_ID,
+      name: NOTES_TITLE,
+      utilityTabId: NOTES_UTILITY_TAB_ID,
+    },
     ...tabs.map((tab) => ({ ...tab, kind: "document" as const })),
     ...imageTabs.map((tab) => ({ ...tab, kind: "image" as const })),
     ...referenceDocumentTabs.map((tab) => ({ ...tab, kind: "reference-document" as const, readonly: true as const })),
@@ -697,9 +747,21 @@ export function App() {
       }]
       : []),
   ], [activeProject, imageTabs, openUtilityTabs, referenceDocumentTabs, tabs]);
-  const activeTabId = activeUtilityTab === RELEASE_NOTES_UTILITY_TAB_ID ? RELEASE_NOTES_WORKSPACE_TAB_ID : activeReferenceDocumentId || activeImageId || activeDocumentId || (activeProject ? AI_CONVERSATION_TAB_ID : "");
+  const activeTabId = activeUtilityTab === RELEASE_NOTES_UTILITY_TAB_ID
+    ? RELEASE_NOTES_WORKSPACE_TAB_ID
+    : activeUtilityTab === NOTES_UTILITY_TAB_ID
+    ? NOTES_WORKSPACE_TAB_ID
+    : activeReferenceDocumentId || activeImageId || activeDocumentId || (activeProject ? AI_CONVERSATION_TAB_ID : NOTES_WORKSPACE_TAB_ID);
   const activeSession = activeDocumentId ? documentSessions[activeDocumentId] : undefined;
   const activeDocumentSyncStatus = activeDocumentId ? documentSyncStatuses[activeDocumentId] ?? null : null;
+  const visibleAiContextSources = useMemo(
+    () => getVisibleAiContextSources(aiContextSources, removingAiContextSourceIds),
+    [aiContextSources, removingAiContextSourceIds],
+  );
+  const promptContextSourceIds = useMemo(
+    () => getPromptContextSourceIds(aiContextSources, removingAiContextSourceIds),
+    [aiContextSources, removingAiContextSourceIds],
+  );
   useEffect(() => {
     if (!activeDocumentId || !activeSession?.document) return;
     lastDocumentContextRef.current = { id: activeDocumentId, path: activeSession.document.path };
@@ -962,6 +1024,8 @@ export function App() {
   }
 
   function handleCloseTab(tabId: string) {
+    if (tabId === NOTES_WORKSPACE_TAB_ID) return;
+
     if (tabId === RELEASE_NOTES_WORKSPACE_TAB_ID) {
       const nextOpenUtilityTabs = removeReleaseNotesTab(openUtilityTabs);
       setOpenUtilityTabs(nextOpenUtilityTabs);
@@ -997,6 +1061,10 @@ export function App() {
       return;
     }
     closeTabNow(documentId);
+  }
+
+  function handleReorderDocumentTabs(draggedTabId: string, targetTabId: string, placement: "before" | "after") {
+    setTabs((currentTabs) => reorderOpenDocumentTabs(currentTabs, draggedTabId, targetTabId, placement));
   }
 
   function closeTabNow(documentId: string) {
@@ -1036,6 +1104,18 @@ export function App() {
       setActiveUtilityTab(RELEASE_NOTES_UTILITY_TAB_ID);
       setActiveImageId("");
       setActiveReferenceDocumentId("");
+      setActiveTreeNodeId("");
+      return;
+    }
+
+    if (tabId === NOTES_WORKSPACE_TAB_ID) {
+      if (activeDocumentId && documentSessions[activeDocumentId]) {
+        void persistDraft(activeDocumentId, documentSessions[activeDocumentId]);
+      }
+      setActiveUtilityTab(NOTES_UTILITY_TAB_ID);
+      setActiveImageId("");
+      setActiveReferenceDocumentId("");
+      setActiveDocumentId("");
       setActiveTreeNodeId("");
       return;
     }
@@ -1088,15 +1168,14 @@ export function App() {
       if (!session) return currentSessions;
       return {
         ...currentSessions,
-        [documentId]: {
-          ...session,
-          markdown: nextMarkdown,
-          isDirty: nextMarkdown !== session.savedMarkdown,
-          saveState: "idle",
-          document: session.document ? { ...session.document, wordCount: countWords(nextMarkdown) } : session.document,
-        },
+        [documentId]: applyLocalMarkdownEdit(session, nextMarkdown),
       };
     });
+  }
+
+  function handleNotesMarkdownChange(nextMarkdown: string) {
+    setNotesMarkdown(nextMarkdown);
+    setNotesSaveState("idle");
   }
 
   function handleEditorOperationApplied(operationId: string) {
@@ -1105,6 +1184,11 @@ export function App() {
 
   function handleEditorOperationFailed(operation: MarkdownEditorExternalOperation) {
     setPendingEditorOperations((currentOperations) => currentOperations.filter((currentOperation) => currentOperation.id !== operation.id));
+    if (operation.documentId === NOTES_WORKSPACE_TAB_ID) {
+      setNotesMarkdown(operation.markdown);
+      void persistNotes(operation.markdown);
+      return;
+    }
     setDocumentSessions((currentSessions) => {
       const session = currentSessions[operation.documentId];
       if (!session) return currentSessions;
@@ -1117,29 +1201,35 @@ export function App() {
 
   async function handleSendAiPrompt(prompt: string, selectionFocus?: AiSelectionFocus | null, options?: AiPromptExecutionOptions) {
     if (!activeProject) return;
+    const hasNotesContext = activeUtilityTab === NOTES_UTILITY_TAB_ID;
     const hasDocumentContext = Boolean(activeDocumentId && activeSession?.document);
     if (hasDocumentContext && (activeSession?.conflictStatus === "disk-changed" || activeSession?.orphaned || activeSession?.conflictStatus === "missing")) {
       setAiBubble({ id: `local-${Date.now()}`, answer: "Resuelve el conflicto del documento antes de aplicar cambios con IA." });
       return;
     }
+    const interactionDocumentId = hasNotesContext ? NOTES_WORKSPACE_TAB_ID : hasDocumentContext ? activeDocumentId : null;
+    const interactionMarkdown = hasNotesContext ? notesMarkdown : hasDocumentContext ? activeSession?.markdown ?? "" : "";
+    const interactionSelection = hasNotesContext
+      ? selectionFocus?.documentId === NOTES_WORKSPACE_TAB_ID ? selectionFocus : null
+      : hasDocumentContext && selectionFocus?.documentId === activeDocumentId ? selectionFocus : null;
 
     setAiBubble(null);
     try {
       const response = await sendAiInteraction({
         projectId: activeProject.id,
-        documentId: hasDocumentContext ? activeDocumentId : null,
+        documentId: interactionDocumentId,
         prompt,
-        activeMarkdown: hasDocumentContext ? activeSession?.markdown ?? "" : "",
-        selectionFocus: hasDocumentContext && selectionFocus?.documentId === activeDocumentId ? selectionFocus : null,
+        activeMarkdown: interactionMarkdown,
+        selectionFocus: interactionSelection,
         clientContext: {
           lastDocumentId: lastDocumentContextRef.current.id,
           lastDocumentPath: lastDocumentContextRef.current.path,
         },
         executionMode: options?.executionMode ?? "quick",
         reasoningDepth: options?.reasoningDepth ?? "light",
-        mode: hasDocumentContext ? "document" : "project",
+        mode: interactionDocumentId ? "document" : "project",
         clientMessageId: `client-${Date.now()}`,
-        contextSourceIds: aiContextSources.filter((source) => source.status !== "error" && source.status !== "processing").map((source) => source.id),
+        contextSourceIds: promptContextSourceIds,
       });
       applyAiInteractionResponse(response);
       void refreshAiUsageSummary();
@@ -1202,11 +1292,23 @@ export function App() {
 
   async function handleRemoveAiContextSource(sourceId: string) {
     if (!activeProject) return;
+    setRemovingAiContextSourceIds((currentIds) => new Set(currentIds).add(sourceId));
     try {
       const response = await removeAiContextSource(activeProject.id, sourceId);
       setAiContextSources(response.sources);
+      setRemovingAiContextSourceIds((currentIds) => {
+        const nextIds = new Set(currentIds);
+        nextIds.delete(sourceId);
+        return nextIds;
+      });
     } catch (error) {
       showError(error, "No se pudo quitar la fuente del contexto IA.", { source: "app.aiContext.remove" });
+      await refreshAiContextSources(activeProject.id, { silent: true });
+      setRemovingAiContextSourceIds((currentIds) => {
+        const nextIds = new Set(currentIds);
+        nextIds.delete(sourceId);
+        return nextIds;
+      });
     }
   }
 
@@ -1335,6 +1437,24 @@ export function App() {
 
     if (response.updatedDocument) {
       const updated = response.updatedDocument;
+      if (updated.documentId === NOTES_WORKSPACE_TAB_ID) {
+        setNotesMarkdown(updated.markdown);
+        setAiAppliedChange({
+          documentId: NOTES_WORKSPACE_TAB_ID,
+          summary: updated.summary,
+        });
+        void persistNotes(updated.markdown);
+        setPendingEditorOperations((currentOperations) => [
+          ...currentOperations,
+          {
+            id: `ai-${response.interactionId}-${NOTES_WORKSPACE_TAB_ID}-${Date.now()}`,
+            documentId: NOTES_WORKSPACE_TAB_ID,
+            markdown: updated.markdown,
+            source: "ai",
+            addToHistory: true,
+          },
+        ]);
+      } else {
       const existingSession = documentSessions[updated.documentId];
       const targetNode = findNodeById(tree, updated.documentId);
       if (!existingSession) {
@@ -1356,6 +1476,16 @@ export function App() {
           })
           .catch((error) => showError(error, "No se pudo abrir el documento actualizado por IA.", { source: "app.aiUpdatedDocument" }));
       } else {
+        const updatedSession = applyLocalMarkdownEdit(existingSession, updated.markdown);
+        setDocumentSessions((currentSessions) => {
+          const session = currentSessions[updated.documentId];
+          if (!session) return currentSessions;
+          return {
+            ...currentSessions,
+            [updated.documentId]: applyLocalMarkdownEdit(session, updated.markdown),
+          };
+        });
+        void persistDraft(updated.documentId, updatedSession);
         setAiAppliedChange({
           documentId: updated.documentId,
           summary: updated.summary,
@@ -1370,6 +1500,7 @@ export function App() {
             addToHistory: true,
           },
         ]);
+      }
       }
     }
 
@@ -1394,7 +1525,8 @@ export function App() {
   }
 
   function handleDocumentSelectionChange(documentId: string, selection: MarkdownEditorSelection | null) {
-    if (documentId !== activeDocumentId) return;
+    const activeSelectionDocumentId = activeUtilityTab === NOTES_UTILITY_TAB_ID ? NOTES_WORKSPACE_TAB_ID : activeDocumentId;
+    if (documentId !== activeSelectionDocumentId) return;
     if (!selection) {
       setAiSelectionFocus((currentSelection) => (currentSelection?.documentId === documentId ? null : currentSelection));
       return;
@@ -1402,7 +1534,7 @@ export function App() {
 
     setAiSelectionFocus({
       documentId,
-      path: documentSessions[documentId]?.document?.path ?? null,
+      path: documentId === NOTES_WORKSPACE_TAB_ID ? NOTES_TITLE : documentSessions[documentId]?.document?.path ?? null,
       from: selection.from,
       to: selection.to,
       text: selection.text,
@@ -2869,7 +3001,7 @@ export function App() {
         aiBubble={aiBubble}
         aiAppliedChange={aiAppliedChange}
         aiSelectionFocus={aiSelectionFocus}
-        aiContextSources={aiContextSources}
+        aiContextSources={visibleAiContextSources}
         tree={tree}
         tabs={workspaceTabs}
         activeTabId={activeTabId}
@@ -2877,6 +3009,11 @@ export function App() {
         activeTreeNodeId={activeTreeNodeId}
         activeImageId={activeImageId}
         editorSessions={editorSessions}
+        notesMarkdown={notesMarkdown}
+        notesUpdatedAt={notesUpdatedAt}
+        notesEditorKey={`${NOTES_WORKSPACE_TAB_ID}-${notesLoadVersion}`}
+        notesLoaded={notesLoaded}
+        notesSaveState={notesSaveState}
         releaseNotesMarkdown={RELEASE_NOTES_MARKDOWN}
         activeDocument={activeSession?.document ?? null}
         activeMarkdown={activeSession?.markdown ?? ""}
@@ -2964,6 +3101,7 @@ export function App() {
         onSelectTreeNode={handleSelectTreeNode}
         onSelectTab={handleSelectTab}
         onCloseTab={handleCloseTab}
+        onReorderDocumentTabs={handleReorderDocumentTabs}
         onTreeContextAction={handleTreeContextAction}
         onExportDocument={handleExportDocument}
         onMoveTreeNode={handleMoveTreeNodeDrop}
@@ -2971,6 +3109,7 @@ export function App() {
         onBuildImageReference={handleBuildImageReference}
         onInsertImageIntoActiveDocument={(assetId) => void insertImageIntoActiveDocument(assetId)}
         onMarkdownChange={handleMarkdownChange}
+        onNotesMarkdownChange={handleNotesMarkdownChange}
         onEditorOperationApplied={handleEditorOperationApplied}
         onEditorOperationFailed={handleEditorOperationFailed}
         onDocumentSelectionChange={handleDocumentSelectionChange}
@@ -3192,6 +3331,24 @@ export function App() {
       return true;
     } catch (error) {
       showError(error, "No se pudo guardar el borrador interno del documento.");
+      return false;
+    }
+  }
+
+  async function persistNotes(markdown: string) {
+    setNotesSaveState("saving");
+    try {
+      const saved = await saveUserNotes(markdown);
+      setNotesSavedMarkdown(saved.markdown);
+      setNotesUpdatedAt(saved.updatedAt);
+      setNotesSaveState("idle");
+      return true;
+    } catch (error) {
+      setNotesSaveState("error");
+      showError(error, "No se pudieron guardar las notas automáticamente.", {
+        source: "app.notesPersistence",
+        suppressApiConnectionNotice: true,
+      });
       return false;
     }
   }
@@ -3476,24 +3633,119 @@ function normalizeProjectTabs(projectTabs: ProjectTabsConfig): ProjectTabsConfig
   };
 }
 
-function AppNoticeBanner({ notice, onClose }: { notice: AppNotice | null; onClose: () => void }) {
-  if (!notice) return null;
+function reorderOpenDocumentTabs(tabs: OpenDocumentTab[], draggedTabId: string, targetTabId: string, placement: "before" | "after") {
+  if (draggedTabId === targetTabId) return tabs;
+  const draggedTab = tabs.find((tab) => tab.id === draggedTabId);
+  if (!draggedTab || !tabs.some((tab) => tab.id === targetTabId)) return tabs;
 
-  const toneClasses = notice.tone === "error"
-    ? { border: "border-red-200", dot: "bg-red-600" }
-    : { border: "border-orange-200", dot: "bg-brand-orange" };
+  const remainingTabs = tabs.filter((tab) => tab.id !== draggedTabId);
+  const targetIndex = remainingTabs.findIndex((tab) => tab.id === targetTabId);
+  if (targetIndex < 0) return tabs;
+
+  const insertIndex = placement === "before" ? targetIndex : targetIndex + 1;
+  const nextTabs = [...remainingTabs];
+  nextTabs.splice(insertIndex, 0, draggedTab);
+  return areOpenDocumentTabsEqual(tabs, nextTabs) ? tabs : nextTabs;
+}
+
+function areOpenDocumentTabsEqual(left: OpenDocumentTab[], right: OpenDocumentTab[]) {
+  return left.length === right.length && left.every((tab, index) => tab.id === right[index]?.id && tab.name === right[index]?.name);
+}
+
+function AppNoticeBanner({ notice, onClose }: { notice: AppNotice | null; onClose: () => void }) {
+  const [renderedNotice, setRenderedNotice] = useState<AppNotice | null>(notice);
+  const [visible, setVisible] = useState(false);
+  const exitTimerRef = useRef<number | null>(null);
+  const closeRequestTimerRef = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (exitTimerRef.current !== null) window.clearTimeout(exitTimerRef.current);
+    if (closeRequestTimerRef.current !== null) window.clearTimeout(closeRequestTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    if (exitTimerRef.current !== null) {
+      window.clearTimeout(exitTimerRef.current);
+      exitTimerRef.current = null;
+    }
+    if (closeRequestTimerRef.current !== null) {
+      window.clearTimeout(closeRequestTimerRef.current);
+      closeRequestTimerRef.current = null;
+    }
+
+    if (notice) {
+      setRenderedNotice(notice);
+      setVisible(false);
+      const frame = window.requestAnimationFrame(() => setVisible(true));
+      return () => window.cancelAnimationFrame(frame);
+    }
+
+    setVisible(false);
+    exitTimerRef.current = window.setTimeout(() => {
+      setRenderedNotice(null);
+      exitTimerRef.current = null;
+    }, 220);
+  }, [notice]);
+
+  if (!renderedNotice) return null;
+
+  function handleCloseRequest() {
+    if (closeRequestTimerRef.current !== null) return;
+    setVisible(false);
+    closeRequestTimerRef.current = window.setTimeout(() => {
+      closeRequestTimerRef.current = null;
+      onClose();
+    }, 220);
+  }
+
+  const toneClasses = renderedNotice.tone === "error"
+    ? {
+        background: "bg-red-50",
+        border: "border-red-200",
+        icon: "text-red-600",
+        title: "text-red-950",
+        message: "text-red-700",
+        close: "text-red-700 hover:bg-red-100 hover:text-red-900",
+        Icon: AlertCircle,
+      }
+    : {
+        background: "bg-orange-50",
+        border: "border-orange-200",
+        icon: "text-brand-orange",
+        title: "text-orange-950",
+        message: "text-orange-800",
+        close: "text-orange-700 hover:bg-orange-100 hover:text-orange-900",
+        Icon: Info,
+      };
+  const NoticeIcon = toneClasses.Icon;
+  const noticeKey = `${renderedNotice.tone}:${renderedNotice.title}:${renderedNotice.message}`;
 
   return (
-    <div className={["fixed right-5 top-[70px] z-[100] w-[380px] rounded-lg border bg-white p-4 shadow-menu", toneClasses.border].join(" ")}>
+    <div
+      className={[
+        "fixed right-5 top-[70px] z-[100] w-[min(420px,calc(100vw-32px))] rounded-lg border p-4 shadow-menu transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
+        visible ? "translate-y-0 opacity-100" : "-translate-y-2 opacity-0",
+        toneClasses.background,
+        toneClasses.border,
+      ].join(" ")}
+      role="status"
+      aria-live="polite"
+    >
       <div className="flex items-start gap-3">
-        <span className={["mt-1 h-2 w-2 shrink-0 rounded-full", toneClasses.dot].join(" ")} />
+        <span className={["mt-0.5 shrink-0", toneClasses.icon].join(" ")}>
+          <NoticeIcon size={18} strokeWidth={2} />
+        </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-semibold text-ink-primary">{notice.title}</p>
-          <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{notice.message}</p>
+          <p className={["text-[11px] font-semibold", toneClasses.title].join(" ")}>{renderedNotice.title}</p>
+          <p className={["mt-1 text-[11px] leading-5", toneClasses.message].join(" ")}>{renderedNotice.message}</p>
         </div>
-        <button className="rounded px-2 py-1 text-[11px] text-ink-secondary hover:bg-panel" onClick={onClose}>
-          Cerrar
-        </button>
+        <CountdownCloseButton
+          ariaLabel="Cerrar aviso"
+          className={toneClasses.close}
+          durationMs={10_000}
+          onClose={handleCloseRequest}
+          resetKey={noticeKey}
+        />
       </div>
     </div>
   );

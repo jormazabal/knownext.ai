@@ -1,6 +1,6 @@
 import type { AppConfig, AppUtilityTabId } from "../types/domain";
 
-export const RELEASE_NOTES_UTILITY_TAB_ID: AppUtilityTabId = "release-notes";
+export const RELEASE_NOTES_UTILITY_TAB_ID = "release-notes" as const;
 export const RELEASE_NOTES_WORKSPACE_TAB_ID = "app-release-notes" as const;
 
 export function ensureReleaseNotesTab(openUtilityTabs: AppUtilityTabId[]) {

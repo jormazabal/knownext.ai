@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DocumentTabs } from "./DocumentTabs";
 
 const tabs = [
@@ -9,6 +9,8 @@ const tabs = [
 ];
 
 describe("DocumentTabs", () => {
+  afterEach(() => cleanup());
+
   it("shows a compact navigation opener when provided", async () => {
     const onOpenNavigation = vi.fn();
 
@@ -73,6 +75,34 @@ describe("DocumentTabs", () => {
     expect(onCloseTab).toHaveBeenCalledWith("app-release-notes");
   });
 
+  it("shows fixed utility tabs as icon-only tabs without close controls", () => {
+    const onCloseTab = vi.fn();
+
+    const { container } = render(
+      <DocumentTabs
+        tabs={[
+          { kind: "ai-conversation", id: "project-ai-conversation", name: "IA", readonly: true },
+          { kind: "notes", id: "user-notes", name: "Notas", utilityTabId: "notes" },
+          ...tabs,
+        ]}
+        activeTabId="user-notes"
+        dirtyDocumentIds={["user-notes"]}
+        onSelectTab={vi.fn()}
+        onCloseTab={onCloseTab}
+      />,
+    );
+
+    expect(screen.getByLabelText("IA")).toHaveTextContent("");
+    expect(screen.getByLabelText("IA")).toHaveAttribute("data-tooltip", "IA");
+    expect(screen.getByLabelText("Notas")).toHaveTextContent("");
+    expect(screen.getByLabelText("Notas")).toHaveAttribute("data-tooltip", "Notas");
+    expect(screen.queryByLabelText("Cerrar Notas")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Cerrar IA")).not.toBeInTheDocument();
+    expect(container.querySelector(".overflow-x-hidden [aria-label='IA']")).not.toBeInTheDocument();
+    expect(container.querySelector(".overflow-x-hidden [aria-label='Notas']")).not.toBeInTheDocument();
+    expect(onCloseTab).not.toHaveBeenCalled();
+  });
+
   it("shows reference documents as closable read-only tabs", async () => {
     const onSelectTab = vi.fn();
     const onCloseTab = vi.fn();
@@ -95,6 +125,51 @@ describe("DocumentTabs", () => {
     await userEvent.click(screen.getByLabelText("Cerrar Presupuesto.xlsx"));
 
     expect(onCloseTab).toHaveBeenCalledWith("ref-budget");
+  });
+
+  it("reorders document tabs with drag and drop without making fixed tabs draggable", () => {
+    const onReorderDocumentTabs = vi.fn();
+    const dataTransfer = createDataTransfer();
+    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 160,
+      bottom: 36,
+      width: 160,
+      height: 36,
+      toJSON: () => ({}),
+    });
+
+    try {
+      render(
+        <DocumentTabs
+          tabs={[
+            { kind: "ai-conversation", id: "project-ai-conversation", name: "IA", readonly: true },
+            { kind: "notes", id: "user-notes", name: "Notas", utilityTabId: "notes" },
+            ...tabs,
+          ]}
+          activeTabId="doc-a"
+          dirtyDocumentIds={[]}
+          onSelectTab={vi.fn()}
+          onCloseTab={vi.fn()}
+          onReorderDocumentTabs={onReorderDocumentTabs}
+        />,
+      );
+
+      expect(screen.getByLabelText("IA")).toHaveAttribute("draggable", "false");
+      expect(screen.getByLabelText("Notas")).toHaveAttribute("draggable", "false");
+      expect(screen.getByLabelText("Acta.md")).toHaveAttribute("draggable", "true");
+
+      fireEvent.dragStart(screen.getByLabelText("Esquemas.md"), { dataTransfer });
+      fireEvent.dragOver(screen.getByLabelText("Acta.md"), { dataTransfer, clientX: 120 });
+      fireEvent.drop(screen.getByLabelText("Acta.md"), { dataTransfer, clientX: 120 });
+
+      expect(onReorderDocumentTabs).toHaveBeenCalledWith("doc-b", "doc-a", "after");
+    } finally {
+      rectSpy.mockRestore();
+    }
   });
 
   it("shows overflow controls and a vertical tab list when open tabs do not fit", async () => {
@@ -154,3 +229,15 @@ describe("DocumentTabs", () => {
     }
   });
 });
+
+function createDataTransfer() {
+  const data = new Map<string, string>();
+  return {
+    effectAllowed: "",
+    dropEffect: "",
+    getData: vi.fn((type: string) => data.get(type) ?? ""),
+    setData: vi.fn((type: string, value: string) => {
+      data.set(type, value);
+    }),
+  } as unknown as DataTransfer;
+}
