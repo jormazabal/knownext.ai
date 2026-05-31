@@ -1,8 +1,5 @@
 import { APP_VERSION } from "../appVersion";
-
-type TauriWindow = Window & {
-  __TAURI_INTERNALS__?: unknown;
-};
+import { isTauriMobileRuntime, isTauriRuntime } from "../runtime/platform";
 
 export type BackendHealth = {
   app?: string;
@@ -20,28 +17,62 @@ export type BackendHealth = {
   appDataDir?: string;
 };
 
+const MOBILE_UNCONFIGURED_API_BASE_URL = "https://knownext-mobile-api-not-configured.invalid";
+const MOBILE_API_BASE_URL_STORAGE_KEY = "knownext.mobileApiBaseUrl";
+
 export let API_BASE_URL = resolveApiBaseUrl();
 let apiBaseUrlInitialized = false;
 
 function resolveApiBaseUrl() {
-  if (import.meta.env.VITE_API_BASE_URL) return import.meta.env.VITE_API_BASE_URL;
-  if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in (window as TauriWindow)) {
+  if (isTauriMobileRuntime() && storedMobileApiBaseUrl()) return storedMobileApiBaseUrl();
+  if (configuredApiBaseUrl()) return configuredApiBaseUrl();
+  if (isTauriMobileRuntime()) return MOBILE_UNCONFIGURED_API_BASE_URL;
+  if (isTauriRuntime()) {
     return "http://127.0.0.1:8765";
   }
   return "http://127.0.0.1:8766";
 }
 
 export function setApiBaseUrl(url: string) {
-  const normalized = url.replace(/\/+$/, "");
+  const normalized = normalizeApiBaseUrl(url);
   if (normalized) {
     API_BASE_URL = normalized;
     apiBaseUrlInitialized = true;
   }
 }
 
+export function getApiBaseUrl() {
+  return API_BASE_URL;
+}
+
+export function setPersistentMobileApiBaseUrl(url: string) {
+  const normalized = normalizeApiBaseUrl(url);
+  if (!normalized) throw new Error("Introduce la URL del backend móvil.");
+  localStorage.setItem(MOBILE_API_BASE_URL_STORAGE_KEY, normalized);
+  setApiBaseUrl(normalized);
+}
+
+export function clearPersistentMobileApiBaseUrl() {
+  localStorage.removeItem(MOBILE_API_BASE_URL_STORAGE_KEY);
+  API_BASE_URL = configuredApiBaseUrl() || MOBILE_UNCONFIGURED_API_BASE_URL;
+  apiBaseUrlInitialized = true;
+}
+
+export function isMobileApiBaseUrlConfigured() {
+  return Boolean(storedMobileApiBaseUrl() || configuredApiBaseUrl());
+}
+
 export async function initializeApiBaseUrl() {
   if (apiBaseUrlInitialized) return API_BASE_URL;
-  if (isTauriRuntime()) {
+  if (isTauriMobileRuntime() && storedMobileApiBaseUrl()) {
+    setApiBaseUrl(storedMobileApiBaseUrl());
+    return API_BASE_URL;
+  }
+  if (configuredApiBaseUrl()) {
+    apiBaseUrlInitialized = true;
+    return API_BASE_URL;
+  }
+  if (isTauriRuntime() && !isTauriMobileRuntime()) {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       setApiBaseUrl(await invoke<string>("get_runtime_api_base_url"));
@@ -242,9 +273,15 @@ function delay(ms: number) {
 export function getApiErrorMessage(error: unknown, fallback: string) {
   if (error instanceof ApiError) return typeof error.detail === "string" ? error.detail : error.message;
   if (error instanceof DOMException && error.name === "AbortError") {
+    if (isTauriMobileRuntime()) {
+      return `La API de KnowNext.ai para Android no respondió a tiempo (${API_BASE_URL}). Comprueba el endpoint del backend móvil.`;
+    }
     return "La API local no respondió a tiempo. Comprueba que el backend esté en ejecución.";
   }
   if (error instanceof TypeError) {
+    if (isTauriMobileRuntime()) {
+      return `No se pudo conectar con la API de KnowNext.ai para Android (${API_BASE_URL}). Revisa el endpoint del backend móvil y que el teléfono esté en la misma red.`;
+    }
     return `No se pudo conectar con la API local (${API_BASE_URL}). Comprueba que el backend correspondiente esté en ejecución.`;
   }
   if (error instanceof Error) return error.message;
@@ -256,6 +293,8 @@ export function isApiConnectionError(error: unknown) {
 }
 
 export function expectedBackendProfile() {
+  if (configuredBackendProfile()) return configuredBackendProfile();
+  if (isTauriMobileRuntime()) return "mobile";
   return isTauriRuntime() ? "desktop" : "web-dev";
 }
 
@@ -275,7 +314,38 @@ export function validateBackendHealth(health: BackendHealth) {
   }
 }
 
-function isTauriRuntime() {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in (window as TauriWindow);
+function configuredApiBaseUrl() {
+  const value = import.meta.env.VITE_API_BASE_URL?.trim();
+  return value ? normalizeApiBaseUrl(value) : "";
+}
+
+function configuredBackendProfile() {
+  return import.meta.env.VITE_EXPECTED_BACKEND_PROFILE?.trim() || "";
+}
+
+function storedMobileApiBaseUrl() {
+  if (typeof localStorage === "undefined") return "";
+  return normalizeApiBaseUrl(localStorage.getItem(MOBILE_API_BASE_URL_STORAGE_KEY) ?? "");
+}
+
+function normalizeApiBaseUrl(url: string) {
+  const trimmed = url.trim().replace(/\/+$/, "");
+  if (!trimmed) return "";
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error("El endpoint debe ser una URL completa, por ejemplo http://192.168.1.20:8775.");
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("El endpoint debe empezar por http:// o https://.");
+  }
+
+  parsed.pathname = parsed.pathname.replace(/\/+$/, "");
+  parsed.search = "";
+  parsed.hash = "";
+  return parsed.toString().replace(/\/+$/, "");
 }
 

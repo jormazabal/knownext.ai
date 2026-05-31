@@ -121,7 +121,7 @@ export function ExternalChangesDrawer({
   return (
     <div className="knownext-modal-overlay fixed inset-0 z-[80] flex items-center justify-center bg-black/20 px-4 py-8" onMouseDown={onClose}>
       <section
-        className="relative flex max-h-[min(820px,calc(100vh-56px))] w-[min(920px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
+        className="relative flex max-h-[min(820px,calc(100dvh-56px))] w-[min(920px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
         role="dialog"
         aria-modal="true"
         aria-labelledby="protection-history-title"

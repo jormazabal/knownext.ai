@@ -15,7 +15,9 @@ Use this skill for every version bump, GitHub Release, updater change, installer
 - `backend/tests/test_api.py` must expect the same version returned by `/health`.
 - The README manual installer link must use `releases/latest/download/KnowNext.ai_<version>_x64-setup.exe`.
 - GitHub Releases must include `KnowNext.ai_<version>_x64-setup.exe`, `KnowNext.ai_<version>_x64_en-US.msi`, both `.sig` files, and `latest.json`.
+- Android private APK releases must include `KnowNext.ai-android-arm64-v<version>.apk` and `android-latest.json`.
 - The published updater manifest must resolve to the new version and point `windows-x86_64.url` to the MSI artifact.
+- The published Android manifest must resolve to the new version, declare `applicationId=ai.knownext.mobile`, and point to the Android APK asset with the matching SHA-256.
 - Do not publish a release from an unclean or unrelated worktree.
 - Do not change the Tauri updater public key unless the maintainer explicitly accepts the migration impact.
 
@@ -23,6 +25,10 @@ Use this skill for every version bump, GitHub Release, updater change, installer
 
 - `TAURI_SIGNING_PRIVATE_KEY`
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
 
 Optional hardening:
 
@@ -58,7 +64,9 @@ Invoke-WebRequest -UseBasicParsing -Method Head -Uri "https://github.com/jormaza
 - The release is not left as a draft.
 - `latest.json` returns the new version.
 - `latest.json` points Windows updates to `KnowNext.ai_<version>_x64_en-US.msi`.
+- `android-latest.json` returns the new version and points Android updates to `KnowNext.ai-android-arm64-v<version>.apk`.
 - The README download URL returns HTTP 200.
+- The README Android APK URL returns HTTP 200.
 - A previously installed per-user version can update without requiring administrator permissions and without deleting app data.
 
 ## Mistakes To Avoid

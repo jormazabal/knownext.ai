@@ -5,10 +5,23 @@
 - [ ] Confirm the loading layer uses a quiet white/light-panel treatment with orange progress accent and no fake project/document placeholders.
 - [ ] Confirm the transition from loading to the resolved app state is smooth, with no flash of Proyecto Alpha, sample documents, stale tabs, or partially initialized controls.
 - [ ] Start the app with a clean profile and no `projects.json` projects, then confirm the sidebar shows no project selector dropdown.
+- [ ] Install the Windows build over a disposable clean Windows profile and confirm no project, credential, note, draft, log, or AI cache data is present before first launch.
+- [ ] Update an existing Windows installation with real test data and confirm `projects.json`, `config.json`, `credentials.json`, notes, drafts, and managed project folders are preserved in the same Tauri app data directory.
+- [ ] Start a `desktop` backend with a legacy `%APPDATA%/KnowNext.ai` profile and confirm legacy recovery imports real user data into the current desktop app data directory.
+- [ ] Start `web-dev` or `mobile` with the same legacy directory available and confirm no desktop projects, config, credentials, notes, or seed data are imported.
 - [ ] In the no-projects state, confirm the sidebar shows `Añadir primer proyecto` with a plus icon and explanatory copy about creating the first project before working with the application.
 - [ ] Confirm pressing `Añadir primer proyecto` opens the same new-project flow used by `Nuevo proyecto`.
 - [ ] Restart with no projects and confirm the first-project empty state is restored instead of seeding sample projects.
 - [ ] Confirm no mock projects, mock documents, mock users, mock history, or mock AI answers appear in the normal application runtime.
+- [ ] For Android builds, start `pnpm backend:mobile`, compile with `VITE_API_BASE_URL`, install the APK, and confirm startup resolves against a compatible `profile=mobile` backend rather than `127.0.0.1:1420`.
+- [ ] For Android clean-install testing, use an empty mobile backend `KNOWNEXT_APP_DATA_DIR`; confirm a first install shows no projects after connecting.
+- [ ] For Android private update testing, install the previous signed APK, configure a backend endpoint, trigger `Buscar actualizaciones`, grant install permission if Android asks for it, install the new APK, and confirm the saved endpoint remains configured.
+- [ ] Confirm Android rejects an update APK with the wrong package id, lower/equal `versionCode`, wrong SHA-256, or different signing certificate before opening the system installer.
+- [ ] Build a shareable Android APK without `VITE_API_BASE_URL` and confirm the APK opens the backend connection screen instead of embedding a workstation endpoint.
+- [ ] Before sharing any APK/AAB, scan the artifact and frontend bundle for `sk-`, `OPENAI_API_KEY`, `VITE_OPENAI`, local credential files, `projects.json`, `notes.json`, `drafts/`, `logs/`, and seed project names.
+- [ ] On Android, block or change the packaged backend URL and confirm the startup connection screen accepts a new endpoint, validates `/health`, persists it, and then loads the workspace.
+- [ ] Update Android with `adb install -r` or the store update flow and confirm the saved backend endpoint remains configured while backend-held project data is unchanged.
+- [ ] On Android, confirm the app opens as native Tauri, renders the project/document workspace, and the backend receives `/health`, `/api/projects`, `/api/config`, and document tree requests.
 - [ ] If `projects.json` contains only legacy seed projects (`Proyecto Alpha`, `Proyecto Beta`, `Proyecto Gamma`), restart the backend and confirm the app either recovers real projects from a valid `projects.json.corrupt-*` backup or shows the first-project empty state.
 - [ ] Confirm the window top bar shows KnowNext.ai and simulated window controls.
 - [ ] In the packaged Tauri app, resize the application freely from each window edge and corner and confirm the workspace follows the window without clipping critical controls.

@@ -6,6 +6,8 @@ describe("requestJson", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
+    localStorage.clear();
+    delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   });
 
   it("honors a custom request timeout", async () => {
@@ -33,6 +35,42 @@ describe("requestJson", () => {
 
     await vi.advanceTimersByTimeAsync(18_000);
     await expect(request).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
+describe("Android API endpoint configuration", () => {
+  afterEach(() => {
+    vi.resetModules();
+    vi.restoreAllMocks();
+    localStorage.clear();
+    delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  });
+
+  it("uses the saved mobile endpoint before the build-time endpoint", async () => {
+    vi.resetModules();
+    Object.defineProperty(window, "__TAURI_INTERNALS__", { value: {}, configurable: true });
+    Object.defineProperty(window.navigator, "userAgent", { value: "Mozilla/5.0 Android", configurable: true });
+    localStorage.setItem("knownext.mobileApiBaseUrl", "http://192.168.0.24:8775/");
+
+    const client = await import("./client");
+
+    expect(client.getApiBaseUrl()).toBe("http://192.168.0.24:8775");
+    expect(client.expectedBackendProfile()).toBe("mobile");
+    expect(client.isMobileApiBaseUrlConfigured()).toBe(true);
+  });
+
+  it("validates and normalizes saved mobile endpoints", async () => {
+    vi.resetModules();
+    Object.defineProperty(window, "__TAURI_INTERNALS__", { value: {}, configurable: true });
+    Object.defineProperty(window.navigator, "userAgent", { value: "Mozilla/5.0 Android", configurable: true });
+
+    const client = await import("./client");
+
+    client.setPersistentMobileApiBaseUrl(" http://10.0.2.2:8775/// ");
+
+    expect(client.getApiBaseUrl()).toBe("http://10.0.2.2:8775");
+    expect(localStorage.getItem("knownext.mobileApiBaseUrl")).toBe("http://10.0.2.2:8775");
+    expect(() => client.setPersistentMobileApiBaseUrl("ftp://10.0.2.2:8775")).toThrow("http:// o https://");
   });
 });
 

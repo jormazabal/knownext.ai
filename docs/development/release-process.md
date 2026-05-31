@@ -42,6 +42,10 @@ Required GitHub Actions secrets:
 
 - `TAURI_SIGNING_PRIVATE_KEY`
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
 
 The production updater key is kept outside the repository at:
 
@@ -53,6 +57,8 @@ The password file is encrypted with Windows DPAPI for the current user. Do not c
 The public updater key is configured in `apps/desktop/src-tauri/tauri.conf.json`. If the production key is regenerated, update `plugins.updater.pubkey`, update the GitHub secrets, and rebuild a release from a clean commit.
 
 The Windows updater currently prefers the MSI artifact when generating `latest.json`. Keep the NSIS setup executable as the manual installer linked from the README and GitHub Releases.
+
+Android private APK updates use a separate `android-latest.json` manifest. The APK must keep `applicationId=ai.knownext.mobile`, use the same Android signing certificate as previous private APKs, and publish a strictly increasing `versionCode`.
 
 Distribution contract:
 

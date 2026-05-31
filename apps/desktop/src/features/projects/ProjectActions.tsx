@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { AiUsageCapabilitySummary, AiUsageModelSummary, AiUsageSummaryResponse, AppearanceConfig, AuthStatus } from "../../types/domain";
 
 type ProjectActionsProps = {
@@ -51,6 +52,7 @@ export function ProjectActions({
   const text = projectActionsCopy[language];
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
+  const narrowActionsMode = useNarrowActionsMode();
 
   const accountName = authStatus.user?.name || authStatus.user?.login || text.noGithubAccount;
   const accountInitials = getInitials(accountName);
@@ -107,6 +109,7 @@ export function ProjectActions({
           isCheckingForUpdates={isCheckingForUpdates}
           accountMenuOpen={accountMenuOpen}
           placement="right"
+          narrowMode={narrowActionsMode}
           onRunAction={runAccountAction}
           onCloseAccountMenu={() => setAccountMenuOpen(false)}
           onLoginGithub={onLoginGithub}
@@ -147,6 +150,7 @@ export function ProjectActions({
           isCheckingForUpdates={isCheckingForUpdates}
           accountMenuOpen={accountMenuOpen}
           placement="center"
+          narrowMode={narrowActionsMode}
           onRunAction={runAccountAction}
           onCloseAccountMenu={() => setAccountMenuOpen(false)}
           onLoginGithub={onLoginGithub}
@@ -173,6 +177,7 @@ function AccountActionsMenu({
   isCheckingForUpdates,
   accountMenuOpen,
   placement,
+  narrowMode,
   onRunAction,
   onCloseAccountMenu,
   onLoginGithub,
@@ -193,6 +198,7 @@ function AccountActionsMenu({
   isCheckingForUpdates: boolean;
   accountMenuOpen: boolean;
   placement: "center" | "right";
+  narrowMode: boolean;
   onRunAction: (action: () => void) => void;
   onCloseAccountMenu: () => void;
   onLoginGithub: () => void;
@@ -204,6 +210,7 @@ function AccountActionsMenu({
 }) {
   const [usagePanelOpen, setUsagePanelOpen] = useState(false);
   const [usagePanelPinned, setUsagePanelPinned] = useState(false);
+  const [usageDialogOpen, setUsageDialogOpen] = useState(false);
   const usageOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const usageCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const usagePanelVisible = usagePanelOpen || usagePanelPinned;
@@ -219,6 +226,7 @@ function AccountActionsMenu({
     if (accountMenuOpen) return;
     setUsagePanelOpen(false);
     setUsagePanelPinned(false);
+    setUsageDialogOpen(false);
     cancelUsageTimers();
   }, [accountMenuOpen]);
 
@@ -265,7 +273,75 @@ function AccountActionsMenu({
     cancelUsageTimers();
     setUsagePanelOpen(false);
     setUsagePanelPinned(false);
+    setUsageDialogOpen(false);
     onCloseAccountMenu();
+  }
+
+  function openUsageDialog() {
+    cancelUsageTimers();
+    setUsageDialogOpen(true);
+  }
+
+  if (narrowMode) {
+    if (!accountMenuOpen) return null;
+
+    if (usageDialogOpen) {
+      return renderProjectActionsPortal(
+        <AiUsagePanel
+          variant="dialog"
+          text={text}
+          language={language}
+          summary={aiUsageSummary}
+          onClose={closeUsagePanelAndMenu}
+          onPin={() => {}}
+          onHoverEnter={() => {}}
+          onHoverLeave={() => {}}
+        />,
+      );
+    }
+
+    return renderProjectActionsPortal(
+      <div className="fixed inset-0 z-[160] flex items-end justify-center bg-black/20 px-4 py-4" role="presentation" onMouseDown={onCloseAccountMenu}>
+        <section
+          className="flex max-h-[min(560px,calc(100dvh-32px))] w-[min(420px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="account-actions-title"
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-line px-4">
+            <h2 id="account-actions-title" className="text-[13px] font-semibold text-ink-primary">{text.accountOptionsTitle}</h2>
+            <button className="grid h-8 w-8 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange" aria-label={text.accountOptionsClose} onClick={onCloseAccountMenu}>
+              <X size={16} />
+            </button>
+          </header>
+          <div className="min-h-0 flex-1 overflow-y-auto p-2">
+            <AccountActionsMenuContent
+              className="rounded-md border border-line bg-white p-1"
+              appVersion={appVersion}
+              text={text}
+              authStatus={authStatus}
+              accountName={accountName}
+              accountInitials={accountInitials}
+              orphanDraftCount={orphanDraftCount}
+              isCheckingForUpdates={isCheckingForUpdates}
+              usagePanelVisible={false}
+              narrowMode
+              onRunAction={onRunAction}
+              onLoginGithub={onLoginGithub}
+              onLogout={onLogout}
+              onOpenAppSettings={onOpenAppSettings}
+              onOpenRecoverableDrafts={onOpenRecoverableDrafts}
+              onCheckForUpdates={onCheckForUpdates}
+              onOpenReleaseNotes={onOpenReleaseNotes}
+              onOpenAiUsage={openUsageDialog}
+              onScheduleUsageOpen={scheduleUsageOpen}
+              onScheduleUsageClose={scheduleUsageClose}
+            />
+          </div>
+        </section>
+      </div>,
+    );
   }
 
   return (
@@ -277,94 +353,31 @@ function AccountActionsMenu({
       ].join(" ")}
     >
       <div className="relative" onMouseEnter={cancelUsageTimers} onMouseLeave={scheduleUsageClose}>
-      <div className="rounded-md border border-line bg-white p-1 shadow-menu">
-        <div className="px-2 py-2">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex min-w-0 items-start gap-2">
-              <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-brand-hover text-[11px] font-semibold text-brand-orange">
-                {accountInitials}
-              </span>
-              <div className="min-w-0">
-                <p className="truncate text-[11px] font-semibold text-ink-primary">{accountName}</p>
-                <p className="mt-0.5 text-[10px] leading-4 text-ink-secondary">
-                  {authStatus.isAuthenticated ? text.githubConnectedStatus : text.githubBlockedStatus}
-                </p>
-              </div>
-            </div>
-            <span className="shrink-0 rounded border border-line bg-panel px-1.5 py-0.5 text-[10px] font-medium text-ink-secondary">
-              v{appVersion}
-            </span>
-          </div>
-          <div className="mt-2 flex items-center gap-2">
-            {authStatus.isAuthenticated ? (
-              <button
-                className="inline-flex h-7 items-center gap-1.5 rounded border border-line px-2 text-[10px] font-semibold text-ink-secondary hover:bg-red-50 hover:text-red-700"
-                onClick={() => onRunAction(onLogout)}
-              >
-                <LogOut size={13} />
-                <span>{text.logout}</span>
-              </button>
-            ) : (
-              <button
-                className="inline-flex h-7 items-center gap-1.5 rounded bg-brand-orange px-2 text-[10px] font-semibold text-white hover:bg-brand-dark"
-                onClick={() => onRunAction(onLoginGithub)}
-              >
-                <UserPlus size={13} />
-                <span>{text.connectGithub}</span>
-              </button>
-            )}
-          </div>
-        </div>
-        <div className="my-1 border-t border-line" />
-        <button
-          className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
-          onClick={() => onRunAction(onOpenAppSettings)}
-        >
-          <Settings size={14} />
-          <span>{text.appSettings}</span>
-        </button>
-        <button
-          className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
-          onClick={() => onRunAction(onOpenRecoverableDrafts)}
-        >
-          <FileClock size={14} />
-          <span className="min-w-0 flex-1 truncate">{text.recoverableDrafts}</span>
-          {orphanDraftCount > 0 ? (
-            <span className="rounded bg-brand-orange px-1.5 py-0.5 text-[10px] font-semibold text-white">
-              {orphanDraftCount}
-            </span>
-          ) : null}
-        </button>
-        <div className="relative" onMouseEnter={scheduleUsageOpen} onMouseLeave={scheduleUsageClose}>
-          <button
-            className={`flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover ${usagePanelVisible ? "bg-brand-hover" : ""}`}
-            aria-haspopup="dialog"
-            onFocus={scheduleUsageOpen}
-          >
-            <BarChart3 size={14} />
-            <span className="min-w-0 flex-1 truncate">{text.aiUsage}</span>
-            <ChevronRight size={13} className="text-ink-secondary" />
-          </button>
-        </div>
-        <button
-          className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
-          onClick={() => onRunAction(onOpenReleaseNotes)}
-        >
-          <ScrollText size={14} />
-          <span>{text.releaseNotes}</span>
-        </button>
-        <div className="my-1 border-t border-line" />
-        <button
-          className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={isCheckingForUpdates}
-          onClick={() => onRunAction(onCheckForUpdates)}
-        >
-          <RefreshCw size={14} className={isCheckingForUpdates ? "animate-spin" : ""} />
-          <span>{isCheckingForUpdates ? text.checkingUpdates : text.checkUpdates}</span>
-        </button>
-      </div>
+      <AccountActionsMenuContent
+        className="rounded-md border border-line bg-white p-1 shadow-menu"
+        appVersion={appVersion}
+        text={text}
+        authStatus={authStatus}
+        accountName={accountName}
+        accountInitials={accountInitials}
+        orphanDraftCount={orphanDraftCount}
+        isCheckingForUpdates={isCheckingForUpdates}
+        usagePanelVisible={usagePanelVisible}
+        narrowMode={false}
+        onRunAction={onRunAction}
+        onLoginGithub={onLoginGithub}
+        onLogout={onLogout}
+        onOpenAppSettings={onOpenAppSettings}
+        onOpenRecoverableDrafts={onOpenRecoverableDrafts}
+        onCheckForUpdates={onCheckForUpdates}
+        onOpenReleaseNotes={onOpenReleaseNotes}
+        onOpenAiUsage={openUsageDialog}
+        onScheduleUsageOpen={scheduleUsageOpen}
+        onScheduleUsageClose={scheduleUsageClose}
+      />
       {usagePanelVisible ? (
         <AiUsagePanel
+          variant="flyout"
           text={text}
           language={language}
           summary={aiUsageSummary}
@@ -379,7 +392,142 @@ function AccountActionsMenu({
   );
 }
 
+function AccountActionsMenuContent({
+  className,
+  appVersion,
+  text,
+  authStatus,
+  accountName,
+  accountInitials,
+  orphanDraftCount,
+  isCheckingForUpdates,
+  usagePanelVisible,
+  narrowMode,
+  onRunAction,
+  onLoginGithub,
+  onLogout,
+  onOpenAppSettings,
+  onOpenRecoverableDrafts,
+  onCheckForUpdates,
+  onOpenReleaseNotes,
+  onOpenAiUsage,
+  onScheduleUsageOpen,
+  onScheduleUsageClose,
+}: {
+  className: string;
+  appVersion: string;
+  text: ProjectActionsCopy;
+  authStatus: AuthStatus;
+  accountName: string;
+  accountInitials: string;
+  orphanDraftCount: number;
+  isCheckingForUpdates: boolean;
+  usagePanelVisible: boolean;
+  narrowMode: boolean;
+  onRunAction: (action: () => void) => void;
+  onLoginGithub: () => void;
+  onLogout: () => void;
+  onOpenAppSettings: () => void;
+  onOpenRecoverableDrafts: () => void;
+  onCheckForUpdates: () => void;
+  onOpenReleaseNotes: () => void;
+  onOpenAiUsage: () => void;
+  onScheduleUsageOpen: () => void;
+  onScheduleUsageClose: () => void;
+}) {
+  return (
+    <div className={className}>
+      <div className="px-2 py-2">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-2">
+            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-brand-hover text-[11px] font-semibold text-brand-orange">
+              {accountInitials}
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-[11px] font-semibold text-ink-primary">{accountName}</p>
+              <p className="mt-0.5 text-[10px] leading-4 text-ink-secondary">
+                {authStatus.isAuthenticated ? text.githubConnectedStatus : text.githubBlockedStatus}
+              </p>
+            </div>
+          </div>
+          <span className="shrink-0 rounded border border-line bg-panel px-1.5 py-0.5 text-[10px] font-medium text-ink-secondary">
+            v{appVersion}
+          </span>
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          {authStatus.isAuthenticated ? (
+            <button
+              className="inline-flex h-7 items-center gap-1.5 rounded border border-line px-2 text-[10px] font-semibold text-ink-secondary hover:bg-red-50 hover:text-red-700"
+              onClick={() => onRunAction(onLogout)}
+            >
+              <LogOut size={13} />
+              <span>{text.logout}</span>
+            </button>
+          ) : (
+            <button
+              className="inline-flex h-7 items-center gap-1.5 rounded bg-brand-orange px-2 text-[10px] font-semibold text-white hover:bg-brand-dark"
+              onClick={() => onRunAction(onLoginGithub)}
+            >
+              <UserPlus size={13} />
+              <span>{text.connectGithub}</span>
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="my-1 border-t border-line" />
+      <button
+        className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
+        onClick={() => onRunAction(onOpenAppSettings)}
+      >
+        <Settings size={14} />
+        <span>{text.appSettings}</span>
+      </button>
+      <button
+        className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
+        onClick={() => onRunAction(onOpenRecoverableDrafts)}
+      >
+        <FileClock size={14} />
+        <span className="min-w-0 flex-1 truncate">{text.recoverableDrafts}</span>
+        {orphanDraftCount > 0 ? (
+          <span className="rounded bg-brand-orange px-1.5 py-0.5 text-[10px] font-semibold text-white">
+            {orphanDraftCount}
+          </span>
+        ) : null}
+      </button>
+      <div className="relative" onMouseEnter={narrowMode ? undefined : onScheduleUsageOpen} onMouseLeave={narrowMode ? undefined : onScheduleUsageClose}>
+        <button
+          className={`flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover ${usagePanelVisible ? "bg-brand-hover" : ""}`}
+          aria-haspopup="dialog"
+          onClick={narrowMode ? onOpenAiUsage : undefined}
+          onFocus={narrowMode ? undefined : onScheduleUsageOpen}
+        >
+          <BarChart3 size={14} />
+          <span className="min-w-0 flex-1 truncate">{text.aiUsage}</span>
+          <ChevronRight size={13} className="text-ink-secondary" />
+        </button>
+      </div>
+      <button
+        className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
+        onClick={() => onRunAction(onOpenReleaseNotes)}
+      >
+        <ScrollText size={14} />
+        <span>{text.releaseNotes}</span>
+      </button>
+      <div className="my-1 border-t border-line" />
+      <button
+        className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
+        disabled={isCheckingForUpdates}
+        onClick={() => onRunAction(onCheckForUpdates)}
+      >
+        <RefreshCw size={14} className={isCheckingForUpdates ? "animate-spin" : ""} />
+        <span>{isCheckingForUpdates ? text.checkingUpdates : text.checkUpdates}</span>
+      </button>
+    </div>
+  );
+}
+
 function AiUsagePanel({
+  variant = "flyout",
   text,
   language,
   summary,
@@ -388,6 +536,7 @@ function AiUsagePanel({
   onHoverEnter,
   onHoverLeave,
 }: {
+  variant?: "flyout" | "dialog";
   text: ProjectActionsCopy;
   language: AppearanceConfig["language"];
   summary: AiUsageSummaryResponse | null;
@@ -404,24 +553,14 @@ function AiUsagePanel({
   const totals = getUsageTotals(summary);
   const hasUsage = totals.interactions > 0 || totals.totalTokens > 0 || totals.estimatedCost > 0;
 
-  return (
-    <div
-      onMouseEnter={onHoverEnter}
-      onMouseLeave={onHoverLeave}
-      onMouseDown={(event) => {
-        event.stopPropagation();
-        onPin();
-      }}
-      className={[
-        "absolute bottom-0 left-[calc(100%-1px)] z-[150] w-[360px] rounded-md border border-line bg-white p-3 shadow-menu",
-      ].join(" ")}
-    >
+  const content = (
+    <>
       <div className="flex items-start gap-3">
         <div className="grid h-8 w-8 shrink-0 place-items-center rounded border border-brand-orange/20 bg-brand-hover text-brand-orange">
           <BarChart3 size={15} />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-[12px] font-semibold text-ink-primary">{text.aiUsageTitle}</p>
+          <p id={variant === "dialog" ? "ai-usage-dialog-title" : undefined} className="text-[12px] font-semibold text-ink-primary">{text.aiUsageTitle}</p>
           <p className="mt-0.5 text-[10px] font-medium text-ink-secondary">{monthLabel}</p>
         </div>
         <button
@@ -489,6 +628,38 @@ function AiUsagePanel({
           <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{text.aiUsageEmptyDetail}</p>
         </div>
       )}
+    </>
+  );
+
+  if (variant === "dialog") {
+    return (
+      <div className="fixed inset-0 z-[170] flex items-end justify-center bg-black/20 px-4 py-4" role="presentation" onMouseDown={onClose}>
+        <section
+          className="flex max-h-[min(560px,calc(100dvh-32px))] w-[min(420px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="ai-usage-dialog-title"
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <div className="min-h-0 flex-1 overflow-y-auto p-3">{content}</div>
+        </section>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      onMouseEnter={onHoverEnter}
+      onMouseLeave={onHoverLeave}
+      onMouseDown={(event) => {
+        event.stopPropagation();
+        onPin();
+      }}
+      className={[
+        "absolute bottom-0 left-[calc(100%-1px)] z-[150] w-[360px] rounded-md border border-line bg-white p-3 shadow-menu",
+      ].join(" ")}
+    >
+      {content}
     </div>
   );
 }
@@ -541,6 +712,8 @@ const projectActionsCopy = {
     noGithubAccount: "Sin cuenta GitHub",
     githubConnectedStatus: "Cuenta GitHub conectada",
     githubBlockedStatus: "Historial bloqueado sin GitHub",
+    accountOptionsTitle: "Opciones de cuenta",
+    accountOptionsClose: "Cerrar opciones de cuenta",
     connectGithub: "Conectar GitHub",
     appSettings: "Configuración de la app",
     logout: "Cerrar sesión",
@@ -574,6 +747,8 @@ const projectActionsCopy = {
     noGithubAccount: "No GitHub account",
     githubConnectedStatus: "GitHub account connected",
     githubBlockedStatus: "History locked without GitHub",
+    accountOptionsTitle: "Account options",
+    accountOptionsClose: "Close account options",
     connectGithub: "Connect GitHub",
     appSettings: "App settings",
     logout: "Sign out",
@@ -703,4 +878,28 @@ function getCapabilityIcon(capability: AiUsageCapabilitySummary["capability"]) {
     agentic_tasks: <Sparkles size={13} />,
   };
   return icons[capability];
+}
+
+function renderProjectActionsPortal(content: React.ReactNode) {
+  if (typeof document === "undefined") return content;
+  return createPortal(content, document.body);
+}
+
+function useNarrowActionsMode() {
+  const [narrow, setNarrow] = useState(() => (
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia("(max-width: 760px)").matches
+      : false
+  ));
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mediaQuery = window.matchMedia("(max-width: 760px)");
+    const update = () => setNarrow(mediaQuery.matches);
+    update();
+    mediaQuery.addEventListener("change", update);
+    return () => mediaQuery.removeEventListener("change", update);
+  }, []);
+
+  return narrow;
 }

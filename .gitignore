@@ -8,6 +8,12 @@ __pycache__/
 .pytest_cache/
 .venv/
 .env
+.env.*
+!.env.example
+credentials.json
+credentials*.json
+*.apk
+*.aab
 *.key
 *.pem
 *.p12

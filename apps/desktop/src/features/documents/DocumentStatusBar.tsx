@@ -50,8 +50,8 @@ export function DocumentStatusBar({
   const StatusIcon = state.tone === "ok" ? CheckCircle2 : state.tone === "danger" ? AlertCircle : RefreshCw;
 
   return (
-    <footer className="z-10 flex h-10 shrink-0 items-center justify-between gap-4 border-t border-line bg-white px-3 text-[11px] text-ink-secondary">
-      <div className="flex min-w-0 items-center gap-3">
+    <footer className="knownext-document-status-bar z-10 flex h-10 shrink-0 items-center justify-between gap-2 border-t border-line bg-white px-2 text-[11px] text-ink-secondary sm:gap-4 sm:px-3">
+      <div className="hidden min-w-0 items-center gap-3 sm:flex">
         <span className="flex items-center gap-2">
           <FileCode2 size={15} />
           Markdown
@@ -60,10 +60,10 @@ export function DocumentStatusBar({
         <span>{wordCount} palabras</span>
       </div>
 
-      <div className="flex min-w-0 shrink-0 items-center justify-end gap-2">
+      <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5 sm:shrink-0 sm:gap-2">
         <span
           className={[
-            "flex min-w-0 items-center gap-2 rounded-full px-2.5 py-1 font-medium",
+            "flex max-w-[min(46vw,180px)] min-w-0 items-center gap-2 rounded-full px-2.5 py-1 font-medium sm:max-w-none",
             state.tone === "ok" ? "bg-green-50 text-green-700" : "",
             state.tone === "warning" ? "bg-orange-50 text-brand-orange" : "",
             state.tone === "danger" ? "bg-red-50 text-red-700" : "",
@@ -76,12 +76,13 @@ export function DocumentStatusBar({
 
         {state.showDiscard ? (
           <button
-            className="flex h-7 items-center gap-1.5 rounded-md border border-line bg-white px-2.5 text-[11px] font-semibold text-ink-secondary shadow-subtle hover:bg-panel hover:text-ink-primary"
+            className="flex h-7 items-center gap-1.5 rounded-md border border-line bg-white px-2 text-[11px] font-semibold text-ink-secondary shadow-subtle hover:bg-panel hover:text-ink-primary sm:px-2.5"
             onClick={onDiscardPendingChanges}
             disabled={state.busy}
+            aria-label="Deshacer cambios"
           >
             <RotateCcw size={13} />
-            Deshacer cambios
+            <span className="hidden sm:inline">Deshacer cambios</span>
           </button>
         ) : null}
         {state.showSave ? (

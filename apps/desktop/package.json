@@ -1,15 +1,20 @@
 {
   "name": "@knownext/desktop",
   "private": true,
-  "version": "0.21.0",
+  "version": "1.0.0",
   "type": "module",
   "license": "Apache-2.0",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420",
     "build": "tsc && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 1420",
+    "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
+    "tauri:android:init": "tauri android init",
+    "tauri:android:dev": "tauri android dev",
+    "tauri:android:build": "tauri android build",
+    "tauri:android:run": "tauri android run",
     "test": "vitest run"
   },
   "dependencies": {

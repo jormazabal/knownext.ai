@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, FileText, FileSpreadsheet, Image, List, NotebookPen, PanelLeftOpen, ScrollText, Sparkles, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, FileText, FileSpreadsheet, Image, List, NotebookPen, PanelLeftOpen, ScrollText, Sparkles, X } from "lucide-react";
 import type { DragEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { WorkspaceTab } from "../../types/domain";
@@ -6,6 +6,7 @@ import type { WorkspaceTab } from "../../types/domain";
 type DocumentTabsProps = {
   tabs: WorkspaceTab[];
   activeTabId: string;
+  activeDocumentId?: string | null;
   dirtyDocumentIds: string[];
   onOpenNavigation?: () => void;
   onSelectTab: (tabId: string) => void;
@@ -14,10 +15,11 @@ type DocumentTabsProps = {
   rightSlot?: ReactNode;
 };
 
-export function DocumentTabs({ tabs, activeTabId, dirtyDocumentIds, onOpenNavigation, onSelectTab, onCloseTab, onReorderDocumentTabs, rightSlot }: DocumentTabsProps) {
+export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirtyDocumentIds, onOpenNavigation, onSelectTab, onCloseTab, onReorderDocumentTabs, rightSlot }: DocumentTabsProps) {
   const dirtyIds = new Set(dirtyDocumentIds);
   const fixedTabs = tabs.filter((tab) => isFixedUtilityTab(tab));
   const scrollableTabs = tabs.filter((tab) => !isFixedUtilityTab(tab));
+  const compactTabs = useCompactTabsMode();
   const tabsViewportRef = useRef<HTMLDivElement | null>(null);
   const tabListMenuRef = useRef<HTMLDivElement | null>(null);
   const [tabsOverflowing, setTabsOverflowing] = useState(false);
@@ -134,6 +136,23 @@ export function DocumentTabs({ tabs, activeTabId, dirtyDocumentIds, onOpenNaviga
       return { tabId, placement: clientX < rect.left + rect.width / 2 ? "before" as const : "after" as const };
     }
     return null;
+  }
+
+  if (compactTabs) {
+    return (
+      <CompactDocumentTabs
+        tabs={tabs}
+        fixedTabs={fixedTabs}
+        scrollableTabs={scrollableTabs}
+        activeTabId={activeTabId}
+        activeDocumentId={activeDocumentId}
+        dirtyIds={dirtyIds}
+        onOpenNavigation={onOpenNavigation}
+        onSelectTab={onSelectTab}
+        onCloseTab={onCloseTab}
+        rightSlot={rightSlot}
+      />
+    );
   }
 
   return (
@@ -256,6 +275,197 @@ export function DocumentTabs({ tabs, activeTabId, dirtyDocumentIds, onOpenNaviga
   );
 }
 
+function CompactDocumentTabs({
+  tabs,
+  fixedTabs,
+  scrollableTabs,
+  activeTabId,
+  activeDocumentId,
+  dirtyIds,
+  onOpenNavigation,
+  onSelectTab,
+  onCloseTab,
+  rightSlot,
+}: {
+  tabs: WorkspaceTab[];
+  fixedTabs: WorkspaceTab[];
+  scrollableTabs: WorkspaceTab[];
+  activeTabId: string;
+  activeDocumentId?: string | null;
+  dirtyIds: Set<string>;
+  onOpenNavigation?: () => void;
+  onSelectTab: (tabId: string) => void;
+  onCloseTab: (tabId: string) => void;
+  rightSlot?: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
+  const activeWorkspaceTab = scrollableTabs.find((tab) => tab.id === activeTabId)
+    ?? scrollableTabs.find((tab) => tab.kind === "document" && tab.id === activeDocumentId)
+    ?? scrollableTabs[0]
+    ?? null;
+
+  function selectTab(tabId: string) {
+    onSelectTab(tabId);
+    setOpen(false);
+  }
+
+  return (
+    <div className="knownext-document-tabs knownext-document-tabs-compact flex h-9 shrink-0 items-end border-b border-line bg-white">
+      {onOpenNavigation ? (
+        <button
+          className="grid h-full w-10 shrink-0 place-items-center border-r border-line text-ink-secondary hover:bg-brand-hover hover:text-brand-orange lg:hidden"
+          data-tooltip="Abrir documentos"
+          data-tooltip-placement="bottom"
+          aria-label="Abrir panel de documentos"
+          onClick={onOpenNavigation}
+        >
+          <PanelLeftOpen size={16} />
+        </button>
+      ) : null}
+
+      {fixedTabs.map((tab) => (
+        <WorkspaceTabButton
+          key={tab.id}
+          tab={tab}
+          active={tab.id === activeTabId}
+          dirty={false}
+          fixed
+          onSelectTab={selectTab}
+          onCloseTab={onCloseTab}
+        />
+      ))}
+
+      {activeWorkspaceTab ? (
+        <div className="knownext-document-tab knownext-document-tab-compact-active relative flex h-full min-w-0 flex-1 items-center border-r border-line text-[11px] font-semibold text-ink-primary hover:bg-panel">
+          <button
+            className="flex h-full min-w-0 flex-1 items-center gap-2 px-2.5 text-left"
+            type="button"
+            aria-label={`Documento activo ${activeWorkspaceTab.name}`}
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            onClick={() => setOpen(true)}
+          >
+            {renderTabIcon(activeWorkspaceTab, activeWorkspaceTab.id === activeTabId)}
+            <span className="min-w-0 flex-1 truncate">{activeWorkspaceTab.name}</span>
+            {activeWorkspaceTab.kind === "document" && dirtyIds.has(activeWorkspaceTab.id) ? <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-brand-orange" /> : null}
+          </button>
+          {!isFixedUtilityTab(activeWorkspaceTab) ? (
+            <button
+              className="grid h-full w-8 shrink-0 place-items-center text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
+              type="button"
+              aria-label={activeWorkspaceTab.kind === "document" && dirtyIds.has(activeWorkspaceTab.id) ? `Cerrar ${activeWorkspaceTab.name}, con cambios sin guardar` : `Cerrar ${activeWorkspaceTab.name}`}
+              onClick={() => {
+                setOpen(false);
+                onCloseTab(activeWorkspaceTab.id);
+              }}
+            >
+              <X size={14} />
+            </button>
+          ) : null}
+          <button
+            className="grid h-full w-8 shrink-0 place-items-center text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
+            type="button"
+            aria-label={`Mostrar archivos abiertos, activo ${activeWorkspaceTab.name}`}
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            onClick={() => setOpen(true)}
+          >
+            <ChevronDown size={14} />
+          </button>
+          {activeWorkspaceTab.id === activeTabId ? <span className="absolute inset-x-0 bottom-0 h-[2px] bg-brand-orange" /> : null}
+        </div>
+      ) : activeTab ? (
+        <div className="min-w-0 flex-1" />
+      ) : null}
+
+      {rightSlot}
+
+      {open ? (
+        <OpenTabsDialog
+          tabs={scrollableTabs}
+          activeTabId={activeTabId}
+          dirtyIds={dirtyIds}
+          onClose={() => setOpen(false)}
+          onSelectTab={selectTab}
+          onCloseTab={onCloseTab}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function OpenTabsDialog({
+  tabs,
+  activeTabId,
+  dirtyIds,
+  onClose,
+  onSelectTab,
+  onCloseTab,
+}: {
+  tabs: WorkspaceTab[];
+  activeTabId: string;
+  dirtyIds: Set<string>;
+  onClose: () => void;
+  onSelectTab: (tabId: string) => void;
+  onCloseTab: (tabId: string) => void;
+}) {
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  return (
+    <div className="knownext-modal-overlay fixed inset-0 z-[90] flex items-center justify-center bg-black/20 px-4 py-6" role="presentation" onMouseDown={onClose}>
+      <section
+        className="flex max-h-[min(520px,calc(100dvh-48px))] w-[min(420px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="open-tabs-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-line px-4">
+          <h2 id="open-tabs-title" className="text-[13px] font-semibold text-ink-primary">Archivos abiertos</h2>
+          <button className="grid h-8 w-8 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange" aria-label="Cerrar lista de archivos abiertos" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          {tabs.length === 0 ? (
+            <p className="px-3 py-6 text-center text-[12px] text-ink-secondary">No hay archivos abiertos.</p>
+          ) : (
+            tabs.map((tab) => {
+              const active = tab.id === activeTabId;
+              const dirty = tab.kind === "document" && dirtyIds.has(tab.id);
+              return (
+                <div key={tab.id} className={["flex h-11 items-center gap-2 rounded-md px-2", active ? "bg-brand-hover text-brand-orange" : "text-ink-primary hover:bg-panel"].join(" ")}>
+                  <button className="flex min-w-0 flex-1 items-center gap-2 text-left" type="button" onClick={() => onSelectTab(tab.id)}>
+                    {renderTabIcon(tab, active)}
+                    <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{tab.name}</span>
+                    {dirty ? <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-brand-orange" /> : null}
+                  </button>
+                  {!isFixedUtilityTab(tab) ? (
+                    <button
+                      className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-ink-secondary hover:bg-white hover:text-brand-orange"
+                      aria-label={dirty ? `Cerrar ${tab.name}, con cambios sin guardar` : `Cerrar ${tab.name}`}
+                      onClick={() => onCloseTab(tab.id)}
+                    >
+                      <X size={14} />
+                    </button>
+                  ) : null}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function WorkspaceTabButton({
   tab,
   active,
@@ -372,6 +582,30 @@ function getDropPlacement(event: DragEvent<HTMLElement>) {
 
 function isFixedUtilityTab(tab: WorkspaceTab) {
   return tab.kind === "ai-conversation" || tab.kind === "notes";
+}
+
+function useCompactTabsMode() {
+  const [compact, setCompact] = useState(() => (
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia("(max-width: 760px)").matches
+      : false
+  ));
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mediaQuery = window.matchMedia("(max-width: 760px)");
+    const update = () => setCompact(mediaQuery.matches);
+    update();
+    mediaQuery.addEventListener?.("change", update);
+    return () => mediaQuery.removeEventListener?.("change", update);
+  }, []);
+
+  return compact;
+}
+
+function renderTabIcon(tab: WorkspaceTab, active: boolean) {
+  const Icon = getTabIcon(tab);
+  return <Icon size={15} className={active ? "shrink-0 text-brand-orange" : "shrink-0 text-ink-secondary"} />;
 }
 
 function getTabIcon(tab: WorkspaceTab) {

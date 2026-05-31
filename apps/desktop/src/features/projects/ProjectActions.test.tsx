@@ -4,6 +4,7 @@ import { ProjectActions } from "./ProjectActions";
 
 afterEach(() => {
   cleanup();
+  Reflect.deleteProperty(window, "matchMedia");
 });
 
 describe("ProjectActions", () => {
@@ -192,6 +193,75 @@ describe("ProjectActions", () => {
     expect(screen.queryByText(/datos ficticios/i)).not.toBeInTheDocument();
   });
 
+  it("uses modal dialogs for account options and AI usage in narrow responsive mode", async () => {
+    mockNarrowViewport();
+
+    render(
+      <ProjectActions
+        appVersion="0.7.2"
+        authStatus={{ isAuthenticated: false, provider: null, user: null, scopes: [] }}
+        aiUsageSummary={{
+          month: "2026-05",
+          currency: "EUR",
+          estimated: true,
+          totalEstimatedCost: 1.86,
+          generatedAt: "2026-05-12T12:00:00Z",
+          capabilities: [
+            {
+              capability: "document_ai",
+              label: "IA documental",
+              interactions: 32,
+              inputTokens: 62000,
+              cachedInputTokens: 0,
+              outputTokens: 34180,
+              reasoningTokens: 0,
+              embeddingTokens: 0,
+              totalTokens: 96180,
+              estimatedCost: 1.86,
+              currency: "EUR",
+              usageSource: "provider",
+            },
+          ],
+          models: [
+            {
+              model: "gpt-5.4-mini",
+              interactions: 32,
+              inputTokens: 62000,
+              cachedInputTokens: 0,
+              outputTokens: 34180,
+              reasoningTokens: 0,
+              embeddingTokens: 0,
+              totalTokens: 96180,
+              estimatedCost: 1.86,
+              currency: "EUR",
+              usageSource: "provider",
+            },
+          ],
+        }}
+        orphanDraftCount={0}
+        isCheckingForUpdates={false}
+        onLoginGithub={vi.fn()}
+        onLogout={vi.fn()}
+        onOpenAppSettings={vi.fn()}
+        onOpenRecoverableDrafts={vi.fn()}
+        onCheckForUpdates={vi.fn()}
+        onOpenReleaseNotes={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /sin cuenta github/i }));
+
+    expect(screen.getByRole("dialog", { name: "Opciones de cuenta" })).toBeInTheDocument();
+    expect(screen.queryByText("Mayo")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Uso IA" }));
+
+    expect(await screen.findByRole("dialog", { name: "Uso IA" })).toBeInTheDocument();
+    expect(screen.getByText("Mayo")).toBeInTheDocument();
+    expect(screen.getByText("IA documental")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Por modelo" })).toBeInTheDocument();
+  });
+
   it("opens application settings from the account menu", () => {
     const onOpenAppSettings = vi.fn();
 
@@ -216,3 +286,19 @@ describe("ProjectActions", () => {
     expect(onOpenAppSettings).toHaveBeenCalledTimes(1);
   });
 });
+
+function mockNarrowViewport(matches = true) {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+}

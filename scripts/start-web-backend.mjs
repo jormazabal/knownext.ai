@@ -4,7 +4,7 @@ import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const appDataRoot = process.env.APPDATA ? join(process.env.APPDATA, "ai.knownext.web") : join(homedir(), ".knownext.ai-web");
+const appDataRoot = process.env.KNOWNEXT_APP_DATA_DIR ?? (process.env.APPDATA ? join(process.env.APPDATA, "ai.knownext.web") : join(homedir(), ".knownext.ai-web"));
 mkdirSync(appDataRoot, { recursive: true });
 const host = process.env.KNOWNEXT_API_HOST ?? "127.0.0.1";
 const port = process.env.KNOWNEXT_API_PORT ?? await resolveAvailablePort(host, range(8766, 8799));

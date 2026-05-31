@@ -251,7 +251,7 @@ export function DocumentTree({
 
   return (
     <div
-      className="flex h-full min-h-0 cursor-default flex-col text-[11px]"
+      className="knownext-document-tree flex h-full min-h-0 cursor-default flex-col text-[11px]"
       onDragLeave={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null);
       }}

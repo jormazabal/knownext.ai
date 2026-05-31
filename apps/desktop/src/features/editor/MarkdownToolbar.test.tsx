@@ -4,7 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MarkdownToolbar } from "./MarkdownToolbar";
 
 describe("MarkdownToolbar", () => {
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    Object.defineProperty(window, "matchMedia", { value: undefined, configurable: true });
+  });
 
   it("marks active editor formats and keeps toolbar actions available", async () => {
     const onRunEditorAction = vi.fn();
@@ -205,4 +208,60 @@ describe("MarkdownToolbar", () => {
     expect(screen.getByRole("button", { name: "Deshacer" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Rehacer" })).toBeEnabled();
   });
+
+  it("uses a compact editor toolbar with all secondary actions in a modal in narrow responsive mode", async () => {
+    mockCompactToolbarMode(true);
+    const onRunEditorAction = vi.fn();
+
+    render(
+      <MarkdownToolbar
+        historyOpen={false}
+        historyEnabled
+        historyDisabledReason="Historial no disponible"
+        editorReady
+        markdownZoomPercent={100}
+        activeActions={{ "heading-1": true, bold: true }}
+        editorHistoryState={{ canUndo: true, canRedo: true, undoDepth: 1, redoDepth: 1 }}
+        onRunEditorAction={onRunEditorAction}
+        onExportDocument={vi.fn()}
+        onMarkdownZoomChange={vi.fn()}
+        onToggleHistory={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Formato de bloque" })).toHaveTextContent("Título 1");
+    expect(screen.getByRole("button", { name: "Negrita" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Cursiva" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Más opciones" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Deshacer" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Rehacer" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Lista con viñetas" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Enlace" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Tabla" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Zoom del visualizador Markdown" })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Más opciones" }));
+
+    expect(screen.getByRole("dialog", { name: "Opciones del editor" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Viñetas" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Enlace" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Tabla 3 x 4" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Viñetas" }));
+
+    expect(onRunEditorAction).toHaveBeenCalledWith("bullet-list");
+    expect(screen.queryByRole("dialog", { name: "Opciones del editor" })).not.toBeInTheDocument();
+  });
 });
+
+function mockCompactToolbarMode(matches: boolean) {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  });
+}

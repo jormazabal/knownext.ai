@@ -40,6 +40,26 @@ const activeProject: Project = {
 };
 
 describe("CreateProjectDialog", () => {
+  it("keeps wizard steps and configuration content in a single modal scroll region", () => {
+    render(
+      <CreateProjectDialog
+        open
+        mode="create"
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onUpdate={vi.fn()}
+      />,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: /crear proyecto de documentación/i });
+    const scrollRegions = Array.from(dialog.querySelectorAll(".overflow-y-auto"));
+
+    expect(scrollRegions).toHaveLength(1);
+    expect(scrollRegions[0]).toHaveTextContent("Situación");
+    expect(scrollRegions[0]).toHaveTextContent("Qué tipo de proyecto vas a configurar");
+    expect(dialog.querySelector("aside")?.className).not.toContain("overflow-y-auto");
+  });
+
   it("opens in edit mode with project data and submits updates", async () => {
     const onUpdate = vi.fn();
 

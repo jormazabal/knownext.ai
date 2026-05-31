@@ -4,7 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DOCUMENT_TREE_FILE_DRAG_MIME } from "../../lib/dragData";
 import { AiPromptInput } from "./AiPromptInput";
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  Object.defineProperty(window, "matchMedia", { value: undefined, configurable: true });
+});
 
 describe("AiPromptInput", () => {
   it("shows applied AI changes as a dismissible floating prompt notice", async () => {
@@ -237,6 +240,52 @@ describe("AiPromptInput", () => {
 
     expect(onTranscriptionConfigChange).toHaveBeenCalledWith({ defaultLanguage: "es" });
   });
+
+  it("uses a compact prompt action group and modal options in narrow responsive mode", async () => {
+    mockCompactPromptMode(true);
+    const onSubmit = vi.fn();
+    const onTranscriptionConfigChange = vi.fn();
+
+    render(
+      <AiPromptInput
+        documentId="doc-1"
+        projectId="project-1"
+        markdown="Contenido"
+        providerReady
+        transcriptionConfig={{
+          enabled: true,
+          model: "gpt-realtime-whisper",
+          defaultTarget: "prompt",
+          defaultLanguage: "auto",
+          favoriteLanguages: ["es", "en"],
+        }}
+        onSubmit={onSubmit}
+        onTranscriptionConfigChange={onTranscriptionConfigChange}
+      />,
+    );
+
+    expect(screen.getByLabelText("Opciones del prompt")).toBeInTheDocument();
+    expect(screen.getByLabelText("Enviar prompt")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Añadir contexto")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Selector de modo IA")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Iniciar transcripción")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByLabelText("Opciones del prompt"));
+
+    expect(screen.getByRole("dialog", { name: "Opciones del prompt" })).toBeInTheDocument();
+    expect(screen.getByText("Archivo del proyecto")).toBeInTheDocument();
+    expect(screen.getByText("Rápido")).toBeInTheDocument();
+    expect(screen.getByText("Dictado")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Profundo" }));
+
+    expect(screen.queryByRole("dialog", { name: "Opciones del prompt" })).not.toBeInTheDocument();
+
+    await userEvent.type(screen.getByPlaceholderText(/Pregunta algo sobre este documento/), "Investiga y redacta");
+    await userEvent.click(screen.getByLabelText("Enviar prompt"));
+
+    expect(onSubmit).toHaveBeenCalledWith("Investiga y redacta", null, { executionMode: "reasoning", reasoningDepth: "deep" });
+  });
 });
 
 function createProjectFileDataTransfer(payload: { id: string; type: string; name: string; path: string }) {
@@ -249,4 +298,16 @@ function createProjectFileDataTransfer(payload: { id: string; type: string; name
     setData: (key: string, value: string) => data.set(key, value),
     getData: (key: string) => data.get(key) ?? "",
   };
+}
+
+function mockCompactPromptMode(matches: boolean) {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  });
 }
