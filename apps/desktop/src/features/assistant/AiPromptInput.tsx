@@ -1,7 +1,8 @@
-import { AlertCircle, Brain, Check, ChevronDown, Clock3, File, FileText, Image, MessageSquare, Mic, Plus, Search, SendHorizontal, SlidersHorizontal, Sparkles, Square, X, Zap } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type RefObject } from "react";
+import { AlertCircle, Brain, Check, ChevronDown, Clock3, File, FileText, Image, MessageSquare, Mic, MoreVertical, Plus, Search, SendHorizontal, SlidersHorizontal, Sparkles, Square, X, Zap, type LucideIcon } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type ReactNode, type RefObject } from "react";
 import type { AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiExecutionMode, AiReasoningDepth, AiSelectionFocus, AiTranscriptionLanguage, AiTranscriptionTarget } from "../../types/domain";
 import { getDocumentTreeFileDragData, hasDocumentTreeFileDragData } from "../../lib/dragData";
+import { isPhoneAppShell } from "../../lib/runtime/platform";
 import { useRealtimeTranscription } from "../transcription/useRealtimeTranscription";
 
 export type AiPromptExecutionOptions = {
@@ -69,6 +70,7 @@ export function AiPromptInput({
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [depthMenuOpen, setDepthMenuOpen] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
+  const [compactOptionsOpen, setCompactOptionsOpen] = useState(false);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [referenceQuery, setReferenceQuery] = useState<string | null>(null);
@@ -93,6 +95,7 @@ export function AiPromptInput({
   const hasBlockingContext = activeContextSources.some((source) => source.status === "processing");
   const transcription = transcriptionConfig ?? defaultTranscriptionConfig;
   const transcriptionState = useRealtimeTranscription();
+  const compactPrompt = useCompactPromptMode();
   const transcribing = transcriptionState.status === "connecting" || transcriptionState.status === "listening" || transcriptionState.status === "stopping";
   const transcriptionAvailable = canPrompt && transcription.enabled;
   const canStartTranscription = transcriptionAvailable && !loading && !hasBlockingContext;
@@ -176,6 +179,17 @@ export function AiPromptInput({
   }, [contextMenuOpen, sourcesOpen]);
 
   useEffect(() => {
+    if (!compactOptionsOpen) return;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setCompactOptionsOpen(false);
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [compactOptionsOpen]);
+
+  useEffect(() => {
     if (referenceQuery === null || !onSearchProjectDocuments) {
       setReferenceResults([]);
       return;
@@ -202,7 +216,7 @@ export function AiPromptInput({
     const textarea = textareaRef.current;
     if (!textarea) return;
     textarea.style.height = "auto";
-    const maxHeight = 80;
+    const maxHeight = isPhoneAppShell() ? 132 : 80;
     const nextHeight = Math.min(textarea.scrollHeight, maxHeight);
     textarea.style.height = `${nextHeight}px`;
     textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
@@ -343,6 +357,7 @@ export function AiPromptInput({
     if (!files.length || !onUploadContextFiles) return;
     await onUploadContextFiles(files);
     setContextMenuOpen(false);
+    setCompactOptionsOpen(false);
   }
 
   function isContextDrop(event: DragEvent<HTMLDivElement>) {
@@ -387,8 +402,37 @@ export function AiPromptInput({
     }
   }
 
+  function focusProjectReferenceSearch() {
+    setContextMenuOpen(false);
+    setCompactOptionsOpen(false);
+    setReferenceQuery("");
+    textareaRef.current?.focus();
+  }
+
+  function focusPromptForPaste() {
+    setContextMenuOpen(false);
+    setCompactOptionsOpen(false);
+    textareaRef.current?.focus();
+  }
+
+  function openCompactOptions() {
+    setContextMenuOpen(false);
+    setModeMenuOpen(false);
+    setDepthMenuOpen(false);
+    setTranscriptionMenuOpen(false);
+    setSourcesOpen(false);
+    setCompactOptionsOpen(true);
+  }
+
+  function chooseExecutionMode(mode: AiExecutionMode, depth: AiReasoningDepth = "light") {
+    setExecutionMode(mode);
+    setReasoningDepth(mode === "quick" ? "light" : depth);
+    setDepthMenuOpen(false);
+    setModeMenuOpen(false);
+  }
+
   return (
-    <div className="pointer-events-none absolute inset-x-8 bottom-11 z-20 flex justify-center">
+    <div className="knownext-ai-prompt-anchor pointer-events-none absolute inset-x-8 bottom-11 z-20 flex justify-center">
       {loading || appliedChangeSummary ? (
         <div className="absolute bottom-full right-0 mb-2 flex w-[min(320px,42vw)] min-w-[240px] flex-col items-end gap-2">
           {loading ? (
@@ -476,46 +520,54 @@ export function AiPromptInput({
           </div>
         ) : null}
         <div className="knownext-ai-prompt-row flex items-center gap-1.5">
+          {compactPrompt ? (
+            <input
+              ref={fileInputRef}
+              className="hidden"
+              type="file"
+              multiple
+              accept=".md,.txt,.csv,.pdf,.docx,.pptx,.xlsx,image/png,image/jpeg,image/webp,image/gif"
+              onChange={(event) => {
+                const files = Array.from(event.currentTarget.files ?? []);
+                event.currentTarget.value = "";
+                void uploadFiles(files);
+              }}
+            />
+          ) : (
           <div className="relative" ref={contextMenuRef}>
-          <button
-            type="button"
-            className={`knownext-ai-context-button grid h-8 w-8 shrink-0 place-items-center rounded-full text-ink-primary ${promptControlClass}`}
-            data-tooltip="Añadir contexto"
-            aria-label="Añadir contexto"
-            aria-expanded={contextMenuOpen}
-            onClick={() => setContextMenuOpen((open) => !open)}
-            disabled={!canPrompt}
-          >
-            <Plus size={19} strokeWidth={1.8} />
-          </button>
-          {contextMenuOpen ? (
-            <div className="absolute bottom-full left-0 z-40 mb-2 grid w-64 gap-1 rounded-[16px] border border-line bg-white p-1.5 text-[11px] text-ink-primary shadow-menu">
-              <p className="px-2 pb-0.5 pt-0.5 text-[10px] text-ink-secondary">Añadir contexto</p>
-              <ContextMenuButton icon={FileText} title="Archivo del proyecto" detail="Escribe @ para buscar documentos" onClick={() => {
-                setContextMenuOpen(false);
-                setReferenceQuery("");
-                textareaRef.current?.focus();
-              }} />
-              <ContextMenuButton icon={File} title="Adjuntar archivo" detail="PDF, Office, CSV, Markdown e imagen" onClick={() => fileInputRef.current?.click()} />
-              <ContextMenuButton icon={Image} title="Pegar imagen" detail="Usa Ctrl+V dentro del prompt" onClick={() => {
-                setContextMenuOpen(false);
-                textareaRef.current?.focus();
-              }} />
-            </div>
-          ) : null}
-          <input
-            ref={fileInputRef}
-            className="hidden"
-            type="file"
-            multiple
-            accept=".md,.txt,.csv,.pdf,.docx,.pptx,.xlsx,image/png,image/jpeg,image/webp,image/gif"
-            onChange={(event) => {
-              const files = Array.from(event.currentTarget.files ?? []);
-              event.currentTarget.value = "";
-              void uploadFiles(files);
-            }}
-          />
+            <button
+              type="button"
+              className={`knownext-ai-context-button grid h-8 w-8 shrink-0 place-items-center rounded-full text-ink-primary ${promptControlClass}`}
+              data-tooltip="Añadir contexto"
+              aria-label="Añadir contexto"
+              aria-expanded={contextMenuOpen}
+              onClick={() => setContextMenuOpen((open) => !open)}
+              disabled={!canPrompt}
+            >
+              <Plus size={19} strokeWidth={1.8} />
+            </button>
+            {contextMenuOpen ? (
+              <div className="absolute bottom-full left-0 z-40 mb-2 grid w-64 gap-1 rounded-[16px] border border-line bg-white p-1.5 text-[11px] text-ink-primary shadow-menu">
+                <p className="px-2 pb-0.5 pt-0.5 text-[10px] text-ink-secondary">Añadir contexto</p>
+                <ContextMenuButton icon={FileText} title="Archivo del proyecto" detail="Escribe @ para buscar documentos" onClick={focusProjectReferenceSearch} />
+                <ContextMenuButton icon={File} title="Adjuntar archivo" detail="PDF, Office, CSV, Markdown e imagen" onClick={() => fileInputRef.current?.click()} />
+                <ContextMenuButton icon={Image} title="Pegar imagen" detail="Usa Ctrl+V dentro del prompt" onClick={focusPromptForPaste} />
+              </div>
+            ) : null}
+            <input
+              ref={fileInputRef}
+              className="hidden"
+              type="file"
+              multiple
+              accept=".md,.txt,.csv,.pdf,.docx,.pptx,.xlsx,image/png,image/jpeg,image/webp,image/gif"
+              onChange={(event) => {
+                const files = Array.from(event.currentTarget.files ?? []);
+                event.currentTarget.value = "";
+                void uploadFiles(files);
+              }}
+            />
           </div>
+          )}
           <textarea
             ref={textareaRef}
             className="knownext-ai-prompt-textarea max-h-20 min-h-7 min-w-0 flex-1 resize-none bg-transparent px-1 py-1.5 text-[13px] leading-5 text-ink-primary outline-none placeholder:text-ink-secondary/70"
@@ -569,6 +621,7 @@ export function AiPromptInput({
               onSelect={(result) => void addReference(result)}
             />
           ) : null}
+          {compactPrompt ? null : (
           <div className="relative shrink-0" ref={modeMenuRef}>
             <button
               type="button"
@@ -600,10 +653,7 @@ export function AiPromptInput({
                   role="menuitemradio"
                   aria-checked={executionMode === "quick"}
                   onClick={() => {
-                    setExecutionMode("quick");
-                    setReasoningDepth("light");
-                    setDepthMenuOpen(false);
-                    setModeMenuOpen(false);
+                    chooseExecutionMode("quick");
                   }}
                 >
                   <span className="grid h-5 w-5 place-items-center rounded-full bg-panel text-ink-primary">
@@ -651,10 +701,7 @@ export function AiPromptInput({
                             role="menuitemradio"
                             aria-checked={selected}
                             onClick={() => {
-                              setExecutionMode("reasoning");
-                              setReasoningDepth(option.value);
-                              setDepthMenuOpen(false);
-                              setModeMenuOpen(false);
+                              chooseExecutionMode("reasoning", option.value);
                             }}
                           >
                             <span>{option.label}</span>
@@ -668,6 +715,8 @@ export function AiPromptInput({
               </div>
             ) : null}
           </div>
+          )}
+          {compactPrompt ? null : (
           <div ref={transcriptionMenuRef} className="relative shrink-0">
             <div
               className={[
@@ -747,6 +796,32 @@ export function AiPromptInput({
               </div>
             ) : null}
           </div>
+          )}
+          {compactPrompt ? (
+            <div className="knownext-ai-compact-actions flex h-9 shrink-0 overflow-hidden rounded-full border border-line bg-panel shadow-[inset_0_1px_0_rgba(255,255,255,0.72)]">
+              <button
+                type="button"
+                className="grid h-9 w-9 place-items-center border-r border-line text-ink-primary transition hover:bg-brand-hover hover:text-brand-orange disabled:cursor-not-allowed disabled:opacity-50"
+                data-tooltip="Opciones del prompt"
+                aria-label="Opciones del prompt"
+                aria-haspopup="dialog"
+                aria-expanded={compactOptionsOpen}
+                onClick={openCompactOptions}
+                disabled={!hasContext}
+              >
+                <MoreVertical size={18} />
+              </button>
+              <button
+                className="grid h-9 w-9 place-items-center text-brand-orange transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
+                data-tooltip="Enviar prompt"
+                aria-label="Enviar prompt"
+                onClick={() => void handleSubmit()}
+                disabled={loading || !canPrompt || hasBlockingContext}
+              >
+                {loading ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-brand-orange border-t-transparent" /> : <SendHorizontal size={18} />}
+              </button>
+            </div>
+          ) : (
           <button
             className={`knownext-ai-send-button grid h-8 w-8 shrink-0 place-items-center rounded-full text-brand-orange ${promptControlClass}`}
             data-tooltip="Enviar"
@@ -756,6 +831,7 @@ export function AiPromptInput({
           >
             {loading ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-brand-orange border-t-transparent" /> : <SendHorizontal size={18} />}
           </button>
+          )}
         </div>
         {hasBlockingContext ? (
           <p className="mx-10 mt-1 text-[10px] text-ink-secondary">Esperando a que las fuentes terminen de procesarse.</p>
@@ -780,6 +856,51 @@ export function AiPromptInput({
             onRemove={onRemoveContextSource}
             onExtend={onExtendContextSource}
             onAddToProject={onAddContextSourceToProject}
+          />
+        ) : null}
+        {compactOptionsOpen ? (
+          <PromptOptionsDialog
+            canPrompt={canPrompt}
+            hasBlockingContext={hasBlockingContext}
+            transcriptionAvailable={transcriptionAvailable}
+            canStartTranscription={canStartTranscription}
+            transcribing={transcribing}
+            transcriptionEnabled={transcription.enabled}
+            transcriptionTarget={transcriptionTarget}
+            transcriptionLanguage={transcriptionLanguage}
+            transcriptionLanguages={getTranscriptionMenuLanguages(transcription.favoriteLanguages, transcriptionLanguage)}
+            documentDictationReady={documentDictationReady}
+            executionMode={executionMode}
+            reasoningDepth={reasoningDepth}
+            selectedDepthLabel={selectedDepthLabel}
+            activeContextSources={activeContextSources}
+            selectionFocus={selectionFocus}
+            contextWeightLabel={contextWeightLabel}
+            onClose={() => setCompactOptionsOpen(false)}
+            onFocusProjectReferenceSearch={focusProjectReferenceSearch}
+            onUploadFiles={() => fileInputRef.current?.click()}
+            onFocusPromptForPaste={focusPromptForPaste}
+            onOpenSources={() => {
+              setCompactOptionsOpen(false);
+              setSourcesOpen(true);
+            }}
+            onClearSelectionFocus={onClearSelectionFocus}
+            onChooseExecutionMode={(mode, depth) => {
+              chooseExecutionMode(mode, depth);
+              setCompactOptionsOpen(false);
+            }}
+            onToggleTranscription={() => {
+              void toggleTranscription();
+              setCompactOptionsOpen(false);
+            }}
+            onChooseTranscriptionTarget={(target) => {
+              chooseTranscriptionTarget(target);
+              setCompactOptionsOpen(false);
+            }}
+            onChooseTranscriptionLanguage={(language) => {
+              chooseTranscriptionLanguage(language);
+              setCompactOptionsOpen(false);
+            }}
           />
         ) : null}
       </div>
@@ -900,6 +1021,239 @@ function ContextMenuButton({ icon: Icon, title, detail, onClick }: { icon: typeo
       </span>
       <span className="min-w-0">
         <span className="block text-[11px] font-semibold text-ink-primary">{title}</span>
+        <span className="block truncate text-[10px] text-ink-secondary">{detail}</span>
+      </span>
+    </button>
+  );
+}
+
+function PromptOptionsDialog({
+  canPrompt,
+  hasBlockingContext,
+  transcriptionAvailable,
+  canStartTranscription,
+  transcribing,
+  transcriptionEnabled,
+  transcriptionTarget,
+  transcriptionLanguage,
+  transcriptionLanguages,
+  documentDictationReady,
+  executionMode,
+  reasoningDepth,
+  selectedDepthLabel,
+  activeContextSources,
+  selectionFocus,
+  contextWeightLabel,
+  onClose,
+  onFocusProjectReferenceSearch,
+  onUploadFiles,
+  onFocusPromptForPaste,
+  onOpenSources,
+  onClearSelectionFocus,
+  onChooseExecutionMode,
+  onToggleTranscription,
+  onChooseTranscriptionTarget,
+  onChooseTranscriptionLanguage,
+}: {
+  canPrompt: boolean;
+  hasBlockingContext: boolean;
+  transcriptionAvailable: boolean;
+  canStartTranscription: boolean;
+  transcribing: boolean;
+  transcriptionEnabled: boolean;
+  transcriptionTarget: AiTranscriptionTarget;
+  transcriptionLanguage: AiTranscriptionLanguage;
+  transcriptionLanguages: AiTranscriptionLanguage[];
+  documentDictationReady: boolean;
+  executionMode: AiExecutionMode;
+  reasoningDepth: AiReasoningDepth;
+  selectedDepthLabel: string;
+  activeContextSources: AiContextSource[];
+  selectionFocus?: AiSelectionFocus | null;
+  contextWeightLabel: string;
+  onClose: () => void;
+  onFocusProjectReferenceSearch: () => void;
+  onUploadFiles: () => void;
+  onFocusPromptForPaste: () => void;
+  onOpenSources: () => void;
+  onClearSelectionFocus?: () => void;
+  onChooseExecutionMode: (mode: AiExecutionMode, depth?: AiReasoningDepth) => void;
+  onToggleTranscription: () => void;
+  onChooseTranscriptionTarget: (target: AiTranscriptionTarget) => void;
+  onChooseTranscriptionLanguage: (language: AiTranscriptionLanguage) => void;
+}) {
+  const transcriptionStatus = !canPrompt
+    ? "Configura OpenAI en Ajustes > IA para usar el dictado."
+    : !transcriptionEnabled
+    ? "Activa Audio y transcripción en Ajustes > IA."
+    : hasBlockingContext
+    ? "Espera a que las fuentes terminen de procesarse."
+    : transcriptionTarget === "document" && !documentDictationReady
+    ? "Coloca el cursor en el documento antes de dictar sobre él."
+    : null;
+
+  return (
+    <div className="knownext-modal-overlay fixed inset-0 z-[90] flex items-center justify-center bg-black/20 px-4 py-6" role="presentation" onMouseDown={onClose}>
+      <section
+        className="flex max-h-[min(680px,calc(100dvh-48px))] w-[min(460px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="prompt-options-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-line px-4">
+          <h2 id="prompt-options-title" className="text-[13px] font-semibold text-ink-primary">Opciones del prompt</h2>
+          <button className="grid h-8 w-8 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange" aria-label="Cerrar opciones del prompt" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </header>
+
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3">
+          <PromptOptionsSection title="Contexto">
+            <div className="grid gap-1 rounded-xl border border-line p-1">
+              <ContextMenuButton icon={FileText} title="Archivo del proyecto" detail="Buscar con @ documentos del proyecto" onClick={onFocusProjectReferenceSearch} />
+              <ContextMenuButton icon={File} title="Adjuntar archivo" detail="PDF, Office, CSV, Markdown e imagen" onClick={onUploadFiles} />
+              <ContextMenuButton icon={Image} title="Pegar imagen" detail="Cierra este panel y usa Ctrl+V en el prompt" onClick={onFocusPromptForPaste} />
+            </div>
+            {selectionFocus ? (
+              <div className="flex items-center gap-2 rounded-xl border border-orange-200 bg-brand-hover px-3 py-2 text-[11px] text-brand-orange">
+                <span className="min-w-0 flex-1 truncate font-semibold">Texto seleccionado</span>
+                {onClearSelectionFocus ? (
+                  <button className="grid h-7 w-7 place-items-center rounded-md hover:bg-white" aria-label="Quitar texto seleccionado del contexto IA" onClick={onClearSelectionFocus}>
+                    <X size={14} />
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+            {activeContextSources.length > 0 ? (
+              <button className="flex h-10 w-full items-center gap-2 rounded-xl border border-line px-3 text-left text-[12px] text-ink-primary hover:bg-brand-hover" onClick={onOpenSources}>
+                <Sparkles size={16} className="shrink-0 text-brand-orange" />
+                <span className="min-w-0 flex-1 truncate">Fuentes activas · {activeContextSources.length} · {contextWeightLabel}</span>
+              </button>
+            ) : null}
+          </PromptOptionsSection>
+
+          <PromptOptionsSection title="Modo IA">
+            <div className="grid grid-cols-2 gap-2">
+              <PromptOptionButton
+                icon={Zap}
+                label="Rápido"
+                detail="Respuesta directa"
+                active={executionMode === "quick"}
+                onClick={() => onChooseExecutionMode("quick")}
+              />
+              <PromptOptionButton
+                icon={Brain}
+                label="Razonar"
+                detail={selectedDepthLabel}
+                active={executionMode === "reasoning"}
+                onClick={() => onChooseExecutionMode("reasoning", reasoningDepth)}
+              />
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {reasoningDepthOptions.map((option) => {
+                const selected = executionMode === "reasoning" && reasoningDepth === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    className={`h-9 rounded-xl border text-[12px] font-semibold ${selected ? "border-orange-200 bg-brand-hover text-brand-orange" : "border-line text-ink-primary hover:bg-brand-hover"}`}
+                    aria-pressed={selected}
+                    onClick={() => onChooseExecutionMode("reasoning", option.value)}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          </PromptOptionsSection>
+
+          <PromptOptionsSection title="Dictado">
+            <button
+              className={`flex h-11 w-full items-center gap-2 rounded-xl border px-3 text-left text-[12px] font-semibold ${transcribing ? "border-orange-200 bg-brand-hover text-brand-orange" : "border-line text-ink-primary hover:bg-brand-hover"} ${transcriptionAvailable || transcribing ? "" : "opacity-50"}`}
+              disabled={!transcriptionAvailable && !transcribing}
+              onClick={onToggleTranscription}
+            >
+              {transcribing ? <Square size={14} fill="currentColor" /> : <TranscriptionTargetIcon target={transcriptionTarget} />}
+              <span className="min-w-0 flex-1 truncate">{transcribing ? "Detener transcripción" : "Iniciar transcripción"}</span>
+            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <PromptOptionButton
+                icon={MessageSquare}
+                label="Al prompt"
+                detail="Transcribir"
+                active={transcriptionTarget === "prompt"}
+                disabled={transcribing}
+                onClick={() => onChooseTranscriptionTarget("prompt")}
+              />
+              <PromptOptionButton
+                icon={FileText}
+                label="Al documento"
+                detail="Dictar"
+                active={transcriptionTarget === "document"}
+                disabled={transcribing}
+                onClick={() => onChooseTranscriptionTarget("document")}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {transcriptionLanguages.map((language) => {
+                const selected = transcriptionLanguage === language;
+                return (
+                  <button
+                    key={language}
+                    className={`h-9 rounded-xl border px-2 text-[12px] font-semibold ${selected ? "border-orange-200 bg-brand-hover text-brand-orange" : "border-line text-ink-primary hover:bg-brand-hover"} ${transcribing ? "opacity-50" : ""}`}
+                    disabled={transcribing}
+                    aria-pressed={selected}
+                    onClick={() => onChooseTranscriptionLanguage(language)}
+                  >
+                    {transcriptionLanguageLabels[language]}
+                  </button>
+                );
+              })}
+            </div>
+            {transcriptionStatus && !canStartTranscription ? (
+              <p className="rounded-xl border border-orange-200 bg-brand-hover px-3 py-2 text-[11px] leading-4 text-brand-orange">{transcriptionStatus}</p>
+            ) : null}
+          </PromptOptionsSection>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function PromptOptionsSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-2">
+      <h3 className="px-1 text-[11px] font-semibold uppercase text-ink-secondary">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+function PromptOptionButton({
+  icon: Icon,
+  label,
+  detail,
+  active,
+  disabled = false,
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  detail: string;
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={`flex h-11 min-w-0 items-center gap-2 rounded-xl border px-3 text-left ${active ? "border-orange-200 bg-brand-hover text-brand-orange" : "border-line text-ink-primary hover:bg-brand-hover"} ${disabled ? "opacity-50" : ""}`}
+      disabled={disabled}
+      aria-pressed={active}
+      onClick={onClick}
+    >
+      <Icon size={16} className="shrink-0" />
+      <span className="min-w-0">
+        <span className="block truncate text-[12px] font-semibold">{label}</span>
         <span className="block truncate text-[10px] text-ink-secondary">{detail}</span>
       </span>
     </button>
@@ -1055,6 +1409,25 @@ function getActiveMention(value: string) {
 
 function removeActiveMention(value: string) {
   return value.replace(/(?:^|\s)@([^\s@]*)$/, (match) => (match.startsWith(" ") ? " " : "")).trimEnd();
+}
+
+function useCompactPromptMode() {
+  const [compact, setCompact] = useState(() => (
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia("(max-width: 760px)").matches
+      : false
+  ));
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mediaQuery = window.matchMedia("(max-width: 760px)");
+    const update = () => setCompact(mediaQuery.matches);
+    update();
+    mediaQuery.addEventListener?.("change", update);
+    return () => mediaQuery.removeEventListener?.("change", update);
+  }, []);
+
+  return compact;
 }
 
 function getContextWeightLabel(sources: AiContextSource[]) {

@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { selectProjectFolder } from "../../lib/runtime/folders";
+import { isMobileDeviceRuntime, isTauriRuntime } from "../../lib/runtime/platform";
 import type { AuthStatus, GithubPublishVisibility, GithubRepositorySummary, Project, ProjectCapabilities, ProjectCreationMode, ProjectPayload, ProjectSyncStatus, SyncMode, VersioningMode } from "../../types/domain";
 import { getProjectIcon, projectColors, projectIconOptions } from "./projectVisuals";
 
@@ -112,7 +113,7 @@ export function CreateProjectDialog({
   const [activeStep, setActiveStep] = useState<WizardStepId>("scenario");
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
 
-  const isWebRuntime = runtimeMode ? runtimeMode === "web" : !isTauriRuntime();
+  const isWebRuntime = runtimeMode ? runtimeMode === "web" : !isTauriRuntime() || isMobileDeviceRuntime();
   const SelectedIcon = getProjectIcon(icon);
   const isEditing = mode === "edit";
   const selectedGithubRepository = githubRepositories.find((repository) => repository.owner === githubOwner && repository.repo === githubRepo);
@@ -315,9 +316,12 @@ export function CreateProjectDialog({
     <div className="knownext-modal-overlay fixed inset-0 z-[80] grid place-items-center bg-black/20 p-4">
       <section
         className={[
-          "flex max-h-[calc(100vh-32px)] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu",
+          "flex max-h-[calc(100dvh-32px)] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu",
           isEditing ? "w-[min(640px,calc(100vw-32px))]" : "w-[min(960px,calc(100vw-32px))]",
         ].join(" ")}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-project-dialog-title"
       >
         <header className="flex shrink-0 items-center justify-between border-b border-line px-5 py-4">
           <div className="flex min-w-0 items-center gap-3">
@@ -325,7 +329,7 @@ export function CreateProjectDialog({
               <FolderPlus size={18} />
             </span>
             <div className="min-w-0">
-              <h2 className="truncate text-[15px] font-semibold text-ink-primary">
+              <h2 id="create-project-dialog-title" className="truncate text-[15px] font-semibold text-ink-primary">
                 {isEditing ? "Editar proyecto" : "Crear proyecto de documentación"}
               </h2>
               <p className="mt-0.5 text-[11px] text-ink-secondary">
@@ -337,176 +341,178 @@ export function CreateProjectDialog({
             <X size={17} />
           </button>
         </header>
-        <div className={isEditing ? "grid min-h-0 flex-1 grid-cols-1 overflow-hidden" : "grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[260px_minmax(0,1fr)]"}>
-          {!isEditing ? (
-            <aside className="min-h-0 overflow-y-auto border-b border-line bg-panel px-5 py-4 md:border-b-0 md:border-r">
-              <div className="space-y-3">
-                {wizardSteps.map((step, index) => {
-                  const complete = index < activeStepIndex;
-                  const selected = step.id === activeStep;
-                  const reachable = canEnterStep(step.id, startMode, derivedMode, hasFolder, hasGithubRepository);
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className={isEditing ? "grid grid-cols-1" : "grid grid-cols-1 md:grid-cols-[260px_minmax(0,1fr)]"}>
+            {!isEditing ? (
+              <aside className="border-b border-line bg-panel px-5 py-4 md:border-b-0 md:border-r">
+                <div className="space-y-3">
+                  {wizardSteps.map((step, index) => {
+                    const complete = index < activeStepIndex;
+                    const selected = step.id === activeStep;
+                    const reachable = canEnterStep(step.id, startMode, derivedMode, hasFolder, hasGithubRepository);
 
-                  return (
-                    <button
-                      key={step.id}
-                      disabled={!reachable}
-                      className={[
-                        "flex w-full items-start gap-3 rounded-md px-2 py-2 text-left transition",
-                        selected ? "bg-white shadow-[0_1px_2px_rgba(17,24,39,0.08)]" : "hover:bg-white/70",
-                        !reachable ? "cursor-not-allowed opacity-55 hover:bg-transparent" : "",
-                      ].join(" ")}
-                      type="button"
-                      onClick={() => {
-                        if (reachable) setActiveStep(step.id);
-                      }}
-                    >
-                      <span
+                    return (
+                      <button
+                        key={step.id}
+                        disabled={!reachable}
                         className={[
-                          "mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border text-[10px] font-semibold",
-                          selected || complete ? "border-brand-orange bg-brand-orange text-white" : "border-line bg-white text-ink-secondary",
+                          "flex w-full items-start gap-3 rounded-md px-2 py-2 text-left transition",
+                          selected ? "bg-white shadow-[0_1px_2px_rgba(17,24,39,0.08)]" : "hover:bg-white/70",
+                          !reachable ? "cursor-not-allowed opacity-55 hover:bg-transparent" : "",
                         ].join(" ")}
+                        type="button"
+                        onClick={() => {
+                          if (reachable) setActiveStep(step.id);
+                        }}
                       >
-                        {complete ? <Check size={13} /> : index + 1}
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block text-[11px] font-semibold text-ink-primary">{step.title}</span>
-                        <span className="mt-0.5 block text-[10px] leading-4 text-ink-secondary">{step.description}</span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </aside>
-          ) : null}
-          <div className="min-h-0 overflow-y-auto px-5 py-5">
-            {isEditing ? (
-              <EditProjectForm
-                project={project}
-                name={name}
-                icon={icon}
-                iconColor={iconColor}
-                folderPath={folderPath}
-                SelectedIcon={SelectedIcon}
-                onNameChange={setName}
-                onIconChange={setIcon}
-                onIconColorChange={setIconColor}
-                authStatus={authStatus}
-                capabilities={capabilities}
-                githubRepositories={githubRepositories}
-                githubRepositoriesLoading={githubRepositoriesLoading}
-                projectSyncStatus={projectSyncStatus}
-                selectedGithubRepository={selectedGithubRepository}
-                githubOwner={githubOwner}
-                githubRepo={githubRepo}
-                githubPublishVisibility={githubPublishVisibility}
-                githubSyncPreference={githubSyncPreference}
-                onLoginGithub={onLoginGithub}
-                onLogoutGithub={onLogoutGithub}
-                onVerifyGithubConnection={onVerifyGithubConnection}
-                onRefreshGithubRepositories={onRefreshGithubRepositories}
-                onGithubOwnerChange={setGithubOwner}
-                onGithubRepoChange={setGithubRepo}
-                onGithubPublishVisibilityChange={setGithubPublishVisibility}
-                onGithubSyncPreferenceChange={setGithubSyncPreference}
-                onFolderPathChange={setFolderPath}
-                onSelectFolder={handleSelectFolder}
-                localHistoryChoice={localHistoryChoice}
-                onHistoryChoiceChange={handleHistoryChoiceChange}
-                currentProtectionLevel={currentProtectionLevel}
-                selectedProtectionLevel={selectedProtectionLevel}
-                needsGithubDetachConfirmation={needsGithubDetachConfirmation}
-                needsGitDetachConfirmation={needsGitDetachConfirmation}
-                detachGithubConfirmed={detachGithubConfirmed}
-                detachGitConfirmed={detachGitConfirmed}
-                onDetachGithubConfirmedChange={setDetachGithubConfirmed}
-                onDetachGitConfirmedChange={setDetachGitConfirmed}
-                isWebRuntime={isWebRuntime}
-              />
-            ) : activeStep === "scenario" ? (
-              <ScenarioStep
-                startMode={startMode}
-                authStatus={authStatus}
-                capabilities={capabilities}
-                isWebRuntime={isWebRuntime}
-                onLoginGithub={onLoginGithub}
-                onSelect={(nextMode) => {
-                  setStartMode(nextMode);
-                  setLocalHistoryChoice(nextMode === "local-existing-git" ? "local-git" : "files-only");
-                }}
-              />
-            ) : activeStep === "location" ? (
-              <LocationStep
-                startMode={startMode}
-                folderPath={folderPath}
-                newProjectParentPath={newProjectParentPath}
-                newProjectFolderName={newProjectFolderName}
-                finalFolderPath={finalFolderPath}
-                authStatus={authStatus}
-                githubRepositories={githubRepositories}
-                githubRepositoriesLoading={githubRepositoriesLoading}
-                selectedGithubRepository={selectedGithubRepository}
-                githubOwner={githubOwner}
-                githubRepo={githubRepo}
-                onLoginGithub={onLoginGithub}
-                onRefreshGithubRepositories={onRefreshGithubRepositories}
-                onFolderPathChange={setFolderPath}
-                onNewProjectParentPathChange={setNewProjectParentPath}
-                onNewProjectFolderNameChange={setNewProjectFolderName}
-                onGithubOwnerChange={setGithubOwner}
-                onGithubRepoChange={setGithubRepo}
-                onNameSuggestion={(nextName) => {
-                  if (!name.trim()) setName(nextName);
-                }}
-                onSelectFolder={pickFolder}
-                isWebRuntime={isWebRuntime}
-              />
-            ) : activeStep === "versioning" ? (
-              <VersioningStep
-                startMode={startMode}
-                localHistoryChoice={localHistoryChoice}
-                authStatus={authStatus}
-                capabilities={capabilities}
-                selectedGithubRepository={selectedGithubRepository}
-                githubOwner={githubOwner}
-                githubRepo={githubRepo}
-                githubPublishVisibility={githubPublishVisibility}
-                githubRepositories={githubRepositories}
-                githubRepositoriesLoading={githubRepositoriesLoading}
-                onLoginGithub={onLoginGithub}
-                onRefreshGithubRepositories={onRefreshGithubRepositories}
-                onHistoryChoiceChange={handleHistoryChoiceChange}
-                githubSyncPreference={githubSyncPreference}
-                onGithubSyncPreferenceChange={setGithubSyncPreference}
-                onGithubOwnerChange={setGithubOwner}
-                onGithubRepoChange={setGithubRepo}
-                onGithubPublishVisibilityChange={setGithubPublishVisibility}
-                onNameSuggestion={(nextName) => {
-                  if (!name.trim()) setName(nextName);
-                }}
-              />
-            ) : activeStep === "identity" ? (
-              <ProjectIdentityStep
-                name={name}
-                icon={icon}
-                iconColor={iconColor}
-                SelectedIcon={SelectedIcon}
-                mode={derivedMode}
-                onNameChange={setName}
-                onIconChange={setIcon}
-                onIconColorChange={setIconColor}
-              />
-            ) : (
-              <ProjectReviewStep
-                SelectedIcon={SelectedIcon}
-                iconColor={iconColor}
-                previewName={previewName}
-                items={reviewItems}
-                derivedMode={derivedMode}
-                localHistoryChoice={localHistoryChoice}
-                githubSyncPreference={githubSyncPreference}
-                authStatus={authStatus}
-              />
-            )}
+                        <span
+                          className={[
+                            "mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border text-[10px] font-semibold",
+                            selected || complete ? "border-brand-orange bg-brand-orange text-white" : "border-line bg-white text-ink-secondary",
+                          ].join(" ")}
+                        >
+                          {complete ? <Check size={13} /> : index + 1}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-[11px] font-semibold text-ink-primary">{step.title}</span>
+                          <span className="mt-0.5 block text-[10px] leading-4 text-ink-secondary">{step.description}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </aside>
+            ) : null}
+            <div className="px-5 py-5">
+              {isEditing ? (
+                <EditProjectForm
+                  project={project}
+                  name={name}
+                  icon={icon}
+                  iconColor={iconColor}
+                  folderPath={folderPath}
+                  SelectedIcon={SelectedIcon}
+                  onNameChange={setName}
+                  onIconChange={setIcon}
+                  onIconColorChange={setIconColor}
+                  authStatus={authStatus}
+                  capabilities={capabilities}
+                  githubRepositories={githubRepositories}
+                  githubRepositoriesLoading={githubRepositoriesLoading}
+                  projectSyncStatus={projectSyncStatus}
+                  selectedGithubRepository={selectedGithubRepository}
+                  githubOwner={githubOwner}
+                  githubRepo={githubRepo}
+                  githubPublishVisibility={githubPublishVisibility}
+                  githubSyncPreference={githubSyncPreference}
+                  onLoginGithub={onLoginGithub}
+                  onLogoutGithub={onLogoutGithub}
+                  onVerifyGithubConnection={onVerifyGithubConnection}
+                  onRefreshGithubRepositories={onRefreshGithubRepositories}
+                  onGithubOwnerChange={setGithubOwner}
+                  onGithubRepoChange={setGithubRepo}
+                  onGithubPublishVisibilityChange={setGithubPublishVisibility}
+                  onGithubSyncPreferenceChange={setGithubSyncPreference}
+                  onFolderPathChange={setFolderPath}
+                  onSelectFolder={handleSelectFolder}
+                  localHistoryChoice={localHistoryChoice}
+                  onHistoryChoiceChange={handleHistoryChoiceChange}
+                  currentProtectionLevel={currentProtectionLevel}
+                  selectedProtectionLevel={selectedProtectionLevel}
+                  needsGithubDetachConfirmation={needsGithubDetachConfirmation}
+                  needsGitDetachConfirmation={needsGitDetachConfirmation}
+                  detachGithubConfirmed={detachGithubConfirmed}
+                  detachGitConfirmed={detachGitConfirmed}
+                  onDetachGithubConfirmedChange={setDetachGithubConfirmed}
+                  onDetachGitConfirmedChange={setDetachGitConfirmed}
+                  isWebRuntime={isWebRuntime}
+                />
+              ) : activeStep === "scenario" ? (
+                <ScenarioStep
+                  startMode={startMode}
+                  authStatus={authStatus}
+                  capabilities={capabilities}
+                  isWebRuntime={isWebRuntime}
+                  onLoginGithub={onLoginGithub}
+                  onSelect={(nextMode) => {
+                    setStartMode(nextMode);
+                    setLocalHistoryChoice(nextMode === "local-existing-git" ? "local-git" : "files-only");
+                  }}
+                />
+              ) : activeStep === "location" ? (
+                <LocationStep
+                  startMode={startMode}
+                  folderPath={folderPath}
+                  newProjectParentPath={newProjectParentPath}
+                  newProjectFolderName={newProjectFolderName}
+                  finalFolderPath={finalFolderPath}
+                  authStatus={authStatus}
+                  githubRepositories={githubRepositories}
+                  githubRepositoriesLoading={githubRepositoriesLoading}
+                  selectedGithubRepository={selectedGithubRepository}
+                  githubOwner={githubOwner}
+                  githubRepo={githubRepo}
+                  onLoginGithub={onLoginGithub}
+                  onRefreshGithubRepositories={onRefreshGithubRepositories}
+                  onFolderPathChange={setFolderPath}
+                  onNewProjectParentPathChange={setNewProjectParentPath}
+                  onNewProjectFolderNameChange={setNewProjectFolderName}
+                  onGithubOwnerChange={setGithubOwner}
+                  onGithubRepoChange={setGithubRepo}
+                  onNameSuggestion={(nextName) => {
+                    if (!name.trim()) setName(nextName);
+                  }}
+                  onSelectFolder={pickFolder}
+                  isWebRuntime={isWebRuntime}
+                />
+              ) : activeStep === "versioning" ? (
+                <VersioningStep
+                  startMode={startMode}
+                  localHistoryChoice={localHistoryChoice}
+                  authStatus={authStatus}
+                  capabilities={capabilities}
+                  selectedGithubRepository={selectedGithubRepository}
+                  githubOwner={githubOwner}
+                  githubRepo={githubRepo}
+                  githubPublishVisibility={githubPublishVisibility}
+                  githubRepositories={githubRepositories}
+                  githubRepositoriesLoading={githubRepositoriesLoading}
+                  onLoginGithub={onLoginGithub}
+                  onRefreshGithubRepositories={onRefreshGithubRepositories}
+                  onHistoryChoiceChange={handleHistoryChoiceChange}
+                  githubSyncPreference={githubSyncPreference}
+                  onGithubSyncPreferenceChange={setGithubSyncPreference}
+                  onGithubOwnerChange={setGithubOwner}
+                  onGithubRepoChange={setGithubRepo}
+                  onGithubPublishVisibilityChange={setGithubPublishVisibility}
+                  onNameSuggestion={(nextName) => {
+                    if (!name.trim()) setName(nextName);
+                  }}
+                />
+              ) : activeStep === "identity" ? (
+                <ProjectIdentityStep
+                  name={name}
+                  icon={icon}
+                  iconColor={iconColor}
+                  SelectedIcon={SelectedIcon}
+                  mode={derivedMode}
+                  onNameChange={setName}
+                  onIconChange={setIcon}
+                  onIconColorChange={setIconColor}
+                />
+              ) : (
+                <ProjectReviewStep
+                  SelectedIcon={SelectedIcon}
+                  iconColor={iconColor}
+                  previewName={previewName}
+                  items={reviewItems}
+                  derivedMode={derivedMode}
+                  localHistoryChoice={localHistoryChoice}
+                  githubSyncPreference={githubSyncPreference}
+                  authStatus={authStatus}
+                />
+              )}
+            </div>
           </div>
         </div>
         <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-line bg-white px-5 py-4">
@@ -2554,10 +2560,6 @@ function localFolderDescription(startMode: ProjectStartMode) {
 
 function folderSelectionFallbackMessage() {
   return "No se pudo abrir el selector de carpetas. En navegador escribe o pega la ruta completa; el selector con ruta absoluta está garantizado en la app Windows.";
-}
-
-function isTauriRuntime() {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
 function joinProjectFolderPath(parentPath: string, folderName: string) {

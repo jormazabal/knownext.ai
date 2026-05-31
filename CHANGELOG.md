@@ -2,6 +2,15 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 1.0.0 - 2026-06-01
+
+- Added native Android packaging hardening for private APK distribution, including clean mobile runtime separation, Android-specific shell behavior, and the orange brain app icon.
+- Added a private Android update channel using `android-latest.json`, APK SHA-256 validation, `versionCode` checks, package identity checks, and installed-certificate matching before opening Android's system installer.
+- Added GitHub Actions Android release automation for signed arm64 APK uploads next to the Windows installer, MSI, updater signatures, and `latest.json`.
+- Improved narrow-width mobile UX across document tabs, editor toolbar, prompt input, project dialogs, and account menus.
+- Kept Windows on the signed Tauri updater path while Android uses a platform-specific private APK updater.
+- Extended release documentation, mobile runtime notes, clean-bundle checks, and manual acceptance around clean installs, mobile backends, updater behavior, and secret handling.
+
 ## 0.21.0 - 2026-05-30
 
 - Added the persistent user `Notas` workspace tab as a Markdown surface that autosaves outside the project document tree and stays pinned next to IA.

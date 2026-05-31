@@ -12,6 +12,7 @@ from uuid import uuid4
 
 
 APP_DATA_DIR_ENV = "KNOWNEXT_APP_DATA_DIR"
+RUNTIME_PROFILE_ENV = "KNOWNEXT_RUNTIME_PROFILE"
 APP_DATA_DIR_NAME = "KnowNext.ai"
 _STORE_LOCKS_GUARD = threading.Lock()
 _STORE_LOCKS: dict[str, threading.RLock] = {}
@@ -29,7 +30,18 @@ def get_app_data_dir() -> Path:
     return Path.home() / ".knownext.ai"
 
 
+def get_runtime_profile() -> str:
+    return os.environ.get(RUNTIME_PROFILE_ENV, "desktop").strip() or "desktop"
+
+
+def should_recover_legacy_app_data() -> bool:
+    return get_runtime_profile() == "desktop"
+
+
 def get_legacy_app_data_dirs() -> list[Path]:
+    if not should_recover_legacy_app_data():
+        return []
+
     current_dir = get_app_data_dir()
     candidates: list[Path] = []
 
@@ -56,6 +68,8 @@ def _matches_default_data(data: dict[str, Any], default: dict[str, Any]) -> bool
     comparable_default = deepcopy(default)
     comparable_data.pop("updatedAt", None)
     comparable_default.pop("updatedAt", None)
+    for key, value in comparable_default.items():
+        comparable_data.setdefault(key, deepcopy(value))
     return comparable_data == comparable_default
 
 

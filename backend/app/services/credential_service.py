@@ -11,12 +11,16 @@ from fastapi import HTTPException
 from app.services.app_storage import JsonFileStore
 
 
+def _default_credentials() -> dict[str, Any]:
+    return {"schemaVersion": 1, "github": None, "openai": None}
+
+
 class CredentialService:
     def __init__(self) -> None:
         self.store = JsonFileStore("credentials.json")
 
     def get_github_token(self) -> str | None:
-        data = self.store.read({"schemaVersion": 1, "github": None})
+        data = self._read_credentials()
         github = data.get("github")
         if not isinstance(github, dict):
             return None
@@ -29,7 +33,7 @@ class CredentialService:
         return None
 
     def get_github_record(self) -> dict[str, Any] | None:
-        data = self.store.read({"schemaVersion": 1, "github": None})
+        data = self._read_credentials()
         github = data.get("github")
         return deepcopy(github) if isinstance(github, dict) else None
 
@@ -93,14 +97,17 @@ class CredentialService:
         self.store.write(data)
 
     def _read_credentials(self) -> dict[str, Any]:
-        data = self.store.read({"schemaVersion": 1, "github": None, "openai": None})
+        data = self.store.read(_default_credentials())
         if not isinstance(data, dict):
-            return {"schemaVersion": 1, "github": None, "openai": None}
-        return {
+            data = _default_credentials()
+        normalized = {
             "schemaVersion": 1,
             "github": data.get("github"),
             "openai": data.get("openai"),
         }
+        if normalized != data:
+            self.store.write(normalized)
+        return normalized
 
 
 credential_service = CredentialService()

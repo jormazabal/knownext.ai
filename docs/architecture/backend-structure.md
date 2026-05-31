@@ -57,6 +57,8 @@ The local API owns application metadata files. React must access them through AP
 
 By default these files are stored in `%APPDATA%/KnowNext.ai` on Windows and `~/.knownext.ai` elsewhere. The installed Tauri app overrides this with its app profile, currently `%APPDATA%/ai.knownext.desktop`, and browser development should use `pnpm backend:web`, which sets a separate web profile under `%APPDATA%/ai.knownext.web`. The backend `/health` response identifies the active runtime with `app=knownext`, `profile`, `version`, `port`, `managedBy`, `instanceId`, and `appDataDir`; frontends must reject a backend whose profile does not match their runtime. When project creation sends an empty `folderPath`, the backend allocates a managed folder under `projects/<project-id>` inside the active app data directory. Tests and local tooling can override the directory with `KNOWNEXT_APP_DATA_DIR`.
 
+Legacy app-data recovery is profile scoped. Only `KNOWNEXT_RUNTIME_PROFILE=desktop` may recover older `%APPDATA%/KnowNext.ai` or `~/.knownext.ai` JSON files into the current Tauri desktop data directory. Mobile, mobile-development, and web-development profiles must start from their own configured data directories and must not import desktop projects, config, credentials, notes, or seed data. The detailed product policy lives in `docs/architecture/data-management.md`.
+
 Layout width values in `config.json` are user preferences. Services should preserve known width fields, tolerate missing legacy values, and return defaults when values are absent or invalid so the frontend can clamp and render resizable panels safely.
 
 ## Project Modes

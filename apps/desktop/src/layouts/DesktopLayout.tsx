@@ -29,6 +29,7 @@ import { formatVersionFullDate, VersionHistoryPanel, type VersionPreview, type V
 import { BrandMark } from "../components/brand/BrandMark";
 import { TitleBar } from "../components/window/TitleBar";
 import { getProjectImageContentUrl } from "../lib/api/projects";
+import { isMobileDeviceRuntime, isPhoneAppShell } from "../lib/runtime/platform";
 import type { ActivityEvent, AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentSyncStatus, DocumentTreeNode, ExportFormat, ExternalChangeDecision, ExternalChangeSet, InsertImageReferenceResponse, LayoutConfig, Project, ProjectSyncState, ProjectSyncStatus, ProjectVersioningStatus, VersionRecord, WorkspaceTab } from "../types/domain";
 
 const sidebarWidthConfig = {
@@ -194,6 +195,8 @@ type SideBySideDiffRow = {
 };
 
 export function DesktopLayout(props: DesktopLayoutProps) {
+  const mobileShell = isMobileDeviceRuntime();
+  const phoneShell = isPhoneAppShell();
   const [editorControllers, setEditorControllers] = useState<Record<string, MarkdownEditorController>>({});
   const [editorFormatState, setEditorFormatState] = useState<MarkdownEditorFormatState>(emptyMarkdownEditorFormatState);
   const [editorHistoryStates, setEditorHistoryStates] = useState<Record<string, MarkdownEditorHistoryState>>({});
@@ -371,6 +374,11 @@ export function DesktopLayout(props: DesktopLayoutProps) {
     setNavigationOpen(false);
   }, [props.onOpenDocument]);
 
+  const handleOpenReleaseNotes = useCallback(() => {
+    setNavigationOpen(false);
+    props.onOpenReleaseNotes();
+  }, [props.onOpenReleaseNotes]);
+
   const [imageInsertOpen, setImageInsertOpen] = useState(false);
 
   const externalChangeBadges = useMemo(() => buildExternalChangeBadges(props.externalChangeSet), [props.externalChangeSet]);
@@ -402,12 +410,15 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   }
 
   return (
-    <div className="h-screen overflow-hidden bg-white text-ink-primary">
-      <TitleBar />
-      <div className="relative flex h-[calc(100vh-36px)]">
+    <div className={["h-[100dvh] overflow-hidden bg-white text-ink-primary", mobileShell ? "knownext-mobile-shell" : "", phoneShell ? "knownext-phone-shell" : ""].join(" ")}>
+      {mobileShell ? null : <TitleBar />}
+      <div
+        className={["relative flex", mobileShell ? "h-[100dvh]" : "h-[calc(100dvh-36px)]"].join(" ")}
+        style={mobileShell ? { paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" } : undefined}
+      >
         {navigationOpen ? (
           <button
-            className="fixed inset-x-0 bottom-0 top-9 z-40 bg-black/20 lg:hidden"
+            className={["fixed inset-x-0 bottom-0 z-40 bg-black/20 lg:hidden", mobileShell ? "top-0" : "top-9"].join(" ")}
             aria-label="Cerrar panel de documentos"
             onClick={() => setNavigationOpen(false)}
           />
@@ -418,7 +429,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             navigationOpen ? "translate-x-0" : "-translate-x-full",
             desktopNavigationVisible ? "" : "lg:hidden",
           ].join(" ")}
-          style={{ width: sidebar.width, maxWidth: "calc(100vw - 48px)" }}
+          style={{ width: phoneShell ? "min(100vw, 420px)" : sidebar.width, maxWidth: phoneShell ? "100vw" : "calc(100vw - 48px)" }}
         >
           <div className="px-4 pb-2 pt-3">
             <ProjectSelector
@@ -490,7 +501,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             onOpenAppSettings={props.onOpenAppSettings}
             onOpenRecoverableDrafts={props.onOpenRecoverableDrafts}
             onCheckForUpdates={props.onCheckForUpdates}
-            onOpenReleaseNotes={props.onOpenReleaseNotes}
+            onOpenReleaseNotes={handleOpenReleaseNotes}
             isCheckingForUpdates={props.isCheckingForUpdates}
           />
         </aside>
@@ -530,7 +541,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 onOpenAppSettings={props.onOpenAppSettings}
                 onOpenRecoverableDrafts={props.onOpenRecoverableDrafts}
                 onCheckForUpdates={props.onCheckForUpdates}
-                onOpenReleaseNotes={props.onOpenReleaseNotes}
+                onOpenReleaseNotes={handleOpenReleaseNotes}
                 isCheckingForUpdates={props.isCheckingForUpdates}
               />
             </div>
@@ -543,6 +554,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
           <DocumentTabs
             tabs={props.tabs}
             activeTabId={props.activeTabId}
+            activeDocumentId={props.activeDocumentId}
             dirtyDocumentIds={props.dirtyDocumentIds}
             onOpenNavigation={() => setNavigationOpen(true)}
             onSelectTab={props.onSelectTab}
@@ -1425,7 +1437,7 @@ function InsertImageDialog({
 
   return (
     <div className="knownext-modal-overlay fixed inset-0 z-[98] grid place-items-center bg-black/20 px-4">
-      <section className="flex max-h-[min(620px,calc(100vh-48px))] w-[min(640px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu">
+      <section className="flex max-h-[min(620px,calc(100dvh-48px))] w-[min(640px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu">
         <header className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
           <div>
             <h2 className="text-[15px] font-semibold text-ink-primary">Insertar imagen</h2>

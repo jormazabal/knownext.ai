@@ -2,6 +2,8 @@
 
 KnowNext.ai uses Tauri as the desktop shell.
 
+Android packaging is documented separately in [Mobile Runtime](mobile-runtime.md). The Android app does not use the desktop Python sidecar model.
+
 ## Current Runtime
 
 - Tauri loads the Vite React app.

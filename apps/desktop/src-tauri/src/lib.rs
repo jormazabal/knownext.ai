@@ -1,4 +1,6 @@
-use std::io::{Read, Write};
+#[cfg(desktop)]
+use std::io::Read;
+use std::io::Write;
 #[cfg(all(desktop, not(debug_assertions)))]
 use std::io::{BufRead, BufReader};
 #[cfg(desktop)]
@@ -22,6 +24,7 @@ static TRACE_LOG_LOCK: Mutex<()> = Mutex::new(());
 const BACKEND_SIDECAR_EXE: &str = "knownext-backend.exe";
 #[cfg(all(desktop, not(debug_assertions)))]
 const BACKEND_SIDECAR_TARGET_EXE: &str = "knownext-backend-x86_64-pc-windows-msvc.exe";
+#[cfg(desktop)]
 const BACKEND_HOST: &str = "127.0.0.1";
 const DEFAULT_BACKEND_PORT: u16 = 8765;
 const AUTO_BACKEND_PORT_END: u16 = 8799;
@@ -29,6 +32,11 @@ const AUTO_BACKEND_PORT_END: u16 = 8799;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 #[cfg(desktop)]
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn install_mobile_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
 
 #[cfg(all(desktop, not(debug_assertions)))]
 struct BackendProcess(Mutex<Option<Child>>);
@@ -54,7 +62,6 @@ struct BackendHealth {
     app_data_dir: Option<String>,
 }
 
-#[cfg(desktop)]
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BackendPortConfig {
@@ -64,7 +71,6 @@ struct BackendPortConfig {
     auto_port_end: u16,
 }
 
-#[cfg(desktop)]
 impl Default for BackendPortConfig {
     fn default() -> Self {
         Self {
@@ -96,7 +102,6 @@ impl Default for BackendRuntime {
 #[cfg(desktop)]
 struct BackendRuntimeState(Mutex<BackendRuntime>);
 
-#[cfg(desktop)]
 #[derive(serde::Serialize)]
 struct RuntimeServicesStatus {
     services: Vec<RuntimeServiceStatus>,
@@ -104,7 +109,6 @@ struct RuntimeServicesStatus {
     checked_at: String,
 }
 
-#[cfg(desktop)]
 #[derive(serde::Serialize)]
 struct RuntimeServiceStatus {
     id: String,
@@ -246,33 +250,42 @@ fn record_trace_log(
 
 #[tauri::command]
 fn open_folder(folder_path: String) -> Result<(), String> {
-    std::fs::create_dir_all(&folder_path).map_err(|error| error.to_string())?;
-
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
-        std::process::Command::new("explorer")
-            .arg(&folder_path)
-            .spawn()
-            .map_err(|error| error.to_string())?;
+        let _ = folder_path;
+        Err("Abrir carpetas del sistema no está disponible en la app móvil.".to_string())
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
-        std::process::Command::new("open")
-            .arg(&folder_path)
-            .spawn()
-            .map_err(|error| error.to_string())?;
-    }
+        std::fs::create_dir_all(&folder_path).map_err(|error| error.to_string())?;
 
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&folder_path)
-            .spawn()
-            .map_err(|error| error.to_string())?;
-    }
+        #[cfg(target_os = "windows")]
+        {
+            std::process::Command::new("explorer")
+                .arg(&folder_path)
+                .spawn()
+                .map_err(|error| error.to_string())?;
+        }
 
-    Ok(())
+        #[cfg(target_os = "macos")]
+        {
+            std::process::Command::new("open")
+                .arg(&folder_path)
+                .spawn()
+                .map_err(|error| error.to_string())?;
+        }
+
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            std::process::Command::new("xdg-open")
+                .arg(&folder_path)
+                .spawn()
+                .map_err(|error| error.to_string())?;
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(desktop)]
@@ -388,7 +401,12 @@ fn runtime_config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 #[cfg(desktop)]
 fn normalize_backend_port_config(config: BackendPortConfig) -> BackendPortConfig {
     let default = BackendPortConfig::default();
-    let mode = if config.mode == "fixed" { "fixed" } else { "automatic" }.to_string();
+    let mode = if config.mode == "fixed" {
+        "fixed"
+    } else {
+        "automatic"
+    }
+    .to_string();
     let port = if (1024..=65535).contains(&config.port) {
         config.port
     } else {
@@ -399,7 +417,9 @@ fn normalize_backend_port_config(config: BackendPortConfig) -> BackendPortConfig
     } else {
         default.auto_port_start
     };
-    let auto_port_end = if (1024..=65535).contains(&config.auto_port_end) && config.auto_port_end >= auto_port_start {
+    let auto_port_end = if (1024..=65535).contains(&config.auto_port_end)
+        && config.auto_port_end >= auto_port_start
+    {
         config.auto_port_end
     } else {
         default.auto_port_end
@@ -436,7 +456,10 @@ fn read_backend_port_config(app: &tauri::AppHandle) -> BackendPortConfig {
 }
 
 #[cfg(desktop)]
-fn write_backend_port_config(app: &tauri::AppHandle, config: &BackendPortConfig) -> Result<(), String> {
+fn write_backend_port_config(
+    app: &tauri::AppHandle,
+    config: &BackendPortConfig,
+) -> Result<(), String> {
     let path = runtime_config_path(app)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -447,8 +470,11 @@ fn write_backend_port_config(app: &tauri::AppHandle, config: &BackendPortConfig)
             "port": config,
         },
     });
-    std::fs::write(path, serde_json::to_string_pretty(&data).map_err(|error| error.to_string())?)
-        .map_err(|error| error.to_string())
+    std::fs::write(
+        path,
+        serde_json::to_string_pretty(&data).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())
 }
 
 #[cfg(desktop)]
@@ -462,7 +488,11 @@ fn runtime_active_port(app: &tauri::AppHandle) -> u16 {
 }
 
 #[cfg(desktop)]
-fn set_runtime_port(app: &tauri::AppHandle, config: BackendPortConfig, active_port: u16) -> Result<(), String> {
+fn set_runtime_port(
+    app: &tauri::AppHandle,
+    config: BackendPortConfig,
+    active_port: u16,
+) -> Result<(), String> {
     let runtime_state = app.state::<BackendRuntimeState>();
     let mut runtime = runtime_state.0.lock().map_err(|error| error.to_string())?;
     runtime.port_config = config;
@@ -481,7 +511,10 @@ fn get_runtime_port_config(app: &tauri::AppHandle) -> BackendPortConfig {
 }
 
 #[cfg(all(desktop, not(debug_assertions)))]
-fn choose_backend_port(app: &tauri::AppHandle, expected_app_data_dir: &str) -> Result<(BackendPortConfig, u16), String> {
+fn choose_backend_port(
+    app: &tauri::AppHandle,
+    expected_app_data_dir: &str,
+) -> Result<(BackendPortConfig, u16), String> {
     let config = normalize_backend_port_config(read_backend_port_config(app));
     if config.mode == "fixed" {
         if let Some(health) = backend_health(config.port) {
@@ -497,7 +530,10 @@ fn choose_backend_port(app: &tauri::AppHandle, expected_app_data_dir: &str) -> R
             ));
         }
         if backend_port_accepts_connections(config.port) {
-            return Err(format!("El puerto fijo {} está ocupado por otro servicio.", config.port));
+            return Err(format!(
+                "El puerto fijo {} está ocupado por otro servicio.",
+                config.port
+            ));
         }
         return Ok((config.clone(), config.port));
     }
@@ -536,12 +572,14 @@ fn backend_child_health_note(app: &tauri::AppHandle) -> Option<String> {
             *child_slot = None;
             Some(format!("Bundled backend process exited: {status}"))
         }
-        Ok(None) => Some("Bundled backend process is running, but /health is not available.".to_string()),
+        Ok(None) => {
+            Some("Bundled backend process is running, but /health is not available.".to_string())
+        }
         Err(error) => Some(format!("Could not inspect backend process: {error}")),
     }
 }
 
-#[cfg(any(not(desktop), debug_assertions))]
+#[cfg(all(desktop, debug_assertions))]
 fn backend_child_health_note(_app: &tauri::AppHandle) -> Option<String> {
     None
 }
@@ -553,7 +591,7 @@ fn resolved_sidecar_path_for_status(app: &tauri::AppHandle) -> Option<String> {
         .map(|path| path.to_string_lossy().to_string())
 }
 
-#[cfg(any(not(desktop), debug_assertions))]
+#[cfg(all(desktop, debug_assertions))]
 fn resolved_sidecar_path_for_status(_app: &tauri::AppHandle) -> Option<String> {
     None
 }
@@ -659,15 +697,58 @@ fn get_runtime_service_status(app: tauri::AppHandle) -> Result<RuntimeServicesSt
     })
 }
 
-#[cfg(desktop)]
+#[cfg(not(desktop))]
 #[tauri::command]
-fn get_runtime_api_base_url(app: tauri::AppHandle) -> Result<String, String> {
-    Ok(format!("http://{BACKEND_HOST}:{}", runtime_active_port(&app)))
+fn get_runtime_service_status() -> Result<RuntimeServicesStatus, String> {
+    Ok(RuntimeServicesStatus {
+        services: vec![RuntimeServiceStatus {
+            id: "backend".to_string(),
+            name: "Backend API".to_string(),
+            status: "unavailable".to_string(),
+            status_label: "Configurable".to_string(),
+            description: "La app móvil no incluye el backend Python como sidecar; debe conectarse a una API FastAPI externa configurada en la app o durante el build.".to_string(),
+            endpoint: "Backend móvil configurable".to_string(),
+            expected_version: env!("CARGO_PKG_VERSION").to_string(),
+            version: None,
+            expected_profile: "mobile".to_string(),
+            profile: None,
+            expected_app_data_dir: "".to_string(),
+            app_data_dir: None,
+            port: None,
+            managed_by: None,
+            instance_id: None,
+            started_at: None,
+            sidecar_path: None,
+            last_error: Some("Configura un endpoint backend compatible desde la pantalla de conexión móvil o mediante VITE_API_BASE_URL para builds privadas.".to_string()),
+            can_restart: false,
+            can_configure_port: false,
+            port_config: None,
+        }],
+        checked_at: trace_timestamp(),
+    })
 }
 
 #[cfg(desktop)]
 #[tauri::command]
-fn update_backend_port_config(app: tauri::AppHandle, config: BackendPortConfig) -> Result<RuntimeServicesStatus, String> {
+fn get_runtime_api_base_url(app: tauri::AppHandle) -> Result<String, String> {
+    Ok(format!(
+        "http://{BACKEND_HOST}:{}",
+        runtime_active_port(&app)
+    ))
+}
+
+#[cfg(not(desktop))]
+#[tauri::command]
+fn get_runtime_api_base_url() -> Result<String, String> {
+    Err("La app móvil no supervisa una API local. Configura un endpoint backend compatible desde la pantalla de conexión móvil.".to_string())
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+fn update_backend_port_config(
+    app: tauri::AppHandle,
+    config: BackendPortConfig,
+) -> Result<RuntimeServicesStatus, String> {
     let config = normalize_backend_port_config(config);
     #[cfg(all(desktop, not(debug_assertions)))]
     let previous_config = get_runtime_port_config(&app);
@@ -717,6 +798,12 @@ fn update_backend_port_config(app: tauri::AppHandle, config: BackendPortConfig) 
     get_runtime_service_status(app)
 }
 
+#[cfg(not(desktop))]
+#[tauri::command]
+fn update_backend_port_config(_config: BackendPortConfig) -> Result<RuntimeServicesStatus, String> {
+    Err("La configuración de puerto del backend solo está disponible en escritorio.".to_string())
+}
+
 #[cfg(all(desktop, not(debug_assertions)))]
 #[tauri::command]
 fn restart_backend_service(app: tauri::AppHandle) -> Result<RuntimeServicesStatus, String> {
@@ -750,7 +837,16 @@ fn restart_backend_service(app: tauri::AppHandle) -> Result<RuntimeServicesStatu
         "Manual backend restart requested, but sidecar supervision is only active in packaged desktop builds.",
         None,
     );
-    Err("El reinicio automático del backend solo está disponible en la aplicación instalada.".to_string())
+    Err(
+        "El reinicio automático del backend solo está disponible en la aplicación instalada."
+            .to_string(),
+    )
+}
+
+#[cfg(not(desktop))]
+#[tauri::command]
+fn restart_backend_service() -> Result<RuntimeServicesStatus, String> {
+    Err("El reinicio automático del backend solo está disponible en escritorio.".to_string())
 }
 
 #[cfg(all(desktop, not(debug_assertions), target_os = "windows"))]
@@ -901,7 +997,9 @@ fn start_backend_sidecar(app: &tauri::AppHandle) -> Result<(), String> {
             "info",
             "backend.sidecar",
             "Compatible local API is already running.",
-            Some(&format!("version={APP_VERSION}\nappDataDir={app_data_dir}\nport={active_port}")),
+            Some(&format!(
+                "version={APP_VERSION}\nappDataDir={app_data_dir}\nport={active_port}"
+            )),
         );
         return Ok(());
     }
@@ -954,7 +1052,10 @@ fn start_backend_sidecar(app: &tauri::AppHandle) -> Result<(), String> {
     *process_state.0.lock().map_err(|error| error.to_string())? = Some(child);
 
     if wait_for_backend(active_port, Duration::from_secs(45), &app_data_dir) {
-        let detail = format!("path={}\nversion={APP_VERSION}\nappDataDir={app_data_dir}\nport={active_port}", sidecar_path.display());
+        let detail = format!(
+            "path={}\nversion={APP_VERSION}\nappDataDir={app_data_dir}\nport={active_port}",
+            sidecar_path.display()
+        );
         append_trace_log(
             app,
             "info",
@@ -1013,6 +1114,9 @@ fn spawn_backend_monitor(app: tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    install_mobile_crypto_provider();
+
     let builder = tauri::Builder::default();
     #[cfg(desktop)]
     let builder = builder.manage(BackendRuntimeState(Mutex::new(BackendRuntime::default())));
@@ -1023,9 +1127,14 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_shell::init())
-        .setup(|app| {
+        .setup(|_app| {
+            #[cfg(desktop)]
+            let app = _app;
+
+            #[cfg(desktop)]
+            app.handle().plugin(tauri_plugin_process::init())?;
+
             #[cfg(desktop)]
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;

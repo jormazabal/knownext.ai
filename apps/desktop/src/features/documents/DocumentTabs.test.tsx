@@ -9,7 +9,10 @@ const tabs = [
 ];
 
 describe("DocumentTabs", () => {
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    Object.defineProperty(window, "matchMedia", { value: undefined, configurable: true });
+  });
 
   it("shows a compact navigation opener when provided", async () => {
     const onOpenNavigation = vi.fn();
@@ -228,6 +231,80 @@ describe("DocumentTabs", () => {
       }
     }
   });
+
+  it("uses a compact tab switcher in narrow responsive mode", async () => {
+    mockCompactTabsMode(true);
+    const onSelectTab = vi.fn();
+    const onCloseTab = vi.fn();
+
+    render(
+      <DocumentTabs
+        tabs={[
+          { kind: "ai-conversation", id: "project-ai-conversation", name: "IA", readonly: true },
+          { kind: "notes", id: "user-notes", name: "Notas", utilityTabId: "notes" },
+          ...tabs,
+          { kind: "reference-document", id: "ref-budget", name: "Presupuesto.xlsx", path: "Presupuesto.xlsx", format: "xlsx", readonly: true },
+        ]}
+        activeTabId="doc-b"
+        dirtyDocumentIds={["doc-b"]}
+        onOpenNavigation={vi.fn()}
+        onSelectTab={onSelectTab}
+        onCloseTab={onCloseTab}
+      />,
+    );
+
+    expect(screen.getByLabelText("Abrir panel de documentos")).toBeInTheDocument();
+    expect(screen.getByLabelText("IA")).toBeInTheDocument();
+    expect(screen.getByLabelText("Notas")).toBeInTheDocument();
+    expect(screen.getByLabelText("Documento activo Esquemas.md")).toBeInTheDocument();
+    expect(screen.getByLabelText("Mostrar archivos abiertos, activo Esquemas.md")).toBeInTheDocument();
+    const closeActiveTab = screen.getByLabelText("Cerrar Esquemas.md, con cambios sin guardar");
+    const openDocuments = screen.getByLabelText("Mostrar archivos abiertos, activo Esquemas.md");
+    expect(closeActiveTab.compareDocumentPosition(openDocuments) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText("Acta.md")).not.toBeInTheDocument();
+    expect(screen.queryByText("Presupuesto.xlsx")).not.toBeInTheDocument();
+
+    await userEvent.click(closeActiveTab);
+
+    expect(onCloseTab).toHaveBeenCalledWith("doc-b");
+    expect(screen.queryByRole("dialog", { name: "Archivos abiertos" })).not.toBeInTheDocument();
+
+    await userEvent.click(openDocuments);
+
+    expect(screen.getByRole("dialog", { name: "Archivos abiertos" })).toBeInTheDocument();
+    expect(screen.getByText("Acta.md")).toBeInTheDocument();
+    expect(screen.getAllByText("Esquemas.md").length).toBeGreaterThan(1);
+    expect(screen.getByText("Presupuesto.xlsx")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText("Acta.md"));
+
+    expect(onSelectTab).toHaveBeenCalledWith("doc-a");
+    expect(screen.queryByRole("dialog", { name: "Archivos abiertos" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the current document visible when a fixed tab is active in narrow responsive mode", () => {
+    mockCompactTabsMode(true);
+
+    render(
+      <DocumentTabs
+        tabs={[
+          { kind: "ai-conversation", id: "project-ai-conversation", name: "IA", readonly: true },
+          { kind: "notes", id: "user-notes", name: "Notas", utilityTabId: "notes" },
+          ...tabs,
+        ]}
+        activeTabId="user-notes"
+        activeDocumentId="doc-b"
+        dirtyDocumentIds={[]}
+        onOpenNavigation={vi.fn()}
+        onSelectTab={vi.fn()}
+        onCloseTab={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText("Notas")).toBeInTheDocument();
+    expect(screen.getByLabelText("Mostrar archivos abiertos, activo Esquemas.md")).toBeInTheDocument();
+    expect(screen.queryByText("Acta.md")).not.toBeInTheDocument();
+  });
 });
 
 function createDataTransfer() {
@@ -240,4 +317,16 @@ function createDataTransfer() {
       data.set(type, value);
     }),
   } as unknown as DataTransfer;
+}
+
+function mockCompactTabsMode(matches: boolean) {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  });
 }

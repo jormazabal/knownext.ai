@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type MutableRefObject } from "react";
 import type { DocumentTreeAction } from "../features/documents/DocumentTree";
 import type { MarkdownEditorExternalOperation, MarkdownEditorSelection } from "../features/editor/editorTypes";
 import type { AiPromptExecutionOptions } from "../features/assistant/AiPromptInput";
@@ -59,7 +59,18 @@ import {
   sendAiInteraction,
   uploadAiContextFiles,
 } from "../lib/api/ai";
-import { API_BASE_URL, ApiError, getApiErrorMessage, isApiConnectionError, isBackendEnabled, waitForApiReady } from "../lib/api/client";
+import {
+  API_BASE_URL,
+  ApiError,
+  getApiBaseUrl,
+  getApiErrorMessage,
+  isApiConnectionError,
+  isBackendEnabled,
+  isMobileApiBaseUrlConfigured,
+  setApiBaseUrl,
+  setPersistentMobileApiBaseUrl,
+  waitForApiReady,
+} from "../lib/api/client";
 import { getProjectActivity, recordProjectActivity } from "../lib/api/activity";
 import {
   discardDocumentDraft,
@@ -91,9 +102,10 @@ import {
 import { getTraceLogStatus, openTraceLogFolder, recordTraceLog, type TraceLogStatus } from "../lib/runtime/logging";
 import { openExternalUrl } from "../lib/runtime/links";
 import { isTauriRuntime, selectBrowserExportTarget, selectExportFilePath, withExportExtension } from "../lib/runtime/exportDialogs";
+import { isTauriMobileRuntime } from "../lib/runtime/platform";
 import { getRuntimeServiceStatus, restartBackendService, updateBackendPortConfig, type BackendPortConfig, type RuntimeServicesStatus } from "../lib/runtime/services";
 import { applyAppearanceAttributes, useResolvedAppearanceTheme } from "../lib/theme/appearance";
-import { AlertCircle, ArchiveRestore, FileWarning, Info, RefreshCw, Trash2, X } from "lucide-react";
+import { AlertCircle, ArchiveRestore, Check, FileWarning, Info, RefreshCw, Server, Trash2, X } from "lucide-react";
 import {
   createFolder,
   createProjectDocument,
@@ -252,6 +264,10 @@ export function App() {
   const [configLoaded, setConfigLoaded] = useState(false);
   const [configPersistenceAvailable, setConfigPersistenceAvailable] = useState(true);
   const [notice, setNotice] = useState<AppNotice | null>(null);
+  const [startupRetrySequence, setStartupRetrySequence] = useState(0);
+  const [mobileApiSetupOpen, setMobileApiSetupOpen] = useState(false);
+  const [mobileApiSetupError, setMobileApiSetupError] = useState<string | null>(null);
+  const [mobileApiSetupBusy, setMobileApiSetupBusy] = useState(false);
   const [closeDocumentId, setCloseDocumentId] = useState<string | null>(null);
   const [orphanDrafts, setOrphanDrafts] = useState<OrphanDraft[]>([]);
   const [recoverableDraftsOpen, setRecoverableDraftsOpen] = useState(false);
@@ -379,15 +395,22 @@ export function App() {
         setTabs(activeProjectTabs.openTabs);
         setActiveDocumentId(activeProjectTabs.activeDocumentId);
         setActiveTreeNodeId(activeProjectTabs.activeDocumentId);
+        setMobileApiSetupOpen(false);
+        setMobileApiSetupError(null);
       } catch (error) {
+        const startupMessage = getApiErrorMessage(error, "La aplicación no pudo cargar la configuración inicial.");
         void recordTraceLog({
           source: "app.startup",
-          message: getApiErrorMessage(error, "La aplicación no pudo cargar la configuración inicial."),
+          message: startupMessage,
           detail: describeError(error),
         });
+        if (isTauriMobileRuntime()) {
+          setMobileApiSetupOpen(true);
+          setMobileApiSetupError(startupMessage);
+        }
         setNotice({
           title: "No se pudo iniciar KnowNext.ai",
-          message: getApiErrorMessage(error, "La aplicación no pudo cargar la configuración inicial."),
+          message: startupMessage,
           tone: "error",
         });
         setProjects([]);
@@ -417,7 +440,7 @@ export function App() {
         setConfigLoaded(true);
       }
     })();
-  }, []);
+  }, [startupRetrySequence]);
 
   useEffect(() => {
     if (!configLoaded) return;
@@ -2322,6 +2345,33 @@ export function App() {
     void recordTraceLog({ source, message, detail });
   }
 
+  async function handleSaveMobileApiBaseUrl(endpoint: string) {
+    const previousEndpoint = getApiBaseUrl();
+    setMobileApiSetupBusy(true);
+    setMobileApiSetupError(null);
+
+    try {
+      setApiBaseUrl(endpoint);
+      await waitForApiReady({ attempts: 5, intervalMs: 300 });
+      setPersistentMobileApiBaseUrl(endpoint);
+      setMobileApiSetupOpen(false);
+      setNotice(null);
+      setConfigLoaded(false);
+      setStartupRetrySequence((sequence) => sequence + 1);
+    } catch (error) {
+      setApiBaseUrl(previousEndpoint);
+      setMobileApiSetupError(getApiErrorMessage(error, "No se pudo validar el backend móvil."));
+    } finally {
+      setMobileApiSetupBusy(false);
+    }
+  }
+
+  function handleRetryMobileApiBaseUrl() {
+    setMobileApiSetupError(null);
+    setConfigLoaded(false);
+    setStartupRetrySequence((sequence) => sequence + 1);
+  }
+
   function handleLayoutConfigChange(nextLayoutConfig: Partial<LayoutConfig>) {
     setLayoutConfig((currentLayoutConfig) => ({ ...currentLayoutConfig, ...nextLayoutConfig }));
   }
@@ -3127,6 +3177,15 @@ export function App() {
       />
       <GlobalTooltip />
       <StartupOverlay loading={!configLoaded} />
+      <MobileApiSetupOverlay
+        open={mobileApiSetupOpen}
+        currentEndpoint={getApiBaseUrl()}
+        hasSavedEndpoint={isMobileApiBaseUrlConfigured()}
+        busy={mobileApiSetupBusy}
+        error={mobileApiSetupError}
+        onSave={(endpoint) => void handleSaveMobileApiBaseUrl(endpoint)}
+        onRetry={handleRetryMobileApiBaseUrl}
+      />
       <AppNoticeBanner notice={notice} onClose={() => setNotice(null)} />
       <AppSettingsDialog
         open={appSettingsOpen}
@@ -3787,6 +3846,101 @@ function StartupOverlay({ loading }: { loading: boolean }) {
   );
 }
 
+function MobileApiSetupOverlay({
+  open,
+  currentEndpoint,
+  hasSavedEndpoint,
+  busy,
+  error,
+  onSave,
+  onRetry,
+}: {
+  open: boolean;
+  currentEndpoint: string;
+  hasSavedEndpoint: boolean;
+  busy: boolean;
+  error: string | null;
+  onSave: (endpoint: string) => void;
+  onRetry: () => void;
+}) {
+  const [endpoint, setEndpoint] = useState(currentEndpoint);
+
+  useEffect(() => {
+    if (open) setEndpoint(currentEndpoint);
+  }, [currentEndpoint, open]);
+
+  if (!open) return null;
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!busy) onSave(endpoint);
+  }
+
+  return (
+    <div className="fixed inset-0 z-[130] flex min-h-[100dvh] items-center justify-center bg-white px-5 py-6">
+      <section className="w-full max-w-[420px]">
+        <BrandMark className="h-11 w-11" />
+        <div className="mt-6 flex items-center gap-2 text-[11px] font-semibold uppercase text-brand-orange">
+          <Server size={14} strokeWidth={2} />
+          Backend móvil
+        </div>
+        <h1 className="mt-2 text-[23px] font-semibold leading-tight text-ink-primary">Conectar KnowNext.ai</h1>
+        <p className="mt-3 text-[12px] leading-5 text-ink-secondary">
+          Android necesita una API FastAPI accesible desde el teléfono. Usa la IP del equipo que ejecuta `pnpm backend:mobile`.
+        </p>
+        <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
+          <label className="block">
+            <span className="text-[11px] font-semibold text-ink-primary">Endpoint de la API</span>
+            <input
+              className="mt-2 h-11 w-full rounded-md border border-line bg-white px-3 font-mono text-[12px] text-ink-primary outline-none transition focus:border-brand-orange focus:ring-2 focus:ring-orange-200"
+              value={endpoint}
+              onChange={(event) => setEndpoint(event.target.value)}
+              placeholder="http://192.168.1.20:8775"
+              inputMode="url"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              disabled={busy}
+            />
+          </label>
+          <div className="rounded-md border border-line bg-panel px-3 py-3">
+            <div className="flex items-start gap-2">
+              <Check size={14} className="mt-0.5 shrink-0 text-brand-orange" strokeWidth={2} />
+              <p className="text-[11px] leading-5 text-ink-secondary">
+                Se validará `/health` con la versión de la app y el perfil `mobile` antes de guardar.
+              </p>
+            </div>
+          </div>
+          {error ? (
+            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-3 text-[11px] leading-5 text-red-700" role="alert">
+              {error}
+            </div>
+          ) : null}
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              type="submit"
+              className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md bg-brand-orange px-4 text-[12px] font-semibold text-white transition hover:bg-brand-orange-dark disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={busy}
+            >
+              {busy ? <RefreshCw size={15} className="animate-spin" /> : <Check size={15} />}
+              Guardar y entrar
+            </button>
+            <button
+              type="button"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-line bg-white px-4 text-[12px] font-semibold text-ink-primary transition hover:bg-panel disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={onRetry}
+              disabled={busy || !hasSavedEndpoint}
+            >
+              <RefreshCw size={15} />
+              Reintentar
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 function GithubLoginDialog({
   open,
   state,
@@ -3899,6 +4053,8 @@ function UpdateAvailableDialog({
   const busy = state === "downloading" || state === "installing";
   const progressLabel = progress?.percent !== undefined ? `${progress.percent}%` : "Preparando";
   const releaseDate = update.date ? formatDateTime(update.date) : null;
+  const sizeLabel = update.sizeBytes ? formatBytes(update.sizeBytes) : null;
+  const platformLabel = update.platform === "android-private" ? "APK Android privado" : "Actualizador de escritorio";
 
   return (
     <div className="knownext-modal-overlay fixed inset-0 z-[95] grid place-items-center bg-black/20">
@@ -3919,6 +4075,17 @@ function UpdateAvailableDialog({
             <span className="font-mono text-[11px] font-semibold text-brand-orange">v{update.version}</span>
           </div>
           {releaseDate ? <p className="text-[11px]">Publicada el {releaseDate}.</p> : null}
+          <div className="flex items-center justify-between rounded-md border border-line bg-white px-3 py-2">
+            <span>Canal</span>
+            <span className="font-medium text-ink-primary">{platformLabel}</span>
+          </div>
+          {sizeLabel ? (
+            <div className="flex items-center justify-between rounded-md border border-line bg-white px-3 py-2">
+              <span>Tamaño</span>
+              <span className="font-mono text-[11px] text-ink-primary">{sizeLabel}</span>
+            </div>
+          ) : null}
+          {update.mandatory ? <p className="text-[11px] text-red-700">Esta actualización está marcada como obligatoria.</p> : null}
           {update.notes ? (
             <div className="max-h-28 overflow-y-auto rounded-md border border-line bg-white px-3 py-2 text-[11px] leading-5">
               {update.notes}
@@ -4101,7 +4268,7 @@ function RecoverableDraftsDialog({
   return (
     <div className="knownext-modal-overlay fixed inset-0 z-[90] grid place-items-center bg-black/20">
       <section
-        className="flex max-h-[min(620px,calc(100vh-48px))] w-[min(660px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
+        className="flex max-h-[min(620px,calc(100dvh-48px))] w-[min(660px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
         role="dialog"
         aria-modal="true"
         aria-labelledby="recoverable-drafts-title"
@@ -4246,6 +4413,18 @@ function formatDateTime(value: string) {
   } catch {
     return value;
   }
+}
+
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size >= 10 || unitIndex === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[unitIndex]}`;
 }
 
 function describeError(error: unknown) {

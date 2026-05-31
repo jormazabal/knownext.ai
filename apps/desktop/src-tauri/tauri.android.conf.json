@@ -1,0 +1,15 @@
+{
+  "identifier": "ai.knownext.mobile",
+  "build": {
+    "beforeBuildCommand": "pnpm build && node ../../scripts/check-client-bundle-clean.mjs"
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": false,
+    "externalBin": [],
+    "icon": [
+      "icons/icon.png"
+    ]
+  }
+}

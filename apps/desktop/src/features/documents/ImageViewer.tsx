@@ -99,7 +99,7 @@ export function ImageViewer({
                 }}
                 style={
                   fitToWindow
-                    ? { maxWidth: "100%", maxHeight: "calc(100vh - 210px)", width: "auto", height: "auto" }
+                    ? { maxWidth: "100%", maxHeight: "calc(100dvh - 210px)", width: "auto", height: "auto" }
                     : {
                         width: naturalSize?.width ? `${Math.round(naturalSize.width * (zoomPercent / 100))}px` : `${zoomPercent}%`,
                         maxWidth: "none",

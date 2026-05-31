@@ -147,7 +147,7 @@ export function AiModelSelector<ModelId extends string = string>({
       </button>
 
       {open ? (
-        <section className="absolute left-0 right-0 top-full z-[115] -mt-px max-h-[min(520px,calc(100vh-220px))] overflow-y-auto rounded-b-lg border border-line bg-white p-3 shadow-menu">
+        <section className="absolute left-0 right-0 top-full z-[115] -mt-px max-h-[min(520px,calc(100dvh-220px))] overflow-y-auto rounded-b-lg border border-line bg-white p-3 shadow-menu">
           <header className="flex flex-wrap items-center justify-between gap-3 px-1 pb-3">
             <p className="text-[11px] font-semibold text-ink-primary">{title}</p>
             <label className="flex items-center gap-2 text-[11px] text-ink-secondary">

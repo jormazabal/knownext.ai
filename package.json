@@ -1,20 +1,29 @@
 {
   "name": "knownext-ai",
   "private": true,
-  "version": "0.21.0",
+  "version": "1.0.0",
   "description": "KnowNext.ai desktop product for Markdown project documentation.",
   "license": "Apache-2.0",
   "packageManager": "pnpm@11.0.8",
   "scripts": {
     "dev": "pnpm --filter @knownext/desktop dev",
+    "tauri": "pnpm --filter @knownext/desktop exec tauri",
     "desktop": "pnpm --filter @knownext/desktop tauri:dev",
+    "android:init": "pnpm --filter @knownext/desktop tauri:android:init",
+    "android:dev": "pnpm --filter @knownext/desktop tauri:android:dev",
+    "android:build": "pnpm --filter @knownext/desktop tauri:android:build",
+    "android:build:debug": "node scripts/build-android-debug.mjs",
+    "android:build:release": "node scripts/build-android-release.mjs",
+    "android:run": "pnpm --filter @knownext/desktop tauri:android:run",
     "build": "pnpm --filter @knownext/desktop build",
+    "bundle:check-clean": "node scripts/check-client-bundle-clean.mjs",
     "test": "pnpm --filter @knownext/desktop test",
     "backend:dev": "cd backend && python -m uvicorn app.main:app --reload --port 8765",
     "backend:web": "node scripts/start-web-backend.mjs",
+    "backend:mobile": "node scripts/start-mobile-backend.mjs",
     "backend:test": "cd backend && python -m pytest",
     "version:check": "node scripts/check-version.mjs",
-    "release:check": "pnpm version:check && pnpm build && pnpm test && pnpm backend:test"
+    "release:check": "pnpm version:check && pnpm build && pnpm bundle:check-clean && pnpm test && pnpm backend:test"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

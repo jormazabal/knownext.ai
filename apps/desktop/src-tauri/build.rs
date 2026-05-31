@@ -1,6 +1,11 @@
 fn main() {
     let target_triple =
         std::env::var("TARGET").unwrap_or_else(|_| "x86_64-pc-windows-msvc".to_string());
+    if target_triple.contains("android") || target_triple.contains("ios") {
+        tauri_build::build();
+        return;
+    }
+
     let extension = if target_triple.contains("windows") {
         ".exe"
     } else {

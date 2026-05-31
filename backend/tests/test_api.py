@@ -92,7 +92,7 @@ def test_health() -> None:
     assert payload["app"] == "knownext"
     assert payload["schemaVersion"] == 2
     assert payload["status"] == "ok"
-    assert payload["version"] == "0.21.0"
+    assert payload["version"] == "1.0.0"
     assert payload["profile"] == "desktop"
     assert payload["port"] == 8765
     assert payload["managedBy"] == "manual"
@@ -1473,6 +1473,97 @@ def test_empty_current_profile_recovers_legacy_projects_config_and_credentials(t
     assert auth.json()["user"]["login"] == "legacy-user"
     assert json.loads((current_dir / "projects.json").read_text(encoding="utf-8"))["activeProjectId"] == "project-legacy"
     assert json.loads((current_dir / "credentials.json").read_text(encoding="utf-8"))["github"]["user"]["login"] == "legacy-user"
+
+
+def test_mobile_profile_does_not_recover_desktop_legacy_data(tmp_path, monkeypatch) -> None:
+    current_dir = tmp_path / "mobile-profile"
+    legacy_parent = tmp_path / "legacy-appdata"
+    legacy_dir = legacy_parent / "KnowNext.ai"
+    docs_root = tmp_path / "desktop-docs"
+    docs_root.mkdir()
+    legacy_dir.mkdir(parents=True)
+    monkeypatch.setenv("KNOWNEXT_APP_DATA_DIR", str(current_dir))
+    monkeypatch.setenv("APPDATA", str(legacy_parent))
+    monkeypatch.setenv("KNOWNEXT_RUNTIME_PROFILE", "mobile")
+
+    (legacy_dir / "projects.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 2,
+                "activeProjectId": "project-desktop",
+                "projects": [
+                    {
+                        "id": "project-desktop",
+                        "name": "Proyecto escritorio",
+                        "folderPath": str(docs_root),
+                        "icon": "folder",
+                        "iconColor": "#F37021",
+                        "storageMode": "local-files",
+                        "versioningMode": "none",
+                        "syncMode": "none",
+                        "authRequired": False,
+                        "githubRepository": None,
+                        "isGitRepository": False,
+                        "active": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (legacy_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "layout": {"sidebarWidth": 410, "historyWidth": 360},
+                "appearance": {"language": "en", "zoomPercent": 110},
+                "diagnostics": {"traceLoggingEnabled": True},
+                "tabsByProject": {},
+                "lastRunAppVersion": "0.6.8",
+                "lastSeenReleaseNotesVersion": "0.6.8",
+                "openUtilityTabs": [],
+                "activeUtilityTab": None,
+                "updatedAt": "2026-05-10T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (legacy_dir / "credentials.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "github": {
+                    "accessToken": "legacy-token",
+                    "scopes": ["read:user", "repo"],
+                    "user": {"login": "legacy-user", "name": "Legacy User", "avatarUrl": None},
+                },
+                "openai": {"apiKey": "sk-test-secret-1234"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    projects = client.get("/api/projects")
+    config = client.get("/api/config")
+    auth = client.get("/api/auth/status")
+    openai_key = client.get("/api/credentials/openai-key")
+
+    assert projects.status_code == 200
+    assert projects.json() == []
+    assert config.json()["layout"]["sidebarWidth"] == 338
+    assert config.json()["diagnostics"]["traceLoggingEnabled"] is False
+    assert auth.json()["isAuthenticated"] is False
+    assert openai_key.json()["configured"] is False
+    assert json.loads((current_dir / "projects.json").read_text(encoding="utf-8")) == {
+        "schemaVersion": 2,
+        "activeProjectId": None,
+        "projects": [],
+    }
+    assert json.loads((current_dir / "credentials.json").read_text(encoding="utf-8")) == {
+        "schemaVersion": 1,
+        "github": None,
+        "openai": None,
+    }
 
 
 def test_invalid_config_file_is_backed_up(tmp_path) -> None:

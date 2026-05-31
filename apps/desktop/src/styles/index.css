@@ -244,10 +244,18 @@
   box-sizing: border-box;
 }
 
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  min-height: 100dvh;
+}
+
 body {
   margin: 0;
   min-width: 320px;
-  min-height: 100vh;
+  min-height: 100dvh;
   overflow: hidden;
   cursor: default;
   background: rgb(var(--app-bg));
@@ -802,6 +810,11 @@ input[type="range"]::-moz-range-thumb {
   .knownext-history-button {
     display: none;
   }
+
+  .knownext-document-export-menu,
+  .knownext-markdown-zoom-select {
+    display: none;
+  }
 }
 
 [data-tooltip] {
@@ -1190,4 +1203,147 @@ input[type="range"]::-moz-range-thumb {
 .knownext-editor .milkdown-toolbar,
 .knownext-editor .link-tooltip {
   display: none;
+}
+
+.knownext-phone-shell .knownext-document-tabs {
+  height: 44px;
+}
+
+.knownext-phone-shell .knownext-document-tabs > button {
+  width: 44px;
+}
+
+.knownext-phone-shell .knownext-document-tab {
+  min-width: 164px;
+  font-size: 13px !important;
+}
+
+.knownext-phone-shell .knownext-document-tab svg,
+.knownext-phone-shell .knownext-editor-toolbar svg {
+  width: 18px;
+  height: 18px;
+}
+
+.knownext-phone-shell .knownext-document-tab-close {
+  width: 28px;
+  height: 28px;
+}
+
+.knownext-phone-shell .knownext-editor-toolbar {
+  height: 44px;
+  gap: 4px;
+  padding-right: 8px;
+  padding-left: 8px;
+}
+
+.knownext-phone-shell .toolbar-button {
+  min-width: 34px;
+  height: 34px;
+  padding-right: 6px;
+  padding-left: 6px;
+}
+
+.knownext-phone-shell .toolbar-select {
+  min-width: 94px;
+  height: 34px;
+  padding-right: 8px;
+  padding-left: 8px;
+  font-size: 13px !important;
+}
+
+.knownext-phone-shell .knownext-document-status-bar {
+  height: 48px;
+  padding-right: 8px;
+  padding-left: 8px;
+  font-size: 13px !important;
+}
+
+.knownext-phone-shell .knownext-document-status-bar button {
+  min-width: 40px;
+  height: 36px;
+  font-size: 13px !important;
+}
+
+.knownext-phone-shell .knownext-document-status-bar span {
+  font-size: 13px !important;
+}
+
+.knownext-phone-shell .knownext-ai-prompt-anchor {
+  right: 20px;
+  bottom: 54px;
+  left: 20px;
+}
+
+.knownext-phone-shell .knownext-ai-prompt {
+  min-height: 58px;
+  border-radius: 30px;
+  padding: 8px 10px;
+}
+
+.knownext-phone-shell .knownext-ai-prompt-row {
+  gap: 8px;
+}
+
+.knownext-phone-shell .knownext-ai-prompt-textarea {
+  max-height: 132px !important;
+  min-height: 38px;
+  font-size: 15px !important;
+  line-height: 22px !important;
+}
+
+.knownext-phone-shell .knownext-ai-context-button,
+.knownext-phone-shell .knownext-ai-send-button {
+  width: 40px;
+  height: 40px;
+}
+
+.knownext-phone-shell .knownext-ai-mode-selector {
+  width: 58px;
+  height: 40px;
+}
+
+.knownext-phone-shell .knownext-ai-mic-control {
+  height: 40px;
+}
+
+.knownext-phone-shell .knownext-document-tree {
+  font-size: 13px !important;
+}
+
+.knownext-phone-shell aside button {
+  min-height: 40px;
+  font-size: 13px !important;
+}
+
+.knownext-phone-shell aside svg {
+  width: 18px;
+  height: 18px;
+}
+
+.knownext-phone-shell .knownext-editor .milkdown .editor,
+.knownext-phone-shell .knownext-editor .milkdown .ProseMirror {
+  padding-bottom: 24px;
+}
+
+.knownext-phone-shell .knownext-editor p,
+.knownext-phone-shell .knownext-editor li,
+.knownext-phone-shell .knownext-editor .ProseMirror p,
+.knownext-phone-shell .knownext-editor .ProseMirror li {
+  font-size: 14px !important;
+  line-height: 1.62;
+}
+
+.knownext-phone-shell .knownext-editor h1,
+.knownext-phone-shell .knownext-editor .ProseMirror h1 {
+  font-size: 34px !important;
+}
+
+.knownext-phone-shell .knownext-editor h2,
+.knownext-phone-shell .knownext-editor .ProseMirror h2 {
+  font-size: 22px !important;
+}
+
+.knownext-phone-shell .knownext-editor h3,
+.knownext-phone-shell .knownext-editor .ProseMirror h3 {
+  font-size: 18px !important;
 }
