@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, rmSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, rmSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -80,6 +80,8 @@ mkdirSync(jniDir, { recursive: true });
 copyFileSync(sourceLibrary, jniLibrary);
 
 try {
+  const gradleWrapper = join(repoRoot, "apps", "desktop", "src-tauri", "gen", "android", process.platform === "win32" ? "gradlew.bat" : "gradlew");
+  if (process.platform !== "win32") chmodSync(gradleWrapper, 0o755);
   run(
     process.platform === "win32" ? "gradlew.bat" : "./gradlew",
     [target.gradleTask, "-x", target.gradleTask.replace("assemble", "rustBuild")],
@@ -104,7 +106,8 @@ function run(command, args, cwd, env) {
     stdio: "inherit",
   });
   if (result.status !== 0) {
-    throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status}`);
+    const reason = result.error?.message ?? result.signal ?? result.status;
+    throw new Error(`${command} ${args.join(" ")} failed with exit code ${reason}`);
   }
 }
 
