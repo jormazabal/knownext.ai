@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronLeft, ChevronRight, FileText, FileSpreadsheet, Image, List, NotebookPen, PanelLeftOpen, ScrollText, Sparkles, X } from "lucide-react";
-import type { DragEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type { DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
+import { xsViewportQuery } from "../../lib/runtime/responsive";
 import type { WorkspaceTab } from "../../types/domain";
 
 type DocumentTabsProps = {
@@ -24,6 +25,7 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
   const tabListMenuRef = useRef<HTMLDivElement | null>(null);
   const [tabsOverflowing, setTabsOverflowing] = useState(false);
   const [tabListOpen, setTabListOpen] = useState(false);
+  const [tabContextMenu, setTabContextMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
   const [draggedDocumentTabId, setDraggedDocumentTabId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ tabId: string; placement: "before" | "after" } | null>(null);
   const pointerDragRef = useRef<{ tabId: string; startX: number; startY: number; dragging: boolean } | null>(null);
@@ -75,6 +77,22 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
     };
   }, [tabListOpen]);
 
+  useEffect(() => {
+    if (!tabContextMenu) return;
+    function closeContextMenu() {
+      setTabContextMenu(null);
+    }
+    function closeContextMenuOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setTabContextMenu(null);
+    }
+    document.addEventListener("pointerdown", closeContextMenu);
+    document.addEventListener("keydown", closeContextMenuOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeContextMenu);
+      document.removeEventListener("keydown", closeContextMenuOnEscape);
+    };
+  }, [tabContextMenu]);
+
   function selectAdjacentTab(direction: "previous" | "next") {
     const nextIndex = direction === "previous" ? activeTabIndex - 1 : activeTabIndex + 1;
     const nextTab = tabs[nextIndex];
@@ -89,6 +107,18 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
       return;
     }
     onSelectTab(tabId);
+  }
+
+  function openTabContextMenu(tab: WorkspaceTab, event: ReactMouseEvent<HTMLElement>) {
+    if (!isCloseableTab(tab)) return;
+    event.preventDefault();
+    setTabListOpen(false);
+    setTabContextMenu({ tabId: tab.id, x: event.clientX, y: event.clientY });
+  }
+
+  function closeTabs(tabIds: string[]) {
+    setTabContextMenu(null);
+    tabIds.forEach((tabId) => onCloseTab(tabId));
   }
 
   function handleDocumentPointerDown(tabId: string, event: ReactPointerEvent<HTMLElement>) {
@@ -130,7 +160,7 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
     for (const candidate of candidates) {
       const tabId = candidate.getAttribute("data-tab-id");
       const tab = tabs.find((item) => item.id === tabId);
-      if (!tabId || tabId === draggedTabId || tab?.kind !== "document") continue;
+      if (!tabId || tabId === draggedTabId || !tab || !isReorderableWorkspaceTab(tab)) continue;
       const rect = candidate.getBoundingClientRect();
       if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) continue;
       return { tabId, placement: clientX < rect.left + rect.width / 2 ? "before" as const : "after" as const };
@@ -150,10 +180,15 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
         onOpenNavigation={onOpenNavigation}
         onSelectTab={onSelectTab}
         onCloseTab={onCloseTab}
+        onOpenTabContextMenu={openTabContextMenu}
         rightSlot={rightSlot}
       />
     );
   }
+
+  const closeableTabs = tabs.filter(isCloseableTab);
+  const contextMenuTab = tabContextMenu ? tabs.find((tab) => tab.id === tabContextMenu.tabId && isCloseableTab(tab)) ?? null : null;
+  const otherCloseableTabIds = contextMenuTab ? closeableTabs.filter((tab) => tab.id !== contextMenuTab.id).map((tab) => tab.id) : [];
 
   return (
     <div className="knownext-document-tabs flex h-9 shrink-0 items-end border-b border-line bg-white">
@@ -179,6 +214,7 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
               fixed
               onSelectTab={handleTabClick}
               onCloseTab={onCloseTab}
+              onOpenTabContextMenu={openTabContextMenu}
             />
           ))}
         </div>
@@ -195,6 +231,7 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
             dropPlacement={dropTarget?.tabId === tab.id ? dropTarget.placement : null}
             onSelectTab={handleTabClick}
             onCloseTab={onCloseTab}
+            onOpenTabContextMenu={openTabContextMenu}
             onReorderDocumentTabs={onReorderDocumentTabs}
             onDocumentDragStart={setDraggedDocumentTabId}
             onDocumentDragEnd={() => {
@@ -271,6 +308,16 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
         </div>
       ) : null}
       {rightSlot}
+      {contextMenuTab && tabContextMenu ? (
+        <TabContextMenu
+          x={tabContextMenu.x}
+          y={tabContextMenu.y}
+          closeOtherTabsDisabled={otherCloseableTabIds.length === 0}
+          onClose={() => closeTabs([contextMenuTab.id])}
+          onCloseOthers={() => closeTabs(otherCloseableTabIds)}
+          onCloseAll={() => closeTabs(closeableTabs.map((tab) => tab.id))}
+        />
+      ) : null}
     </div>
   );
 }
@@ -285,6 +332,7 @@ function CompactDocumentTabs({
   onOpenNavigation,
   onSelectTab,
   onCloseTab,
+  onOpenTabContextMenu,
   rightSlot,
 }: {
   tabs: WorkspaceTab[];
@@ -296,6 +344,7 @@ function CompactDocumentTabs({
   onOpenNavigation?: () => void;
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
+  onOpenTabContextMenu: (tab: WorkspaceTab, event: ReactMouseEvent<HTMLElement>) => void;
   rightSlot?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -333,18 +382,20 @@ function CompactDocumentTabs({
           fixed
           onSelectTab={selectTab}
           onCloseTab={onCloseTab}
+          onOpenTabContextMenu={onOpenTabContextMenu}
         />
       ))}
 
       {activeWorkspaceTab ? (
-        <div className="knownext-document-tab knownext-document-tab-compact-active relative flex h-full min-w-0 flex-1 items-center border-r border-line text-[11px] font-semibold text-ink-primary hover:bg-panel">
+        <div className="knownext-document-tab knownext-document-tab-compact-active relative flex h-full min-w-0 flex-1 cursor-default items-center border-r border-line text-[11px] font-semibold text-ink-primary hover:bg-panel">
           <button
-            className="flex h-full min-w-0 flex-1 items-center gap-2 px-2.5 text-left"
+            className="flex h-full min-w-0 flex-1 cursor-default items-center gap-2 px-2.5 text-left"
             type="button"
             aria-label={`Documento activo ${activeWorkspaceTab.name}`}
             aria-haspopup="dialog"
             aria-expanded={open}
             onClick={() => setOpen(true)}
+            onContextMenu={(event) => onOpenTabContextMenu(activeWorkspaceTab, event)}
           >
             {renderTabIcon(activeWorkspaceTab, activeWorkspaceTab.id === activeTabId)}
             <span className="min-w-0 flex-1 truncate">{activeWorkspaceTab.name}</span>
@@ -352,7 +403,7 @@ function CompactDocumentTabs({
           </button>
           {!isFixedUtilityTab(activeWorkspaceTab) ? (
             <button
-              className="grid h-full w-8 shrink-0 place-items-center text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
+              className="grid h-full w-8 shrink-0 cursor-default place-items-center text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
               type="button"
               aria-label={activeWorkspaceTab.kind === "document" && dirtyIds.has(activeWorkspaceTab.id) ? `Cerrar ${activeWorkspaceTab.name}, con cambios sin guardar` : `Cerrar ${activeWorkspaceTab.name}`}
               onClick={() => {
@@ -364,7 +415,7 @@ function CompactDocumentTabs({
             </button>
           ) : null}
           <button
-            className="grid h-full w-8 shrink-0 place-items-center text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
+            className="grid h-full w-8 shrink-0 cursor-default place-items-center text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
             type="button"
             aria-label={`Mostrar archivos abiertos, activo ${activeWorkspaceTab.name}`}
             aria-haspopup="dialog"
@@ -476,6 +527,7 @@ function WorkspaceTabButton({
   fixed = false,
   onSelectTab,
   onCloseTab,
+  onOpenTabContextMenu,
   onReorderDocumentTabs,
   onDocumentDragStart,
   onDocumentDragEnd,
@@ -491,6 +543,7 @@ function WorkspaceTabButton({
   fixed?: boolean;
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
+  onOpenTabContextMenu: (tab: WorkspaceTab, event: ReactMouseEvent<HTMLElement>) => void;
   onReorderDocumentTabs?: (draggedTabId: string, targetTabId: string, placement: "before" | "after") => void;
   onDocumentDragStart?: (tabId: string) => void;
   onDocumentDragEnd?: () => void;
@@ -498,8 +551,8 @@ function WorkspaceTabButton({
   onDocumentPointerDown?: (tabId: string, event: ReactPointerEvent<HTMLElement>) => void;
 }) {
   const Icon = getTabIcon(tab);
-  const closeable = !isFixedUtilityTab(tab);
-  const draggable = tab.kind === "document" && Boolean(onReorderDocumentTabs);
+  const closeable = isCloseableTab(tab);
+  const draggable = isReorderableWorkspaceTab(tab) && Boolean(onReorderDocumentTabs);
   return (
     <button
       aria-label={tab.name}
@@ -508,13 +561,13 @@ function WorkspaceTabButton({
       data-tooltip={fixed ? tab.name : undefined}
       data-tooltip-placement={fixed ? "bottom" : undefined}
       className={[
-        "knownext-document-tab group relative flex h-full items-center gap-1.5 border-r border-line text-[11px]",
+        "knownext-document-tab group relative flex h-full cursor-default items-center gap-1.5 border-r border-line text-[11px]",
         fixed ? "w-12 min-w-12 max-w-12 justify-center px-0" : "min-w-[150px] max-w-[210px] px-2.5",
-        draggable ? "cursor-grab active:cursor-grabbing" : "",
         dragging ? "opacity-50" : "",
         active ? "knownext-document-tab-active bg-white font-semibold" : "text-ink-primary hover:bg-panel",
       ].join(" ")}
       onClick={() => onSelectTab(tab.id)}
+      onContextMenu={(event) => onOpenTabContextMenu(tab, event)}
       onPointerDown={(event) => {
         if (draggable) onDocumentPointerDown?.(tab.id, event);
       }}
@@ -530,7 +583,7 @@ function WorkspaceTabButton({
       }}
       onDragEnd={() => onDocumentDragEnd?.()}
       onDragOver={(event) => {
-        if (tab.kind !== "document" || !onReorderDocumentTabs) return;
+        if (!isReorderableWorkspaceTab(tab) || !onReorderDocumentTabs) return;
         const draggedTabId = draggedDocumentTabId || event.dataTransfer.getData("application/x-knownext-document-tab") || event.dataTransfer.getData("text/plain");
         if (!draggedTabId || draggedTabId === tab.id) return;
         event.preventDefault();
@@ -542,7 +595,7 @@ function WorkspaceTabButton({
         onDocumentDragOver?.(null);
       }}
       onDrop={(event) => {
-        if (tab.kind !== "document" || !onReorderDocumentTabs) return;
+        if (!isReorderableWorkspaceTab(tab) || !onReorderDocumentTabs) return;
         const draggedTabId = event.dataTransfer.getData("application/x-knownext-document-tab") || event.dataTransfer.getData("text/plain") || draggedDocumentTabId;
         if (!draggedTabId || draggedTabId === tab.id) return;
         event.preventDefault();
@@ -558,7 +611,7 @@ function WorkspaceTabButton({
         null
       ) : (
         <span
-          className="knownext-document-tab-close ml-auto grid h-5 w-5 place-items-center rounded hover:bg-brand-hover"
+          className="knownext-document-tab-close ml-auto grid h-5 w-5 cursor-default place-items-center rounded hover:bg-brand-hover"
           aria-label={dirty ? `Cerrar ${tab.name}, con cambios sin guardar` : `Cerrar ${tab.name}`}
           draggable={false}
           onClick={(event) => {
@@ -575,6 +628,51 @@ function WorkspaceTabButton({
   );
 }
 
+function TabContextMenu({
+  x,
+  y,
+  closeOtherTabsDisabled,
+  onClose,
+  onCloseOthers,
+  onCloseAll,
+}: {
+  x: number;
+  y: number;
+  closeOtherTabsDisabled: boolean;
+  onClose: () => void;
+  onCloseOthers: () => void;
+  onCloseAll: () => void;
+}) {
+  return (
+    <div
+      className="fixed z-[120] w-48 rounded-md border border-line bg-white p-1 text-[11px] text-ink-primary shadow-menu"
+      role="menu"
+      aria-label="Opciones de pestaña"
+      style={{ left: x, top: y }}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <TabContextMenuItem label="Cerrar" onClick={onClose} />
+      <TabContextMenuItem label="Cerrar otras pestañas" onClick={onCloseOthers} disabled={closeOtherTabsDisabled} />
+      <div className="my-1 border-t border-line" />
+      <TabContextMenuItem label="Cerrar todas las pestañas" onClick={onCloseAll} />
+    </div>
+  );
+}
+
+function TabContextMenuItem({ label, disabled = false, onClick }: { label: string; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button
+      className="flex h-8 w-full items-center rounded px-2 text-left hover:bg-brand-hover hover:text-brand-orange disabled:cursor-default disabled:text-ink-secondary/50 disabled:hover:bg-transparent disabled:hover:text-ink-secondary/50"
+      type="button"
+      role="menuitem"
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {label}
+    </button>
+  );
+}
+
 function getDropPlacement(event: DragEvent<HTMLElement>) {
   const rect = event.currentTarget.getBoundingClientRect();
   return event.clientX < rect.left + rect.width / 2 ? "before" : "after";
@@ -584,16 +682,24 @@ function isFixedUtilityTab(tab: WorkspaceTab) {
   return tab.kind === "ai-conversation" || tab.kind === "notes";
 }
 
+function isCloseableTab(tab: WorkspaceTab) {
+  return !isFixedUtilityTab(tab);
+}
+
+function isReorderableWorkspaceTab(tab: WorkspaceTab) {
+  return tab.kind === "document" || tab.kind === "release-notes";
+}
+
 function useCompactTabsMode() {
   const [compact, setCompact] = useState(() => (
     typeof window !== "undefined" && typeof window.matchMedia === "function"
-      ? window.matchMedia("(max-width: 760px)").matches
+      ? window.matchMedia(xsViewportQuery).matches
       : false
   ));
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-    const mediaQuery = window.matchMedia("(max-width: 760px)");
+    const mediaQuery = window.matchMedia(xsViewportQuery);
     const update = () => setCompact(mediaQuery.matches);
     update();
     mediaQuery.addEventListener?.("change", update);

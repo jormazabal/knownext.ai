@@ -21,7 +21,7 @@ type WindowWorkArea = {
 };
 
 const WINDOW_STATE_STORAGE_KEY = "knownext.windowState.v1";
-const MIN_RESTORED_WIDTH = 720;
+const MIN_RESTORED_WIDTH = 360;
 const MIN_RESTORED_HEIGHT = 520;
 
 function getTauriWindow() {

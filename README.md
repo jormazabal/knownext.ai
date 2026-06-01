@@ -18,8 +18,8 @@ This first version establishes the product foundation:
 
 The latest Windows installer is published on GitHub Releases:
 
-- [Download KnowNext.ai for Windows](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_1.0.0_x64-setup.exe)
-- [Download KnowNext.ai for Android arm64](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai-android-arm64-v1.0.0.apk)
+- [Download KnowNext.ai for Windows](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_1.0.1_x64-setup.exe)
+- [Download KnowNext.ai for Android arm64](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai-android-arm64-v1.0.1.apk)
 - [View all releases](https://github.com/jormazabal/knownext.ai/releases)
 
 The desktop app also checks the signed updater manifest at:
@@ -58,27 +58,25 @@ Run the Tauri desktop app:
 pnpm desktop
 ```
 
-Build the native Android app after installing the Android SDK/NDK and configuring a backend endpoint:
+Build the native Android app after installing the Android SDK/NDK:
 
 ```powershell
 pnpm android:init
-$env:VITE_API_BASE_URL="https://api.example.com"
 $env:VITE_EXPECTED_BACKEND_PROFILE="mobile"
 pnpm android:build
 ```
 
-Android artifacts are generated under `apps/desktop/src-tauri/gen/android/app/build/outputs`. The Android package is native Tauri, but it does not bundle the Python sidecar; it requires a compatible FastAPI backend. If the packaged endpoint is unreachable, the Android startup screen lets you enter and save another backend URL.
+Android artifacts are generated under `apps/desktop/src-tauri/gen/android/app/build/outputs`. The Android package is native Tauri, but it does not bundle the Python sidecar; it requires a compatible FastAPI backend. On first startup, Android searches the local network for a compatible mobile backend and only shows the connection screen if automatic discovery fails.
 
 For local debug testing from this workstation:
 
 ```powershell
 pnpm backend:mobile
-$env:VITE_API_BASE_URL="http://<host-lan-ip>:8775"
 $env:KNOWNEXT_ANDROID_ABI="arm64"
 pnpm android:build:debug
 ```
 
-The debug helper writes `output/KnowNext.ai-android-arm64-debug.apk`. If `VITE_API_BASE_URL` is omitted, the APK does not embed a backend endpoint and asks for it on Android startup. The helper refuses to package client-exposed OpenAI/API-key environment variables.
+The debug helper writes `output/KnowNext.ai-android-arm64-debug.apk`. If `VITE_API_BASE_URL` is omitted, the APK does not embed a backend endpoint and Android discovers the mobile backend from the local network before asking for a manual address. The helper refuses to package client-exposed OpenAI/API-key environment variables.
 
 The mobile backend endpoint must respond to `/health` with this app version and `profile=mobile`.
 

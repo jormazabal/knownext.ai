@@ -130,9 +130,61 @@ describe("DocumentTabs", () => {
     expect(onCloseTab).toHaveBeenCalledWith("ref-budget");
   });
 
+  it("shows close options from the secondary-button tab menu for closeable tabs", async () => {
+    const onCloseTab = vi.fn();
+
+    render(
+      <DocumentTabs
+        tabs={[
+          ...tabs,
+          { kind: "reference-document", id: "ref-budget", name: "Presupuesto.xlsx", path: "Presupuesto.xlsx", format: "xlsx", readonly: true },
+        ]}
+        activeTabId="doc-a"
+        dirtyDocumentIds={[]}
+        onSelectTab={vi.fn()}
+        onCloseTab={onCloseTab}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByLabelText("Esquemas.md"), { clientX: 80, clientY: 24 });
+
+    expect(screen.getByRole("menu", { name: "Opciones de pestaña" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Cerrar" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Cerrar otras pestañas" })).toBeEnabled();
+    expect(screen.getByRole("menuitem", { name: "Cerrar todas las pestañas" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("menuitem", { name: "Cerrar otras pestañas" }));
+
+    expect(onCloseTab).toHaveBeenCalledTimes(2);
+    expect(onCloseTab).toHaveBeenNthCalledWith(1, "doc-a");
+    expect(onCloseTab).toHaveBeenNthCalledWith(2, "ref-budget");
+  });
+
+  it("does not show the secondary-button tab menu for fixed utility tabs", () => {
+    render(
+      <DocumentTabs
+        tabs={[
+          { kind: "ai-conversation", id: "project-ai-conversation", name: "IA", readonly: true },
+          { kind: "notes", id: "user-notes", name: "Notas", utilityTabId: "notes" },
+          ...tabs,
+        ]}
+        activeTabId="doc-a"
+        dirtyDocumentIds={[]}
+        onSelectTab={vi.fn()}
+        onCloseTab={vi.fn()}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByLabelText("IA"), { clientX: 80, clientY: 24 });
+    fireEvent.contextMenu(screen.getByLabelText("Notas"), { clientX: 80, clientY: 24 });
+
+    expect(screen.queryByRole("menu", { name: "Opciones de pestaña" })).not.toBeInTheDocument();
+  });
+
   it("reorders document tabs with drag and drop without making fixed tabs draggable", () => {
     const onReorderDocumentTabs = vi.fn();
     const dataTransfer = createDataTransfer();
+    const releaseNotesDataTransfer = createDataTransfer();
     const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
       x: 0,
       y: 0,
@@ -152,6 +204,7 @@ describe("DocumentTabs", () => {
             { kind: "ai-conversation", id: "project-ai-conversation", name: "IA", readonly: true },
             { kind: "notes", id: "user-notes", name: "Notas", utilityTabId: "notes" },
             ...tabs,
+            { kind: "release-notes", id: "app-release-notes", name: "Notas de release", utilityTabId: "release-notes", readonly: true },
           ]}
           activeTabId="doc-a"
           dirtyDocumentIds={[]}
@@ -164,12 +217,21 @@ describe("DocumentTabs", () => {
       expect(screen.getByLabelText("IA")).toHaveAttribute("draggable", "false");
       expect(screen.getByLabelText("Notas")).toHaveAttribute("draggable", "false");
       expect(screen.getByLabelText("Acta.md")).toHaveAttribute("draggable", "true");
+      expect(screen.getByLabelText("Acta.md")).toHaveClass("cursor-default");
+      expect(screen.getByLabelText("Notas de release")).toHaveAttribute("draggable", "true");
 
       fireEvent.dragStart(screen.getByLabelText("Esquemas.md"), { dataTransfer });
       fireEvent.dragOver(screen.getByLabelText("Acta.md"), { dataTransfer, clientX: 120 });
       fireEvent.drop(screen.getByLabelText("Acta.md"), { dataTransfer, clientX: 120 });
 
       expect(onReorderDocumentTabs).toHaveBeenCalledWith("doc-b", "doc-a", "after");
+
+      onReorderDocumentTabs.mockClear();
+      fireEvent.dragStart(screen.getByLabelText("Notas de release"), { dataTransfer: releaseNotesDataTransfer });
+      fireEvent.dragOver(screen.getByLabelText("Acta.md"), { dataTransfer: releaseNotesDataTransfer, clientX: 120 });
+      fireEvent.drop(screen.getByLabelText("Acta.md"), { dataTransfer: releaseNotesDataTransfer, clientX: 120 });
+
+      expect(onReorderDocumentTabs).toHaveBeenCalledWith("app-release-notes", "doc-a", "after");
     } finally {
       rectSpy.mockRestore();
     }

@@ -2,6 +2,16 @@
 
 All KnowNext.ai releases use a single monolithic application version for the desktop frontend, Tauri shell, and FastAPI backend.
 
+## 1.0.1 - 2026-06-01
+
+- Added automatic Android backend discovery on the local network so first startup no longer exposes the placeholder API endpoint to users.
+- Reworked the Android connection fallback into user-facing copy with a simple computer address field and local-network HTTP validation.
+- Allowed Android release builds to reach local HTTP backends while rejecting non-local `http://` endpoints in the client.
+- Reduced compact workspace breakpoints to `xs`/`2xs` and allowed the Windows shell to shrink to 360 px for narrow layout validation.
+- Added Windows titlebar double-click maximize and restore behavior.
+- Added right-click close menus for closeable workspace tabs, including close, close others, and close all.
+- Made release notes reorder with document tabs and kept workspace tabs on the default cursor instead of pointer styling.
+
 ## 1.0.0 - 2026-06-01
 
 - Added native Android packaging hardening for private APK distribution, including clean mobile runtime separation, Android-specific shell behavior, and the orange brain app icon.

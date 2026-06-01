@@ -1,9 +1,12 @@
 import type { MouseEvent, PointerEvent } from "react";
+import { useRef } from "react";
 import { Maximize2, Minus, X } from "lucide-react";
 import { BrandMark } from "../brand/BrandMark";
 import { closeWindow, minimizeWindow, startWindowDrag, startWindowResize, toggleMaximizeWindow } from "../../lib/runtime/windowControls";
 
 export function TitleBar() {
+  const suppressNextDoubleClickRef = useRef(false);
+
   const handleTopResizePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     event.preventDefault();
@@ -13,7 +16,12 @@ export function TitleBar() {
 
   const handleTitlePointerDown = (event: PointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
-    if (event.detail > 1) return;
+    if (event.detail > 1) {
+      event.preventDefault();
+      suppressNextDoubleClickRef.current = true;
+      void toggleMaximizeWindow();
+      return;
+    }
 
     void startWindowDrag();
   };
@@ -21,6 +29,10 @@ export function TitleBar() {
   const handleTitleDoubleClick = (event: MouseEvent<HTMLElement>) => {
     if (event.button !== 0) return;
     event.preventDefault();
+    if (suppressNextDoubleClickRef.current) {
+      suppressNextDoubleClickRef.current = false;
+      return;
+    }
     void toggleMaximizeWindow();
   };
 

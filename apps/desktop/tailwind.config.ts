@@ -4,6 +4,10 @@ export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
+      screens: {
+        "2xs": "360px",
+        xs: "480px",
+      },
       colors: {
         brand: {
           orange: "rgb(var(--accent) / <alpha-value>)",

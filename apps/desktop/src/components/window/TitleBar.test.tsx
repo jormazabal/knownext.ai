@@ -40,6 +40,18 @@ describe("TitleBar", () => {
     expect(toggleMaximizeWindow).toHaveBeenCalledTimes(1);
   });
 
+  it("toggles maximize from the second pointer down when native dragging suppresses double click", () => {
+    render(<TitleBar />);
+
+    const pointerDown = new Event("pointerdown", { bubbles: true, cancelable: true });
+    Object.defineProperty(pointerDown, "button", { value: 0 });
+    Object.defineProperty(pointerDown, "detail", { value: 2 });
+    screen.getByRole("banner").dispatchEvent(pointerDown);
+
+    expect(startWindowDrag).not.toHaveBeenCalled();
+    expect(toggleMaximizeWindow).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps window control interactions isolated from header double click", () => {
     render(<TitleBar />);
 

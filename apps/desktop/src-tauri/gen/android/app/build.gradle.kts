@@ -42,7 +42,7 @@ android {
         }
     }
     defaultConfig {
-        manifestPlaceholders["usesCleartextTraffic"] = "false"
+        manifestPlaceholders["usesCleartextTraffic"] = "true"
         applicationId = "ai.knownext.mobile"
         minSdk = 24
         targetSdk = 36
