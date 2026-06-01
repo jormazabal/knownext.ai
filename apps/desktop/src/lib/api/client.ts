@@ -118,6 +118,19 @@ export type ApiRequestInit = RequestInit & {
 const DEFAULT_REQUEST_TIMEOUT_MS = 7000;
 const BROWSER_BACKEND_DISCOVERY_PORTS = Array.from({ length: 34 }, (_, index) => 8766 + index);
 const BROWSER_BACKEND_DISCOVERY_TIMEOUT_MS = 450;
+const MOBILE_BACKEND_DISCOVERY_PORT = 8775;
+const MOBILE_BACKEND_DISCOVERY_TIMEOUT_MS = 450;
+const MOBILE_BACKEND_DISCOVERY_CONCURRENCY = 32;
+const MOBILE_BACKEND_DISCOVERY_SUBNETS = ["192.168.1", "192.168.0", "192.168.68", "192.168.50", "10.0.0"];
+
+export type MobileApiDiscoveryOptions = {
+  port?: number;
+  timeoutMs?: number;
+  concurrency?: number;
+  subnets?: string[];
+  hostStart?: number;
+  hostEnd?: number;
+};
 
 export async function requestJson<T>(path: string, init?: ApiRequestInit): Promise<T> {
   await initializeApiBaseUrl();
@@ -193,6 +206,36 @@ export async function waitForApiReady(options: { attempts?: number; intervalMs?:
   throw lastError;
 }
 
+export async function discoverMobileApiBaseUrl(options: MobileApiDiscoveryOptions = {}) {
+  const candidates = buildMobileBackendCandidates(options);
+  let nextCandidateIndex = 0;
+  let discoveredBaseUrl = "";
+  const workerCount = Math.max(1, Math.min(options.concurrency ?? MOBILE_BACKEND_DISCOVERY_CONCURRENCY, candidates.length));
+
+  async function probeNextCandidate() {
+    while (!discoveredBaseUrl && nextCandidateIndex < candidates.length) {
+      const candidate = candidates[nextCandidateIndex];
+      nextCandidateIndex += 1;
+
+      try {
+        const response = await fetchWithTimeout(`${candidate}/health`, {}, options.timeoutMs ?? MOBILE_BACKEND_DISCOVERY_TIMEOUT_MS);
+        if (!response.ok) continue;
+        const health = (await response.json()) as BackendHealth;
+        if (isCompatibleBackendHealth(health)) {
+          discoveredBaseUrl = candidate;
+          setApiBaseUrl(candidate);
+          return;
+        }
+      } catch {
+        // Network discovery is best effort; unreachable hosts are expected.
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, () => probeNextCandidate()));
+  return discoveredBaseUrl;
+}
+
 async function discoverCompatibleBrowserBackend() {
   const candidates = buildBrowserBackendCandidates();
   for (const baseUrl of candidates) {
@@ -216,6 +259,28 @@ function buildBrowserBackendCandidates() {
   for (const port of BROWSER_BACKEND_DISCOVERY_PORTS) {
     candidates.add(`http://127.0.0.1:${port}`);
   }
+  return Array.from(candidates);
+}
+
+function buildMobileBackendCandidates(options: MobileApiDiscoveryOptions) {
+  const port = options.port ?? MOBILE_BACKEND_DISCOVERY_PORT;
+  const hostStart = options.hostStart ?? 2;
+  const hostEnd = options.hostEnd ?? 254;
+  const subnets = options.subnets ?? MOBILE_BACKEND_DISCOVERY_SUBNETS;
+  const candidates = new Set<string>();
+  const savedEndpoint = storedMobileApiBaseUrl();
+  const configuredEndpoint = configuredApiBaseUrl();
+
+  if (savedEndpoint) candidates.add(savedEndpoint);
+  if (configuredEndpoint) candidates.add(configuredEndpoint);
+  candidates.add(`http://10.0.2.2:${port}`);
+
+  for (const subnet of subnets) {
+    for (let host = hostStart; host <= hostEnd; host += 1) {
+      candidates.add(`http://${subnet}.${host}:${port}`);
+    }
+  }
+
   return Array.from(candidates);
 }
 
@@ -343,9 +408,32 @@ function normalizeApiBaseUrl(url: string) {
     throw new Error("El endpoint debe empezar por http:// o https://.");
   }
 
+  if (isTauriMobileRuntime() && parsed.protocol === "http:" && !isPrivateNetworkHost(parsed.hostname)) {
+    throw new Error("En Android, las direcciones http:// deben ser locales, por ejemplo http://192.168.1.20:8775.");
+  }
+
   parsed.pathname = parsed.pathname.replace(/\/+$/, "");
   parsed.search = "";
   parsed.hash = "";
   return parsed.toString().replace(/\/+$/, "");
+}
+
+function isPrivateNetworkHost(hostname: string) {
+  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  if (host.endsWith(".local")) return true;
+  if (host === "10.0.2.2") return true;
+  if (host.startsWith("127.")) return true;
+  if (host.startsWith("10.")) return true;
+  if (host.startsWith("192.168.")) return true;
+  if (host.startsWith("169.254.")) return true;
+
+  const private172Match = /^172\.(\d+)\./.exec(host);
+  if (private172Match) {
+    const secondOctet = Number(private172Match[1]);
+    return secondOctet >= 16 && secondOctet <= 31;
+  }
+
+  return false;
 }
 

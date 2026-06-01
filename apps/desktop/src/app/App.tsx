@@ -62,6 +62,7 @@ import {
 import {
   API_BASE_URL,
   ApiError,
+  discoverMobileApiBaseUrl,
   getApiBaseUrl,
   getApiErrorMessage,
   isApiConnectionError,
@@ -224,6 +225,7 @@ export function App() {
   const [activeImageId, setActiveImageId] = useState("");
   const [referenceDocumentTabs, setReferenceDocumentTabs] = useState<Array<{ id: string; name: string; path: string; format: "pdf" | "docx" | "xlsx" }>>([]);
   const [activeReferenceDocumentId, setActiveReferenceDocumentId] = useState("");
+  const [workspaceTabOrder, setWorkspaceTabOrder] = useState<string[]>([]);
   const [documentSessions, setDocumentSessions] = useState<Record<string, DocumentSession>>({});
   const [historyOpen, setHistoryOpen] = useState(false);
   const [createDocumentOpen, setCreateDocumentOpen] = useState(false);
@@ -268,6 +270,7 @@ export function App() {
   const [mobileApiSetupOpen, setMobileApiSetupOpen] = useState(false);
   const [mobileApiSetupError, setMobileApiSetupError] = useState<string | null>(null);
   const [mobileApiSetupBusy, setMobileApiSetupBusy] = useState(false);
+  const [mobileApiAutoDiscovering, setMobileApiAutoDiscovering] = useState(false);
   const [closeDocumentId, setCloseDocumentId] = useState<string | null>(null);
   const [orphanDrafts, setOrphanDrafts] = useState<OrphanDraft[]>([]);
   const [recoverableDraftsOpen, setRecoverableDraftsOpen] = useState(false);
@@ -308,6 +311,45 @@ export function App() {
     void (async () => {
       const localPreferences = readLocalAppPreferences();
       try {
+        if (isTauriMobileRuntime() && !isMobileApiBaseUrlConfigured()) {
+          setMobileApiSetupOpen(true);
+          setMobileApiAutoDiscovering(true);
+          setMobileApiSetupError(null);
+          setNotice(null);
+          setProjects([]);
+          setActiveProject(null);
+          setVersioningStatus(null);
+          setProjectSyncStatus(null);
+          setTree([]);
+          setTabs([]);
+          setActiveDocumentId("");
+          setActiveTreeNodeId("");
+          setAppearanceConfig(localPreferences.appearance ?? defaultAppearanceConfig);
+          setDiagnosticsConfig(localPreferences.diagnostics ?? defaultDiagnosticsConfig);
+          setExportTemplateConfig(defaultExportTemplateConfig);
+          setExportTemplatePath("");
+          setAiConfig({ ...(localPreferences.ai ?? defaultAiConfig), openaiKeyConfigured: false, openaiKeyPreview: null });
+          setAiUsageSummary(null);
+          setConfigPersistenceAvailable(false);
+          setTreeOpenPathsByProject({});
+          setOpenUtilityTabs([]);
+          setActiveUtilityTab(null);
+          setNotesMarkdown("");
+          setNotesSavedMarkdown("");
+          setNotesUpdatedAt(null);
+          setNotesLoaded(true);
+          setNotesSaveState("idle");
+          const discoveredEndpoint = await discoverMobileApiBaseUrl();
+          setMobileApiAutoDiscovering(false);
+
+          if (discoveredEndpoint) {
+            setPersistentMobileApiBaseUrl(discoveredEndpoint);
+            setMobileApiSetupOpen(false);
+          } else {
+            setMobileApiSetupError("No hemos encontrado tu ordenador automáticamente. Comprueba que KnowNext.ai está abierto en el ordenador y que ambos dispositivos están en la misma Wi-Fi.");
+            return;
+          }
+        }
         await waitForApiReady();
         const [projectList, appConfig, auth, capabilities, loadedAiConfig, loadedExportTemplate, loadedExportTemplatePath, loadedAiUsageSummary, loadedNotes] = await Promise.all([
           listProjects(),
@@ -398,6 +440,7 @@ export function App() {
         setMobileApiSetupOpen(false);
         setMobileApiSetupError(null);
       } catch (error) {
+        setMobileApiAutoDiscovering(false);
         const startupMessage = getApiErrorMessage(error, "La aplicación no pudo cargar la configuración inicial.");
         void recordTraceLog({
           source: "app.startup",
@@ -742,21 +785,22 @@ export function App() {
     return () => window.clearTimeout(timeout);
   }, [configLoaded]);
 
-  const workspaceTabs = useMemo<WorkspaceTab[]>(() => [
-    ...(activeProject
-      ? [{
-        kind: "ai-conversation" as const,
-        id: AI_CONVERSATION_TAB_ID,
-        name: "IA" as const,
-        readonly: true as const,
-      }]
-      : []),
+  const fixedWorkspaceTabs = useMemo<WorkspaceTab[]>(() => [
+    ...(activeProject ? [{
+      kind: "ai-conversation" as const,
+      id: AI_CONVERSATION_TAB_ID,
+      name: "IA" as const,
+      readonly: true as const,
+    }] : []),
     {
       kind: "notes" as const,
       id: NOTES_WORKSPACE_TAB_ID,
       name: NOTES_TITLE,
       utilityTabId: NOTES_UTILITY_TAB_ID,
     },
+  ], [activeProject]);
+
+  const scrollableWorkspaceTabs = useMemo<WorkspaceTab[]>(() => [
     ...tabs.map((tab) => ({ ...tab, kind: "document" as const })),
     ...imageTabs.map((tab) => ({ ...tab, kind: "image" as const })),
     ...referenceDocumentTabs.map((tab) => ({ ...tab, kind: "reference-document" as const, readonly: true as const })),
@@ -770,6 +814,21 @@ export function App() {
       }]
       : []),
   ], [activeProject, imageTabs, openUtilityTabs, referenceDocumentTabs, tabs]);
+
+  useEffect(() => {
+    const visibleTabIds = scrollableWorkspaceTabs.map((tab) => tab.id);
+    setWorkspaceTabOrder((currentOrder) => normalizeWorkspaceTabOrder(currentOrder, visibleTabIds));
+  }, [scrollableWorkspaceTabs]);
+
+  const orderedScrollableWorkspaceTabs = useMemo(
+    () => orderWorkspaceTabs(scrollableWorkspaceTabs, workspaceTabOrder),
+    [scrollableWorkspaceTabs, workspaceTabOrder],
+  );
+
+  const workspaceTabs = useMemo<WorkspaceTab[]>(
+    () => [...fixedWorkspaceTabs, ...orderedScrollableWorkspaceTabs],
+    [fixedWorkspaceTabs, orderedScrollableWorkspaceTabs],
+  );
   const activeTabId = activeUtilityTab === RELEASE_NOTES_UTILITY_TAB_ID
     ? RELEASE_NOTES_WORKSPACE_TAB_ID
     : activeUtilityTab === NOTES_UTILITY_TAB_ID
@@ -1087,6 +1146,10 @@ export function App() {
   }
 
   function handleReorderDocumentTabs(draggedTabId: string, targetTabId: string, placement: "before" | "after") {
+    setWorkspaceTabOrder((currentOrder) => {
+      const visibleTabIds = orderedScrollableWorkspaceTabs.map((tab) => tab.id);
+      return reorderWorkspaceTabIds(normalizeWorkspaceTabOrder(currentOrder, visibleTabIds), draggedTabId, targetTabId, placement);
+    });
     setTabs((currentTabs) => reorderOpenDocumentTabs(currentTabs, draggedTabId, targetTabId, placement));
   }
 
@@ -3179,9 +3242,9 @@ export function App() {
       <StartupOverlay loading={!configLoaded} />
       <MobileApiSetupOverlay
         open={mobileApiSetupOpen}
-        currentEndpoint={getApiBaseUrl()}
-        hasSavedEndpoint={isMobileApiBaseUrlConfigured()}
+        currentEndpoint={isMobileApiBaseUrlConfigured() ? getApiBaseUrl() : ""}
         busy={mobileApiSetupBusy}
+        discovering={mobileApiAutoDiscovering}
         error={mobileApiSetupError}
         onSave={(endpoint) => void handleSaveMobileApiBaseUrl(endpoint)}
         onRetry={handleRetryMobileApiBaseUrl}
@@ -3707,8 +3770,45 @@ function reorderOpenDocumentTabs(tabs: OpenDocumentTab[], draggedTabId: string, 
   return areOpenDocumentTabsEqual(tabs, nextTabs) ? tabs : nextTabs;
 }
 
+function normalizeWorkspaceTabOrder(order: string[], visibleTabIds: string[]) {
+  const visibleTabIdSet = new Set(visibleTabIds);
+  const normalizedOrder = order.filter((tabId) => visibleTabIdSet.has(tabId));
+  for (const tabId of visibleTabIds) {
+    if (!normalizedOrder.includes(tabId)) normalizedOrder.push(tabId);
+  }
+  return areStringArraysEqual(order, normalizedOrder) ? order : normalizedOrder;
+}
+
+function orderWorkspaceTabs(tabs: WorkspaceTab[], order: string[]) {
+  const tabById = new Map(tabs.map((tab) => [tab.id, tab]));
+  const orderedTabs = order.flatMap((tabId) => {
+    const tab = tabById.get(tabId);
+    return tab ? [tab] : [];
+  });
+  const orderedTabIds = new Set(orderedTabs.map((tab) => tab.id));
+  return [
+    ...orderedTabs,
+    ...tabs.filter((tab) => !orderedTabIds.has(tab.id)),
+  ];
+}
+
+function reorderWorkspaceTabIds(order: string[], draggedTabId: string, targetTabId: string, placement: "before" | "after") {
+  if (draggedTabId === targetTabId) return order;
+  if (!order.includes(draggedTabId) || !order.includes(targetTabId)) return order;
+
+  const nextOrder = order.filter((tabId) => tabId !== draggedTabId);
+  const targetIndex = nextOrder.indexOf(targetTabId);
+  if (targetIndex < 0) return order;
+  nextOrder.splice(placement === "before" ? targetIndex : targetIndex + 1, 0, draggedTabId);
+  return areStringArraysEqual(order, nextOrder) ? order : nextOrder;
+}
+
 function areOpenDocumentTabsEqual(left: OpenDocumentTab[], right: OpenDocumentTab[]) {
   return left.length === right.length && left.every((tab, index) => tab.id === right[index]?.id && tab.name === right[index]?.name);
+}
+
+function areStringArraysEqual(left: string[], right: string[]) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function AppNoticeBanner({ notice, onClose }: { notice: AppNotice | null; onClose: () => void }) {
@@ -3849,16 +3949,16 @@ function StartupOverlay({ loading }: { loading: boolean }) {
 function MobileApiSetupOverlay({
   open,
   currentEndpoint,
-  hasSavedEndpoint,
   busy,
+  discovering,
   error,
   onSave,
   onRetry,
 }: {
   open: boolean;
   currentEndpoint: string;
-  hasSavedEndpoint: boolean;
   busy: boolean;
+  discovering: boolean;
   error: string | null;
   onSave: (endpoint: string) => void;
   onRetry: () => void;
@@ -3873,7 +3973,7 @@ function MobileApiSetupOverlay({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!busy) onSave(endpoint);
+    if (!busy && !discovering) onSave(endpoint);
   }
 
   return (
@@ -3886,11 +3986,25 @@ function MobileApiSetupOverlay({
         </div>
         <h1 className="mt-2 text-[23px] font-semibold leading-tight text-ink-primary">Conectar KnowNext.ai</h1>
         <p className="mt-3 text-[12px] leading-5 text-ink-secondary">
-          Android necesita una API FastAPI accesible desde el teléfono. Usa la IP del equipo que ejecuta `pnpm backend:mobile`.
+          El móvil se conecta a KnowNext.ai en tu ordenador para abrir tus proyectos y documentos. Normalmente lo encontramos automáticamente.
         </p>
+        {discovering ? (
+          <div className="mt-6 rounded-md border border-line bg-panel px-4 py-4">
+            <div className="flex items-start gap-3">
+              <RefreshCw size={18} className="mt-0.5 shrink-0 animate-spin text-brand-orange" strokeWidth={2} />
+              <div>
+                <div className="text-[12px] font-semibold text-ink-primary">Buscando tu ordenador</div>
+                <p className="mt-1 text-[11px] leading-5 text-ink-secondary">
+                  Mantén KnowNext.ai abierto en el ordenador y ambos dispositivos en la misma Wi-Fi.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {!discovering ? (
         <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
           <label className="block">
-            <span className="text-[11px] font-semibold text-ink-primary">Endpoint de la API</span>
+            <span className="text-[11px] font-semibold text-ink-primary">Dirección del ordenador</span>
             <input
               className="mt-2 h-11 w-full rounded-md border border-line bg-white px-3 font-mono text-[12px] text-ink-primary outline-none transition focus:border-brand-orange focus:ring-2 focus:ring-orange-200"
               value={endpoint}
@@ -3900,14 +4014,14 @@ function MobileApiSetupOverlay({
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
-              disabled={busy}
+              disabled={busy || discovering}
             />
           </label>
           <div className="rounded-md border border-line bg-panel px-3 py-3">
             <div className="flex items-start gap-2">
               <Check size={14} className="mt-0.5 shrink-0 text-brand-orange" strokeWidth={2} />
               <p className="text-[11px] leading-5 text-ink-secondary">
-                Se validará `/health` con la versión de la app y el perfil `mobile` antes de guardar.
+                Solo necesitas escribirla si la búsqueda automática no lo encuentra. KnowNext.ai comprobará que corresponde a esta versión antes de entrar.
               </p>
             </div>
           </div>
@@ -3920,7 +4034,7 @@ function MobileApiSetupOverlay({
             <button
               type="submit"
               className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md bg-brand-orange px-4 text-[12px] font-semibold text-white transition hover:bg-brand-orange-dark disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={busy}
+              disabled={busy || discovering}
             >
               {busy ? <RefreshCw size={15} className="animate-spin" /> : <Check size={15} />}
               Guardar y entrar
@@ -3929,13 +4043,14 @@ function MobileApiSetupOverlay({
               type="button"
               className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-line bg-white px-4 text-[12px] font-semibold text-ink-primary transition hover:bg-panel disabled:cursor-not-allowed disabled:opacity-60"
               onClick={onRetry}
-              disabled={busy || !hasSavedEndpoint}
+              disabled={busy || discovering}
             >
               <RefreshCw size={15} />
-              Reintentar
+              Buscar de nuevo
             </button>
           </div>
         </form>
+        ) : null}
       </section>
     </div>
   );

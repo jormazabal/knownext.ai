@@ -6,7 +6,7 @@ KnowNext.ai can be packaged as a native Android app through Tauri v2.
 
 - Android uses the same React + TypeScript frontend as desktop.
 - Android does not bundle or start the Python FastAPI backend as a local sidecar.
-- Android builds can include a default backend with `VITE_API_BASE_URL`, and the installed Android app can override it from the startup connection screen.
+- Android builds can include a default backend with `VITE_API_BASE_URL`, but the installed Android app can also discover a compatible local mobile backend automatically and override the endpoint from the startup connection screen if needed.
 - The backend health profile expected by Android is `mobile` by default and can be overridden with `VITE_EXPECTED_BACKEND_PROFILE`.
 - Windows uses the signed Tauri updater. Android private APK builds use a separate `android-latest.json` channel and the Android system installer.
 - The Android package must not contain projects, documents, credentials, API keys, notes, drafts, logs, or development backend data.
@@ -18,7 +18,7 @@ This keeps the first Android package native without pretending that local Python
 
 ## Data Model
 
-A clean Android installation has no bundled product data. When no endpoint is packaged or saved, startup stops on the backend connection screen. When an endpoint is configured, all projects and documents shown in the Android UI come from that backend's active `appDataDir`; they are not copied from the APK.
+A clean Android installation has no bundled product data. When no endpoint is packaged or saved, startup searches the local network for a compatible mobile backend before showing the backend connection screen. When an endpoint is configured or discovered, all projects and documents shown in the Android UI come from that backend's active `appDataDir`; they are not copied from the APK.
 
 Android updates preserve WebView app storage for the same package, so a saved backend endpoint remains configured after `adb install -r` or an app-store update. User project data remains wherever the backend stores it. Uninstalling the Android app follows Android defaults and clears app-specific WebView storage, but does not delete data held by an external backend.
 
@@ -59,7 +59,7 @@ For local device testing against the development backend, start the mobile backe
 pnpm backend:mobile
 ```
 
-Then build a debug APK for a physical Android phone on the same Wi-Fi. `VITE_API_BASE_URL` is only a default for private local testing; if omitted, the APK does not embed any backend endpoint and Android shows a connection screen where the endpoint can be entered and persisted.
+Then build a debug APK for a physical Android phone on the same Wi-Fi. `VITE_API_BASE_URL` is only a default for private local testing; if omitted, the APK does not embed any backend endpoint and Android searches the local network before showing a connection screen where the endpoint can be entered and persisted.
 
 ```powershell
 $env:VITE_API_BASE_URL="http://<host-lan-ip>:8775"
@@ -97,7 +97,7 @@ apps/desktop/src-tauri/gen/android/app/build/outputs
 output/KnowNext.ai-android-<abi>-debug.apk
 ```
 
-If the packaged endpoint is unreachable, the Android app opens a compact connection screen before the workspace. Enter a full URL such as `http://192.168.1.20:8775`; the app checks `/health` for the matching app version and `profile=mobile` before saving it locally on the device.
+If the packaged or discovered endpoint is unreachable, the Android app opens a compact connection screen before the workspace. Enter a full local URL such as `http://192.168.1.20:8775`; the app checks `/health` for the matching app version and `profile=mobile` before saving it locally on the device.
 
 Do not put OpenAI credentials in `VITE_*` variables or Android build inputs. The debug build helper refuses `VITE_OPENAI*`, `VITE_*API_KEY*`, and `sk-...` values in the client bundle. OpenAI keys belong only in backend-managed credentials and must never be shipped in APK/AAB artifacts.
 
@@ -133,5 +133,5 @@ The backend must allow the Tauri mobile WebView origin through CORS. `http://tau
 
 - Offline local project storage on Android is not implemented yet.
 - Local Git integration on Android is not implemented yet.
-- The Android app is installable as a native Tauri APK/AAB, but it requires a compatible backend endpoint for product data. The endpoint can be changed in the app when startup cannot reach the packaged default.
+- The Android app is installable as a native Tauri APK/AAB, but it requires a compatible backend endpoint for product data. The endpoint can be discovered on the local network or changed in the app when startup cannot reach a backend automatically.
 - Play Store release tracks are not implemented yet. The current Android release channel is private APK distribution from GitHub Releases through `android-latest.json`.

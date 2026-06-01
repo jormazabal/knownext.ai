@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEv
 import type { AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiExecutionMode, AiReasoningDepth, AiSelectionFocus, AiTranscriptionLanguage, AiTranscriptionTarget } from "../../types/domain";
 import { getDocumentTreeFileDragData, hasDocumentTreeFileDragData } from "../../lib/dragData";
 import { isPhoneAppShell } from "../../lib/runtime/platform";
+import { xsViewportQuery } from "../../lib/runtime/responsive";
 import { useRealtimeTranscription } from "../transcription/useRealtimeTranscription";
 
 export type AiPromptExecutionOptions = {
@@ -1414,13 +1415,13 @@ function removeActiveMention(value: string) {
 function useCompactPromptMode() {
   const [compact, setCompact] = useState(() => (
     typeof window !== "undefined" && typeof window.matchMedia === "function"
-      ? window.matchMedia("(max-width: 760px)").matches
+      ? window.matchMedia(xsViewportQuery).matches
       : false
   ));
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-    const mediaQuery = window.matchMedia("(max-width: 760px)");
+    const mediaQuery = window.matchMedia(xsViewportQuery);
     const update = () => setCompact(mediaQuery.matches);
     update();
     mediaQuery.addEventListener?.("change", update);

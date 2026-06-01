@@ -14,10 +14,10 @@ describe("resolveVisibleWindowState", () => {
   });
 
   it("moves a partially offscreen window back inside the work area", () => {
-    expect(resolveVisibleWindowState({ x: 900, y: 520, width: 800, height: 420 }, [primaryWorkArea])).toEqual({
-      x: 566,
+    expect(resolveVisibleWindowState({ x: 1100, y: 520, width: 320, height: 420 }, [primaryWorkArea])).toEqual({
+      x: 1006,
       y: 248,
-      width: 800,
+      width: 360,
       height: 520,
     });
   });

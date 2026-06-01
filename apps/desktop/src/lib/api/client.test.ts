@@ -71,6 +71,42 @@ describe("Android API endpoint configuration", () => {
     expect(client.getApiBaseUrl()).toBe("http://10.0.2.2:8775");
     expect(localStorage.getItem("knownext.mobileApiBaseUrl")).toBe("http://10.0.2.2:8775");
     expect(() => client.setPersistentMobileApiBaseUrl("ftp://10.0.2.2:8775")).toThrow("http:// o https://");
+    expect(() => client.setPersistentMobileApiBaseUrl("http://example.com:8775")).toThrow("deben ser locales");
+  });
+
+  it("discovers a compatible mobile backend on the local network", async () => {
+    vi.resetModules();
+    Object.defineProperty(window, "__TAURI_INTERNALS__", { value: {}, configurable: true });
+    Object.defineProperty(window.navigator, "userAgent", { value: "Mozilla/5.0 Android", configurable: true });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        if (url === "http://192.168.1.42:8775/health") {
+          return Promise.resolve(
+            new Response(JSON.stringify({
+              app: "knownext",
+              status: "ok",
+              profile: "mobile",
+              version: APP_VERSION,
+            }), { status: 200 }),
+          );
+        }
+        return Promise.reject(new TypeError("unreachable"));
+      }),
+    );
+
+    const client = await import("./client");
+    const endpoint = await client.discoverMobileApiBaseUrl({
+      subnets: ["192.168.1"],
+      hostStart: 42,
+      hostEnd: 42,
+      concurrency: 1,
+      timeoutMs: 10,
+    });
+
+    expect(endpoint).toBe("http://192.168.1.42:8775");
+    expect(client.getApiBaseUrl()).toBe("http://192.168.1.42:8775");
   });
 });
 
