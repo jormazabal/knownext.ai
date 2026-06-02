@@ -127,8 +127,11 @@ Invoke-WebRequest -UseBasicParsing -Method Head -Uri "https://github.com/jormaza
 
 $androidManifest = Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/jormazabal/knownext.ai/releases/latest/download/android-latest.json" -MaximumRedirection 10
 $android = [System.Text.Encoding]::UTF8.GetString($androidManifest.Content) | ConvertFrom-Json
-$android.version
-$android.url
+$android.versionName
+$android.applicationId
+$artifact = $android.artifacts | Where-Object { $_.abi -eq "arm64-v8a" } | Select-Object -First 1
+$artifact.url
+$artifact.sha256
 Invoke-WebRequest -UseBasicParsing -Method Head -Uri "https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai-android-arm64-v${version}.apk" -MaximumRedirection 10
 ```
 
