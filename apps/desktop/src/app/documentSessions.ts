@@ -39,12 +39,13 @@ export function createEmptyDocumentSession(loadVersion: number): DocumentSession
 export function createLoadedDocumentSession(record: DocumentRecord, currentSession?: DocumentSession): DocumentSession {
   const hasRecoveredDraft = Boolean(record.hasDraft || record.isDirty);
   const savedMarkdown = record.diskMarkdown ?? record.markdown;
+  const dirtyMarkdown = !markdownMatchesSaved(record.markdown, savedMarkdown);
 
   return {
     document: record,
     markdown: record.markdown,
     savedMarkdown,
-    isDirty: record.markdown !== savedMarkdown || hasRecoveredDraft,
+    isDirty: dirtyMarkdown || hasRecoveredDraft,
     isLoading: false,
     saveState: "idle",
     loadVersion: currentSession?.loadVersion ?? 0,
@@ -78,7 +79,7 @@ export function applyExternalMarkdownUpdate(session: DocumentSession, markdown: 
   return {
     ...session,
     markdown,
-    isDirty: markdown !== session.savedMarkdown,
+    isDirty: !markdownMatchesSaved(markdown, session.savedMarkdown),
     saveState: "idle",
     loadVersion: session.loadVersion + 1,
     document: session.document ? { ...session.document, wordCount: countWords(markdown) } : session.document,
@@ -89,7 +90,7 @@ export function applyLocalMarkdownEdit(session: DocumentSession, markdown: strin
   return {
     ...session,
     markdown,
-    isDirty: markdown !== session.savedMarkdown,
+    isDirty: !markdownMatchesSaved(markdown, session.savedMarkdown),
     saveState: "idle",
     document: session.document ? { ...session.document, wordCount: countWords(markdown) } : session.document,
   };
@@ -106,4 +107,12 @@ export function shouldPersistDraft(session: DocumentSession) {
 
 export function countWords(markdown: string) {
   return markdown.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function markdownMatchesSaved(markdown: string, savedMarkdown: string) {
+  return normalizeMarkdownForDirtyCheck(markdown) === normalizeMarkdownForDirtyCheck(savedMarkdown);
+}
+
+function normalizeMarkdownForDirtyCheck(markdown: string) {
+  return markdown.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n+$/g, "");
 }

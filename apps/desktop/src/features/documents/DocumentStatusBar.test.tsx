@@ -77,6 +77,32 @@ describe("DocumentStatusBar", () => {
     expect(screen.getByRole("button", { name: "Sincronizar" })).toBeInTheDocument();
   });
 
+  it("keeps saved local changes quiet when GitHub access is paused", () => {
+    render(
+      <DocumentStatusBar
+        {...defaultProps}
+        gitEnabled
+        remoteAccess="unauthenticated"
+        remotePaused
+        remoteReason="Sin cuenta GitHub"
+        documentSyncStatus={{
+          documentId: "doc-1",
+          exists: true,
+          diskChanged: false,
+          hasDraft: false,
+          orphaned: false,
+          conflictStatus: "none",
+          versionState: "local-ahead",
+          localChanged: true,
+          remoteChanged: false,
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Guardado local · Sin acceso a GitHub")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sincronizar" })).not.toBeInTheDocument();
+  });
+
   it("shows a red update action when a newer remote version is available", () => {
     render(
       <DocumentStatusBar

@@ -46,7 +46,7 @@ export async function initializeApiBaseUrl() {
 }
 
 export async function getApiWebSocketUrl(_path: string): Promise<string> {
-  throw new Error("La transcripción en tiempo real por WebSocket no está disponible en el runtime local-first 2.0.0.");
+  throw new Error(`La transcripción en tiempo real por WebSocket no está disponible en el runtime local-first ${APP_VERSION}.`);
 }
 
 export function isRuntimeApiEnabled() {
@@ -92,7 +92,7 @@ type LocalApiFile = {
 export async function requestJson<T>(path: string, init?: ApiRequestInit): Promise<T> {
   await initializeApiBaseUrl();
   if (!isTauriRuntime()) {
-    throw new ApiError(503, "Runtime unavailable", "KnowNext.ai 2.0.0 requiere el runtime Tauri local.");
+    throw new ApiError(503, "Runtime unavailable", `KnowNext.ai ${APP_VERSION} requiere el runtime Tauri local.`);
   }
 
   const response = await invoke<LocalApiResponse<T>>("local_api_request", {
@@ -110,7 +110,7 @@ export async function requestJson<T>(path: string, init?: ApiRequestInit): Promi
 export async function requestFormData<T>(path: string, formData: FormData, init?: ApiRequestInit): Promise<T> {
   await initializeApiBaseUrl();
   if (!isTauriRuntime()) {
-    throw new ApiError(503, "Runtime unavailable", "KnowNext.ai 2.0.0 requiere el runtime Tauri local.");
+    throw new ApiError(503, "Runtime unavailable", `KnowNext.ai ${APP_VERSION} requiere el runtime Tauri local.`);
   }
 
   const files: LocalApiFile[] = [];
@@ -141,7 +141,7 @@ export async function requestFormData<T>(path: string, formData: FormData, init?
 export async function requestBinary(path: string, init?: ApiRequestInit): Promise<Blob> {
   await initializeApiBaseUrl();
   if (!isTauriRuntime()) {
-    throw new ApiError(503, "Runtime unavailable", "KnowNext.ai 2.0.0 requiere el runtime Tauri local.");
+    throw new ApiError(503, "Runtime unavailable", `KnowNext.ai ${APP_VERSION} requiere el runtime Tauri local.`);
   }
 
   const response = await invoke<LocalApiContentResponse>("local_api_content", {

@@ -1,6 +1,6 @@
 # Architecture Overview
 
-KnowNext.ai 2.0.0 is a local-first Tauri v2 product with a React frontend and a Rust runtime. Windows and Android use the same product contracts through Tauri commands; neither platform connects to a separate product service.
+KnowNext.ai 2.0.1 is a local-first Tauri v2 product with a React frontend and a Rust runtime. Windows and Android use the same product contracts through Tauri commands; neither platform connects to a separate product service.
 
 ```text
 Tauri v2 shell
@@ -52,4 +52,4 @@ The health payload includes:
 
 ## No Separate Runtime Server
 
-KnowNext.ai 2.0.0 does not include a separate product server, packaged auxiliary process, mobile endpoint discovery path, or compatibility mode for those paths. Any future external sync or AI provider traffic must be mediated by Rust/Tauri services.
+KnowNext.ai 2.0.1 does not include a separate product server, packaged auxiliary process, mobile endpoint discovery path, or compatibility mode for those paths. Any future external sync or AI provider traffic must be mediated by Rust/Tauri services.

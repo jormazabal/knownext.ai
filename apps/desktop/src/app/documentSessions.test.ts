@@ -43,6 +43,21 @@ describe("documentSessions", () => {
     expect(shouldPersistDraft(nextSessions["doc-a"])).toBe(true);
   });
 
+  it("does not mark a clean document dirty when the editor only normalizes final newlines", () => {
+    const session = createLoadedDocumentSession({
+      ...baseDocument,
+      markdown: "# Clean\r\n\r\nBody\r\n",
+      diskMarkdown: "# Clean\n\nBody\n\n",
+      hasDraft: false,
+      isDirty: false,
+    });
+    const updated = applyLocalMarkdownEdit(session, "# Clean\n\nBody");
+
+    expect(session.isDirty).toBe(false);
+    expect(updated.isDirty).toBe(false);
+    expect(shouldPersistDraft(updated)).toBe(false);
+  });
+
   it("treats AI edits on an open document like local edits without remounting the editor", () => {
     const session = createLoadedDocumentSession({ ...baseDocument, hasDraft: false, isDirty: false, diskMarkdown: null });
     const updated = applyLocalMarkdownEdit(session, "# AI update\n\nVisible in editor");

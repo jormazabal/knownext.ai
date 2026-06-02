@@ -103,7 +103,7 @@ import { getTraceLogStatus, openTraceLogFolder, recordTraceLog, type TraceLogSta
 import { openExternalUrl } from "../lib/runtime/links";
 import { isTauriRuntime, selectBrowserExportTarget, selectExportFilePath, withExportExtension } from "../lib/runtime/exportDialogs";
 import { isTauriMobileRuntime } from "../lib/runtime/platform";
-import { getRuntimeServiceStatus, restartLocalRuntime, updateRuntimePortConfig, type RuntimePortConfig, type RuntimeServicesStatus } from "../lib/runtime/services";
+import { getRuntimeServiceStatus, type RuntimeServicesStatus } from "../lib/runtime/services";
 import { applyAppearanceAttributes, useResolvedAppearanceTheme } from "../lib/theme/appearance";
 import { AlertCircle, ArchiveRestore, Check, FileWarning, Info, RefreshCw, Server, Trash2, X } from "lucide-react";
 import {
@@ -624,7 +624,7 @@ export function App() {
       void refreshProjectSyncStatus(activeProject.id, { autoRun: isAutomaticSyncMode(activeProject.syncMode), silent: true });
     }, 45000);
     return () => window.clearInterval(interval);
-  }, [activeProject?.id, activeProject?.syncMode, activeDocumentId, configLoaded, documentSessions]);
+  }, [activeProject?.id, activeProject?.syncMode, activeDocumentId, authStatus.isAuthenticated, configLoaded, documentSessions]);
 
   useEffect(() => {
     if (!configLoaded || !activeProject) {
@@ -1009,14 +1009,17 @@ export function App() {
   async function refreshProjectSyncStatus(projectId = activeProject?.id, options: { autoRun?: boolean; silent?: boolean } = {}) {
     if (!projectId) return;
     try {
+      const project = projects.find((candidate) => candidate.id === projectId) ?? (activeProject?.id === projectId ? activeProject : null);
       const payload = {
         openDocuments: getOpenDocumentSyncState(),
         allowAutoApply: Boolean(options.autoRun),
       };
-      const status = options.autoRun ? await autoRunProjectSync(projectId, payload) : await scanProjectSync(projectId, payload);
-      setProjectSyncStatus(status);
-      setProjectSyncState(status.state);
-      setExternalChangesMessage(status.detail ?? status.label);
+      const canAutoRun = Boolean(options.autoRun && shouldRunAutomaticSync(project, authStatus));
+      const status = canAutoRun ? await autoRunProjectSync(projectId, payload) : await scanProjectSync(projectId, payload);
+      const normalizedStatus = withDerivedRemoteSyncStatus(status, project, authStatus);
+      setProjectSyncStatus(normalizedStatus);
+      setProjectSyncState(normalizedStatus.state);
+      setExternalChangesMessage(normalizedStatus.detail ?? normalizedStatus.label);
     } catch (error) {
       if (!options.silent) showError(error, "No se pudo comprobar la sincronización del proyecto.");
     }
@@ -1024,7 +1027,8 @@ export function App() {
 
   async function handleVerifyGithubConnection(projectId = activeProject?.id) {
     if (!projectId) return null;
-    const status = await verifyProjectGithubConnection(projectId);
+    const project = projects.find((candidate) => candidate.id === projectId) ?? (activeProject?.id === projectId ? activeProject : null);
+    const status = withDerivedRemoteSyncStatus(await verifyProjectGithubConnection(projectId), project, authStatus);
     setProjectSyncStatus(status);
     setProjectSyncState(status.state);
     setExternalChangesMessage(status.detail ?? status.label);
@@ -2050,6 +2054,24 @@ export function App() {
 
   async function handlePullProject() {
     if (!activeProject || syncState !== "idle") return;
+    if (!canUseGithubRemote(activeProject, authStatus)) {
+      const status = withDerivedRemoteSyncStatus(projectSyncStatus ?? {
+        projectId: activeProject.id,
+        mode: activeProject.syncMode === "auto-github" ? "github-auto" : "github-manual",
+        state: "local-history",
+        label: "GitHub pausado",
+        detail: "Sin cuenta GitHub. Puedes seguir trabajando con historial local.",
+        pendingPush: false,
+        pendingPull: false,
+        hasConflicts: false,
+        conflicts: [],
+      }, activeProject, authStatus);
+      setProjectSyncStatus(status);
+      setProjectSyncState(status.state);
+      setExternalChangesMessage(status.detail ?? status.label);
+      setNotice({ title: "GitHub pausado", message: "Conecta GitHub para traer cambios remotos. El proyecto local sigue editable.", tone: "info" });
+      return;
+    }
     setSyncState("pulling");
     setExternalChangesBusy(true);
     setExternalChangesMessage("Actualizando el proyecto desde GitHub.");
@@ -2095,6 +2117,24 @@ export function App() {
 
   async function handlePushProject() {
     if (!activeProject || syncState !== "idle") return;
+    if (!canUseGithubRemote(activeProject, authStatus)) {
+      const status = withDerivedRemoteSyncStatus(projectSyncStatus ?? {
+        projectId: activeProject.id,
+        mode: activeProject.syncMode === "auto-github" ? "github-auto" : "github-manual",
+        state: "local-pending",
+        label: "GitHub pausado",
+        detail: "Sin cuenta GitHub. Los cambios quedan guardados localmente hasta recuperar acceso.",
+        pendingPush: true,
+        pendingPull: false,
+        hasConflicts: false,
+        conflicts: [],
+      }, activeProject, authStatus);
+      setProjectSyncStatus({ ...status, state: "local-pending", pendingPush: true, localState: "pending-push" });
+      setProjectSyncState("local-pending");
+      setExternalChangesMessage("Cambios guardados localmente. GitHub queda pendiente hasta recuperar acceso.");
+      setNotice({ title: "GitHub pausado", message: "Los cambios quedan en historial local. Conecta GitHub para subirlos.", tone: "info" });
+      return;
+    }
     setSyncState("pushing");
     setExternalChangesBusy(true);
     setExternalChangesMessage("Subiendo el historial local a GitHub.");
@@ -2173,6 +2213,12 @@ export function App() {
       }
 
       if (isGithubSyncMode(activeProject.syncMode)) {
+        if (!canUseGithubRemote(activeProject, authStatus)) {
+          await refreshProjectSyncStatus(activeProject.id, { silent: true });
+          await checkOpenDocumentSync();
+          setExternalChangesMessage("Documento guardado localmente. GitHub queda pendiente hasta recuperar acceso.");
+          return;
+        }
         const response = await pushProject(activeProject.id);
         await refreshProjectCapabilityState(activeProject.id);
         await refreshProjectSyncStatus(activeProject.id, { silent: true });
@@ -2632,42 +2678,6 @@ export function App() {
     }
   }
 
-  async function handleRestartRuntimeService() {
-    setRuntimeServicesRefreshing(true);
-    try {
-      setRuntimeServicesStatus(await restartLocalRuntime());
-    } catch (error) {
-      showError(error, "No se pudo reiniciar el runtime local.", { source: "app.runtimeServices" });
-      await refreshRuntimeServiceStatus({ silent: true });
-    } finally {
-      setRuntimeServicesRefreshing(false);
-    }
-  }
-
-  async function handleUpdateRuntimePortConfig(config: RuntimePortConfig) {
-    setRuntimeServicesRefreshing(true);
-    try {
-      const status = await updateRuntimePortConfig(config);
-      setRuntimeServicesStatus(status);
-      await waitForApiReady({ attempts: 8, intervalMs: 250 });
-    } catch (error) {
-      const message = describeError(error);
-      setNotice({
-        title: "No se pudo aplicar la configuración del runtime",
-        message,
-        tone: "error",
-      });
-      await refreshRuntimeServiceStatus();
-      void recordTraceLog({
-        source: "app.runtime.updateRuntimePortConfig",
-        message: "No se pudo aplicar la configuración de puerto del runtime.",
-        detail: message,
-      });
-    } finally {
-      setRuntimeServicesRefreshing(false);
-    }
-  }
-
   async function handleOpenTraceLogFolder() {
     const folderPath = traceLogStatus?.folderPath;
     if (!folderPath) return;
@@ -3084,7 +3094,7 @@ export function App() {
     }
   }
 
-  const historyEnabled = Boolean(activeProject && versioningStatus?.enabled && (!isGithubSyncMode(activeProject.syncMode) || authStatus.isAuthenticated));
+  const historyEnabled = Boolean(activeProject && versioningStatus?.enabled);
 
   return (
     <>
@@ -3263,8 +3273,6 @@ export function App() {
         onDeleteAiIndex={() => void handleDeleteAiIndex()}
         onOpenTraceLogFolder={() => void handleOpenTraceLogFolder()}
         onRefreshRuntimeServices={() => void refreshRuntimeServiceStatus()}
-        onRestartRuntimeService={() => void handleRestartRuntimeService()}
-        onUpdateRuntimePortConfig={(config) => void handleUpdateRuntimePortConfig(config)}
       />
       <AiDeleteConfirmationDialog
         pendingDelete={aiPendingDelete}
@@ -4010,7 +4018,7 @@ function MobileApiSetupOverlay({
             <div className="flex items-start gap-2">
               <Check size={14} className="mt-0.5 shrink-0 text-brand-orange" strokeWidth={2} />
               <p className="text-[11px] leading-5 text-ink-secondary">
-                KnowNext.ai 2.0.0 usa comandos Tauri locales. Este cuadro queda solo como diagnóstico si falla el arranque móvil.
+                KnowNext.ai {APP_VERSION} usa comandos Tauri locales. Este cuadro queda solo como diagnóstico si falla el arranque móvil.
               </p>
             </div>
           </div>
@@ -4069,6 +4077,8 @@ function GithubLoginDialog({
   if (!open) return null;
 
   const busy = state === "starting";
+  const localGithubFallback = Boolean(device?.mock && !import.meta.env.DEV);
+  const developmentGithubMock = Boolean(device?.mock && import.meta.env.DEV);
   return (
     <div className="knownext-modal-overlay fixed inset-0 z-[95] grid place-items-center bg-black/20">
       <section className="w-[460px] rounded-lg border border-line bg-white shadow-menu">
@@ -4079,7 +4089,17 @@ function GithubLoginDialog({
           </p>
         </header>
         <div className="space-y-4 px-5 py-5 text-[11px] text-ink-secondary">
-          {device ? (
+          {localGithubFallback ? (
+            <>
+              <div className="rounded-md border border-orange-200 bg-brand-hover px-3 py-3">
+                <p className="text-[11px] font-semibold text-ink-primary">GitHub remoto no configurado</p>
+                <p className="mt-1 leading-5">
+                  Esta instalación mantiene el historial local activo y pausa la sincronización remota hasta que la conexión GitHub esté disponible.
+                </p>
+              </div>
+              <p>Puedes seguir editando y guardando documentos. Los proyectos configurados con GitHub mostrarán el acceso remoto como pausado.</p>
+            </>
+          ) : device ? (
             <>
               <div className="rounded-md border border-line bg-panel px-3 py-3">
                 <div className="text-[10px] uppercase text-ink-secondary">Código de verificación</div>
@@ -4087,7 +4107,7 @@ function GithubLoginDialog({
               </div>
               <p>Abre GitHub, introduce el código y vuelve aquí para confirmar la conexión.</p>
               <p>KnowNext.ai comprobará la autorización automáticamente cada {Math.max(device.interval, 1)} s.</p>
-              {device.mock ? (
+              {developmentGithubMock ? (
                 <p className="rounded-md border border-orange-200 bg-brand-hover px-3 py-2">
                   Modo desarrollo: no hay `KNOWNEXT_GITHUB_CLIENT_ID`, así que la autorización se completará con una cuenta mock.
                 </p>
@@ -4110,7 +4130,7 @@ function GithubLoginDialog({
             >
               {busy ? "Preparando" : "Iniciar login"}
             </button>
-          ) : (
+          ) : localGithubFallback ? null : (
             <>
               <button className="h-9 rounded-md border border-brand-orange px-4 text-[11px] font-semibold text-brand-orange hover:bg-brand-hover" onClick={onOpenGithub}>
                 Abrir GitHub
@@ -4746,6 +4766,57 @@ function isAutomaticSyncMode(syncMode?: SyncMode | null) {
 
 function isGithubSyncMode(syncMode?: SyncMode | null) {
   return syncMode === "manual-github" || syncMode === "auto-github";
+}
+
+function shouldRunAutomaticSync(project: Project | null | undefined, authStatus: AuthStatus) {
+  if (!project) return false;
+  if (project.syncMode === "auto-local") return true;
+  if (project.syncMode === "auto-github") return authStatus.isAuthenticated;
+  return false;
+}
+
+function canUseGithubRemote(project: Project | null | undefined, authStatus: AuthStatus) {
+  return !isGithubSyncMode(project?.syncMode) || authStatus.isAuthenticated;
+}
+
+function withDerivedRemoteSyncStatus(status: ProjectSyncStatus, project: Project | null | undefined, authStatus: AuthStatus): ProjectSyncStatus {
+  const githubMode = isGithubSyncMode(project?.syncMode);
+  if (!githubMode) {
+    return {
+      ...status,
+      remoteAccess: status.remoteAccess ?? "not-configured",
+      remotePaused: status.remotePaused ?? false,
+      remoteReason: status.remoteReason ?? null,
+      remoteAction: status.remoteAction ?? null,
+      localState: status.localState ?? (status.pendingPush ? "pending-push" : "clean"),
+    };
+  }
+
+  if (!authStatus.isAuthenticated) {
+    return {
+      ...status,
+      mode: project?.syncMode === "auto-github" ? "github-auto" : "github-manual",
+      state: status.pendingPush || status.state === "pending" ? "local-pending" : "local-history",
+      label: "GitHub pausado",
+      detail: "Sin cuenta GitHub. Puedes seguir trabajando y guardando historial local.",
+      remoteAccess: "unauthenticated",
+      remotePaused: true,
+      remoteReason: "Sin cuenta GitHub",
+      remoteAction: "connect-github",
+      pendingPull: false,
+      localState: status.pendingPush ? "pending-push" : "clean",
+    };
+  }
+
+  return {
+    ...status,
+    mode: project?.syncMode === "auto-github" ? "github-auto" : "github-manual",
+    remoteAccess: status.remoteAccess ?? "available",
+    remotePaused: status.remotePaused ?? false,
+    remoteReason: status.remoteReason ?? null,
+    remoteAction: status.remoteAction ?? null,
+    localState: status.localState ?? (status.pendingPush ? "pending-push" : "clean"),
+  };
 }
 
 function isNoVersionChangesError(error: unknown) {

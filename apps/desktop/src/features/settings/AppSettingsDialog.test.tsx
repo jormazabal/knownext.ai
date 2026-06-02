@@ -32,8 +32,6 @@ const baseProps = {
   onDeleteAiIndex: vi.fn(),
   onOpenTraceLogFolder: vi.fn(),
   onRefreshRuntimeServices: vi.fn(),
-  onRestartRuntimeService: vi.fn(),
-  onUpdateRuntimePortConfig: vi.fn(),
 };
 
 describe("AppSettingsDialog", () => {
@@ -51,21 +49,16 @@ describe("AppSettingsDialog", () => {
               statusLabel: "Operativo",
               description: "El runtime local responde y coincide con esta instalación.",
               endpoint: "tauri://local-api/health",
-              expectedVersion: "2.0.0",
-              version: "2.0.0",
+              expectedVersion: "2.0.1",
+              version: "2.0.1",
               expectedProfile: "desktop",
               profile: "desktop",
               expectedAppDataDir: "C:\\Users\\user\\AppData\\Roaming\\ai.knownext.desktop",
               appDataDir: "C:\\Users\\user\\AppData\\Roaming\\ai.knownext.desktop",
-              port: null,
               managedBy: "tauri",
               instanceId: "runtime-test",
               startedAt: "2026-05-11T17:29:00.000Z",
-              externalExecutablePath: null,
               lastError: null,
-              canRestart: false,
-              canConfigurePort: false,
-              portConfig: { mode: "local", port: 0, autoPortStart: 0, autoPortEnd: 0 },
             },
           ],
         }}
@@ -82,16 +75,17 @@ describe("AppSettingsDialog", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: /sistema y diagnóstico/i }));
 
-    expect(screen.getByRole("heading", { name: /estado de servicios/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /runtime local/i })).toBeInTheDocument();
     expect(screen.getByText("Runtime local Rust")).toBeInTheDocument();
     expect(screen.getByText("Operativo")).toBeInTheDocument();
-    expect(screen.getByText("2.0.0")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /reiniciar runtime/i })).toBeDisabled();
+    expect(screen.getByText("2.0.1")).toBeInTheDocument();
+    expect(screen.getAllByText("Contrato local").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: /reiniciar runtime/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/puerto/i)).not.toBeInTheDocument();
   });
 
-  it("allows checking and restarting runtime services", () => {
+  it("allows checking local runtime status without backend controls", () => {
     const onRefreshRuntimeServices = vi.fn();
-    const onRestartRuntimeService = vi.fn();
 
     render(
       <AppSettingsDialog
@@ -106,39 +100,34 @@ describe("AppSettingsDialog", () => {
               statusLabel: "No disponible",
               description: "El runtime local no responde al chequeo de salud.",
               endpoint: "tauri://local-api/health",
-              expectedVersion: "2.0.0",
+              expectedVersion: "2.0.1",
               version: null,
               expectedProfile: "desktop",
               profile: null,
               expectedAppDataDir: "C:\\Users\\user\\AppData\\Roaming\\ai.knownext.desktop",
               appDataDir: null,
-              port: null,
               managedBy: null,
               instanceId: null,
               startedAt: null,
-              externalExecutablePath: null,
               lastError: "Runtime local no disponible",
-              canRestart: false,
-              canConfigurePort: false,
-              portConfig: { mode: "local", port: 0, autoPortStart: 0, autoPortEnd: 0 },
             },
           ],
         }}
         onRefreshRuntimeServices={onRefreshRuntimeServices}
-        onRestartRuntimeService={onRestartRuntimeService}
       />,
     );
 
     fireEvent.click(screen.getByRole("tab", { name: /sistema y diagnóstico/i }));
     fireEvent.click(screen.getByRole("button", { name: /comprobar/i }));
-    fireEvent.click(screen.getByRole("button", { name: /reiniciar runtime/i }));
 
     expect(onRefreshRuntimeServices).toHaveBeenCalledTimes(1);
-    expect(onRestartRuntimeService).not.toHaveBeenCalled();
     expect(screen.getByText(/runtime local no disponible/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /reiniciar runtime/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/ejecutable externo/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/aplicar y reiniciar/i)).not.toBeInTheDocument();
   });
 
-  it("explains that local-first runtime cannot be restarted as an external process", () => {
+  it("keeps backend-oriented runtime controls out of the system panel", () => {
     render(
       <AppSettingsDialog
         {...baseProps}
@@ -152,21 +141,16 @@ describe("AppSettingsDialog", () => {
               statusLabel: "No disponible",
               description: "El runtime local no responde al chequeo de salud.",
               endpoint: "tauri://local-api/health",
-              expectedVersion: "2.0.0",
+              expectedVersion: "2.0.1",
               version: null,
               expectedProfile: "web-dev",
               profile: null,
               expectedAppDataDir: "",
               appDataDir: null,
-              port: null,
               managedBy: null,
               instanceId: null,
               startedAt: null,
-              externalExecutablePath: null,
-              lastError: "El runtime local no usa procesos externos reiniciables.",
-              canRestart: false,
-              canConfigurePort: false,
-              portConfig: null,
+              lastError: "Runtime local no disponible",
             },
           ],
         }}
@@ -175,8 +159,11 @@ describe("AppSettingsDialog", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: /sistema y diagnóstico/i }));
 
-    expect(screen.getByRole("button", { name: /reiniciar runtime/i })).toBeDisabled();
-    expect(screen.getAllByText(/no usa procesos externos/i).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: /reiniciar runtime/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/modo de puerto/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/puerto activo/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/ejecutable externo/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/proceso externo/i)).not.toBeInTheDocument();
   });
 
   it("copies the runtime diagnostic and shows feedback", async () => {
@@ -199,21 +186,16 @@ describe("AppSettingsDialog", () => {
               statusLabel: "Incompatible",
               description: "El runtime local responde, pero no coincide.",
               endpoint: "tauri://local-api/health",
-              expectedVersion: "2.0.0",
+              expectedVersion: "2.0.1",
               version: "1.0.1",
               expectedProfile: "web-dev",
               profile: null,
               expectedAppDataDir: "",
               appDataDir: "C:\\Users\\user\\AppData\\Roaming\\ai.knownext.web",
-              port: null,
               managedBy: null,
               instanceId: null,
               startedAt: null,
-              externalExecutablePath: null,
               lastError: "expectedProfile=web-dev\nactualProfile=unknown",
-              canRestart: false,
-              canConfigurePort: false,
-              portConfig: null,
             },
           ],
         }}
@@ -224,6 +206,7 @@ describe("AppSettingsDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: /copiar diagnóstico/i }));
 
     expect(writeText).toHaveBeenCalledWith(expect.stringContaining("expectedProfile=web-dev"));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("localContract=tauri://local-api/health"));
     expect(await screen.findByRole("button", { name: /diagnóstico copiado/i })).toBeInTheDocument();
   });
 

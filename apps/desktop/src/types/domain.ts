@@ -111,6 +111,20 @@ export type ProjectSyncState =
   | "error"
   | "unsupported";
 
+export type RemoteAccessState =
+  | "available"
+  | "unauthenticated"
+  | "unauthorized"
+  | "offline"
+  | "unknown"
+  | "not-configured";
+
+export type RemoteAccessAction =
+  | "connect-github"
+  | "request-permission"
+  | "retry"
+  | "review-conflicts";
+
 export type SyncConflictType =
   | "remote_changed_open_document"
   | "local_and_remote_changed"
@@ -148,6 +162,11 @@ export type ProjectSyncStatus = {
   state: ProjectSyncState;
   label: string;
   detail?: string | null;
+  remoteAccess?: RemoteAccessState;
+  remotePaused?: boolean;
+  remoteReason?: string | null;
+  remoteAction?: RemoteAccessAction | null;
+  localState?: "clean" | "dirty" | "versioned" | "pending-push";
   pendingPush: boolean;
   pendingPull: boolean;
   hasConflicts: boolean;
