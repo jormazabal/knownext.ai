@@ -618,7 +618,7 @@ function ScenarioStep({
         title="Qué tipo de proyecto vas a configurar"
         description={
           isWebRuntime
-            ? "En navegador los proyectos se guardan dentro del almacenamiento gestionado del backend web. Elige si empiezas desde cero o si quieres traer un repositorio GitHub."
+            ? "En navegador los proyectos se guardan dentro del almacenamiento gestionado del runtime local. Elige si empiezas desde cero o si quieres traer un repositorio GitHub."
             : "La decisión importante es dónde existe hoy la documentación. A partir de ahí el asistente solo pide las opciones que afectan a ese caso."
         }
       />
@@ -629,7 +629,7 @@ function ScenarioStep({
           title={isWebRuntime ? "Proyecto web nuevo" : "Carpeta local nueva"}
           description={
             isWebRuntime
-              ? "Empiezas desde cero. KnowNext.ai creará los Markdown dentro de la carpeta fija del backend web."
+              ? "Empiezas desde cero. KnowNext.ai creará los Markdown dentro de la carpeta sandbox del runtime local."
               : "Empiezas desde cero. KnowNext.ai creará o usará una ruta local vacía para guardar Markdown."
           }
           onClick={() => onSelect("local-new")}
@@ -657,12 +657,12 @@ function ScenarioStep({
         <ModeTab
           active={startMode === "github-existing"}
           disabled={githubUnavailable}
-          disabledReason={isWebRuntime ? "Conecta GitHub para seleccionar un repositorio y traerlo al almacenamiento web." : "Conecta GitHub para seleccionar un repositorio y crear su copia local de trabajo."}
+          disabledReason={isWebRuntime ? "Conecta GitHub para seleccionar un repositorio y traerlo al almacenamiento local gestionado." : "Conecta GitHub para seleccionar un repositorio y crear su copia local de trabajo."}
           icon={Github}
           title="Repo GitHub existente"
           description={
             isWebRuntime
-              ? "La documentación ya vive en GitHub. Seleccionarás el repo y KnowNext.ai lo descargará en el backend web."
+              ? "La documentación ya vive en GitHub. Seleccionarás el repo y KnowNext.ai lo descargará en el almacenamiento local gestionado."
               : "La documentación ya vive en GitHub. Seleccionarás el repo y una carpeta local donde trabajar con su copia."
           }
           onClick={() => onSelect("github-existing")}
@@ -732,15 +732,15 @@ function LocationStep({
   const isNewLocalProject = startMode === "local-new";
   const title = isWebRuntime
     ? isGithubSource
-      ? "Repo origen y almacenamiento web"
-      : "Almacenamiento web del proyecto"
+      ? "Repo origen y almacenamiento local"
+      : "Almacenamiento local del proyecto"
     : isGithubSource
       ? "Repo origen y carpeta local"
       : "Carpeta de documentación";
   const description = isWebRuntime
     ? isGithubSource
-      ? "Selecciona el repositorio GitHub. KnowNext.ai guardará la copia editable dentro de la carpeta fija del backend web."
-      : "En navegador no se selecciona carpeta del equipo. KnowNext.ai creará este proyecto dentro del almacenamiento gestionado del backend web."
+      ? "Selecciona el repositorio GitHub. KnowNext.ai guardará la copia editable dentro de la carpeta sandbox del runtime local."
+      : "En navegador no se selecciona carpeta del equipo. KnowNext.ai creará este proyecto dentro del almacenamiento gestionado del runtime local."
     : isGithubSource
       ? "Un proyecto de GitHub necesita dos datos: el repositorio remoto y la carpeta local donde KnowNext.ai guardará la copia editable."
       : isNewLocalProject
@@ -1054,14 +1054,14 @@ function WebStorageNotice({ isGithubSource }: { isGithubSource: boolean }) {
       <div className="flex items-start gap-3">
         <HardDrive size={15} className="mt-0.5 shrink-0 text-brand-orange" />
         <div className="min-w-0">
-          <div className="text-[11px] font-semibold text-ink-primary">Almacenamiento web gestionado</div>
+          <div className="text-[11px] font-semibold text-ink-primary">Almacenamiento local gestionado</div>
           <p className="mt-1 text-[10px] leading-4 text-ink-secondary">
-            En navegador no se elige una carpeta del equipo. KnowNext.ai creará este proyecto dentro de la carpeta fija del backend web para que puedas depurar sin depender del selector nativo de Windows.
+            En navegador no se elige una carpeta del equipo. KnowNext.ai creará este proyecto dentro de la carpeta sandbox del runtime local para que puedas depurar sin depender del selector nativo de Windows.
           </p>
           <p className="mt-2 text-[10px] leading-4 text-ink-secondary">
             {isGithubSource
-              ? "El repositorio se descargará en ese almacenamiento del servidor web."
-              : "Los archivos Markdown del proyecto se crearán en ese almacenamiento del servidor web."}
+              ? "El repositorio se descargará en ese almacenamiento local gestionado."
+              : "Los archivos Markdown del proyecto se crearán en ese almacenamiento local gestionado."}
           </p>
         </div>
       </div>
@@ -1156,7 +1156,7 @@ function EditProjectForm({
   const githubRepository = project?.githubRepository;
   const folderReadOnlyLabel = isWebRuntime ? "Almacenamiento gestionado" : "Carpeta local gestionada";
   const folderReadOnlyHelp = isWebRuntime
-    ? "En navegador los proyectos viven en la carpeta sandbox del backend web. No se reasigna desde la interfaz."
+    ? "En navegador los proyectos viven en la carpeta sandbox del runtime local. No se reasigna desde la interfaz."
     : "Solo lectura. Para usar otra ubicación, crea un proyecto nuevo desde ese repositorio GitHub.";
   const githubActionsUnavailable = !authStatus.isAuthenticated || !capabilities?.canUseGithubApi || !capabilities?.canUseLocalGit;
   const githubActionReason = !authStatus.isAuthenticated

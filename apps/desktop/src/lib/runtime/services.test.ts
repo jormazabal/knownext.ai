@@ -1,65 +1,71 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getRuntimeServiceStatus } from "./services";
-import { APP_VERSION } from "../appVersion";
+
+const invokeMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: invokeMock,
+}));
 
 describe("runtime services", () => {
   afterEach(() => {
     vi.restoreAllMocks();
-    vi.useRealTimers();
+    invokeMock.mockReset();
+    delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   });
 
-  it("reports the browser backend as unavailable when health does not answer", async () => {
-    vi.useFakeTimers();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((_url: string, init?: RequestInit) => {
-        return new Promise<Response>((_resolve, reject) => {
-          init?.signal?.addEventListener("abort", () => {
-            reject(new DOMException("aborted", "AbortError"));
-          });
-        });
-      }),
-    );
-
-    const statusPromise = getRuntimeServiceStatus();
-    await vi.advanceTimersByTimeAsync(10_300);
-    const status = await statusPromise;
-
-    expect(status.services[0]).toMatchObject({
-      id: "backend",
-      status: "unavailable",
-      statusLabel: "No disponible",
-      canRestart: false,
+  it("reports the local Rust runtime from Tauri commands", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", { value: {}, configurable: true });
+    invokeMock.mockResolvedValue({
+      checkedAt: "2026-06-02T10:00:00.000Z",
+      services: [
+        {
+          id: "local-runtime",
+          name: "Runtime local Rust",
+          status: "running",
+          statusLabel: "Operativo",
+          description: "La aplicación usa Tauri commands.",
+          endpoint: "tauri://local-api/health",
+          expectedVersion: "2.0.0",
+          version: "2.0.0",
+          expectedProfile: "desktop",
+          profile: "desktop",
+          expectedAppDataDir: "C:\\Users\\user\\AppData\\Roaming\\ai.knownext.desktop",
+          appDataDir: "C:\\Users\\user\\AppData\\Roaming\\ai.knownext.desktop",
+          port: null,
+          managedBy: "tauri",
+          instanceId: "tauri-rust-local",
+          startedAt: "2026-06-02T09:59:00.000Z",
+          externalExecutablePath: null,
+          lastError: null,
+          canRestart: false,
+          canConfigurePort: false,
+          portConfig: { mode: "local", port: 0, autoPortStart: 0, autoPortEnd: 0 },
+        },
+      ],
     });
-    expect(status.services[0].lastError).toContain("no respondió");
-  });
-
-  it("marks a responding browser backend with a mismatched version as degraded", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(() =>
-        Promise.resolve(
-          new Response(
-            JSON.stringify({
-              status: "ok",
-              version: "0.0.1",
-              appDataDir: "C:\\Temp\\knownext",
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          ),
-        ),
-      ),
-    );
 
     const status = await getRuntimeServiceStatus();
 
     expect(status.services[0]).toMatchObject({
-      id: "backend",
-      status: "degraded",
-      statusLabel: "Incompatible",
-      expectedVersion: APP_VERSION,
-      version: "0.0.1",
+      id: "local-runtime",
+      status: "running",
+      statusLabel: "Operativo",
+      canRestart: false,
+      canConfigurePort: false,
+      endpoint: "tauri://local-api/health",
     });
-    expect(status.services[0].lastError).toContain(`expectedVersion=${APP_VERSION}`);
+  });
+
+  it("reports unavailable outside Tauri instead of probing HTTP", async () => {
+    const status = await getRuntimeServiceStatus();
+
+    expect(status.services[0]).toMatchObject({
+      id: "local-runtime",
+      status: "unavailable",
+      statusLabel: "No disponible",
+      canRestart: false,
+    });
+    expect(status.services[0].lastError).toContain("runtime");
   });
 });

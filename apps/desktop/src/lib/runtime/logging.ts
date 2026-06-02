@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { API_BASE_URL } from "../api/client";
+import { requestJson } from "../api/client";
 
 export type TraceLogStatus = {
   enabled: boolean;
@@ -65,16 +65,7 @@ export async function openTraceLogFolder(folderPath: string) {
 }
 
 async function requestRuntimeJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-    ...init,
-  });
-
-  if (!response.ok) throw new Error(response.statusText);
-  return response.json() as Promise<T>;
+  return requestJson<T>(path, init);
 }
 
 function isTauriRuntime() {

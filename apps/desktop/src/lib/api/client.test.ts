@@ -1,131 +1,78 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { APP_VERSION } from "../appVersion";
-import { ApiError, requestJson, validateBackendHealth } from "./client";
+import { ApiError, clearPersistentMobileApiBaseUrl, discoverMobileApiBaseUrl, getApiBaseUrl, isMobileApiBaseUrlConfigured, requestJson, setPersistentMobileApiBaseUrl, validateRuntimeHealth } from "./client";
+
+const invokeMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: invokeMock,
+}));
 
 describe("requestJson", () => {
   afterEach(() => {
     vi.restoreAllMocks();
-    vi.useRealTimers();
-    localStorage.clear();
+    invokeMock.mockReset();
     delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   });
 
-  it("honors a custom request timeout", async () => {
-    vi.useFakeTimers();
+  it("routes JSON requests through the local Tauri command", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", { value: {}, configurable: true });
+    invokeMock.mockResolvedValue({ status: 200, body: { ok: true } });
 
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((_url: string, init?: RequestInit) => {
-        return new Promise<Response>((_resolve, reject) => {
-          init?.signal?.addEventListener("abort", () => {
-            reject(new DOMException("aborted", "AbortError"));
-          });
-        });
-      }),
-    );
+    await expect(requestJson("/api/config", { method: "PUT", body: JSON.stringify({ layout: { sidebarWidth: 320 } }) })).resolves.toEqual({ ok: true });
 
-    const request = requestJson("/api/slow", { method: "POST", timeoutMs: 25_000 });
-    let settled = false;
-    request.catch(() => {
-      settled = true;
+    expect(invokeMock).toHaveBeenCalledWith("local_api_request", {
+      request: {
+        method: "PUT",
+        path: "/api/config",
+        body: { layout: { sidebarWidth: 320 } },
+      },
     });
+  });
 
-    await vi.advanceTimersByTimeAsync(7000);
-    expect(settled).toBe(false);
+  it("converts local command errors into ApiError", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", { value: {}, configurable: true });
+    invokeMock.mockResolvedValue({ status: 404, body: { detail: "No encontrado" } });
 
-    await vi.advanceTimersByTimeAsync(18_000);
-    await expect(request).rejects.toMatchObject({ name: "AbortError" });
+    await expect(requestJson("/api/projects/active")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 404,
+      detail: "No encontrado",
+    });
   });
 });
 
-describe("Android API endpoint configuration", () => {
+describe("Android local-first runtime", () => {
   afterEach(() => {
-    vi.resetModules();
-    vi.restoreAllMocks();
-    localStorage.clear();
-    delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+    clearPersistentMobileApiBaseUrl();
   });
 
-  it("uses the saved mobile endpoint before the build-time endpoint", async () => {
-    vi.resetModules();
-    Object.defineProperty(window, "__TAURI_INTERNALS__", { value: {}, configurable: true });
-    Object.defineProperty(window.navigator, "userAgent", { value: "Mozilla/5.0 Android", configurable: true });
-    localStorage.setItem("knownext.mobileApiBaseUrl", "http://192.168.0.24:8775/");
+  it("ignores external mobile endpoints and keeps the local Tauri API", async () => {
+    setPersistentMobileApiBaseUrl(" http://10.0.2.2:8775/// ");
 
-    const client = await import("./client");
-
-    expect(client.getApiBaseUrl()).toBe("http://192.168.0.24:8775");
-    expect(client.expectedBackendProfile()).toBe("mobile");
-    expect(client.isMobileApiBaseUrlConfigured()).toBe(true);
-  });
-
-  it("validates and normalizes saved mobile endpoints", async () => {
-    vi.resetModules();
-    Object.defineProperty(window, "__TAURI_INTERNALS__", { value: {}, configurable: true });
-    Object.defineProperty(window.navigator, "userAgent", { value: "Mozilla/5.0 Android", configurable: true });
-
-    const client = await import("./client");
-
-    client.setPersistentMobileApiBaseUrl(" http://10.0.2.2:8775/// ");
-
-    expect(client.getApiBaseUrl()).toBe("http://10.0.2.2:8775");
-    expect(localStorage.getItem("knownext.mobileApiBaseUrl")).toBe("http://10.0.2.2:8775");
-    expect(() => client.setPersistentMobileApiBaseUrl("ftp://10.0.2.2:8775")).toThrow("http:// o https://");
-    expect(() => client.setPersistentMobileApiBaseUrl("http://example.com:8775")).toThrow("deben ser locales");
-  });
-
-  it("discovers a compatible mobile backend on the local network", async () => {
-    vi.resetModules();
-    Object.defineProperty(window, "__TAURI_INTERNALS__", { value: {}, configurable: true });
-    Object.defineProperty(window.navigator, "userAgent", { value: "Mozilla/5.0 Android", configurable: true });
-
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((url: string) => {
-        if (url === "http://192.168.1.42:8775/health") {
-          return Promise.resolve(
-            new Response(JSON.stringify({
-              app: "knownext",
-              status: "ok",
-              profile: "mobile",
-              version: APP_VERSION,
-            }), { status: 200 }),
-          );
-        }
-        return Promise.reject(new TypeError("unreachable"));
-      }),
-    );
-
-    const client = await import("./client");
-    const endpoint = await client.discoverMobileApiBaseUrl({
-      subnets: ["192.168.1"],
-      hostStart: 42,
-      hostEnd: 42,
-      concurrency: 1,
-      timeoutMs: 10,
-    });
-
-    expect(endpoint).toBe("http://192.168.1.42:8775");
-    expect(client.getApiBaseUrl()).toBe("http://192.168.1.42:8775");
+    expect(getApiBaseUrl()).toBe("tauri://local-api");
+    expect(isMobileApiBaseUrlConfigured()).toBe(true);
+    await expect(discoverMobileApiBaseUrl({ subnets: ["192.168.1"] })).resolves.toBe("tauri://local-api");
   });
 });
 
-describe("API client backend compatibility", () => {
-  it("accepts a matching browser-development backend", () => {
-    expect(() => validateBackendHealth({
+describe("API client runtime compatibility", () => {
+  it("accepts a matching desktop runtime", () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", { value: {}, configurable: true });
+    expect(() => validateRuntimeHealth({
       app: "knownext",
       status: "ok",
-      profile: "web-dev",
+      profile: "desktop",
       version: APP_VERSION,
     })).not.toThrow();
   });
 
-  it("rejects a stale backend with the right profile but a different version", () => {
-    expect(() => validateBackendHealth({
+  it("rejects a stale runtime with the right profile but a different version", () => {
+    expect(() => validateRuntimeHealth({
       app: "knownext",
       status: "ok",
-      profile: "web-dev",
-      version: "0.11.0",
+      profile: "desktop",
+      version: "1.0.1",
     })).toThrow(ApiError);
   });
 });

@@ -1,6 +1,6 @@
 # Release Process
 
-KnowNext.ai is versioned and released as one monolithic application. The desktop frontend, Tauri runtime, Rust package metadata, and FastAPI backend must always carry the same release version.
+KnowNext.ai is versioned and released as one monolithic application. The frontend, Tauri runtime, Rust package metadata, Windows updater, and Android updater must carry the same release version.
 
 ## Version Source
 
@@ -12,7 +12,6 @@ The following files must match `VERSION`:
 - `apps/desktop/package.json`
 - `apps/desktop/src-tauri/tauri.conf.json`
 - `apps/desktop/src-tauri/Cargo.toml`
-- `backend/pyproject.toml`
 
 Run this before any release commit:
 
@@ -28,11 +27,19 @@ Before tagging a release, run:
 pnpm release:check
 ```
 
-This validates version consistency, builds the desktop frontend, runs frontend tests, and runs backend tests.
+This validates version consistency, builds the frontend, checks the client bundle for runtime-data and legacy-server markers, runs frontend tests, and runs Rust contract tests.
 
-Manual acceptance must also pass using `docs/development/manual-test-checklist.md`. For packaged releases, run the checklist against the packaged Tauri app, not only the browser dev server.
+Manual acceptance must also pass using `docs/development/manual-test-checklist.md`. For packaged releases, run the checklist against packaged Windows and Android apps, not only the browser dev server.
 
-For release work, also follow `docs/skills/release-management-skill.md`. That skill captures the installer and updater invariants future agents must preserve.
+For release work, also follow `docs/skills/release-management-skill.md`. That skill captures installer and updater invariants future agents must preserve.
+
+Before packaged release builds, also run the signing preflight in the release environment:
+
+```bash
+pnpm release:secrets:check
+```
+
+This check intentionally stays outside `pnpm release:check` so local development and CI validation can run without exposing signing material.
 
 ## Updater Signing
 
@@ -47,39 +54,24 @@ Required GitHub Actions secrets:
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_PASSWORD`
 
-The production updater key is kept outside the repository at:
+Optional hardening:
 
-- `%USERPROFILE%\.tauri\knownext-ai-updater.key`
-- `%USERPROFILE%\.tauri\knownext-ai-updater.password.clixml`
+- `WINDOWS_CERTIFICATE`
+- `WINDOWS_CERTIFICATE_PASSWORD`
 
-The password file is encrypted with Windows DPAPI for the current user. Do not commit either file.
-
-The public updater key is configured in `apps/desktop/src-tauri/tauri.conf.json`. If the production key is regenerated, update `plugins.updater.pubkey`, update the GitHub secrets, and rebuild a release from a clean commit.
+The public updater key is configured in `apps/desktop/src-tauri/tauri.conf.json`. Do not regenerate the updater key unless the maintainer explicitly accepts the migration impact.
 
 The Windows updater currently prefers the MSI artifact when generating `latest.json`. Keep the NSIS setup executable as the manual installer linked from the README and GitHub Releases.
 
-Android private APK updates use a separate `android-latest.json` manifest. The APK must keep `applicationId=ai.knownext.mobile`, use the same Android signing certificate as previous private APKs, and publish a strictly increasing `versionCode`.
+Android private APK updates use `android-latest.json`. The APK must keep `applicationId=ai.knownext.mobile`, use the same Android signing certificate as previous private APKs, and publish a strictly increasing `versionCode`.
 
 Distribution contract:
 
-- Manual install link: `https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_<version>_x64-setup.exe`
-- Updater manifest: `https://github.com/jormazabal/knownext.ai/releases/latest/download/latest.json`
+- Manual Windows installer: `https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_<version>_x64-setup.exe`
+- Windows updater manifest: `https://github.com/jormazabal/knownext.ai/releases/latest/download/latest.json`
 - Windows updater artifact inside `latest.json`: `KnowNext.ai_<version>_x64_en-US.msi`
-
-This is intentional. New users use the signed NSIS setup path by default; installed users update through the signed MSI artifact.
-
-## Windows Authenticode Signing
-
-Windows release artifacts can be signed with Authenticode to reduce SmartScreen and corporate endpoint protection blocks when users download the installer manually.
-
-Optional GitHub Actions secrets:
-
-- `WINDOWS_CERTIFICATE`: base64-encoded `.pfx` code signing certificate.
-- `WINDOWS_CERTIFICATE_PASSWORD`: export password for the `.pfx` certificate.
-
-When configured, the release workflow imports the certificate into the current user certificate store, exposes its thumbprint through `WINDOWS_CERTIFICATE_THUMBPRINT`, and Tauri calls `scripts/sign-windows.ps1` through `bundle.windows.signCommand`.
-
-A self-signed certificate is not enough for public distribution because it does not establish publisher trust or SmartScreen reputation. If no public code signing certificate is available, publish the release unsigned, keep the Tauri updater signature enabled, and document the expected Windows warning plus SHA256 verification path.
+- Android updater manifest: `https://github.com/jormazabal/knownext.ai/releases/latest/download/android-latest.json`
+- Android updater artifact: `KnowNext.ai-android-arm64-v<version>.apk`
 
 ## GitHub Release Flow
 
@@ -88,19 +80,21 @@ Use one release commit and one annotated tag per application release.
 ```bash
 git status --short
 pnpm release:check
-git add VERSION package.json pnpm-lock.yaml .github/workflows/release.yml apps/desktop/package.json apps/desktop/src-tauri apps/desktop/src docs CHANGELOG.md backend/pyproject.toml scripts
-git commit -m "chore(release): 0.3.1"
-git tag -a v0.3.1 -m "KnowNext.ai 0.3.1"
+git add VERSION package.json pnpm-lock.yaml .github/workflows/release.yml apps/desktop/package.json apps/desktop/src-tauri apps/desktop/src docs CHANGELOG.md scripts README.md AGENTS.md
+git commit -m "chore(release): 2.0.0"
+git tag -a v2.0.0 -m "KnowNext.ai 2.0.0"
 git push origin HEAD
-git push origin v0.3.1
+git push origin v2.0.0
 ```
 
-Pushing the tag runs `.github/workflows/release.yml`. The workflow builds Windows, uploads the NSIS installer, MSI installer, updater signatures, and publishes `latest.json` through `tauri-apps/tauri-action@v0.6.2`.
+Pushing the tag runs `.github/workflows/release.yml`. The workflow builds Windows, uploads the NSIS installer, MSI installer, updater signatures, and publishes `latest.json` through `tauri-apps/tauri-action@v0.6.2`. It then builds and uploads the signed Android APK plus `android-latest.json`.
+
+The workflow starts with `pnpm release:secrets:check`. If mandatory updater or Android signing inputs are missing, CI stops before creating partial release assets.
 
 After the workflow completes, inspect the draft release before publishing it:
 
 ```bash
-gh release view v0.3.1 --repo jormazabal/knownext.ai --json isDraft,isPrerelease,name,tagName,url,assets
+gh release view v2.0.0 --repo jormazabal/knownext.ai --json isDraft,isPrerelease,name,tagName,url,assets
 ```
 
 The release must contain:
@@ -110,49 +104,34 @@ The release must contain:
 - `KnowNext.ai_<version>_x64_en-US.msi`
 - `KnowNext.ai_<version>_x64_en-US.msi.sig`
 - `latest.json`
+- `KnowNext.ai-android-arm64-v<version>.apk`
+- `android-latest.json`
 
 Publish the draft only after those assets are present:
 
 ```bash
-gh release edit v0.3.1 --repo jormazabal/knownext.ai --draft=false
+gh release edit v2.0.0 --repo jormazabal/knownext.ai --draft=false
 ```
 
-For Windows updater changes, install the previous release and update through the in-app updater. Confirm the app process is closed, the installer replaces `knownext-ai-desktop.exe`, and the updated app relaunches with the new visible version.
+## Verification
 
-After publishing, verify that the README download link resolves and that the updater manifest points at the published MSI update artifact. Use PowerShell on Windows so redirects and JSON parsing are explicit:
+After publishing, verify the Windows and Android manifests:
 
 ```powershell
-$version = "0.3.1"
-$manifestUrl = "https://github.com/jormazabal/knownext.ai/releases/latest/download/latest.json"
-$manifestResponse = Invoke-WebRequest -UseBasicParsing -Uri $manifestUrl -MaximumRedirection 10
-$manifestText = [System.Text.Encoding]::UTF8.GetString($manifestResponse.Content)
-$manifest = $manifestText | ConvertFrom-Json
-$installerUrl = "https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_${version}_x64-setup.exe"
-$installerResponse = Invoke-WebRequest -UseBasicParsing -Method Head -Uri $installerUrl -MaximumRedirection 10
-[pscustomobject]@{
-  ManifestStatus = $manifestResponse.StatusCode
-  ManifestVersion = $manifest.version
-  WindowsUrl = $manifest.platforms.'windows-x86_64'.url
-  SignatureLength = $manifest.platforms.'windows-x86_64'.signature.Length
-  ManualInstallerStatus = $installerResponse.StatusCode
-  ManualInstallerUrl = $installerUrl
-}
+$version = "2.0.0"
+$manifest = Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/jormazabal/knownext.ai/releases/latest/download/latest.json" -MaximumRedirection 10
+$json = [System.Text.Encoding]::UTF8.GetString($manifest.Content) | ConvertFrom-Json
+$json.version
+$json.platforms.'windows-x86_64'.url
+Invoke-WebRequest -UseBasicParsing -Method Head -Uri "https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_${version}_x64-setup.exe" -MaximumRedirection 10
+
+$androidManifest = Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/jormazabal/knownext.ai/releases/latest/download/android-latest.json" -MaximumRedirection 10
+$android = [System.Text.Encoding]::UTF8.GetString($androidManifest.Content) | ConvertFrom-Json
+$android.version
+$android.url
+Invoke-WebRequest -UseBasicParsing -Method Head -Uri "https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai-android-arm64-v${version}.apk" -MaximumRedirection 10
 ```
 
-The README should continue linking to the NSIS `.exe` for manual installs. The updater manifest should prefer the MSI for in-app Windows updates unless the release policy is deliberately changed.
+For updater changes, install the previous release and update through the in-app updater. Confirm app data survives and the updated app relaunches with the new visible version. Android acceptance must include offline operation with no workstation app or external service running.
 
-Do not tag or publish a release if `pnpm release:check` fails or if the working tree contains unrelated changes that should not ship in the release.
-Do not announce a release if `/releases/latest/download/latest.json` still resolves to the previous version.
-
-## Next Releases
-
-For the next release:
-
-1. Update `VERSION`.
-2. Update every checked manifest to the same version.
-3. Add a new section to `CHANGELOG.md`.
-4. Add release notes under `docs/releases/`.
-5. Run `pnpm release:check`.
-6. Build a signed Tauri package locally when changing updater configuration.
-7. Commit, tag, push, and let GitHub Actions create the release.
-8. Install the previous release, publish the new release, and validate the real update path before announcing it.
+Do not tag or publish a release if `pnpm release:check` fails, packaged Windows/Android builds fail, manual critical acceptance fails, update manifests point to the previous version, or the working tree contains unrelated changes that should not ship.

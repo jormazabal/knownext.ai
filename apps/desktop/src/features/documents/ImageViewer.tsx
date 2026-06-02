@@ -1,7 +1,7 @@
 import { Copy, FileImage, FileText, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { AssetMetadata, AssetReference, AssetUsageResponse, Project } from "../../types/domain";
-import { getProjectImageContentUrl, getProjectImageUsage } from "../../lib/api/projects";
+import { getProjectImageContentDataUrl, getProjectImageUsage } from "../../lib/api/projects";
 
 type ImageViewerProps = {
   project: Project;
@@ -32,7 +32,7 @@ export function ImageViewer({
   const [error, setError] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
   const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null);
-  const imageUrl = useMemo(() => getProjectImageContentUrl(project.id, assetId), [assetId, project.id]);
+  const [imageUrl, setImageUrl] = useState("");
   const asset = usage?.asset;
   const displayAsset = useMemo(() => {
     if (!asset) return null;
@@ -55,6 +55,13 @@ export function ImageViewer({
     getProjectImageUsage(project.id, assetId)
       .then((response) => {
         if (!cancelled) setUsage(response);
+      })
+      .catch((requestError) => {
+        if (!cancelled) setError(requestError instanceof Error ? requestError.message : "No se pudo cargar la imagen.");
+      });
+    getProjectImageContentDataUrl(project.id, assetId)
+      .then((url) => {
+        if (!cancelled) setImageUrl(url);
       })
       .catch((requestError) => {
         if (!cancelled) setError(requestError instanceof Error ? requestError.message : "No se pudo cargar la imagen.");
@@ -87,7 +94,7 @@ export function ImageViewer({
             <div className="grid h-full place-items-center text-center text-[11px] text-ink-secondary">
               <p>{error}</p>
             </div>
-          ) : (
+          ) : imageUrl ? (
             <div className="grid min-h-full place-items-center">
               <img
                 src={imageUrl}
@@ -106,6 +113,10 @@ export function ImageViewer({
                       }
                 }
               />
+            </div>
+          ) : (
+            <div className="grid h-full place-items-center text-center text-[11px] text-ink-secondary">
+              <p>Cargando imagen.</p>
             </div>
           )}
         </div>

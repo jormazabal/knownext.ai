@@ -1,4 +1,4 @@
-name: Release Windows
+name: Release
 
 on:
   push:
@@ -10,9 +10,38 @@ permissions:
   contents: write
 
 jobs:
+  release-preflight:
+    name: Check release signing inputs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.0.8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check signing inputs
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: pnpm release:secrets:check
+
   release-windows:
     name: Build and publish Windows release
     runs-on: windows-latest
+    needs: release-preflight
 
     steps:
       - name: Checkout
@@ -32,26 +61,21 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install backend test dependencies
-        run: python -m pip install -e './backend[test]'
-
-      - name: Install backend packaging dependencies
-        run: python -m pip install pyinstaller
+      - name: Read release version
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          if (-not $version) {
+            throw "VERSION is empty."
+          }
+          "KNOWNEXT_RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "KNOWNEXT_RELEASE_TAG=v$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Run release gate
         run: pnpm release:check
-
-      - name: Build backend sidecar
-        shell: pwsh
-        run: ./scripts/build-backend-sidecar.ps1
 
       - name: Import Windows code signing certificate
         shell: pwsh
@@ -79,62 +103,6 @@ jobs:
           "WINDOWS_CERTIFICATE_THUMBPRINT=$($certificate.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "WINDOWS_TIMESTAMP_URL=http://timestamp.digicert.com" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Sign backend sidecar
-        shell: pwsh
-        run: ./scripts/sign-windows.ps1 ./apps/desktop/src-tauri/binaries/knownext-backend-x86_64-pc-windows-msvc.exe
-
-      - name: Test backend sidecar
-        shell: pwsh
-        run: |
-          $env:KNOWNEXT_APP_DATA_DIR = Join-Path $env:RUNNER_TEMP "knownext-sidecar-data"
-          $env:KNOWNEXT_API_HOST = "127.0.0.1"
-          $env:KNOWNEXT_API_PORT = "8765"
-          $expectedVersion = (Get-Content ./VERSION -Raw).Trim()
-          $stdoutPath = Join-Path $env:RUNNER_TEMP "knownext-backend.stdout.log"
-          $stderrPath = Join-Path $env:RUNNER_TEMP "knownext-backend.stderr.log"
-          New-Item -ItemType Directory -Force -Path $env:KNOWNEXT_APP_DATA_DIR | Out-Null
-          $process = Start-Process `
-            -FilePath "./apps/desktop/src-tauri/binaries/knownext-backend-x86_64-pc-windows-msvc.exe" `
-            -PassThru `
-            -WindowStyle Hidden `
-            -RedirectStandardOutput $stdoutPath `
-            -RedirectStandardError $stderrPath
-          try {
-            $healthy = $false
-            for ($i = 0; $i -lt 40; $i++) {
-              if ($process.HasExited) {
-                Write-Host "Backend sidecar exited with code $($process.ExitCode)."
-                break
-              }
-              try {
-                $response = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:8765/health" -TimeoutSec 1
-                if ($response.status -eq "ok" -and $response.version -eq $expectedVersion) {
-                  $healthy = $true
-                  break
-                }
-                Write-Host "Unexpected /health response: status=$($response.status); version=$($response.version); expected=$expectedVersion"
-              } catch {
-                Write-Host "Waiting for backend sidecar: $($_.Exception.Message)"
-              }
-              Start-Sleep -Milliseconds 500
-            }
-            if (-not $healthy) {
-              if (Test-Path $stdoutPath) {
-                Write-Host "Backend stdout:"
-                Get-Content $stdoutPath
-              }
-              if (Test-Path $stderrPath) {
-                Write-Host "Backend stderr:"
-                Get-Content $stderrPath
-              }
-              throw "Backend sidecar did not pass /health."
-            }
-          } finally {
-            if ($process -and -not $process.HasExited) {
-              Stop-Process -Id $process.Id -Force
-            }
-          }
-
       - name: Build Tauri Windows release
         uses: tauri-apps/tauri-action@v0.6.2
         env:
@@ -143,8 +111,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
-          tagName: v__VERSION__
-          releaseName: KnowNext.ai __VERSION__
+          tagName: ${{ env.KNOWNEXT_RELEASE_TAG }}
+          releaseName: KnowNext.ai ${{ env.KNOWNEXT_RELEASE_VERSION }}
           releaseBody: See docs/releases for the release notes and installable assets.
           releaseDraft: true
           prerelease: false
@@ -155,7 +123,9 @@ jobs:
   release-android:
     name: Build and upload Android private APK
     runs-on: ubuntu-latest
-    needs: release-windows
+    needs:
+      - release-preflight
+      - release-windows
 
     steps:
       - name: Checkout
@@ -186,6 +156,17 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Read release version
+        shell: bash
+        run: |
+          VERSION="$(cat VERSION)"
+          if [ -z "$VERSION" ]; then
+            echo "VERSION is empty." >&2
+            exit 1
+          fi
+          echo "KNOWNEXT_RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "KNOWNEXT_RELEASE_TAG=v$VERSION" >> "$GITHUB_ENV"
+
       - name: Restore Android keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -204,7 +185,6 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           KNOWNEXT_ANDROID_ABI: arm64
           KNOWNEXT_ANDROID_API_LEVEL: "35"
-          VITE_EXPECTED_BACKEND_PROFILE: mobile
         run: pnpm android:build:release
 
       - name: Create Android update manifest
@@ -217,10 +197,10 @@ jobs:
             --out output/android-latest.json \
             --version "$VERSION" \
             --abi arm64-v8a \
-            --url "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/$(basename "$APK")" \
-            --notes-url "https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
+            --url "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$APK")" \
+            --notes-url "https://github.com/${{ github.repository }}/releases/tag/v${VERSION}"
 
       - name: Upload Android release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.ref_name }}" output/KnowNext.ai-android-arm64-v*.apk output/android-latest.json --clobber
+        run: gh release upload "$KNOWNEXT_RELEASE_TAG" output/KnowNext.ai-android-arm64-v*.apk output/android-latest.json --clobber

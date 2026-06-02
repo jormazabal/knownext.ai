@@ -1,4 +1,4 @@
-import { API_BASE_URL, initializeApiBaseUrl, requestJson } from "./client";
+import { requestDataUrl, requestJson } from "./client";
 import type {
   DocumentPreview,
   DocumentPreviewMode,
@@ -48,6 +48,5 @@ export async function openDocumentPreviewExternal(projectId: string, previewId: 
 }
 
 export async function getDocumentPreviewPdfUrl(projectId: string, previewId: string): Promise<string> {
-  await initializeApiBaseUrl();
-  return `${API_BASE_URL}/api/projects/${encodeURIComponent(projectId)}/previews/${encodeURIComponent(previewId)}/pdf`;
+  return requestDataUrl(`/api/projects/${encodeURIComponent(projectId)}/previews/${encodeURIComponent(previewId)}/pdf`);
 }

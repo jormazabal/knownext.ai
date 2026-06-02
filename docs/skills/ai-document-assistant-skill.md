@@ -4,35 +4,26 @@
 
 Build the contextual AI assistant for the active Markdown document.
 
-## Context
-
-The AI input floats inside the document area and sends the active document plus prompt to FastAPI.
-
 ## Rules
 
 - Do not call AI providers directly from React.
 - Do not expose API keys in frontend code.
-- Keep requests scoped to the active document.
-- Initial behavior can be mocked.
-- Preserve user privacy and document context boundaries.
+- Keep requests scoped to the active document and selected context sources.
+- Runtime services own credentials, context extraction, provider routing, and operation validation.
+- Initial behavior can be mocked only as a replaceable Rust runtime service.
+- Do not persist prompts without an explicit product rule.
 
 ## Recommended Steps
 
-1. Define request and response schemas.
-2. Send prompt and current Markdown through `lib/api/ai`.
-3. Handle loading and empty prompt states.
-4. Add response display only after product behavior is defined.
-5. Move provider integration into FastAPI service adapters.
+1. Define request and response schemas under the frontend API and Rust contracts.
+2. Send prompt, current Markdown, and context source IDs through `lib/api/ai`.
+3. Handle loading, empty prompt, permission, and unavailable-provider states.
+4. Return structured operations for document edits, generated images, and project actions.
+5. Add frontend tests for prompt interactions and Rust tests for runtime contracts.
 
 ## Acceptance Criteria
 
 - Input is writable.
-- Plus, send, and microphone icons are inside the input.
+- Plus, send, and microphone icons stay inside the input.
 - Submit calls the AI API contract.
-
-## Mistakes To Avoid
-
-- Adding an external send button.
-- Building provider-specific code in React.
-- Persisting prompts without an explicit product rule.
-
+- React never receives or displays stored provider secrets.

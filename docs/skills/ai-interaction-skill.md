@@ -13,7 +13,7 @@ Use this guidance when changing KnowNext.ai AI flows.
 - Preserve `targetDocumentId` from the originating document until the intent is completed or cancelled, even if the user continues in the IA tab.
 - Execute document and project changes only from structured fields such as `documentChange`, `operations`, `pendingIntent`, and `intentAction`.
 - Treat `answer` as conversational UI text only. Never promote it into document content.
-- Treat visible prompt context chips as the active source set. The frontend sends `contextSourceIds`; FastAPI resolves, validates, refreshes TTL, and records `sourcesUsed` on the user conversation event.
+- Treat visible prompt context chips as the active source set. The frontend sends `contextSourceIds`; Rust runtime services resolve, validate, refresh TTL, and record `sourcesUsed` on the user conversation event.
 - Reference explicit source names or paths when a response uses `context.explicitSources.sources`, and do not invent content from sources that are not included.
 
 ## Forbidden Pattern

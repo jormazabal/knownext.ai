@@ -1,11 +1,21 @@
 [package]
 name = "knownext-ai-desktop"
-version = "1.0.1"
+version = "2.0.0"
 description = "KnowNext.ai desktop application"
 authors = ["KnowNext.ai contributors"]
 license = "Apache-2.0"
 repository = "https://github.com/jormazabal/knownext.ai"
 edition = "2021"
+
+[workspace]
+members = [
+  ".",
+  "crates/knownext-ai",
+  "crates/knownext-core",
+  "crates/knownext-docs",
+  "crates/knownext-storage",
+]
+resolver = "2"
 
 [lib]
 name = "knownext_ai_desktop_lib"
@@ -27,3 +37,5 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 time = { version = "0.3", features = ["formatting"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+knownext-core = { path = "crates/knownext-core" }
+knownext-storage = { path = "crates/knownext-storage" }

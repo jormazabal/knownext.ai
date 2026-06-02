@@ -6,7 +6,7 @@ import { defaultAiConfig } from "../../lib/api/config";
 import { accentPalettes } from "../../lib/theme/appearance";
 import type { AiConfigStatus, AiImageGenerationModelId, AiIndexStatusResponse, AiModelId, AiTranscriptionLanguage, AiVisionModelId, AppearanceAccentColor, AppearanceConfig, AppearanceThemeMode, DiagnosticsConfig, ExportTemplateConfig, ExportTemplateUpdate, ExportTextFormat } from "../../types/domain";
 import type { TraceLogStatus } from "../../lib/runtime/logging";
-import type { BackendPortConfig, RuntimeServicesStatus } from "../../lib/runtime/services";
+import type { RuntimePortConfig, RuntimeServicesStatus } from "../../lib/runtime/services";
 
 type AppSettingsSection = "summary" | "interface" | "export" | "ai" | "capabilities" | "system";
 
@@ -45,8 +45,8 @@ type AppSettingsDialogProps = {
   onDeleteAiIndex: () => void;
   onOpenTraceLogFolder: () => void;
   onRefreshRuntimeServices: () => void;
-  onRestartBackendService: () => void;
-  onUpdateBackendPortConfig: (config: BackendPortConfig) => void;
+  onRestartRuntimeService: () => void;
+  onUpdateRuntimePortConfig: (config: RuntimePortConfig) => void;
 };
 
 const aiModelIds: AiModelId[] = ["gpt-5.4-mini", "gpt-5.4", "gpt-5.5", "gpt-5.4-nano"];
@@ -134,8 +134,8 @@ export function AppSettingsDialog({
   onDeleteAiIndex,
   onOpenTraceLogFolder,
   onRefreshRuntimeServices,
-  onRestartBackendService,
-  onUpdateBackendPortConfig,
+  onRestartRuntimeService,
+  onUpdateRuntimePortConfig,
 }: AppSettingsDialogProps) {
   const [activeSection, setActiveSection] = useStableSection(open);
   const text = settingsCopy[appearance.language];
@@ -256,8 +256,8 @@ export function AppSettingsDialog({
                 onDiagnosticsChange={onDiagnosticsChange}
                 onOpenTraceLogFolder={onOpenTraceLogFolder}
                 onRefresh={onRefreshRuntimeServices}
-                onRestartBackendService={onRestartBackendService}
-                onUpdateBackendPortConfig={onUpdateBackendPortConfig}
+                onRestartRuntimeService={onRestartRuntimeService}
+                onUpdateRuntimePortConfig={onUpdateRuntimePortConfig}
               />
             )}
           </div>
@@ -285,7 +285,7 @@ function SummarySettings({
   onSelectSection: (section: AppSettingsSection) => void;
 }) {
   const settingsAi = normalizeAiStatus(ai);
-  const backend = runtimeServicesStatus?.services.find((service) => service.id === "backend") ?? null;
+  const runtimeService = runtimeServicesStatus?.services.find((service) => service.id === "local-runtime") ?? runtimeServicesStatus?.services[0] ?? null;
   const model = text.aiModels[settingsAi.model];
   const modelMeter = aiModelMeter[settingsAi.model];
   const modelPrice = aiModelPriceParts[settingsAi.model];
@@ -401,11 +401,11 @@ function SummarySettings({
           onAction={() => onSelectSection("system")}
         >
           <div className="overflow-hidden rounded-md border border-line">
-            <SummaryRow icon={<Server size={13} />} label={text.versionLabel} value={backend?.version ?? text.unavailableValue} />
-            <SummaryRow icon={<Settings size={13} />} label={text.profileLabel} value={backend?.profile ?? text.unavailableValue} />
-            <SummaryRow icon={<Activity size={13} />} label={text.portLabel} value={backend?.port ? String(backend.port) : text.unavailableValue} />
+            <SummaryRow icon={<Server size={13} />} label={text.versionLabel} value={runtimeService?.version ?? text.unavailableValue} />
+            <SummaryRow icon={<Settings size={13} />} label={text.profileLabel} value={runtimeService?.profile ?? text.unavailableValue} />
+            <SummaryRow icon={<Activity size={13} />} label={text.portLabel} value={runtimeService?.port ? String(runtimeService.port) : text.unavailableValue} />
             <SummaryRow icon={<ListChecks size={13} />} label={text.traceToggleLabel} value={diagnostics.traceLoggingEnabled ? text.enabled : text.disabled} />
-            <SummaryRow icon={<Check size={13} />} label={text.servicesNav} value={backend?.statusLabel ?? text.servicesPending} success={backend?.status === "running"} />
+            <SummaryRow icon={<Check size={13} />} label={text.servicesNav} value={runtimeService?.statusLabel ?? text.servicesPending} success={runtimeService?.status === "running"} />
           </div>
         </SummaryCard>
       </div>
@@ -1604,8 +1604,8 @@ function SystemSettings({
   onDiagnosticsChange,
   onOpenTraceLogFolder,
   onRefresh,
-  onRestartBackendService,
-  onUpdateBackendPortConfig,
+  onRestartRuntimeService,
+  onUpdateRuntimePortConfig,
 }: {
   diagnostics: DiagnosticsConfig;
   traceLogStatus: TraceLogStatus | null;
@@ -1615,11 +1615,11 @@ function SystemSettings({
   onDiagnosticsChange: (diagnostics: Partial<DiagnosticsConfig>) => void;
   onOpenTraceLogFolder: () => void;
   onRefresh: () => void;
-  onRestartBackendService: () => void;
-  onUpdateBackendPortConfig: (config: BackendPortConfig) => void;
+  onRestartRuntimeService: () => void;
+  onUpdateRuntimePortConfig: (config: RuntimePortConfig) => void;
 }) {
   const services = runtimeServicesStatus?.services ?? [];
-  const backend = services.find((service) => service.id === "backend") ?? null;
+  const runtimeService = services.find((service) => service.id === "local-runtime") ?? services[0] ?? null;
 
   return (
     <div className="space-y-5">
@@ -1644,14 +1644,14 @@ function SystemSettings({
           <p className="mt-2 text-[10px] text-ink-secondary">{text.lastChecked}: {formatDateTime(runtimeServicesStatus.checkedAt)}</p>
         ) : null}
 
-        {backend ? (
+        {runtimeService ? (
           <SystemServiceCard
-            service={backend}
+            service={runtimeService}
             text={text}
             refreshing={refreshing}
             onRefresh={onRefresh}
-            onRestartBackendService={onRestartBackendService}
-            onUpdateBackendPortConfig={onUpdateBackendPortConfig}
+            onRestartRuntimeService={onRestartRuntimeService}
+            onUpdateRuntimePortConfig={onUpdateRuntimePortConfig}
           />
         ) : (
           <div className="mt-4 rounded-md border border-line bg-panel px-4 py-3 text-[11px] text-ink-secondary">{text.servicesPending}</div>
@@ -1666,10 +1666,10 @@ function SystemSettings({
           </div>
         </div>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <SystemInfoRow icon={<FolderOpen size={14} />} label={text.appDataDirLabel} value={backend?.appDataDir ?? text.unavailableValue} mono />
-          <SystemInfoRow icon={<FolderOpen size={14} />} label={text.expectedAppDataDirLabel} value={backend?.expectedAppDataDir || text.unavailableValue} mono />
-          <SystemInfoRow icon={<Server size={14} />} label={text.endpointLabel} value={backend?.endpoint ?? text.unavailableValue} mono />
-          <SystemInfoRow icon={<Activity size={14} />} label={text.profileLabel} value={backend?.profile ?? text.unavailableValue} />
+          <SystemInfoRow icon={<FolderOpen size={14} />} label={text.appDataDirLabel} value={runtimeService?.appDataDir ?? text.unavailableValue} mono />
+          <SystemInfoRow icon={<FolderOpen size={14} />} label={text.expectedAppDataDirLabel} value={runtimeService?.expectedAppDataDir || text.unavailableValue} mono />
+          <SystemInfoRow icon={<Server size={14} />} label={text.endpointLabel} value={runtimeService?.endpoint ?? text.unavailableValue} mono />
+          <SystemInfoRow icon={<Activity size={14} />} label={text.profileLabel} value={runtimeService?.profile ?? text.unavailableValue} />
         </div>
       </SettingsPanel>
 
@@ -1709,8 +1709,8 @@ function SystemSettings({
         <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.diagnosticToolsDescription}</p>
         <div className="mt-4 grid gap-3 md:grid-cols-3">
           <DiagnosticAction icon={<RefreshCw size={16} />} title={text.refreshServicesTool} description={text.refreshServicesDescription} onClick={onRefresh} disabled={refreshing} />
-          <DiagnosticAction icon={<Copy size={16} />} title={text.copyDiagnosticTool} description={text.copyDiagnosticDescription} onClick={() => backend ? void copyText(buildServiceDiagnostic(backend)) : undefined} disabled={!backend} />
-          <DiagnosticAction icon={<RotateCcw size={16} />} title={text.restartBackendTool} description={text.restartBackendDescription} onClick={onRestartBackendService} disabled={!backend?.canRestart || refreshing} danger />
+          <DiagnosticAction icon={<Copy size={16} />} title={text.copyDiagnosticTool} description={text.copyDiagnosticDescription} onClick={() => runtimeService ? void copyText(buildServiceDiagnostic(runtimeService)) : undefined} disabled={!runtimeService} />
+          <DiagnosticAction icon={<RotateCcw size={16} />} title={text.restartRuntimeTool} description={text.restartRuntimeDescription} onClick={onRestartRuntimeService} disabled={!runtimeService?.canRestart || refreshing} danger />
         </div>
       </SettingsPanel>
     </div>
@@ -1748,18 +1748,18 @@ function SystemServiceCard({
   text,
   refreshing,
   onRefresh,
-  onRestartBackendService,
-  onUpdateBackendPortConfig,
+  onRestartRuntimeService,
+  onUpdateRuntimePortConfig,
 }: {
   service: RuntimeServicesStatus["services"][number];
   text: SettingsCopy;
   refreshing: boolean;
   onRefresh: () => void;
-  onRestartBackendService: () => void;
-  onUpdateBackendPortConfig: (config: BackendPortConfig) => void;
+  onRestartRuntimeService: () => void;
+  onUpdateRuntimePortConfig: (config: RuntimePortConfig) => void;
 }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [portMode, setPortMode] = useState<BackendPortConfig["mode"]>(service.portConfig?.mode ?? "automatic");
+  const [portMode, setPortMode] = useState<RuntimePortConfig["mode"]>(service.portConfig?.mode ?? "automatic");
   const [fixedPort, setFixedPort] = useState(service.portConfig?.port ?? service.port ?? 8765);
   const [autoStart, setAutoStart] = useState(service.portConfig?.autoPortStart ?? 8765);
   const [autoEnd, setAutoEnd] = useState(service.portConfig?.autoPortEnd ?? 8799);
@@ -1835,10 +1835,10 @@ function SystemServiceCard({
           <button
             className="inline-flex h-8 items-center gap-2 rounded-md border border-brand-orange bg-white px-3 text-[11px] font-semibold text-brand-orange hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
             disabled={!service.canRestart || refreshing}
-            onClick={onRestartBackendService}
+            onClick={onRestartRuntimeService}
           >
             <RotateCcw size={14} />
-            {text.restartBackend}
+            {text.restartRuntime}
           </button>
         </div>
         {!service.canRestart ? <p className="text-[10px] text-ink-secondary">{text.restartUnavailable}</p> : null}
@@ -1850,7 +1850,7 @@ function SystemServiceCard({
             <SystemInfoRow icon={<Server size={14} />} label={text.expectedVersionLabel} value={service.expectedVersion} />
             <SystemInfoRow icon={<Activity size={14} />} label={text.expectedProfileLabel} value={service.expectedProfile} />
             {service.instanceId ? <SystemInfoRow icon={<Settings size={14} />} label={text.instanceLabel} value={service.instanceId} mono /> : null}
-            {service.sidecarPath ? <SystemInfoRow icon={<FolderOpen size={14} />} label={text.sidecarPathLabel} value={service.sidecarPath} mono /> : null}
+            {service.externalExecutablePath ? <SystemInfoRow icon={<FolderOpen size={14} />} label={text.externalExecutablePathLabel} value={service.externalExecutablePath} mono /> : null}
           </div>
           <div className="mt-3 rounded-md border border-line bg-white px-3 py-3">
             <div className="flex flex-wrap items-end gap-3">
@@ -1860,7 +1860,7 @@ function SystemServiceCard({
                   className="mt-1 h-8 w-full rounded-md border border-line bg-white px-2 text-[11px] text-ink-primary outline-none focus:border-brand-orange"
                   value={portMode}
                   disabled={!service.canConfigurePort || refreshing}
-                  onChange={(event) => setPortMode(event.target.value as BackendPortConfig["mode"])}
+                  onChange={(event) => setPortMode(event.target.value as RuntimePortConfig["mode"])}
                 >
                   <option value="automatic">{text.portModeAutomatic}</option>
                   <option value="fixed">{text.portModeFixed}</option>
@@ -1872,7 +1872,7 @@ function SystemServiceCard({
               <button
                 className="h-8 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={!service.canConfigurePort || refreshing || !isValidPortConfig(portMode, fixedPort, autoStart, autoEnd)}
-                onClick={() => onUpdateBackendPortConfig({
+                onClick={() => onUpdateRuntimePortConfig({
                   mode: portMode,
                   port: fixedPort,
                   autoPortStart: autoStart,
@@ -1944,18 +1944,18 @@ function ServicesSettings({
   refreshing,
   text,
   onRefresh,
-  onRestartBackendService,
-  onUpdateBackendPortConfig,
+  onRestartRuntimeService,
+  onUpdateRuntimePortConfig,
 }: {
   runtimeServicesStatus: RuntimeServicesStatus | null;
   refreshing: boolean;
   text: SettingsCopy;
   onRefresh: () => void;
-  onRestartBackendService: () => void;
-  onUpdateBackendPortConfig: (config: BackendPortConfig) => void;
+  onRestartRuntimeService: () => void;
+  onUpdateRuntimePortConfig: (config: RuntimePortConfig) => void;
 }) {
   const services = runtimeServicesStatus?.services ?? [];
-  const backend = services.find((service) => service.id === "backend");
+  const runtimeService = services.find((service) => service.id === "local-runtime") ?? services[0];
 
   return (
     <div className="space-y-5">
@@ -1984,13 +1984,13 @@ function ServicesSettings({
         </button>
       </div>
 
-      {backend ? (
+      {runtimeService ? (
         <ServiceCard
-          service={backend}
+          service={runtimeService}
           text={text}
           refreshing={refreshing}
-          onRestartBackendService={onRestartBackendService}
-          onUpdateBackendPortConfig={onUpdateBackendPortConfig}
+          onRestartRuntimeService={onRestartRuntimeService}
+          onUpdateRuntimePortConfig={onUpdateRuntimePortConfig}
         />
       ) : (
         <div className="rounded-md border border-line px-4 py-3 text-[11px] text-ink-secondary">{text.servicesPending}</div>
@@ -2003,17 +2003,17 @@ function ServiceCard({
   service,
   text,
   refreshing,
-  onRestartBackendService,
-  onUpdateBackendPortConfig,
+  onRestartRuntimeService,
+  onUpdateRuntimePortConfig,
 }: {
   service: RuntimeServicesStatus["services"][number];
   text: SettingsCopy;
   refreshing: boolean;
-  onRestartBackendService: () => void;
-  onUpdateBackendPortConfig: (config: BackendPortConfig) => void;
+  onRestartRuntimeService: () => void;
+  onUpdateRuntimePortConfig: (config: RuntimePortConfig) => void;
 }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [portMode, setPortMode] = useState<BackendPortConfig["mode"]>(service.portConfig?.mode ?? "automatic");
+  const [portMode, setPortMode] = useState<RuntimePortConfig["mode"]>(service.portConfig?.mode ?? "automatic");
   const [fixedPort, setFixedPort] = useState(service.portConfig?.port ?? service.port ?? 8765);
   const [autoStart, setAutoStart] = useState(service.portConfig?.autoPortStart ?? 8765);
   const [autoEnd, setAutoEnd] = useState(service.portConfig?.autoPortEnd ?? 8799);
@@ -2063,10 +2063,10 @@ function ServiceCard({
         <button
           className="inline-flex h-8 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
           disabled={!service.canRestart || refreshing}
-          onClick={onRestartBackendService}
+          onClick={onRestartRuntimeService}
         >
           <RotateCcw size={14} />
-          {text.restartBackend}
+          {text.restartRuntime}
         </button>
       </div>
       {!service.canRestart ? (
@@ -2086,7 +2086,7 @@ function ServiceCard({
         {service.startedAt ? <ServiceField label={text.startedAtLabel} value={formatDateTime(service.startedAt)} /> : null}
         <ServiceField label={text.appDataDirLabel} value={service.appDataDir ?? text.unavailableValue} mono wide />
         <ServiceField label={text.expectedAppDataDirLabel} value={service.expectedAppDataDir || text.unavailableValue} mono wide />
-        {service.sidecarPath ? <ServiceField label={text.sidecarPathLabel} value={service.sidecarPath} mono wide /> : null}
+        {service.externalExecutablePath ? <ServiceField label={text.externalExecutablePathLabel} value={service.externalExecutablePath} mono wide /> : null}
       </dl>
 
       {service.lastError ? (
@@ -2109,7 +2109,7 @@ function ServiceCard({
           onClick={() => setAdvancedOpen((isOpen) => !isOpen)}
         >
           <ChevronDown size={14} className={advancedOpen ? "rotate-180 transition" : "transition"} />
-          {text.advancedBackend}
+          {text.advancedRuntime}
         </button>
       </div>
 
@@ -2122,7 +2122,7 @@ function ServiceCard({
                 className="mt-1 h-8 w-full rounded-md border border-line bg-white px-2 text-[11px] text-ink-primary outline-none focus:border-brand-orange"
                 value={portMode}
                 disabled={!service.canConfigurePort || refreshing}
-                onChange={(event) => setPortMode(event.target.value as BackendPortConfig["mode"])}
+                onChange={(event) => setPortMode(event.target.value as RuntimePortConfig["mode"])}
               >
                 <option value="automatic">{text.portModeAutomatic}</option>
                 <option value="fixed">{text.portModeFixed}</option>
@@ -2134,7 +2134,7 @@ function ServiceCard({
             <button
               className="h-8 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
               disabled={!service.canConfigurePort || refreshing || !isValidPortConfig(portMode, fixedPort, autoStart, autoEnd)}
-              onClick={() => onUpdateBackendPortConfig({
+              onClick={() => onUpdateRuntimePortConfig({
                 mode: portMode,
                 port: fixedPort,
                 autoPortStart: autoStart,
@@ -2199,7 +2199,7 @@ function NumberField({ label, value, disabled, onChange }: { label: string; valu
   );
 }
 
-function isValidPortConfig(mode: BackendPortConfig["mode"], port: number, autoStart: number, autoEnd: number) {
+function isValidPortConfig(mode: RuntimePortConfig["mode"], port: number, autoStart: number, autoEnd: number) {
   const validPort = Number.isInteger(port) && port >= 1024 && port <= 65535;
   const validRange = Number.isInteger(autoStart) && Number.isInteger(autoEnd) && autoStart >= 1024 && autoEnd <= 65535 && autoStart <= autoEnd;
   return mode === "fixed" ? validPort : validPort && validRange;
@@ -3685,7 +3685,7 @@ const settingsCopy = {
     systemNav: "Sistema y diagnóstico",
     systemNavDescription: "Servicios locales y trazas",
     servicesNav: "Servicios",
-    servicesNavDescription: "Backend local y salud",
+    servicesNavDescription: "Runtime local y salud",
     appearanceNav: "Apariencia",
     appearanceNavDescription: "Idioma y escala visual",
     aiNav: "IA documental",
@@ -3693,13 +3693,13 @@ const settingsCopy = {
     diagnosticsNav: "Trazas",
     diagnosticsNavDescription: "Registro local de errores",
     servicesHeading: "Estado de servicios",
-    servicesDescription: "Revisa si los procesos locales necesarios para trabajar están activos. Si el backend cae, KnowNext.ai intenta recuperarlo automáticamente y deja el detalle en el log.",
+    servicesDescription: "Revisa si el runtime local Rust necesario para trabajar está activo y deja el detalle en el log.",
     servicesSummary: "Supervisión local",
     servicesPending: "Consultando estado de servicios",
     lastChecked: "Última comprobación",
     refreshServices: "Comprobar",
-    restartBackend: "Reiniciar backend",
-    restartUnavailable: "El reinicio desde la interfaz solo está disponible en la aplicación instalada. En modo web/desarrollo, arranca o reinicia el backend local fuera de la interfaz y vuelve a comprobar.",
+    restartRuntime: "Reiniciar runtime",
+    restartUnavailable: "El runtime local Rust no usa procesos externos reiniciables ni puertos configurables.",
     endpointLabel: "Endpoint",
     profileLabel: "Perfil activo",
     expectedProfileLabel: "Perfil esperado",
@@ -3710,16 +3710,16 @@ const settingsCopy = {
     versionLabel: "Versión activa",
     expectedVersionLabel: "Versión esperada",
     restartAvailableLabel: "Reinicio automático",
-    appDataDirLabel: "Datos usados por el backend",
+    appDataDirLabel: "Datos usados por el runtime",
     expectedAppDataDirLabel: "Datos esperados por la app",
-    sidecarPathLabel: "Ejecutable sidecar",
+    externalExecutablePathLabel: "Ejecutable externo",
     lastErrorLabel: "Último problema detectado",
     copyDiagnostic: "Copiar diagnóstico",
     copyDiagnosticCopied: "Diagnóstico copiado",
     copyDiagnosticFailed: "No se pudo copiar",
     copyDiagnosticTool: "Informe del sistema",
-    copyDiagnosticDescription: "Copia un resumen técnico del backend local.",
-    advancedBackend: "Avanzado",
+    copyDiagnosticDescription: "Copia un resumen técnico del runtime local.",
+    advancedRuntime: "Avanzado",
     portModeLabel: "Modo de puerto",
     portModeAutomatic: "Automático",
     portModeFixed: "Fijo",
@@ -3728,7 +3728,7 @@ const settingsCopy = {
     autoEndLabel: "Rango fin",
     applyAndRestart: "Aplicar y reiniciar",
     portAdvancedDescription: "En automático, la app usa el puerto preferido si está libre y cambia a otro del rango si detecta conflicto. Usa fijo solo cuando necesites reservar un puerto concreto.",
-    portAdvancedUnavailable: "En modo web/desarrollo la interfaz puede diagnosticar el endpoint, pero no puede cambiar ni reiniciar el backend local.",
+    portAdvancedUnavailable: "KnowNext.ai 2.0.0 no usa endpoint ni puerto configurable.",
     checkConnection: "Probar conexión",
     viewDetails: "Ver detalles",
     unavailableValue: "No disponible",
@@ -3881,7 +3881,7 @@ const settingsCopy = {
     imageGenerationConfirmSources: "Confirmar múltiples fuentes",
     imageGenerationConfirmSourcesDescription: "Evita usar varios documentos o fuentes como contexto visual sin revisión previa.",
     transcriptionHeading: "Audio y transcripción",
-    transcriptionDescription: "Controla el dictado realtime usado por el micrófono del prompt. React captura el audio, pero OpenAI se invoca solo desde el backend local.",
+    transcriptionDescription: "Controla el dictado realtime usado por el micrófono del prompt. React captura el audio y el runtime local Rust media cualquier proveedor configurado.",
     transcriptionModelHeading: "Modelo",
     transcriptionDefaultTarget: "Destino por defecto",
     transcriptionDefaultLanguage: "Idioma por defecto",
@@ -3984,9 +3984,9 @@ const settingsCopy = {
     diagnosticToolsHeading: "Herramientas de diagnóstico",
     diagnosticToolsDescription: "Acciones disponibles para comprobar el estado local y resolver incidencias.",
     refreshServicesTool: "Actualizar estado",
-    refreshServicesDescription: "Vuelve a consultar el estado del backend local.",
-    restartBackendTool: "Reinicio controlado",
-    restartBackendDescription: "Reinicia el backend gestionado por la app de escritorio.",
+    refreshServicesDescription: "Vuelve a consultar el estado del runtime local.",
+    restartRuntimeTool: "Reinicio controlado",
+    restartRuntimeDescription: "El runtime local no tiene proceso externo que reiniciar.",
     summaryHeading: "Resumen de configuración",
     summaryDescription: "Revisa los ajustes actuales de tu aplicación. Puedes cambiar cualquier configuración desde su sección correspondiente.",
     summaryInterfaceDescription: "Apariencia general y comportamiento de la aplicación.",
@@ -4096,7 +4096,7 @@ const settingsCopy = {
     systemNav: "System and diagnostics",
     systemNavDescription: "Local services and traces",
     servicesNav: "Services",
-    servicesNavDescription: "Local backend health",
+    servicesNavDescription: "Local runtime health",
     appearanceNav: "Appearance",
     appearanceNavDescription: "Language and visual scale",
     aiNav: "Documentation AI",
@@ -4104,13 +4104,13 @@ const settingsCopy = {
     diagnosticsNav: "Traces",
     diagnosticsNavDescription: "Local error logging",
     servicesHeading: "Service status",
-    servicesDescription: "Check whether the local processes required by the workspace are available. If the backend stops, KnowNext.ai tries to recover it automatically and records the detail in the log.",
+    servicesDescription: "Check whether the local Rust runtime required by the workspace is available and records diagnostics in the log.",
     servicesSummary: "Local supervision",
     servicesPending: "Checking service status",
     lastChecked: "Last checked",
     refreshServices: "Check",
-    restartBackend: "Restart backend",
-    restartUnavailable: "Restart from the interface is only available in the installed desktop app. In web/development mode, start or restart the local backend outside the interface and check again.",
+    restartRuntime: "Restart runtime",
+    restartUnavailable: "The local Rust runtime does not use external restartable processes or configurable ports.",
     endpointLabel: "Endpoint",
     profileLabel: "Active profile",
     expectedProfileLabel: "Expected profile",
@@ -4121,16 +4121,16 @@ const settingsCopy = {
     versionLabel: "Active version",
     expectedVersionLabel: "Expected version",
     restartAvailableLabel: "Automatic restart",
-    appDataDirLabel: "Data used by backend",
+    appDataDirLabel: "Data used by runtime",
     expectedAppDataDirLabel: "Data expected by app",
-    sidecarPathLabel: "Sidecar executable",
+    externalExecutablePathLabel: "External executable",
     lastErrorLabel: "Last detected problem",
     copyDiagnostic: "Copy diagnostic",
     copyDiagnosticCopied: "Diagnostic copied",
     copyDiagnosticFailed: "Could not copy",
     copyDiagnosticTool: "System report",
-    copyDiagnosticDescription: "Copies a technical summary of the local backend.",
-    advancedBackend: "Advanced",
+    copyDiagnosticDescription: "Copies a technical summary of the local runtime.",
+    advancedRuntime: "Advanced",
     portModeLabel: "Port mode",
     portModeAutomatic: "Automatic",
     portModeFixed: "Fixed",
@@ -4139,7 +4139,7 @@ const settingsCopy = {
     autoEndLabel: "Range end",
     applyAndRestart: "Apply and restart",
     portAdvancedDescription: "In automatic mode, the app uses the preferred port when available and moves to another port in the range when it detects a conflict. Use fixed only when you need a specific reserved port.",
-    portAdvancedUnavailable: "In web/development mode the interface can diagnose the endpoint, but it cannot change or restart the local backend.",
+    portAdvancedUnavailable: "KnowNext.ai 2.0.0 does not use a configurable endpoint or port.",
     checkConnection: "Test connection",
     viewDetails: "View details",
     unavailableValue: "Unavailable",
@@ -4292,7 +4292,7 @@ const settingsCopy = {
     imageGenerationConfirmSources: "Confirm multiple sources",
     imageGenerationConfirmSourcesDescription: "Avoid using several documents or sources as visual context without review.",
     transcriptionHeading: "Audio and transcription",
-    transcriptionDescription: "Controls realtime dictation from the prompt microphone. React captures audio, but OpenAI is invoked only by the local backend.",
+    transcriptionDescription: "Controls realtime dictation from the prompt microphone. React captures audio and the local Rust runtime mediates any configured provider.",
     transcriptionModelHeading: "Model",
     transcriptionDefaultTarget: "Default target",
     transcriptionDefaultLanguage: "Default language",
@@ -4395,9 +4395,9 @@ const settingsCopy = {
     diagnosticToolsHeading: "Diagnostic tools",
     diagnosticToolsDescription: "Available actions to check local status and resolve incidents.",
     refreshServicesTool: "Refresh status",
-    refreshServicesDescription: "Checks the local backend status again.",
-    restartBackendTool: "Controlled restart",
-    restartBackendDescription: "Restarts the backend managed by the desktop app.",
+    refreshServicesDescription: "Checks the local runtime status again.",
+    restartRuntimeTool: "Controlled restart",
+    restartRuntimeDescription: "The local runtime has no external process to restart.",
     summaryHeading: "Configuration summary",
     summaryDescription: "Review the current app settings. You can change any setting from its corresponding section.",
     summaryInterfaceDescription: "General appearance and application behavior.",

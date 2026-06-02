@@ -30,10 +30,10 @@ Run the desktop app:
 pnpm desktop
 ```
 
-Run the backend:
+Run Rust runtime checks:
 
 ```bash
-pnpm backend:dev
+pnpm rust:test
 ```
 
 Run the release gate:
