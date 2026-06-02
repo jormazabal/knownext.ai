@@ -35,7 +35,13 @@
       "icons/icon.ico"
     ],
     "windows": {
-      "signCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File ../../../scripts/sign-windows.ps1 %1"
+      "nsis": {
+        "installMode": "currentUser"
+      },
+      "signCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File ../../../scripts/sign-windows.ps1 %1",
+      "wix": {
+        "upgradeCode": "389ecb95-c3d2-5327-872c-5e9508c14b2a"
+      }
     }
   },
   "plugins": {
