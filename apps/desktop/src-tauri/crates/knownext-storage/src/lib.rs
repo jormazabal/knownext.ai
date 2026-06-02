@@ -696,8 +696,8 @@ impl LocalApi {
     fn ai_context_search(&self, project_id: &str, query: &BTreeMap<String, String>) -> Value {
         let needle = query.get("q").map(|value| value.to_ascii_lowercase()).unwrap_or_default();
         let mut matches = Vec::new();
-        if let Ok(nodes) = self.project_tree(project_id) {
-            flatten_nodes(&nodes, &mut matches, project_id, &needle);
+        if let (Ok(root), Ok(nodes)) = (self.project_root(project_id), self.project_tree(project_id)) {
+            flatten_nodes(&nodes, &mut matches, &root, &needle);
         }
         Value::Array(matches)
     }
@@ -876,18 +876,25 @@ fn preview_value(project_id: &str, preview_id: &str, relative: &str, path: &Path
     })
 }
 
-fn flatten_nodes(nodes: &[Value], matches: &mut Vec<Value>, project_id: &str, needle: &str) {
+fn flatten_nodes(nodes: &[Value], matches: &mut Vec<Value>, root: &Path, needle: &str) {
     for node in nodes {
         let name = node["name"].as_str().unwrap_or("");
         let path = node["path"].as_str().unwrap_or("");
-        if node["type"].as_str() != Some("folder") && (needle.is_empty() || name.to_ascii_lowercase().contains(needle) || path.to_ascii_lowercase().contains(needle)) {
+        let content_matches = if needle.is_empty() || node["type"].as_str() == Some("folder") {
+            false
+        } else {
+            let relative_path = PathBuf::from(path.replace('/', std::path::MAIN_SEPARATOR_STR));
+            std::fs::read_to_string(root.join(relative_path))
+                .map(|content| content.to_ascii_lowercase().contains(needle))
+                .unwrap_or(false)
+        };
+        if node["type"].as_str() != Some("folder") && (needle.is_empty() || name.to_ascii_lowercase().contains(needle) || path.to_ascii_lowercase().contains(needle) || content_matches) {
             matches.push(json!({ "documentId": node["id"], "name": name, "path": path, "kind": "project_document", "mimeType": node["mimeType"] }));
         }
         if let Some(children) = node["children"].as_array() {
-            flatten_nodes(children, matches, project_id, needle);
+            flatten_nodes(children, matches, root, needle);
         }
     }
-    let _ = project_id;
 }
 
 fn count_documents(nodes: &[Value]) -> usize {
@@ -998,6 +1005,26 @@ mod tests {
         LocalApi::new(root, "2.0.0".to_string(), "desktop".to_string())
     }
 
+    fn create_project(api: &LocalApi) -> (String, PathBuf) {
+        let root = std::env::temp_dir().join(knownext_core::compact_id("knownext-project"));
+        let created = api.handle("POST", "/api/projects", json!({
+            "name": "Docs",
+            "folderPath": root.to_string_lossy(),
+            "icon": "folder",
+            "iconColor": "#F37021"
+        }), vec![]).unwrap();
+        (created.body["id"].as_str().unwrap().to_string(), root)
+    }
+
+    fn create_document(api: &LocalApi, project_id: &str, name: &str, markdown: &str) -> String {
+        let document = api.handle("POST", &format!("/api/projects/{project_id}/documents"), json!({
+            "parentId": null,
+            "name": name,
+            "markdown": markdown
+        }), vec![]).unwrap();
+        document.body["node"]["id"].as_str().unwrap().to_string()
+    }
+
     #[test]
     fn health_reports_local_tauri_runtime() {
         let api = api();
@@ -1014,21 +1041,9 @@ mod tests {
     #[test]
     fn creates_project_and_reads_markdown_document() {
         let api = api();
-        let root = std::env::temp_dir().join(knownext_core::compact_id("knownext-project"));
-        let created = api.handle("POST", "/api/projects", json!({
-            "name": "Docs",
-            "folderPath": root.to_string_lossy(),
-            "icon": "folder",
-            "iconColor": "#F37021"
-        }), vec![]).unwrap();
-        let project_id = created.body["id"].as_str().unwrap().to_string();
+        let (project_id, _root) = create_project(&api);
 
-        let document = api.handle("POST", &format!("/api/projects/{project_id}/documents"), json!({
-            "parentId": null,
-            "name": "intro.md",
-            "markdown": "# Intro\n"
-        }), vec![]).unwrap();
-        let document_id = document.body["node"]["id"].as_str().unwrap();
+        let document_id = create_document(&api, &project_id, "intro.md", "# Intro\n");
         let loaded = api.handle("GET", &format!("/api/documents/{document_id}"), Value::Null, vec![]).unwrap();
 
         assert_eq!(loaded.body["markdown"], "# Intro\n");
@@ -1049,5 +1064,96 @@ mod tests {
         }), vec![]).unwrap();
         assert_eq!(config.body["appearance"]["zoomPercent"], 125);
         assert_eq!(config.body["openUtilityTabs"], json!(["release-notes"]));
+    }
+
+    #[test]
+    fn imports_previews_exports_and_versions_local_documents() {
+        let api = api();
+        let (project_id, root) = create_project(&api);
+        let document_id = create_document(&api, &project_id, "release-notes.md", "# Release\nContenido local.");
+
+        let draft = api.handle("PUT", &format!("/api/documents/{document_id}/draft"), json!({
+            "markdown": "# Release\nBorrador local.",
+            "baseFingerprint": null
+        }), vec![]).unwrap();
+        assert_eq!(draft.status, 200);
+        assert_eq!(draft.body["isDirty"], true);
+
+        let saved = api.handle("PUT", &format!("/api/documents/{document_id}"), json!({
+            "markdown": "# Release\nContenido final local."
+        }), vec![]).unwrap();
+        assert_eq!(saved.body["markdown"], "# Release\nContenido final local.");
+
+        let version = api.handle("POST", &format!("/api/projects/{project_id}/versions"), json!({
+            "documentId": document_id,
+            "title": "Validacion local"
+        }), vec![]).unwrap();
+        let version_id = version.body["version"]["id"].as_str().unwrap();
+        let version_content = api.handle("GET", &format!("/api/documents/{document_id}/versions/{version_id}/content"), Value::Null, vec![]).unwrap();
+        assert_eq!(version_content.body["markdown"], "# Release\nContenido final local.");
+
+        let md_output = root.join("release-export.md");
+        let pdf_output = root.join("release-export.pdf");
+        let docx_output = root.join("release-export.docx");
+        for (format, output) in [("md", &md_output), ("pdf", &pdf_output), ("docx", &docx_output)] {
+            let exported = api.handle("POST", &format!("/api/documents/{document_id}/export"), json!({
+                "format": format,
+                "outputPath": output.to_string_lossy()
+            }), vec![]).unwrap();
+            assert_eq!(exported.body["format"], format);
+            assert!(output.exists(), "{format} export should exist");
+            assert!(std::fs::metadata(output).unwrap().len() > 0, "{format} export should not be empty");
+        }
+
+        let file = LocalApiFile {
+            field_name: "file".to_string(),
+            name: "pixel.png".to_string(),
+            mime_type: Some("image/png".to_string()),
+            data_base64: base64::engine::general_purpose::STANDARD.encode([0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n']),
+        };
+        let imported = api.handle("POST", &format!("/api/projects/{project_id}/assets/images"), Value::Null, vec![file]).unwrap();
+        assert_eq!(imported.body["asset"]["mimeType"], "image/png");
+
+        let pdf_path = root.join("reference.pdf");
+        std::fs::write(&pdf_path, knownext_docs::minimal_pdf("reference", "Texto de referencia")).unwrap();
+        let preview = api.handle("POST", &format!("/api/projects/{project_id}/previews"), json!({ "path": "reference.pdf" }), vec![]).unwrap();
+        let preview_id = preview.body["id"].as_str().unwrap();
+        assert_eq!(preview.body["format"], "pdf");
+        let preview_text = api.handle("GET", &format!("/api/projects/{project_id}/previews/{preview_id}/text"), Value::Null, vec![]).unwrap();
+        assert_eq!(preview_text.body["searchable"], true);
+
+        let binary = api.content(&format!("/api/documents/{document_id}/export/content"), json!({ "format": "pdf" })).unwrap();
+        assert_eq!(binary.status, 200);
+        assert_eq!(binary.content_type, "application/pdf");
+        assert!(!binary.data_base64.is_empty());
+    }
+
+    #[test]
+    fn ai_context_and_prompt_contracts_are_local_runtime_backed() {
+        let api = api();
+        let (project_id, _root) = create_project(&api);
+        let document_id = create_document(&api, &project_id, "context.md", "# Contexto\nBusca este contenido.");
+
+        let search = api.handle("GET", &format!("/api/projects/{project_id}/ai/context/search?q=contenido"), Value::Null, vec![]).unwrap();
+        assert_eq!(search.status, 200);
+        assert_eq!(search.body.as_array().unwrap()[0]["documentId"], document_id);
+
+        let prompt = api.handle("POST", &format!("/api/documents/{document_id}/ai/prompt"), json!({
+            "prompt": "Resume el documento activo"
+        }), vec![]).unwrap();
+        assert_eq!(prompt.status, 200);
+        assert!(prompt.body["answer"].as_str().unwrap().contains("Rust/Tauri"));
+
+        let interaction = api.handle("POST", &format!("/api/projects/{project_id}/ai/interactions"), json!({
+            "prompt": "Propón un siguiente paso",
+            "documentId": document_id
+        }), vec![]).unwrap();
+        assert_eq!(interaction.status, 200);
+        assert!(interaction.body["answer"].as_str().unwrap().contains(&document_id));
+        assert!(!interaction.body["conversationEvents"].as_array().unwrap().is_empty());
+
+        let index = api.handle("GET", &format!("/api/projects/{project_id}/ai/index/status"), Value::Null, vec![]).unwrap();
+        assert_eq!(index.body["localExactReady"], true);
+        assert_eq!(index.body["documentCount"], 1);
     }
 }
