@@ -63,6 +63,8 @@ The public updater key is configured in `apps/desktop/src-tauri/tauri.conf.json`
 
 The Windows updater currently prefers the MSI artifact when generating `latest.json`. Keep the NSIS setup executable as the manual installer linked from the README and GitHub Releases.
 
+The WiX `upgradeCode` is pinned in `apps/desktop/src-tauri/tauri.conf.json`; do not change it during a routine release. A host with an older MSI registered as a per-machine install may require Administrator rights to remove that older install and is not valid evidence for the per-user updater acceptance gate. Validate updater preservation against a previous current-user install.
+
 Android private APK updates use `android-latest.json`. The APK must keep `applicationId=ai.knownext.mobile`, use the same Android signing certificate as previous private APKs, and publish a strictly increasing `versionCode`.
 
 Distribution contract:
