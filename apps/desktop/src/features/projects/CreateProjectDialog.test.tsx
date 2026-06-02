@@ -410,7 +410,7 @@ describe("CreateProjectDialog", () => {
     }));
   });
 
-  it("uses fixed backend storage for browser-oriented creation", async () => {
+  it("uses fixed local runtime storage for browser-oriented creation", async () => {
     const onCreate = vi.fn();
 
     render(
@@ -425,7 +425,7 @@ describe("CreateProjectDialog", () => {
     expect(screen.getByRole("tab", { name: /proyecto web nuevo/i })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /carpeta local existente/i })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
-    expect(screen.getByText(/almacenamiento web gestionado/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/almacenamiento local gestionado/i).length).toBeGreaterThan(0);
     expect(screen.queryByLabelText(/^carpeta local/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /siguiente/i })).toBeEnabled();
 
@@ -463,13 +463,13 @@ describe("CreateProjectDialog", () => {
     expect(screen.queryByRole("button", { name: /seleccionar/i })).not.toBeInTheDocument();
     expect(showDirectoryPicker).not.toHaveBeenCalled();
     expect(screen.queryByText("C:\\Documentacion\\Proyecto Beta")).not.toBeInTheDocument();
-    expect(screen.queryByText(/sandbox del backend web/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/sandbox del runtime local/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/carpeta de trabajo/i)).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Sincronización" })).toBeInTheDocument();
     expect(screen.getByText(/^archivos locales$/i)).toBeInTheDocument();
   });
 
-  it("uses the local runtime API outside Tauri to keep the full selected path", async () => {
+  it("does not fall back to HTTP transport when the native folder dialog is unavailable", async () => {
     const onUpdate = vi.fn();
     const fetchFolderPath = vi.fn().mockResolvedValue({
       ok: true,
@@ -496,15 +496,9 @@ describe("CreateProjectDialog", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /seleccionar/i }));
 
-    expect(fetchFolderPath).toHaveBeenCalledWith("http://127.0.0.1:8766/api/runtime/select-folder", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ currentPath: "C:\\Documentacion\\Proyecto Beta" }),
-    });
+    expect(fetchFolderPath).not.toHaveBeenCalled();
     expect(showDirectoryPicker).not.toHaveBeenCalled();
-    expect(screen.getByDisplayValue("C:\\Dev\\knownext.ai")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("C:\\Documentacion\\Proyecto Beta")).toBeInTheDocument();
   });
 
   it("enables GitHub repository projects when authenticated and submits selected repository metadata", async () => {

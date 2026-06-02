@@ -32,8 +32,8 @@ const baseProps = {
   onDeleteAiIndex: vi.fn(),
   onOpenTraceLogFolder: vi.fn(),
   onRefreshRuntimeServices: vi.fn(),
-  onRestartBackendService: vi.fn(),
-  onUpdateBackendPortConfig: vi.fn(),
+  onRestartRuntimeService: vi.fn(),
+  onUpdateRuntimePortConfig: vi.fn(),
 };
 
 describe("AppSettingsDialog", () => {
@@ -45,27 +45,27 @@ describe("AppSettingsDialog", () => {
           checkedAt: "2026-05-11T17:30:00.000Z",
           services: [
             {
-              id: "backend",
-              name: "Backend local",
+              id: "local-runtime",
+              name: "Runtime local Rust",
               status: "running",
               statusLabel: "Operativo",
-              description: "La API local responde y coincide con esta instalación.",
-              endpoint: "http://127.0.0.1:8765/health",
-              expectedVersion: "0.6.13",
-              version: "0.6.13",
+              description: "El runtime local responde y coincide con esta instalación.",
+              endpoint: "tauri://local-api/health",
+              expectedVersion: "2.0.0",
+              version: "2.0.0",
               expectedProfile: "desktop",
               profile: "desktop",
               expectedAppDataDir: "C:\\Users\\user\\AppData\\Roaming\\ai.knownext.desktop",
               appDataDir: "C:\\Users\\user\\AppData\\Roaming\\ai.knownext.desktop",
-              port: 8765,
+              port: null,
               managedBy: "tauri",
-              instanceId: "backend-test",
+              instanceId: "runtime-test",
               startedAt: "2026-05-11T17:29:00.000Z",
-              sidecarPath: "C:\\Program Files\\KnowNext.ai\\knownext-backend.exe",
+              externalExecutablePath: null,
               lastError: null,
-              canRestart: true,
-              canConfigurePort: true,
-              portConfig: { mode: "automatic", port: 8765, autoPortStart: 8765, autoPortEnd: 8799 },
+              canRestart: false,
+              canConfigurePort: false,
+              portConfig: { mode: "local", port: 0, autoPortStart: 0, autoPortEnd: 0 },
             },
           ],
         }}
@@ -83,15 +83,15 @@ describe("AppSettingsDialog", () => {
     fireEvent.click(screen.getByRole("tab", { name: /sistema y diagnóstico/i }));
 
     expect(screen.getByRole("heading", { name: /estado de servicios/i })).toBeInTheDocument();
-    expect(screen.getByText("Backend local")).toBeInTheDocument();
+    expect(screen.getByText("Runtime local Rust")).toBeInTheDocument();
     expect(screen.getByText("Operativo")).toBeInTheDocument();
-    expect(screen.getByText("0.6.13")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /reiniciar backend/i })).toBeEnabled();
+    expect(screen.getByText("2.0.0")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /reiniciar runtime/i })).toBeDisabled();
   });
 
   it("allows checking and restarting runtime services", () => {
     const onRefreshRuntimeServices = vi.fn();
-    const onRestartBackendService = vi.fn();
+    const onRestartRuntimeService = vi.fn();
 
     render(
       <AppSettingsDialog
@@ -100,45 +100,45 @@ describe("AppSettingsDialog", () => {
           checkedAt: "2026-05-11T17:30:00.000Z",
           services: [
             {
-              id: "backend",
-              name: "Backend local",
+              id: "local-runtime",
+              name: "Runtime local Rust",
               status: "unavailable",
               statusLabel: "No disponible",
-              description: "La API local no responde al chequeo de salud.",
-              endpoint: "http://127.0.0.1:8765/health",
-              expectedVersion: "0.6.13",
+              description: "El runtime local no responde al chequeo de salud.",
+              endpoint: "tauri://local-api/health",
+              expectedVersion: "2.0.0",
               version: null,
               expectedProfile: "desktop",
               profile: null,
               expectedAppDataDir: "C:\\Users\\user\\AppData\\Roaming\\ai.knownext.desktop",
               appDataDir: null,
-              port: 8765,
+              port: null,
               managedBy: null,
               instanceId: null,
               startedAt: null,
-              sidecarPath: null,
-              lastError: "Could not connect to 127.0.0.1:8765",
-              canRestart: true,
-              canConfigurePort: true,
-              portConfig: { mode: "automatic", port: 8765, autoPortStart: 8765, autoPortEnd: 8799 },
+              externalExecutablePath: null,
+              lastError: "Runtime local no disponible",
+              canRestart: false,
+              canConfigurePort: false,
+              portConfig: { mode: "local", port: 0, autoPortStart: 0, autoPortEnd: 0 },
             },
           ],
         }}
         onRefreshRuntimeServices={onRefreshRuntimeServices}
-        onRestartBackendService={onRestartBackendService}
+        onRestartRuntimeService={onRestartRuntimeService}
       />,
     );
 
     fireEvent.click(screen.getByRole("tab", { name: /sistema y diagnóstico/i }));
     fireEvent.click(screen.getByRole("button", { name: /comprobar/i }));
-    fireEvent.click(screen.getByRole("button", { name: /reiniciar backend/i }));
+    fireEvent.click(screen.getByRole("button", { name: /reiniciar runtime/i }));
 
     expect(onRefreshRuntimeServices).toHaveBeenCalledTimes(1);
-    expect(onRestartBackendService).toHaveBeenCalledTimes(1);
-    expect(screen.getByText(/could not connect/i)).toBeInTheDocument();
+    expect(onRestartRuntimeService).not.toHaveBeenCalled();
+    expect(screen.getByText(/runtime local no disponible/i)).toBeInTheDocument();
   });
 
-  it("explains that browser mode cannot restart the backend from the panel", () => {
+  it("explains that local-first runtime cannot be restarted as an external process", () => {
     render(
       <AppSettingsDialog
         {...baseProps}
@@ -146,13 +146,13 @@ describe("AppSettingsDialog", () => {
           checkedAt: "2026-05-11T17:30:00.000Z",
           services: [
             {
-              id: "backend",
-              name: "Backend local",
+              id: "local-runtime",
+              name: "Runtime local Rust",
               status: "unavailable",
               statusLabel: "No disponible",
-              description: "La API local no responde al chequeo de salud.",
-              endpoint: "http://127.0.0.1:8766/health",
-              expectedVersion: "0.7.0",
+              description: "El runtime local no responde al chequeo de salud.",
+              endpoint: "tauri://local-api/health",
+              expectedVersion: "2.0.0",
               version: null,
               expectedProfile: "web-dev",
               profile: null,
@@ -162,8 +162,8 @@ describe("AppSettingsDialog", () => {
               managedBy: null,
               instanceId: null,
               startedAt: null,
-              sidecarPath: null,
-              lastError: "El chequeo /health no respondió en 2500 ms.",
+              externalExecutablePath: null,
+              lastError: "El runtime local no usa procesos externos reiniciables.",
               canRestart: false,
               canConfigurePort: false,
               portConfig: null,
@@ -175,11 +175,11 @@ describe("AppSettingsDialog", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: /sistema y diagnóstico/i }));
 
-    expect(screen.getByRole("button", { name: /reiniciar backend/i })).toBeDisabled();
-    expect(screen.getByText(/modo web\/desarrollo/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /reiniciar runtime/i })).toBeDisabled();
+    expect(screen.getAllByText(/no usa procesos externos/i).length).toBeGreaterThan(0);
   });
 
-  it("copies the backend diagnostic and shows feedback", async () => {
+  it("copies the runtime diagnostic and shows feedback", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -193,14 +193,14 @@ describe("AppSettingsDialog", () => {
           checkedAt: "2026-05-11T17:30:00.000Z",
           services: [
             {
-              id: "backend",
-              name: "Backend local",
+              id: "local-runtime",
+              name: "Runtime local Rust",
               status: "degraded",
               statusLabel: "Incompatible",
-              description: "Hay una API local respondiendo, pero no coincide.",
-              endpoint: "http://127.0.0.1:8766/health",
-              expectedVersion: "0.7.1",
-              version: "0.6.14",
+              description: "El runtime local responde, pero no coincide.",
+              endpoint: "tauri://local-api/health",
+              expectedVersion: "2.0.0",
+              version: "1.0.1",
               expectedProfile: "web-dev",
               profile: null,
               expectedAppDataDir: "",
@@ -209,7 +209,7 @@ describe("AppSettingsDialog", () => {
               managedBy: null,
               instanceId: null,
               startedAt: null,
-              sidecarPath: null,
+              externalExecutablePath: null,
               lastError: "expectedProfile=web-dev\nactualProfile=unknown",
               canRestart: false,
               canConfigurePort: false,

@@ -60,13 +60,12 @@ import {
   uploadAiContextFiles,
 } from "../lib/api/ai";
 import {
-  API_BASE_URL,
   ApiError,
   discoverMobileApiBaseUrl,
   getApiBaseUrl,
   getApiErrorMessage,
   isApiConnectionError,
-  isBackendEnabled,
+  isRuntimeApiEnabled,
   isMobileApiBaseUrlConfigured,
   setApiBaseUrl,
   setPersistentMobileApiBaseUrl,
@@ -104,7 +103,7 @@ import { getTraceLogStatus, openTraceLogFolder, recordTraceLog, type TraceLogSta
 import { openExternalUrl } from "../lib/runtime/links";
 import { isTauriRuntime, selectBrowserExportTarget, selectExportFilePath, withExportExtension } from "../lib/runtime/exportDialogs";
 import { isTauriMobileRuntime } from "../lib/runtime/platform";
-import { getRuntimeServiceStatus, restartBackendService, updateBackendPortConfig, type BackendPortConfig, type RuntimeServicesStatus } from "../lib/runtime/services";
+import { getRuntimeServiceStatus, restartLocalRuntime, updateRuntimePortConfig, type RuntimePortConfig, type RuntimeServicesStatus } from "../lib/runtime/services";
 import { applyAppearanceAttributes, useResolvedAppearanceTheme } from "../lib/theme/appearance";
 import { AlertCircle, ArchiveRestore, Check, FileWarning, Info, RefreshCw, Server, Trash2, X } from "lucide-react";
 import {
@@ -346,7 +345,7 @@ export function App() {
             setPersistentMobileApiBaseUrl(discoveredEndpoint);
             setMobileApiSetupOpen(false);
           } else {
-            setMobileApiSetupError("No hemos encontrado tu ordenador automáticamente. Comprueba que KnowNext.ai está abierto en el ordenador y que ambos dispositivos están en la misma Wi-Fi.");
+            setMobileApiSetupError("No se pudo inicializar el runtime local de Android. Reinicia la app y revisa los permisos de almacenamiento si el problema continúa.");
             return;
           }
         }
@@ -667,24 +666,14 @@ export function App() {
 
   useEffect(() => {
     function handlePageHide() {
-      if (!isBackendEnabled()) return;
+      if (!isRuntimeApiEnabled()) return;
 
       for (const [documentId, session] of Object.entries(documentSessions)) {
         if (!shouldPersistDraft(session)) continue;
-        void fetch(`${API_BASE_URL}/api/documents/${encodeURIComponent(documentId)}/draft`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ markdown: session.markdown, baseFingerprint: session.baseFingerprint }),
-          keepalive: true,
-        });
+        void saveDocumentDraft(documentId, { markdown: session.markdown, baseFingerprint: session.baseFingerprint });
       }
       if (notesLoaded && notesMarkdown !== notesSavedMarkdown) {
-        void fetch(`${API_BASE_URL}/api/notes`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ markdown: notesMarkdown }),
-          keepalive: true,
-        });
+        void saveUserNotes(notesMarkdown);
       }
     }
 
@@ -2423,7 +2412,7 @@ export function App() {
       setStartupRetrySequence((sequence) => sequence + 1);
     } catch (error) {
       setApiBaseUrl(previousEndpoint);
-      setMobileApiSetupError(getApiErrorMessage(error, "No se pudo validar el backend móvil."));
+      setMobileApiSetupError(getApiErrorMessage(error, "No se pudo validar el runtime local móvil."));
     } finally {
       setMobileApiSetupBusy(false);
     }
@@ -2633,7 +2622,7 @@ export function App() {
         if (options?.silent && shouldKeepCurrentRuntimeStatus(currentStatus, nextStatus, runtimeServiceSilentFailuresRef)) {
           return currentStatus;
         }
-        if (!hasUnavailableBackend(nextStatus)) runtimeServiceSilentFailuresRef.current = 0;
+        if (!hasUnavailableRuntime(nextStatus)) runtimeServiceSilentFailuresRef.current = 0;
         return nextStatus;
       });
     } catch (error) {
@@ -2643,35 +2632,35 @@ export function App() {
     }
   }
 
-  async function handleRestartBackendService() {
+  async function handleRestartRuntimeService() {
     setRuntimeServicesRefreshing(true);
     try {
-      setRuntimeServicesStatus(await restartBackendService());
+      setRuntimeServicesStatus(await restartLocalRuntime());
     } catch (error) {
-      showError(error, "No se pudo reiniciar el backend local.", { source: "app.runtimeServices" });
+      showError(error, "No se pudo reiniciar el runtime local.", { source: "app.runtimeServices" });
       await refreshRuntimeServiceStatus({ silent: true });
     } finally {
       setRuntimeServicesRefreshing(false);
     }
   }
 
-  async function handleUpdateBackendPortConfig(config: BackendPortConfig) {
+  async function handleUpdateRuntimePortConfig(config: RuntimePortConfig) {
     setRuntimeServicesRefreshing(true);
     try {
-      const status = await updateBackendPortConfig(config);
+      const status = await updateRuntimePortConfig(config);
       setRuntimeServicesStatus(status);
       await waitForApiReady({ attempts: 8, intervalMs: 250 });
     } catch (error) {
       const message = describeError(error);
       setNotice({
-        title: "No se pudo aplicar la configuración del backend",
+        title: "No se pudo aplicar la configuración del runtime",
         message,
         tone: "error",
       });
       await refreshRuntimeServiceStatus();
       void recordTraceLog({
-        source: "app.runtime.updateBackendPortConfig",
-        message: "No se pudo aplicar la configuración de puerto del backend.",
+        source: "app.runtime.updateRuntimePortConfig",
+        message: "No se pudo aplicar la configuración de puerto del runtime.",
         detail: message,
       });
     } finally {
@@ -3274,8 +3263,8 @@ export function App() {
         onDeleteAiIndex={() => void handleDeleteAiIndex()}
         onOpenTraceLogFolder={() => void handleOpenTraceLogFolder()}
         onRefreshRuntimeServices={() => void refreshRuntimeServiceStatus()}
-        onRestartBackendService={() => void handleRestartBackendService()}
-        onUpdateBackendPortConfig={(config) => void handleUpdateBackendPortConfig(config)}
+        onRestartRuntimeService={() => void handleRestartRuntimeService()}
+        onUpdateRuntimePortConfig={(config) => void handleUpdateRuntimePortConfig(config)}
       />
       <AiDeleteConfirmationDialog
         pendingDelete={aiPendingDelete}
@@ -3605,12 +3594,12 @@ export function App() {
   }
 }
 
-function hasUnavailableBackend(status: RuntimeServicesStatus | null) {
-  return status?.services.some((service) => service.id === "backend" && service.status === "unavailable") ?? false;
+function hasUnavailableRuntime(status: RuntimeServicesStatus | null) {
+  return status?.services.some((service) => service.id === "local-runtime" && service.status === "unavailable") ?? false;
 }
 
-function hasAvailableBackend(status: RuntimeServicesStatus | null) {
-  return status?.services.some((service) => service.id === "backend" && service.status !== "unavailable") ?? false;
+function hasAvailableRuntime(status: RuntimeServicesStatus | null) {
+  return status?.services.some((service) => service.id === "local-runtime" && service.status !== "unavailable") ?? false;
 }
 
 function shouldKeepCurrentRuntimeStatus(
@@ -3618,7 +3607,7 @@ function shouldKeepCurrentRuntimeStatus(
   nextStatus: RuntimeServicesStatus,
   silentFailuresRef: MutableRefObject<number>,
 ) {
-  if (!hasAvailableBackend(currentStatus) || !hasUnavailableBackend(nextStatus)) {
+  if (!hasAvailableRuntime(currentStatus) || !hasUnavailableRuntime(nextStatus)) {
     silentFailuresRef.current = 0;
     return false;
   }
@@ -3982,11 +3971,11 @@ function MobileApiSetupOverlay({
         <BrandMark className="h-11 w-11" />
         <div className="mt-6 flex items-center gap-2 text-[11px] font-semibold uppercase text-brand-orange">
           <Server size={14} strokeWidth={2} />
-          Backend móvil
+          Runtime móvil
         </div>
         <h1 className="mt-2 text-[23px] font-semibold leading-tight text-ink-primary">Conectar KnowNext.ai</h1>
         <p className="mt-3 text-[12px] leading-5 text-ink-secondary">
-          El móvil se conecta a KnowNext.ai en tu ordenador para abrir tus proyectos y documentos. Normalmente lo encontramos automáticamente.
+          Android usa el runtime local de Tauri/Rust para abrir proyectos y documentos sin depender de un ordenador encendido.
         </p>
         {discovering ? (
           <div className="mt-6 rounded-md border border-line bg-panel px-4 py-4">
@@ -3995,7 +3984,7 @@ function MobileApiSetupOverlay({
               <div>
                 <div className="text-[12px] font-semibold text-ink-primary">Buscando tu ordenador</div>
                 <p className="mt-1 text-[11px] leading-5 text-ink-secondary">
-                  Mantén KnowNext.ai abierto en el ordenador y ambos dispositivos en la misma Wi-Fi.
+                  Preparando almacenamiento local y contratos Tauri para Android.
                 </p>
               </div>
             </div>
@@ -4004,12 +3993,12 @@ function MobileApiSetupOverlay({
         {!discovering ? (
         <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
           <label className="block">
-            <span className="text-[11px] font-semibold text-ink-primary">Dirección del ordenador</span>
+            <span className="text-[11px] font-semibold text-ink-primary">Dirección local</span>
             <input
               className="mt-2 h-11 w-full rounded-md border border-line bg-white px-3 font-mono text-[12px] text-ink-primary outline-none transition focus:border-brand-orange focus:ring-2 focus:ring-orange-200"
               value={endpoint}
               onChange={(event) => setEndpoint(event.target.value)}
-              placeholder="http://192.168.1.20:8775"
+              placeholder="tauri://local-api"
               inputMode="url"
               autoCapitalize="none"
               autoCorrect="off"
@@ -4021,7 +4010,7 @@ function MobileApiSetupOverlay({
             <div className="flex items-start gap-2">
               <Check size={14} className="mt-0.5 shrink-0 text-brand-orange" strokeWidth={2} />
               <p className="text-[11px] leading-5 text-ink-secondary">
-                Solo necesitas escribirla si la búsqueda automática no lo encuentra. KnowNext.ai comprobará que corresponde a esta versión antes de entrar.
+                KnowNext.ai 2.0.0 usa comandos Tauri locales. Este cuadro queda solo como diagnóstico si falla el arranque móvil.
               </p>
             </div>
           </div>

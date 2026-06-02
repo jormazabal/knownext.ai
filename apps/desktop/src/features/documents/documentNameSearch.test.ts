@@ -15,7 +15,7 @@ const nodes: DocumentTreeNode[] = [
         type: "folder",
         open: false,
         children: [
-          { id: "doc-backend", name: "Arquitectura backend.md", type: "document" },
+          { id: "doc-runtime", name: "Arquitectura runtime.md", type: "document" },
           { id: "doc-api", name: "API publica.md", type: "document" },
         ],
       },
@@ -27,7 +27,7 @@ const nodes: DocumentTreeNode[] = [
 
 describe("searchDocumentTreeByName", () => {
   it("matches text in the middle and end of folder or document names", () => {
-    expect(searchDocumentTreeByName(nodes, "tect").map((result) => result.id)).toEqual(["folder-architecture", "doc-backend"]);
+    expect(searchDocumentTreeByName(nodes, "tect").map((result) => result.id)).toEqual(["folder-architecture", "doc-runtime"]);
     expect(searchDocumentTreeByName(nodes, "final").map((result) => result.id)).toEqual(["doc-final", "attachment-final"]);
   });
 

@@ -4,33 +4,23 @@
 
 Add practical tests that protect core KnowNext.ai behavior.
 
-## Context
-
-V1 combines frontend UI state, FastAPI contracts, and manual desktop validation.
-
 ## Rules
 
-- Test backend contracts with FastAPI TestClient.
+- Test Rust/Tauri runtime contracts for product operations.
 - Prefer component tests for UI interactions that can regress.
-- Keep manual checklist updated for desktop-specific behavior.
-- Do not overbuild end-to-end tests before core persistence exists.
+- Keep manual checklist updated for Windows and Android behavior.
+- Do not overbuild end-to-end tests before core persistence and platform flows are stable.
 
 ## Recommended Steps
 
-1. Add backend tests for every endpoint contract.
-2. Add frontend tests for project selector, tabs, save feedback, and history toggle.
-3. Use manual checklist for Milkdown and Tauri visual checks.
+1. Add Rust tests for each new runtime contract.
+2. Add frontend tests for project selector, tabs, save feedback, history, notes, import/export, and AI interactions when changed.
+3. Use the manual checklist for Milkdown, packaged Tauri, updater, and Android offline checks.
 4. Document test gaps in PRs.
 
 ## Acceptance Criteria
 
 - `pnpm test` runs frontend tests.
-- `python -m pytest` runs backend tests.
-- Manual checklist covers the acceptance criteria.
-
-## Mistakes To Avoid
-
-- Snapshot-only tests for dynamic UI.
-- Testing mocks instead of user-visible behavior.
-- Ignoring visual verification for desktop layout.
-
+- `pnpm rust:test` runs Rust tests and Tauri checks.
+- `pnpm release:check` passes before release work is tagged.
+- Manual checklist covers critical acceptance criteria.

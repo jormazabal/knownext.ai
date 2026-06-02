@@ -1,7 +1,7 @@
 # Third-Party Notices
 
-KnowNext.ai depends on third-party open source software from the JavaScript,
-Rust, and Python ecosystems. Third-party dependencies are not relicensed by
+KnowNext.ai depends on third-party open source software from the JavaScript
+and Rust ecosystems. Third-party dependencies are not relicensed by
 this repository; each dependency remains available under its own license.
 
 ## Dependency License Review
@@ -20,9 +20,6 @@ Observed dependency license families:
 - Rust: MIT, Apache-2.0, BSD-3-Clause, ISC, MPL-2.0, Unicode-3.0, Zlib,
   Unlicense, CDLA-Permissive-2.0, and dual-license alternatives that include
   MIT or Apache-2.0.
-- Python: FastAPI, Uvicorn, Pydantic, HTTPX, Pytest, Starlette, and AnyIO are
-  distributed under permissive licenses such as MIT or BSD.
-
 Notable review decisions:
 
 - `r-efi` offers `MIT OR Apache-2.0 OR LGPL-2.1-or-later`; KnowNext.ai relies

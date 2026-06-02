@@ -16,8 +16,7 @@ The current dependency set was reviewed through:
 
 - `pnpm licenses list --recursive --json`
 - `cargo metadata --format-version 1 --locked`
-- Python package metadata for FastAPI, Uvicorn, Pydantic, HTTPX, Pytest,
-  Starlette, and AnyIO
+- native runtime and frontend package metadata for Rust and Node dependencies
 
 No GPL, AGPL, or dependency license that blocks Apache-2.0 publication was
 identified.

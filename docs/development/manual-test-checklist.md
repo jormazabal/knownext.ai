@@ -1,287 +1,74 @@
 # Manual Test Checklist
 
-- [ ] Open the application.
-- [ ] Confirm startup first shows a clean loading layer before any workspace, project selector, document tree, tabs, or account state appears.
-- [ ] Confirm the loading layer uses a quiet white/light-panel treatment with orange progress accent and no fake project/document placeholders.
-- [ ] Confirm the transition from loading to the resolved app state is smooth, with no flash of Proyecto Alpha, sample documents, stale tabs, or partially initialized controls.
-- [ ] Start the app with a clean profile and no `projects.json` projects, then confirm the sidebar shows no project selector dropdown.
-- [ ] Install the Windows build over a disposable clean Windows profile and confirm no project, credential, note, draft, log, or AI cache data is present before first launch.
-- [ ] Update an existing Windows installation with real test data and confirm `projects.json`, `config.json`, `credentials.json`, notes, drafts, and managed project folders are preserved in the same Tauri app data directory.
-- [ ] Start a `desktop` backend with a legacy `%APPDATA%/KnowNext.ai` profile and confirm legacy recovery imports real user data into the current desktop app data directory.
-- [ ] Start `web-dev` or `mobile` with the same legacy directory available and confirm no desktop projects, config, credentials, notes, or seed data are imported.
-- [ ] In the no-projects state, confirm the sidebar shows `Añadir primer proyecto` with a plus icon and explanatory copy about creating the first project before working with the application.
-- [ ] Confirm pressing `Añadir primer proyecto` opens the same new-project flow used by `Nuevo proyecto`.
-- [ ] Restart with no projects and confirm the first-project empty state is restored instead of seeding sample projects.
-- [ ] Confirm no mock projects, mock documents, mock users, mock history, or mock AI answers appear in the normal application runtime.
-- [ ] For Android builds, start `pnpm backend:mobile`, install an APK without `VITE_API_BASE_URL`, and confirm startup automatically discovers a compatible `profile=mobile` backend rather than showing the placeholder endpoint or using `127.0.0.1:1420`.
-- [ ] For Android clean-install testing, use an empty mobile backend `KNOWNEXT_APP_DATA_DIR`; confirm a first install shows no projects after connecting.
-- [ ] For Android private update testing, install the previous signed APK, configure a backend endpoint, trigger `Buscar actualizaciones`, grant install permission if Android asks for it, install the new APK, and confirm the saved endpoint remains configured.
-- [ ] Confirm Android rejects an update APK with the wrong package id, lower/equal `versionCode`, wrong SHA-256, or different signing certificate before opening the system installer.
-- [ ] Build a shareable Android APK without `VITE_API_BASE_URL` and confirm the APK first shows "Buscando tu ordenador" and only opens the backend connection form if automatic discovery fails.
-- [ ] Before sharing any APK/AAB, scan the artifact and frontend bundle for `sk-`, `OPENAI_API_KEY`, `VITE_OPENAI`, local credential files, `projects.json`, `notes.json`, `drafts/`, `logs/`, and seed project names.
-- [ ] On Android, block discovery or change the packaged backend URL and confirm the startup connection screen accepts a new local endpoint, validates `/health`, persists it, and then loads the workspace.
-- [ ] Update Android with `adb install -r` or the store update flow and confirm the saved backend endpoint remains configured while backend-held project data is unchanged.
-- [ ] On Android, confirm the app opens as native Tauri, renders the project/document workspace, and the backend receives `/health`, `/api/projects`, `/api/config`, and document tree requests.
-- [ ] If `projects.json` contains only legacy seed projects (`Proyecto Alpha`, `Proyecto Beta`, `Proyecto Gamma`), restart the backend and confirm the app either recovers real projects from a valid `projects.json.corrupt-*` backup or shows the first-project empty state.
-- [ ] Confirm the window top bar shows KnowNext.ai and simulated window controls.
-- [ ] In the packaged Tauri app, resize the application freely from each window edge and corner and confirm the workspace follows the window without clipping critical controls.
-- [ ] Resize the window down to the minimum practical size and confirm text, buttons, tabs, drawers, and dialogs remain usable without overlap.
-- [ ] Resize the window repeatedly while a document has unsaved edits and confirm the active editor, dirty state, undo/redo state, and save feedback are preserved.
-- [ ] Create or import at least two real test projects before continuing project-switching checks.
-- [ ] Open and close the project selector.
-- [ ] Select another real test project from the project selector.
-- [ ] Restart the app and confirm the selected project is restored from `projects.json`.
-- [ ] Confirm Nuevo proyecto is inside the selector dropdown.
-- [ ] Open Nuevo proyecto and confirm project creation is organized as tabs or an assistant/wizard rather than a single dense long form.
-- [ ] Confirm Situación, Ubicación, Historial, and Detalles are available as clear assistant steps.
-- [ ] Confirm the initial Situación step orders the options as Carpeta local nueva, Carpeta local existente, Carpeta con Git/GitHub, and Repo GitHub existente, with explanatory copy.
-- [ ] In the browser development build, confirm Nuevo proyecto only offers Proyecto web nuevo and Repo GitHub existente, and explains that projects are stored in the managed web backend folder instead of asking for a local PC folder.
-- [ ] Resize the app to a smaller width/height with Nuevo proyecto open and confirm the modal fits the viewport with an internal scroll area and visible footer actions.
-- [ ] In Nuevo proyecto, switch between tabs/steps after entering values and confirm the values are preserved during the same modal session.
-- [ ] In Nuevo proyecto, confirm future steps cannot be opened and Siguiente remains disabled until required data from the current step is complete.
-- [ ] In Nuevo proyecto, trigger validation errors and confirm the footer explains the missing field for the active step.
-- [ ] In Carpeta local nueva, confirm the Ubicación step separates the parent location from the folder name to create and shows the final full path before continuing.
-- [ ] Confirm the assistant ends on a Resumen screen with the complete configuration and only then allows Crear proyecto.
-- [ ] Without GitHub login, confirm Repo GitHub existente, Carpeta con Git/GitHub, and GitHub-related history choices are visible but disabled with explanatory copy.
-- [ ] With GitHub connected, choose Crear repo GitHub desde local, fill owner/repo/visibility, and confirm the final summary shows the new repository and publishing visibility.
-- [ ] With GitHub connected, choose GitHub automático and Crear GitHub automático in the Historial step and confirm the summary reports automatic GitHub sync.
-- [ ] Without GitHub login, hover the lock on Crear repo GitHub desde local and confirm the lock is visually black and its tooltip explains that GitHub is required.
-- [ ] In Carpeta local nueva, type a new folder path that does not exist yet and confirm the project is created with that folder on disk.
-- [ ] Create a local files project without login and confirm it is present after restarting the app.
-- [ ] Confirm the history toolbar button is disabled in a local files project and the tooltip explains that history is unavailable.
-- [ ] Open the account menu and click Conectar GitHub.
-- [ ] Confirm the GitHub device login dialog shows a verification code and an Abrir GitHub action.
-- [ ] Complete GitHub login and confirm the account menu changes to the authenticated GitHub user. If a development-only auth fake is used, confirm it is explicitly labeled and not enabled in normal product runtime.
-- [ ] Reopen Nuevo proyecto and confirm Repo GitHub existente, Carpeta con Git/GitHub, and GitHub-related history choices are enabled after login.
-- [ ] In Repo GitHub existente, refresh the repository list and confirm selecting a repository fills owner, repo, and project name.
-- [ ] In Repo GitHub existente, choose a local destination folder and confirm the created project stores that folder path instead of an opaque internal path.
-- [ ] Create a GitHub versionado project from a repository and confirm the chosen local folder loads Markdown documents when network and permissions allow it.
-- [ ] In a GitHub versionado project, change the same document on GitHub before creating a local version and confirm KnowNext.ai blocks the version with a remote conflict message.
-- [ ] Create a local Git project and confirm the status bar shows a versioning state instead of Sin historial.
-- [ ] Create a project from a folder that already has Git/GitHub configured, associate the matching GitHub repository, and confirm the project is registered as Git local + GitHub existente without moving files.
-- [ ] Open Ajustes del proyecto for a local project with no GitHub repository and confirm Evolución a GitHub offers Conectar GitHub manual, Conectar GitHub automático, Publicar GitHub manual, and Publicar GitHub automático.
-- [ ] From Ajustes del proyecto, publish or connect a disposable project to GitHub in manual mode and confirm the project refreshes as GitHub-connected without recreating local files.
-- [ ] From Ajustes del proyecto, switch the same GitHub-connected project between Sincronización manual and Sincronización automática and confirm the sync indicator updates after saving.
-- [ ] Inspect the folder/document tree levels and confirm they match the active project's local folder.
-- [ ] Confirm Markdown documents, supported image files, support files, and folders are shown in the navigation tree with distinct document/image/file/folder icons.
-- [ ] Confirm folders are collapsed by default on first project load, then expand/collapse several folders, restart the app, and confirm the same per-project folder state is restored.
-- [ ] Confirm the file toolbar sits directly below the project selector with `Archivos` on the left and Buscar, Añadir, Vista del árbol, and Ajustes del proyecto icons aligned to the right.
-- [ ] Click Buscar and confirm a compact modal opens with the input focused, a close X, and no search field permanently added to the sidebar.
-- [ ] Type a middle or ending fragment of a folder name, for example `quis` for `Requisitos`, and confirm matching folders/documents/images/support files appear even when the fragment is not at the start.
-- [ ] Type a middle or ending fragment of a document name, select the result with Enter, and confirm the modal closes, the document opens, parent folders expand, and the document is selected in the tree.
-- [ ] Type part of a non-previewable support-file name, select the result with Enter, and confirm the modal closes, parent folders expand, the file is selected in the tree, and no document/image viewer opens.
-- [ ] Select a folder result from search and confirm the modal closes, parent folders expand, that folder expands and is selected, while the current document remains open.
-- [ ] Confirm document search results show the document name plus a secondary parent-folder route for disambiguation, and that the route is not itself searched as content/name.
-- [ ] Confirm Up/Down changes the active search result, Tab and Enter select the active result, and Escape closes the search modal.
-- [ ] Open Añadir and confirm it offers Nueva carpeta, Nuevo Markdown, and Importar archivo for Markdown, image, and supported support files.
-- [ ] Open Vista del árbol and confirm Ver todo, Solo Markdown, Solo imágenes, Solo archivos, Expandir carpetas, and Contraer carpetas are grouped in one floating menu.
-- [ ] In desktop width, drag the divider next to the folder/document tree and confirm the left panel width changes with a visible vertical orange resize line.
-- [ ] In desktop width, focus the folder/document tree divider with the keyboard and confirm arrow keys resize the left panel within min/max limits.
-- [ ] Restart the app and confirm the folder/document tree width is restored from `config.json`.
-- [ ] Resize the app to a tablet/mobile width and confirm the folder/document tree becomes a left drawer opened by the icon to the left of the document tabs.
-- [ ] In tablet/mobile width, confirm the folder/document drawer does not show the desktop resize divider.
-- [ ] In tablet/mobile width, open the document drawer and confirm the top-right icon inside the drawer hides it.
-- [ ] In tablet/mobile width, open a document from the drawer and confirm the drawer closes while the selected document tab remains active.
-- [ ] In tablet/mobile width, confirm the drawer closes when clicking outside it or pressing Escape.
-- [ ] Expand and collapse individual folder nodes.
-- [ ] Use Expandir carpetas and Contraer carpetas from Vista del árbol in the file toolbar.
-- [ ] Click Configurar proyecto and confirm the edit project dialog opens with the active project name, folder, icon, and color already filled.
-- [ ] Confirm the edit project dialog uses the full modal width, separates editable identity/location from read-only technical configuration, and does not show clipped icon or color controls.
-- [ ] Click Seleccionar in Carpeta local and confirm it opens the native folder selector, not a browser upload picker.
-- [ ] In the Tauri app, select a project folder and confirm the full local path is shown and saved, for example `C:\Dev\knownext.ai`.
-- [ ] In the browser development build, confirm project editing shows the managed backend folder as read-only and does not offer a folder selector.
-- [ ] In the installed Tauri app, confirm service health points to `http://127.0.0.1:8765` and the desktop app-data directory.
-- [ ] In the installed Tauri app, occupy `127.0.0.1:8765` with a non-KnowNext service, restart KnowNext.ai, and confirm the backend automatically moves to another port in `8765-8799` without using the web profile.
-- [ ] In Servicios > Avanzado in the installed Tauri app, switch to a fixed free port, apply and restart, and confirm the endpoint, service health, and API calls use the new port.
-- [ ] In Servicios > Avanzado in the installed Tauri app, try a fixed occupied port and confirm KnowNext.ai shows a clear conflict instead of killing unrelated processes.
-- [ ] In the browser development build, start `pnpm backend:web`, confirm service/API calls use `http://127.0.0.1:8766`, confirm `/health` reports `profile=web-dev`, and confirm browser projects/configuration are independent from the installed app.
-- [ ] Point the browser build at a desktop backend and confirm the app reports an incompatible backend profile instead of operating on the desktop profile.
-- [ ] Save a project edit and confirm the project selector shows the updated project data.
-- [ ] Restart the app and confirm the project edit is restored from `projects.json`.
-- [ ] Open `acta-reunion.md`.
-- [ ] Change active tab to `requisitos-funcionales.md`.
-- [ ] Change active tab to `decision-tecnologica.md`.
-- [ ] Collapse the parent folder of an already open document, activate that document's tab, and confirm the tree expands its parent folders, selects the document node, and scrolls it into view.
-- [ ] Close and open document tabs, then restart the app and confirm the same tabs, active document, and tab order are restored from `config.json`.
-- [ ] Drag Markdown document tabs to reorder them and confirm `IA` and `Notas` remain fixed at the beginning and cannot be moved.
-- [ ] Close every document tab and confirm the tab bar, editor toolbar, document canvas, and status bar disappear.
-- [ ] Confirm the empty workspace area is very light gray and shows the gray KnowNext.ai watermark logo.
-- [ ] Confirm the AI prompt remains visible with project documentation wording when no document tab is open.
-- [ ] Switch projects and confirm each project restores its own open tabs and active document.
-- [ ] Confirm folder context menu shows Nueva carpeta, Nuevo documento, Importar archivo, Renombrar, Eliminar.
-- [ ] Confirm document context menu shows Exportar MD, Exportar PDF, Exportar DOCX, Renombrar, Duplicar, Mover, Eliminar.
-- [ ] Confirm image context menu shows Abrir, Insertar en documento, Usar como contexto IA, Copiar referencia, Renombrar, Mover, Eliminar.
-- [ ] Confirm support-file context menu shows Abrir vista, Usar como contexto IA, Copiar ruta, Renombrar, Mover, Eliminar, and does not show Insertar en documento.
-- [ ] Use the folder context menu to create a folder and document, then confirm they exist on disk.
-- [ ] Use Importar archivo from a folder menu to import an image and confirm the image is copied to that folder, appears in the tree, and opens in the image viewer tab.
-- [ ] Use Importar archivo from a folder menu to import a CSV or TXT file and confirm the file is copied to that folder, appears in the tree with a file-specific icon, can be renamed/moved/deleted, and does not open a viewer tab.
-- [ ] Use Importar archivo from a folder menu to import a PDF and confirm it opens as a `Solo lectura` reference-document tab with PDF.js-rendered pages, zoom, page navigation, fit-width/fit-page controls, search state, refresh, and Abrir externo.
-- [ ] Import a DOCX and confirm it opens as a `Solo lectura` reference-document tab, shows `Vista generada desde Word`, uses the same paginated controls as PDF, and when LibreOffice is not available still renders a basic read-only PDF fallback with a visible fidelity warning and Abrir externo.
-- [ ] Import an XLSX and confirm it opens as a `Solo lectura` reference-document tab directly in the sheet grid, without a `Páginas` mode.
-- [ ] In XLSX, confirm sheet selection works from the toolbar dropdown, the read-only grid updates, cells are selectable/copyable, formulas appear in cell tooltips where present, basic search highlighting works, and no editing behavior is available.
-- [ ] Modify an open PDF/DOCX/XLSX on disk, return to KnowNext.ai, refresh/open the tab, and confirm `Vista desactualizada` appears with an Actualizar action.
-- [ ] Try opening a protected, corrupt, or too-large PDF/DOCX/XLSX and confirm the state is human-readable and offers Reintentar and Abrir externo without modifying the source file.
-- [ ] Switch between a Markdown tab, an image tab, and a reference-document tab and confirm Milkdown state, dirty markers, toolbar visibility, and document context are preserved.
-- [ ] Rename a folder or document from the tree and confirm the disk item is renamed.
-- [ ] Duplicate, move, and delete a document from the file context menu and confirm the disk changes.
-- [ ] Edit content in Milkdown visual mode.
-- [ ] Add numbered and bulleted lists in Milkdown and confirm each item shows a single marker aligned with its text.
-- [ ] Use Insertar > Imagen in the Markdown toolbar, select an existing project image, and confirm Milkdown inserts a Markdown image reference and renders the image in document flow.
-- [ ] Use Insertar > Imagen > Subir from an active document in a nested folder and confirm the image is copied beside that Markdown file and inserted with a relative reference.
-- [ ] Use Insertar > Imagen > URL and confirm an external image URL is inserted without copying a file into the project.
-- [ ] Open a generated image tab and confirm the details panel shows the project image metadata and offers Copiar referencia, Contexto IA, and Insertar.
-- [ ] Move a Markdown document that references one or more images and confirm the app warns about linked images and preserves valid relative references after the move.
-- [ ] Move or rename an image referenced from Markdown and confirm the app warns about linked documents and updates all detected Markdown references.
-- [ ] Delete an image referenced from Markdown and confirm the app warns that references will become broken.
-- [ ] Confirm the document tabs and editor toolbar stay fixed while only the document canvas scrolls vertically.
-- [ ] Confirm the toolbar uses a block-format dropdown with Texto normal and Título 1 through Título 6 instead of separate H1/H2/H3 buttons.
-- [ ] Confirm inline code and block code are separate toolbar actions.
-- [ ] Open Tabla and confirm the 5 x 5 visual picker shows the hovered size, can insert the selected size, and includes Personalizar.
-- [ ] Open Exportar from the editor toolbar and confirm MD, PDF, and DOCX options appear.
-- [ ] Export the active document as MD, PDF, and DOCX and confirm the native save dialog appears each time with the Markdown file name and the target extension by default.
-- [ ] Export a Markdown document from its tree context menu as MD, PDF, and DOCX and confirm the files are written to the selected folder.
-- [ ] Export a document containing headings, bold, italic, strikethrough, underline, inline code, code blocks, links, images, blockquotes, ordered lists, bullet lists, checklists, tables, and horizontal rules; confirm PDF and DOCX preserve readable formatting for every supported element.
-- [ ] Resize the window narrower and confirm the toolbar stays one row while lower-priority actions move into Formato, Estructura, or Insertar menus instead of causing vertical scroll.
-- [ ] Confirm the status changes to Cambios sin guardar.
-- [ ] Confirm Deshacer and Rehacer start disabled on a newly opened editor session.
-- [ ] Edit content, confirm only Deshacer becomes enabled, use Deshacer, then confirm only Rehacer becomes enabled until a new edit clears the redo state.
-- [ ] Use Deshacer and Rehacer in the active document and confirm they affect only that document.
-- [ ] Edit two open documents, switch between tabs, and confirm each tab keeps its own unsaved content and undo/redo history.
-- [ ] Save the document.
-- [ ] Confirm temporary Guardado feedback appears.
-- [ ] Edit a document, do not save, close the tab, and confirm the app offers Guardar, Descartar, and Cancelar.
-- [ ] Edit a document, do not save, close the browser/app, reopen it, and confirm the document appears with Borrador recuperado and remains pending save to disk.
-- [ ] Confirm draft files are created only under the KnowNext.ai app data directory and not inside the project documentation folder.
-- [ ] Edit a document, let the draft autosave, change the same file on disk externally, return to KnowNext.ai, and confirm the conflict warning offers Cargar disco and Mantener mi versión.
-- [ ] With the app still open, change a document externally and confirm the conflict appears after the sync polling interval or after refocusing the window.
-- [ ] Delete an edited document externally and confirm the active document shows Archivo no encontrado and allows recreating from the local draft.
-- [ ] Resolve a conflict with Cargar disco and confirm the draft is discarded.
-- [ ] Resolve a conflict with Mantener mi versión and confirm the draft is written to the real Markdown file.
-- [ ] Open the account menu, choose Borradores recuperables, and confirm orphan drafts are listed with route, date, word count, Recrear archivo, and Descartar.
-- [ ] Restore an orphan draft and confirm the file is recreated, the tree refreshes, and the document opens.
-- [ ] Try restoring an orphan draft after recreating the original file externally and confirm KnowNext.ai refuses to overwrite it.
-- [ ] Stop the FastAPI backend while using the browser build and confirm API failures are visible in the UI instead of silently showing mock data.
-- [ ] Without GitHub login, switch to a local-history project and confirm the history button remains available.
-- [ ] Without GitHub login, switch to a GitHub-sync project and confirm GitHub sync actions are blocked with explanatory copy.
-- [ ] Open the version history panel on a versioned project.
-- [ ] Click Crear versión and confirm either a new version is created or a clear no-changes/provider error appears.
-- [ ] Restore a non-current version and confirm KnowNext.ai writes it as the current document content and creates a new history entry instead of rewinding history.
-- [ ] In a Git local + sync project, use Traer cambios and Subir cambios from the history panel and confirm status feedback is visible.
-- [ ] In automatic sync mode, save a document and confirm the sync indicator moves through saving/pending/synced states without requiring React-side Git operations.
-- [ ] In automatic sync mode, change a file remotely while the affected document is closed and confirm KnowNext.ai pulls it automatically when no conflicts are detected.
-- [ ] In automatic sync mode, change a file remotely while the affected document is open or dirty and confirm KnowNext.ai reports Revisión necesaria instead of overwriting the editor.
-- [ ] In a local Git project, paste a small folder with Markdown files into the project from Windows Explorer and confirm KnowNext.ai detects external changes without stealing editor focus.
-- [ ] Confirm the document tab row shows a compact sync indicator and the editor shows a contextual banner with Revisar and Importar seguros.
-- [ ] Open Revisar and confirm the right drawer groups folders, Markdown documents, images, files, private files, omitted files, and unsupported files with clear counts and decisions.
-- [ ] Confirm safe Markdown/image items are preselected, support files require review, review items can be included or omitted, and private files such as `.env`, `.pem`, or `.key` cannot be included.
-- [ ] Confirm newly detected files/folders appear in the tree with temporary Nuevo/Revisar/Modificado badges and no permanent action icons.
-- [ ] Import selected safe changes and confirm a local version is created, the tree refreshes, badges disappear after clean scan, and the UI reports either Sincronizado or Pendiente de sincronizar with GitHub.
-- [ ] Paste a large or mixed folder and confirm KnowNext.ai requires review instead of importing immediately.
-- [ ] Modify or delete a file externally and confirm the change is classified as Modificado or Eliminado, with deletions requiring review.
-- [ ] In desktop width, drag the divider next to the version history panel and confirm the right panel width changes with a visible vertical orange resize line.
-- [ ] In desktop width, focus the version history divider with the keyboard and confirm arrow keys resize the right panel within min/max limits.
-- [ ] Restart the app, open history, and confirm the history panel width is restored from `config.json`.
-- [ ] In tablet/mobile width, open version history and confirm it appears as a floating right drawer over the editor without a resize divider.
-- [ ] In tablet/mobile width, confirm version history closes from its X button, by clicking outside it, and by pressing Escape.
-- [ ] Confirm latest version appears first and has Actual.
-- [ ] Open Protección e historial and confirm Resumen, Historial local, GitHub, Omitidos, Actividad, and Detalles tabs are available.
-- [ ] In Protección e historial, open Actividad and confirm recent synchronization, backup, GitHub, restore, and ignored-file actions are grouped by day with user-facing copy and no Git branch names or command output.
-- [ ] Perform a project synchronization action and confirm Actividad updates after refreshing the protection state.
-- [ ] Close the version history panel.
-- [ ] Write text in the AI prompt input.
-- [ ] Submit the prompt.
-- [ ] Submit the AI prompt with no document open and confirm it is accepted as a project documentation prompt.
-- [ ] Confirm the fixed first tab is `IA`, uses the AI icon, and cannot be closed.
-- [ ] Confirm the fixed `Notas` tab is always visible next to `IA`, uses the notes icon, and cannot be closed.
-- [ ] Open `Notas`, edit its Milkdown content, and confirm there is no Guardar action, sync control, version history, export control, or image insertion action.
-- [ ] Edit `Notas`, wait for autoguardado, reload/restart, and confirm the content returns exactly as left without appearing in the project folder/document tree.
-- [ ] From `Notas`, submit an AI edit with document-edit permissions enabled and confirm the Notes editor updates and autoguards like a user edit.
-- [ ] Open the `IA` tab and confirm conversation messages are grouped by day.
-- [ ] Submit an informational AI prompt and confirm the response appears in a right-aligned bubble above the prompt with an X close button.
-- [ ] Submit a second AI prompt and confirm the previous bubble disappears before the new response is shown.
-- [ ] Submit an AI prompt and confirm a right-aligned waiting bubble appears above the prompt while the request is processing.
-- [ ] Confirm the prompt defaults to `Rápido`, shows a `Razonar` option, and only shows Ligero/Medio/Profundo when `Razonar` is selected.
-- [ ] In `Rápido`, ask for a simple active-document edit and confirm it executes on the active document without opening the `IA` tab, creating an agentic task, or asking which document to edit.
-- [ ] In `Rápido`, ask for a broad multi-step task and confirm the app asks to switch to `Razonar` instead of opening an agentic task automatically.
-- [ ] In `Razonar`, choose a depth and confirm the task first classifies the work, then either executes directly, asks a real clarification, reports a disabled permission, or opens `IA` only for long work.
-- [ ] Select text in the active document, focus the AI prompt, and confirm the document selection remains visually highlighted while a removable selected-text context chip appears in the prompt.
-- [ ] Remove the selected-text context chip and confirm the prompt can be sent without selected-text focus.
-- [ ] In the AI prompt, type `@` plus part of a filename and confirm a compact project-document picker opens above the prompt, filters results while typing, supports keyboard selection, and adds the selected document as a visible context chip.
-- [ ] In the AI prompt, type `@` plus part of an image filename and confirm project images appear with image icons, can be selected, and become visible image context chips.
-- [ ] In the AI prompt, type `@` plus part of a readable support-file name such as PDF, TXT, DOCX, PPTX, or XLSX and confirm it appears with a file icon, can be selected, and becomes a visible project context chip after backend extraction.
-- [ ] Try adding an unreadable support file such as an archive as AI context and confirm KnowNext.ai shows a clear warning/error instead of adding silent empty context.
-- [ ] Open an image from the project tree and use `Usar como contexto IA`; confirm the prompt receives the image context chip without leaving the image viewer.
-- [ ] Confirm every visible context chip in the prompt is treated as active context, remains visible after sending, and can be removed with its X button.
-- [ ] Add several context sources and confirm the prompt stays compact, shows `Fuentes · N · peso`, and opens a sources popover with status, origin, expiry, preview, remove, and extend actions.
-- [ ] Attach external `.md`, `.txt`, `.pdf`, `.docx`, `.pptx`, `.xlsx`, and image files to the AI prompt where available, and confirm each appears as a chip with clear `Listo`, `Procesando`, `Aviso`, or `No se pudo leer` state.
-- [ ] Confirm external context sources show expiry timing, display an orange warning state when close to expiry, and disappear from active context after backend expiry or when removed by the user.
-- [ ] Open an external source preview from the prompt and confirm extracted text or image readiness is visible without leaving the editor.
-- [ ] Use `Añadir al proyecto` from an external text source and confirm KnowNext.ai creates a Markdown document in the project, refreshes the tree, and opens the new document.
-- [ ] Submit an AI prompt with multiple active sources and confirm the `IA` conversation message records the exact sources used, even if those chips are later removed or expire.
-- [ ] Submit an AI edit for the active document and confirm Milkdown content changes, the document remains `Cambios sin guardar`, and the AI change notice appears as a floating prompt-area bubble with only the summary and an X close button.
-- [ ] Select text in an active document, ask IA in natural language to create an infographic from the selection, and confirm a generated image file appears in the project tree and opens in an image tab without requiring exact command wording.
-- [ ] Select text in an active document, ask IA to create an infographic and put it in the document, and confirm the generated image file appears in the tree while Milkdown renders the inserted image in the document flow.
-- [ ] Disable the image-generation or image-asset permissions in IA settings, repeat an image-generation prompt, and confirm the action is blocked with settings guidance instead of creating files.
-- [ ] From an active document, disable `Editar documentos`, ask for a document edit, and confirm the AI does not modify the editor and tells the user the permission can be changed in `Configuración de la app > IA`.
-- [ ] In the pending-intent card, confirm Permitir búsqueda, Aplicar, and Cancelar perform structured actions and do not inject artificial user text into the conversation.
-- [ ] Continue the pending task from the `IA` tab or with no document active and confirm the preserved target document receives the unsaved buffer update.
-- [ ] Create a folder/document through AI with permissions enabled and confirm the tree refreshes and the created document opens when applicable.
-- [ ] Duplicate and move a document through AI with `Crear, duplicar y mover documentos` enabled and confirm the tree, opened tab, and disk path update correctly.
-- [ ] From a document inside a nested folder, ask AI to create a related document without naming a folder and confirm it is created in the active document's folder.
-- [ ] Request a delete through AI with delete permission disabled and confirm the action is blocked with guidance to `Configuración de la app > IA`; enable the permission and confirm the same structured delete removes the selected nodes directly.
-- [ ] Hover over the account area and confirm the account menu appears with GitHub login/logout, recoverable drafts, and update actions.
-- [ ] Hover or focus Uso IA from the account menu and confirm the usage layer appears next to the menu, grouped by model with interactions, tokens, estimated EUR cost, and a monthly total only when more than one model was used.
-- [ ] Open the account menu and click Configuración de la app.
-- [ ] Confirm the settings modal opens with a left section list and right configuration pane.
-- [ ] In Servicios, confirm Backend local shows status, endpoint, active version, expected version, app data directory, and last check time.
-- [ ] In Servicios, confirm Backend local shows active profile, expected profile, active port, manager, instance id when available, and copied diagnostics include endpoint/profile/version/appDataDir.
-- [ ] In Servicios, click Comprobar and confirm the service status refreshes without closing the modal.
-- [ ] In the installed Tauri app, click Reiniciar backend and confirm the backend returns to Operativo or the last error is visible in the service card.
-- [ ] Stop the packaged backend process and confirm KnowNext.ai records the failed health check and restart attempt in `knownext.log`.
-- [ ] In Apariencia, change Idioma and confirm the selection persists after closing and reopening the modal.
-- [ ] In Apariencia, adjust Zoom and confirm the interface scales immediately and persists after restart.
-- [ ] In Apariencia, switch Tema between Sistema, Claro, and Oscuro. Confirm the workspace, settings modal, document tree, editor canvas, Milkdown content, hover states, and dialogs update without reloading the app.
-- [ ] In Apariencia, select several Color principal options and confirm primary buttons, active states, focus rings, soft highlights, and the preview use the selected accent while project icon colors remain independent.
-- [ ] Restart the app after changing Tema and Color principal, then confirm both preferences are restored from `config.json`.
-- [ ] In Apariencia, confirm `Mostrar subrayado en el editor` is enabled by default, explains that underline is not standard Markdown and uses inline HTML, then disable and re-enable it to confirm the preference persists and the editor toolbar shows or hides `Subrayado` accordingly.
-- [ ] In Exportar, adjust normal text typography, heading typography, colors, line spacing, margins, page size, link color, and separator color; export PDF and DOCX again and confirm the styling changes apply.
-- [ ] Export a Markdown document with several empty lines between paragraphs and confirm PDF and DOCX keep visible blank-line spacing without adding the file name as a title.
-- [ ] In the installed Tauri app, export MD, PDF, and DOCX from the editor toolbar and from the Markdown document tree menu; confirm each action opens the native system "Save as" dialog with the original Markdown filename and the target extension.
-- [ ] In the browser development build, export a Markdown document and confirm the browser save picker appears when supported, or the file is downloaded without console errors when the embedded browser does not expose save-picker support.
-- [ ] In Exportar, confirm the ASCII JSON template path is visible, reset the template, and confirm the defaults are restored.
-- [ ] In IA, save an OpenAI API key and confirm only configured/preview status is shown, never the full key.
-- [ ] In the browser development build, save an OpenAI API key and confirm the request succeeds through the web backend profile without a CORS or `Failed to fetch` error.
-- [ ] In IA, confirm the model selector shows intelligence and cost indicators, select a different model, close/reopen settings, and confirm the selected model persists.
-- [ ] In IA, confirm Visión de imágenes exposes enable/disable, model, detail, max images, max image size, image RAG indexing, and visual-description storage controls; change them, close/reopen settings, and confirm they persist.
-- [ ] In IA, confirm Generación de imágenes exposes enable/disable, GPT Image model, size, quality, output format, prompt metadata, and insertion confirmation controls; change them, close/reopen settings, and confirm they persist.
-- [ ] In IA, confirm Audio y transcripción exposes enable/disable, `gpt-realtime-whisper`, default target, default language, and favorite languages; change them, close/reopen settings, and confirm they persist.
-- [ ] Open the microphone chevron in the prompt and confirm only destination plus configured favorite languages appear, with the split microphone/stop action separate from the options chevron.
-- [ ] Use Transcribir al prompt and confirm speech appears in the prompt input, is editable, and does not submit until Enviar is clicked.
-- [ ] Use Dictar en documento with the cursor in Milkdown and confirm final transcript text is inserted as unsaved document content with normal undo/redo behavior.
-- [ ] In IA settings, confirm task depth is not configured globally; enable Investigación web, adjust step/source/cost limits, close/reopen settings, and confirm the values persist.
-- [ ] In IA, toggle Editar documentos, Crear y mover carpetas, Crear, duplicar y mover documentos, and Eliminar documentos y carpetas and confirm permissions persist.
-- [ ] In IA, enable project indexing, run Reindexar ahora, and confirm status shows indexed document counts plus local exact-search readiness.
-- [ ] In IA, enable image indexing, run Reindexar imágenes with an OpenAI key configured, and confirm image metadata shows indexed visual descriptions.
-- [ ] Edit one Markdown file after indexing, run Reindexar ahora again, and confirm the index updates without forcing a full project reset from the user's perspective.
-- [ ] Ask an IA question using an exact term, acronym, filename, or code-like token that exists in the project and confirm the answer references the expected path.
-- [ ] From an active document, ask for a multi-step documentation task and confirm the app opens the `IA` tab, shows a guided task card with steps, limits, source/web status, and a checkpoint before applying document changes.
-- [ ] Ask a conversational clarification while a document is active and confirm the answer appears in the bubble and `IA` tab without replacing the document.
-- [ ] Delete the IA index and confirm the vector-store status returns to not indexed and local exact-search readiness disappears.
-- [ ] In Trazas, activate Registro de trazas and confirm the log folder path appears.
-- [ ] With Registro de trazas active, trigger a recoverable API error and confirm `knownext.log` is written under the dedicated `logs` folder in the KnowNext.ai app data directory.
-- [ ] Click Abrir carpeta en el explorador and confirm Windows Explorer opens the dedicated log folder.
-- [ ] Disable Registro de trazas and confirm new recoverable errors are no longer appended to `knownext.log`.
-- [ ] Log out from GitHub and confirm versioned project history is disabled without removing local project files.
-- [ ] Confirm the account menu shows the current application version.
-- [ ] In the installed Tauri app, open the account menu and click Buscar actualizaciones.
-- [ ] With no newer release available, confirm the app reports that the installed version is current.
-- [ ] Publish a disposable newer Windows release and confirm the installed previous version detects it.
-- [ ] Confirm the update dialog shows installed version, new version, release notes when present, Actualizar, and Más tarde.
-- [ ] Start the update with edited documents open and confirm pending drafts are persisted before installation starts.
-- [ ] Confirm the updater downloads, installs, relaunches the app, and the visible app version changes.
-- [ ] Confirm projects, open tabs, local config, documents, and internal drafts remain intact after relaunch.
-- [ ] Temporarily break the updater signature or latest.json in a disposable release and confirm KnowNext.ai shows a recoverable update error without blocking editing.
-- [ ] Confirm no Git branch name is shown anywhere.
-- [ ] Confirm orange remains the default primary action color and blue only appears as a primary action accent when the user explicitly selects it in Apariencia.
-- [ ] Corrupt `config.json` in a disposable test profile, restart the backend, and confirm a `config.json.corrupt-*` backup is created.
-- [ ] Run the checklist against the packaged Tauri app before marking a build as 1.0.
+Use this checklist before publishing a KnowNext.ai release. For 2.0.0, run critical acceptance on packaged Windows and Android builds. Do not publish if a critical item fails.
+
+## Build Under Test
+
+- Version: `2.0.0`
+- Windows artifact: `KnowNext.ai_2.0.0_x64-setup.exe` and `KnowNext.ai_2.0.0_x64_en-US.msi`
+- Android artifact: `KnowNext.ai-android-arm64-v2.0.0.apk`
+- Runtime: local Tauri/Rust, no external product service or workstation service dependency.
+
+## Automated Gate
+
+- `pnpm version:check` passes.
+- `pnpm build` passes.
+- `pnpm test` passes.
+- `pnpm rust:test` passes.
+- `pnpm bundle:check-clean` passes.
+- `pnpm release:check` passes.
+- Windows Tauri release build succeeds with updater signing.
+- Android release build succeeds with Android signing.
+- Bundles and installers pass the clean-distribution scanner for removed runtime markers, runtime data files, seed projects, and API keys.
+
+## Windows Critical Acceptance
+
+- Install or update the packaged Windows app.
+- Open the app and confirm startup resolves to an empty workspace or the user's preserved real workspace, not sample data.
+- Create a project from the project selector.
+- Create a folder and Markdown document from tree menus.
+- Open multiple tabs, switch tabs, close tabs, and confirm the active document stays stable.
+- Edit in Milkdown, save, close, reopen, and confirm Markdown content persists.
+- Create and save user notes.
+- Open the history/protection drawer and confirm version state is shown without product branch names.
+- Import or attach an image and confirm it renders in the document/reference viewer when supported.
+- Open PDF/DOCX/XLSX reference previews where supported and confirm failures are visible and non-destructive.
+- Export a document to MD, PDF, and DOCX.
+- Use the AI panel on the active document. Mocked responses are acceptable only when clearly routed through the local runtime contract.
+- Open settings, confirm Services shows `Runtime local Rust`, `tauri://local-api/health`, no port control, and no external executable.
+- Enable diagnostics, trigger a visible error, and confirm trace/log access works.
+- Check for updates and confirm the updater uses the signed Windows manifest.
+- Resize the window across compact and normal widths without overlapping core controls.
+
+## Android Critical Acceptance
+
+- Install the packaged APK on a clean Android device or emulator.
+- Start the app with no workstation app, LAN service, or external product service running.
+- Confirm startup reaches the app workspace without asking for a runtime endpoint.
+- Create a project offline.
+- Create a folder and Markdown document.
+- Edit in Milkdown, save, close, reopen, and confirm content persists.
+- Use tabs and notes.
+- Import/export documents where Android permissions allow it.
+- Open supported reference previews or confirm unsupported previews fail with visible product errors.
+- Use the AI panel through the local runtime contract.
+- Open settings and confirm local runtime diagnostics and no endpoint configuration.
+- Check Android updates through `android-latest.json`; confirm package id, version code, SHA-256, and installer handoff behavior.
+- Reboot or relaunch the app and confirm local app data persists.
+
+## Release Publication Gate
+
+- GitHub release draft contains Windows NSIS, Windows MSI, both `.sig` files, `latest.json`, Android APK, and `android-latest.json`.
+- `latest.json` resolves to `2.0.0` and points `windows-x86_64.url` to the MSI artifact.
+- `android-latest.json` resolves to `2.0.0` and points to `KnowNext.ai-android-arm64-v2.0.0.apk`.
+- README Windows and Android download URLs return HTTP 200.
+- A previous Windows install updates to 2.0.0 without deleting app data.
+- An Android install updates to 2.0.0 while preserving app data and still works offline.
+
+## Known 2.0.0 Limitations To Record If Still Present
+
+- GitHub synchronization may remain mock-backed unless a real Rust GitHub service is validated.
+- AI provider execution may remain mock-backed unless credentials, privacy, and provider routing are validated.
+- Some document previews may be best-effort depending on Rust conversion support.
+
+Any limitation here must be repeated in `docs/releases/2.0.0.md` before publication.

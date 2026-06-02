@@ -37,7 +37,6 @@ const env = {
   JAVA_HOME: javaHome,
   ANDROID_HOME: sdkRoot,
   NDK_HOME: ndkHome,
-  VITE_EXPECTED_BACKEND_PROFILE: process.env.VITE_EXPECTED_BACKEND_PROFILE ?? "mobile",
   PATH: [
     join(javaHome, "bin"),
     join(sdkRoot, "cmdline-tools", "latest", "bin"),

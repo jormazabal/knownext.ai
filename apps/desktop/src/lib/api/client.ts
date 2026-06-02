@@ -1,15 +1,16 @@
+import { invoke } from "@tauri-apps/api/core";
 import { APP_VERSION } from "../appVersion";
 import { isTauriMobileRuntime, isTauriRuntime } from "../runtime/platform";
 
-export type BackendHealth = {
+export type RuntimeHealth = {
   app?: string;
   schemaVersion?: number;
   status?: string;
   service?: string;
   version?: string;
-  profile?: "desktop" | "web-dev" | string;
+  profile?: "desktop" | "mobile" | "web-dev" | string;
   host?: string;
-  port?: number;
+  port?: number | null;
   endpoint?: string;
   instanceId?: string;
   startedAt?: string;
@@ -17,84 +18,38 @@ export type BackendHealth = {
   appDataDir?: string;
 };
 
-const MOBILE_UNCONFIGURED_API_BASE_URL = "https://knownext-mobile-api-not-configured.invalid";
-const MOBILE_API_BASE_URL_STORAGE_KEY = "knownext.mobileApiBaseUrl";
-
-export let API_BASE_URL = resolveApiBaseUrl();
-let apiBaseUrlInitialized = false;
-
-function resolveApiBaseUrl() {
-  if (isTauriMobileRuntime() && storedMobileApiBaseUrl()) return storedMobileApiBaseUrl();
-  if (configuredApiBaseUrl()) return configuredApiBaseUrl();
-  if (isTauriMobileRuntime()) return MOBILE_UNCONFIGURED_API_BASE_URL;
-  if (isTauriRuntime()) {
-    return "http://127.0.0.1:8765";
-  }
-  return "http://127.0.0.1:8766";
-}
+export let API_BASE_URL = "tauri://local-api";
 
 export function setApiBaseUrl(url: string) {
-  const normalized = normalizeApiBaseUrl(url);
-  if (normalized) {
-    API_BASE_URL = normalized;
-    apiBaseUrlInitialized = true;
-  }
+  API_BASE_URL = url || "tauri://local-api";
 }
 
 export function getApiBaseUrl() {
   return API_BASE_URL;
 }
 
-export function setPersistentMobileApiBaseUrl(url: string) {
-  const normalized = normalizeApiBaseUrl(url);
-  if (!normalized) throw new Error("Introduce la URL del backend móvil.");
-  localStorage.setItem(MOBILE_API_BASE_URL_STORAGE_KEY, normalized);
-  setApiBaseUrl(normalized);
+export function setPersistentMobileApiBaseUrl(_url: string) {
+  API_BASE_URL = "tauri://local-api";
 }
 
 export function clearPersistentMobileApiBaseUrl() {
-  localStorage.removeItem(MOBILE_API_BASE_URL_STORAGE_KEY);
-  API_BASE_URL = configuredApiBaseUrl() || MOBILE_UNCONFIGURED_API_BASE_URL;
-  apiBaseUrlInitialized = true;
+  API_BASE_URL = "tauri://local-api";
 }
 
 export function isMobileApiBaseUrlConfigured() {
-  return Boolean(storedMobileApiBaseUrl() || configuredApiBaseUrl());
+  return true;
 }
 
 export async function initializeApiBaseUrl() {
-  if (apiBaseUrlInitialized) return API_BASE_URL;
-  if (isTauriMobileRuntime() && storedMobileApiBaseUrl()) {
-    setApiBaseUrl(storedMobileApiBaseUrl());
-    return API_BASE_URL;
-  }
-  if (configuredApiBaseUrl()) {
-    apiBaseUrlInitialized = true;
-    return API_BASE_URL;
-  }
-  if (isTauriRuntime() && !isTauriMobileRuntime()) {
-    try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      setApiBaseUrl(await invoke<string>("get_runtime_api_base_url"));
-    } catch {
-      apiBaseUrlInitialized = true;
-    }
-    return API_BASE_URL;
-  }
-  apiBaseUrlInitialized = true;
+  API_BASE_URL = "tauri://local-api";
   return API_BASE_URL;
 }
 
-export async function getApiWebSocketUrl(path: string) {
-  await initializeApiBaseUrl();
-  const baseUrl = new URL(API_BASE_URL);
-  baseUrl.protocol = baseUrl.protocol === "https:" ? "wss:" : "ws:";
-  baseUrl.pathname = `${baseUrl.pathname.replace(/\/+$/, "")}${path}`;
-  baseUrl.search = "";
-  return baseUrl.toString();
+export async function getApiWebSocketUrl(_path: string): Promise<string> {
+  throw new Error("La transcripción en tiempo real por WebSocket no está disponible en el runtime local-first 2.0.0.");
 }
 
-export function isBackendEnabled() {
+export function isRuntimeApiEnabled() {
   return true;
 }
 
@@ -115,256 +70,129 @@ export type ApiRequestInit = RequestInit & {
   timeoutMs?: number;
 };
 
-const DEFAULT_REQUEST_TIMEOUT_MS = 7000;
-const BROWSER_BACKEND_DISCOVERY_PORTS = Array.from({ length: 34 }, (_, index) => 8766 + index);
-const BROWSER_BACKEND_DISCOVERY_TIMEOUT_MS = 450;
-const MOBILE_BACKEND_DISCOVERY_PORT = 8775;
-const MOBILE_BACKEND_DISCOVERY_TIMEOUT_MS = 450;
-const MOBILE_BACKEND_DISCOVERY_CONCURRENCY = 32;
-const MOBILE_BACKEND_DISCOVERY_SUBNETS = ["192.168.1", "192.168.0", "192.168.68", "192.168.50", "10.0.0"];
+type LocalApiResponse<T> = {
+  status: number;
+  body: T;
+};
 
-export type MobileApiDiscoveryOptions = {
-  port?: number;
-  timeoutMs?: number;
-  concurrency?: number;
-  subnets?: string[];
-  hostStart?: number;
-  hostEnd?: number;
+type LocalApiContentResponse = {
+  status: number;
+  contentType: string;
+  filename?: string | null;
+  dataBase64: string;
+};
+
+type LocalApiFile = {
+  fieldName: string;
+  name: string;
+  mimeType?: string | null;
+  dataBase64: string;
 };
 
 export async function requestJson<T>(path: string, init?: ApiRequestInit): Promise<T> {
   await initializeApiBaseUrl();
-  const method = (init?.method ?? "GET").toUpperCase();
-  const attempts = method === "GET" ? 6 : 1;
-  let lastError: unknown;
-
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    try {
-      return await requestJsonOnce<T>(path, init);
-    } catch (error) {
-      lastError = error;
-      if (!isApiConnectionError(error) || attempt === attempts - 1) break;
-      await delay(250 * (attempt + 1));
-    }
+  if (!isTauriRuntime()) {
+    throw new ApiError(503, "Runtime unavailable", "KnowNext.ai 2.0.0 requiere el runtime Tauri local.");
   }
 
-  throw lastError;
+  const response = await invoke<LocalApiResponse<T>>("local_api_request", {
+    request: {
+      method: init?.method ?? "GET",
+      path,
+      body: parseBody(init?.body),
+    },
+  });
+
+  if (response.status >= 400) throw apiErrorFromResponse(response.status, response.body);
+  return response.body;
 }
 
 export async function requestFormData<T>(path: string, formData: FormData, init?: ApiRequestInit): Promise<T> {
   await initializeApiBaseUrl();
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), init?.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
-  const { timeoutMs: _timeoutMs, headers: _headers, body: _body, ...requestInit } = init ?? {};
-
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...requestInit,
-    method: requestInit.method ?? "POST",
-    body: formData,
-    signal: controller.signal,
-  }).finally(() => window.clearTimeout(timeout));
-
-  if (!response.ok) {
-    let detail: unknown;
-    try {
-      const body = await response.json();
-      if (body?.detail) detail = body.detail;
-    } catch {
-      // Some errors do not return a JSON body.
-    }
-    throw new ApiError(response.status, response.statusText, detail);
+  if (!isTauriRuntime()) {
+    throw new ApiError(503, "Runtime unavailable", "KnowNext.ai 2.0.0 requiere el runtime Tauri local.");
   }
 
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+  const files: LocalApiFile[] = [];
+  for (const [fieldName, value] of formData.entries()) {
+    if (value instanceof File) {
+      files.push({
+        fieldName,
+        name: value.name,
+        mimeType: value.type || null,
+        dataBase64: await fileToBase64(value),
+      });
+    }
+  }
+
+  const response = await invoke<LocalApiResponse<T>>("local_api_request", {
+    request: {
+      method: init?.method ?? "POST",
+      path,
+      body: parseBody(init?.body),
+      files,
+    },
+  });
+
+  if (response.status >= 400) throw apiErrorFromResponse(response.status, response.body);
+  return response.body;
 }
 
-export async function waitForApiReady(options: { attempts?: number; intervalMs?: number } = {}) {
+export async function requestBinary(path: string, init?: ApiRequestInit): Promise<Blob> {
   await initializeApiBaseUrl();
   if (!isTauriRuntime()) {
-    await discoverCompatibleBrowserBackend();
-  }
-  const attempts = options.attempts ?? 20;
-  const intervalMs = options.intervalMs ?? 250;
-  let lastError: unknown;
-
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    try {
-      const response = await fetchWithTimeout(`${API_BASE_URL}/health`, {}, 2500);
-      if (response.ok) {
-        const health = (await response.json()) as BackendHealth;
-        validateBackendHealth(health);
-        return;
-      }
-      lastError = new ApiError(response.status, response.statusText);
-    } catch (error) {
-      lastError = error;
-    }
-    await delay(intervalMs);
+    throw new ApiError(503, "Runtime unavailable", "KnowNext.ai 2.0.0 requiere el runtime Tauri local.");
   }
 
-  throw lastError;
-}
-
-export async function discoverMobileApiBaseUrl(options: MobileApiDiscoveryOptions = {}) {
-  const candidates = buildMobileBackendCandidates(options);
-  let nextCandidateIndex = 0;
-  let discoveredBaseUrl = "";
-  const workerCount = Math.max(1, Math.min(options.concurrency ?? MOBILE_BACKEND_DISCOVERY_CONCURRENCY, candidates.length));
-
-  async function probeNextCandidate() {
-    while (!discoveredBaseUrl && nextCandidateIndex < candidates.length) {
-      const candidate = candidates[nextCandidateIndex];
-      nextCandidateIndex += 1;
-
-      try {
-        const response = await fetchWithTimeout(`${candidate}/health`, {}, options.timeoutMs ?? MOBILE_BACKEND_DISCOVERY_TIMEOUT_MS);
-        if (!response.ok) continue;
-        const health = (await response.json()) as BackendHealth;
-        if (isCompatibleBackendHealth(health)) {
-          discoveredBaseUrl = candidate;
-          setApiBaseUrl(candidate);
-          return;
-        }
-      } catch {
-        // Network discovery is best effort; unreachable hosts are expected.
-      }
-    }
-  }
-
-  await Promise.all(Array.from({ length: workerCount }, () => probeNextCandidate()));
-  return discoveredBaseUrl;
-}
-
-async function discoverCompatibleBrowserBackend() {
-  const candidates = buildBrowserBackendCandidates();
-  for (const baseUrl of candidates) {
-    try {
-      const response = await fetchWithTimeout(`${baseUrl}/health`, {}, BROWSER_BACKEND_DISCOVERY_TIMEOUT_MS);
-      if (!response.ok) continue;
-      const health = (await response.json()) as BackendHealth;
-      if (isCompatibleBackendHealth(health)) {
-        setApiBaseUrl(baseUrl);
-        return;
-      }
-    } catch {
-      // Try the next development port.
-    }
-  }
-}
-
-function buildBrowserBackendCandidates() {
-  const current = API_BASE_URL.replace(/\/+$/, "");
-  const candidates = new Set<string>([current]);
-  for (const port of BROWSER_BACKEND_DISCOVERY_PORTS) {
-    candidates.add(`http://127.0.0.1:${port}`);
-  }
-  return Array.from(candidates);
-}
-
-function buildMobileBackendCandidates(options: MobileApiDiscoveryOptions) {
-  const port = options.port ?? MOBILE_BACKEND_DISCOVERY_PORT;
-  const hostStart = options.hostStart ?? 2;
-  const hostEnd = options.hostEnd ?? 254;
-  const subnets = options.subnets ?? MOBILE_BACKEND_DISCOVERY_SUBNETS;
-  const candidates = new Set<string>();
-  const savedEndpoint = storedMobileApiBaseUrl();
-  const configuredEndpoint = configuredApiBaseUrl();
-
-  if (savedEndpoint) candidates.add(savedEndpoint);
-  if (configuredEndpoint) candidates.add(configuredEndpoint);
-  candidates.add(`http://10.0.2.2:${port}`);
-
-  for (const subnet of subnets) {
-    for (let host = hostStart; host <= hostEnd; host += 1) {
-      candidates.add(`http://${subnet}.${host}:${port}`);
-    }
-  }
-
-  return Array.from(candidates);
-}
-
-function isCompatibleBackendHealth(health: BackendHealth) {
-  return health.app === "knownext" && health.status === "ok" && health.profile === expectedBackendProfile() && health.version === APP_VERSION;
-}
-
-async function requestJsonOnce<T>(path: string, init?: ApiRequestInit): Promise<T> {
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), init?.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
-  const { timeoutMs: _timeoutMs, ...requestInit } = init ?? {};
-
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(requestInit.headers ?? {}),
+  const response = await invoke<LocalApiContentResponse>("local_api_content", {
+    request: {
+      method: init?.method ?? "GET",
+      path,
+      body: parseBody(init?.body),
     },
-    signal: controller.signal,
-    ...requestInit,
-  }).finally(() => window.clearTimeout(timeout));
+  });
 
-  if (!response.ok) {
-    let detail: unknown;
-
-    try {
-      const body = await response.json();
-      if (body?.detail) {
-        detail = body.detail;
-      }
-    } catch {
-      // Some errors do not return a JSON body.
-    }
-
-    throw new ApiError(response.status, response.statusText, detail);
-  }
-
-  if (response.status === 204) return undefined as T;
-
-  return response.json() as Promise<T>;
+  if (response.status >= 400) throw new ApiError(response.status, "Local API error");
+  return base64ToBlob(response.dataBase64, response.contentType);
 }
 
-async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
-  return fetch(url, {
-    ...init,
-    signal: controller.signal,
-  }).finally(() => window.clearTimeout(timeout));
+export async function requestDataUrl(path: string, init?: ApiRequestInit): Promise<string> {
+  const blob = await requestBinary(path, init);
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
 }
 
-function delay(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
+export async function waitForApiReady(_options: { attempts?: number; intervalMs?: number } = {}) {
+  const health = await requestJson<RuntimeHealth>("/health");
+  validateRuntimeHealth(health);
+}
+
+export async function discoverMobileApiBaseUrl(_options: unknown = {}) {
+  API_BASE_URL = "tauri://local-api";
+  return API_BASE_URL;
 }
 
 export function getApiErrorMessage(error: unknown, fallback: string) {
   if (error instanceof ApiError) return typeof error.detail === "string" ? error.detail : error.message;
-  if (error instanceof DOMException && error.name === "AbortError") {
-    if (isTauriMobileRuntime()) {
-      return `La API de KnowNext.ai para Android no respondió a tiempo (${API_BASE_URL}). Comprueba el endpoint del backend móvil.`;
-    }
-    return "La API local no respondió a tiempo. Comprueba que el backend esté en ejecución.";
-  }
-  if (error instanceof TypeError) {
-    if (isTauriMobileRuntime()) {
-      return `No se pudo conectar con la API de KnowNext.ai para Android (${API_BASE_URL}). Revisa el endpoint del backend móvil y que el teléfono esté en la misma red.`;
-    }
-    return `No se pudo conectar con la API local (${API_BASE_URL}). Comprueba que el backend correspondiente esté en ejecución.`;
-  }
   if (error instanceof Error) return error.message;
   return fallback;
 }
 
 export function isApiConnectionError(error: unknown) {
-  return error instanceof TypeError || (error instanceof DOMException && error.name === "AbortError");
+  return error instanceof ApiError && error.status === 503;
 }
 
-export function expectedBackendProfile() {
-  if (configuredBackendProfile()) return configuredBackendProfile();
+export function expectedRuntimeProfile() {
   if (isTauriMobileRuntime()) return "mobile";
   return isTauriRuntime() ? "desktop" : "web-dev";
 }
 
-export function validateBackendHealth(health: BackendHealth) {
-  const expectedProfile = expectedBackendProfile();
+export function validateRuntimeHealth(health: RuntimeHealth) {
+  const expectedProfile = expectedRuntimeProfile();
   const problems: string[] = [];
   if (health.app !== "knownext") problems.push(`app=${health.app ?? "unknown"}`);
   if (health.status !== "ok") problems.push(`status=${health.status ?? "unknown"}`);
@@ -373,67 +201,34 @@ export function validateBackendHealth(health: BackendHealth) {
   if (problems.length > 0) {
     throw new ApiError(
       409,
-      "Backend incompatible",
-      `Backend local incompatible. Esperado version=${APP_VERSION}, profile=${expectedProfile}; detectado ${problems.join(", ")}.`,
+      "Runtime incompatible",
+      `Runtime local incompatible. Esperado version=${APP_VERSION}, profile=${expectedProfile}; detectado ${problems.join(", ")}.`,
     );
   }
 }
 
-function configuredApiBaseUrl() {
-  const value = import.meta.env.VITE_API_BASE_URL?.trim();
-  return value ? normalizeApiBaseUrl(value) : "";
+function parseBody(body: BodyInit | null | undefined) {
+  if (!body) return null;
+  if (typeof body === "string") return JSON.parse(body);
+  return null;
 }
 
-function configuredBackendProfile() {
-  return import.meta.env.VITE_EXPECTED_BACKEND_PROFILE?.trim() || "";
+function apiErrorFromResponse(status: number, body: unknown) {
+  const detail = typeof body === "object" && body && "detail" in body ? (body as { detail?: unknown }).detail : body;
+  return new ApiError(status, "Local API error", detail);
 }
 
-function storedMobileApiBaseUrl() {
-  if (typeof localStorage === "undefined") return "";
-  return normalizeApiBaseUrl(localStorage.getItem(MOBILE_API_BASE_URL_STORAGE_KEY) ?? "");
+async function fileToBase64(file: File) {
+  const buffer = await file.arrayBuffer();
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 
-function normalizeApiBaseUrl(url: string) {
-  const trimmed = url.trim().replace(/\/+$/, "");
-  if (!trimmed) return "";
-
-  let parsed: URL;
-  try {
-    parsed = new URL(trimmed);
-  } catch {
-    throw new Error("El endpoint debe ser una URL completa, por ejemplo http://192.168.1.20:8775.");
-  }
-
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error("El endpoint debe empezar por http:// o https://.");
-  }
-
-  if (isTauriMobileRuntime() && parsed.protocol === "http:" && !isPrivateNetworkHost(parsed.hostname)) {
-    throw new Error("En Android, las direcciones http:// deben ser locales, por ejemplo http://192.168.1.20:8775.");
-  }
-
-  parsed.pathname = parsed.pathname.replace(/\/+$/, "");
-  parsed.search = "";
-  parsed.hash = "";
-  return parsed.toString().replace(/\/+$/, "");
+function base64ToBlob(base64: string, contentType: string) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new Blob([bytes], { type: contentType });
 }
-
-function isPrivateNetworkHost(hostname: string) {
-  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  if (host === "localhost" || host.endsWith(".localhost")) return true;
-  if (host.endsWith(".local")) return true;
-  if (host === "10.0.2.2") return true;
-  if (host.startsWith("127.")) return true;
-  if (host.startsWith("10.")) return true;
-  if (host.startsWith("192.168.")) return true;
-  if (host.startsWith("169.254.")) return true;
-
-  const private172Match = /^172\.(\d+)\./.exec(host);
-  if (private172Match) {
-    const secondOctet = Number(private172Match[1]);
-    return secondOctet >= 16 && secondOctet <= 31;
-  }
-
-  return false;
-}
-

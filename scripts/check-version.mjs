@@ -25,11 +25,6 @@ const checks = [
     file: "apps/desktop/src-tauri/Cargo.toml",
     read: (contents) => contents.match(/^version\s*=\s*"([^"]+)"/m)?.[1],
   },
-  {
-    label: "backend pyproject",
-    file: "backend/pyproject.toml",
-    read: (contents) => contents.match(/^version\s*=\s*"([^"]+)"/m)?.[1],
-  },
 ];
 
 const mismatches = checks.flatMap(({ label, file, read }) => {

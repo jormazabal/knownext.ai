@@ -15,7 +15,7 @@ Product quality depends on technical foundation and a coherent desktop documenta
 - Verify UI constraints from screenshots.
 - Confirm no forbidden Git branch UI appears.
 - Confirm Milkdown remains the editor.
-- Confirm backend contracts remain organized.
+- Confirm runtime contracts remain organized.
 
 ## Recommended Steps
 
@@ -36,4 +36,3 @@ Product quality depends on technical foundation and a coherent desktop documenta
 - Treating visual drift as subjective when constraints are explicit.
 - Accepting raw Markdown as the main experience.
 - Ignoring documentation and agent guidance changes.
-

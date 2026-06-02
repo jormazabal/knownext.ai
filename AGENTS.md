@@ -2,28 +2,37 @@
 
 ## Product Objective
 
-KnowNext.ai is a Tauri desktop application for managing, editing, versioning, and consulting Markdown documentation by project. The product must feel like a compact professional workspace, not a static mockup.
+KnowNext.ai is a local-first Tauri application for managing, editing, versioning, exporting, and consulting Markdown documentation by project. The product must feel like a compact professional workspace, not a static mockup.
 
 ## Mandatory Stack
 
-- Desktop application: Tauri.
+- Native application: Tauri v2.
 - Frontend: React + TypeScript.
 - Styles: Tailwind CSS.
 - Visual Markdown editor: Milkdown.
-- Local API/backend: Python + FastAPI.
-- Initial persistence: local files and mock services.
-- Future versioning: local Git.
-- Future AI: FastAPI-mediated AI integration.
+- Local runtime: Rust/Tauri commands.
+- Persistence: local files and Rust-managed JSON state.
+- Versioning: local Git mediated by Rust services.
+- AI: Rust/Tauri mediated provider integration; React never calls AI providers directly.
 
 ## Architecture Rules
 
 - Keep a clear separation between UI, services, models, and runtime integration.
-- Components render state and dispatch intent; they must not own backend, Git, or AI business logic.
-- API access belongs under `apps/desktop/src/lib/api`.
+- Components render state and dispatch intent; they must not own filesystem, Git, AI, or persistence business logic.
+- Frontend API access belongs under `apps/desktop/src/lib/api`.
 - Shared product types belong under `apps/desktop/src/types`.
-- Backend business rules belong in `backend/app/services`.
-- Backend routers must stay thin and call services.
+- Rust command registration belongs under `apps/desktop/src-tauri/src`.
+- Rust business rules belong in crates under `apps/desktop/src-tauri/crates`.
+- Tauri commands must stay thin and call Rust services.
 - Do not introduce unrelated frameworks or state managers without a concrete product need.
+
+## Rust Runtime Rules
+
+- The product has no external product service, HTTP runtime server, packaged auxiliary process, or compatibility runtime option.
+- Windows and Android must be autonomous local apps.
+- Runtime commands must return structured JSON with predictable IDs and timestamps.
+- Keep mocks replaceable by real persistence, Git, document, and AI services.
+- Do not block the UI thread with filesystem, Git, document conversion, or AI work.
 
 ## Frontend Rules
 
@@ -34,14 +43,6 @@ KnowNext.ai is a Tauri desktop application for managing, editing, versioning, an
 - Keep the main document as a single-column editing surface.
 - Do not mix business logic into visual-only components.
 - Do not call mock data directly from arbitrary components; use the API layer.
-
-## Backend Rules
-
-- Use FastAPI routers, schemas, and services.
-- Keep mocks replaceable by real persistence services.
-- Do not implement a complex real backend until storage, Git, and security decisions are explicit.
-- Keep endpoint contracts stable and documented.
-- Return structured JSON with predictable IDs and timestamps.
 
 ## Milkdown Rules
 
@@ -56,9 +57,9 @@ KnowNext.ai is a Tauri desktop application for managing, editing, versioning, an
 
 - Use Tauri, not Electron.
 - React remains the primary UI.
-- Keep native commands minimal in the first version.
-- Future backend startup must use a controlled sidecar approach.
-- Do not block the UI thread with filesystem, Git, or backend operations.
+- Keep native command handlers minimal and delegate to Rust crates.
+- Do not add auxiliary product runtime processes.
+- Do not block the UI thread with filesystem, Git, document, or AI operations.
 
 ## Release And Updater Rules
 
@@ -66,29 +67,30 @@ KnowNext.ai is a Tauri desktop application for managing, editing, versioning, an
 - Keep `VERSION` as the release source of truth and keep all checked manifests aligned.
 - Public Windows releases are distributed from GitHub Releases in `jormazabal/knownext.ai`.
 - The README manual download link must point to the versioned NSIS installer using the `/releases/latest/download/KnowNext.ai_<version>_x64-setup.exe` URL.
-- The in-app updater must use the signed Tauri `latest.json` manifest and currently must prefer the MSI artifact for `windows-x86_64`.
-- Do not publish a release unless the GitHub release contains the NSIS installer, MSI installer, both `.sig` files, and `latest.json`.
-- After publishing, verify that `latest.json` resolves to the new version and that its Windows URL points to the MSI artifact.
+- The Windows updater must use the signed Tauri `latest.json` manifest and currently must prefer the MSI artifact for `windows-x86_64`.
+- Android releases must include the signed APK and `android-latest.json`.
+- Do not publish a release unless the GitHub release contains the NSIS installer, MSI installer, both Windows `.sig` files, `latest.json`, Android APK, and `android-latest.json`.
+- After publishing, verify that both update manifests resolve to the new version and point to the expected assets.
 - Updater signing with `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` is mandatory; Authenticode is recommended but optional until a public code-signing certificate exists.
 - Do not regenerate the Tauri updater key unless explicitly requested; changing it can strand already installed clients.
 
 ## Git And Versioning Rules
 
 - Version history is based on commits in the repository conceptually.
-- Do not introduce Git branches into the UI.
+- Do not introduce Git branches into the product UI.
 - Do not show `main` or any branch name in product UI.
 - Do not execute Git directly from React components.
-- Git operations must be mediated by backend/runtime services.
-- The first version uses mock commit history only.
+- Git operations must be mediated by Rust runtime services.
+- Local-only versioning may use replaceable mock commit history only until the local Git service is complete.
 
 ## AI Rules
 
 - AI interactions must be contextual to the active document.
-- AI intent resolution must be structured: backend state + LLM decision + validated deterministic execution.
+- AI intent resolution must be structured: runtime state + LLM decision + validated deterministic execution.
 - The prompt execution mode controls cost and routing: quick mode is direct and non-agentic; reasoning mode may run structured preflight and then choose direct or agentic work.
 - Do not implement intent logic with user-text heuristics, regexes, language-specific phrase lists, or keyword matching.
 - Do not call real AI providers directly from React components.
-- All future AI calls go through FastAPI.
+- All AI calls go through Rust/Tauri services.
 - Initial AI behavior can be mocked, but request/response schemas should be stable.
 - Do not stream or persist prompts until product and privacy rules are defined.
 
@@ -111,18 +113,18 @@ KnowNext.ai is a Tauri desktop application for managing, editing, versioning, an
 
 ## Quality Rules
 
-- Keep changes scoped to the product surface requested.
+- Keep changes scoped to the requested product surface.
 - Favor simple, typed contracts over clever abstractions.
-- Validate with TypeScript build and backend tests when possible.
+- Validate with TypeScript build, frontend tests, Rust tests, and contract tests when possible.
 - Avoid unrelated refactors.
 - Keep mock data realistic and centralized.
 
 ## Testing Rules
 
-- Add tests for backend contracts.
+- Add tests for Rust/Tauri contracts.
 - Add frontend component tests for critical interactions when expanding behavior.
 - Maintain `docs/development/manual-test-checklist.md`.
-- Manual acceptance must include project selector, tree menus, tab switching, Milkdown editing, save feedback, history drawer, and AI input.
+- Manual acceptance must include project selector, tree menus, tab switching, Milkdown editing, save feedback, history drawer, AI input, import/export, previews, settings, Windows update, and Android offline operation.
 
 ## Documentation Rules
 
@@ -134,22 +136,21 @@ KnowNext.ai is a Tauri desktop application for managing, editing, versioning, an
 ## Working By Phases
 
 1. Product shell and visual fidelity.
-2. Stable frontend/backend contracts.
+2. Stable frontend/Rust runtime contracts.
 3. Local filesystem persistence.
 4. Real Git version history service.
-5. Real AI integration through FastAPI.
-6. Tauri sidecar packaging and hardening.
-7. Automated frontend and integration tests.
+5. Real AI integration through Tauri/Rust.
+6. Tauri packaging and hardening for Windows and Android.
+7. Automated frontend, Rust, and integration tests.
 
 ## Do Not Do
 
 - Do not use Electron.
+- Do not add external server runtime paths, compatibility runtime paths, or auxiliary product processes.
 - Do not replace Milkdown without explicit approval.
 - Do not show raw Markdown as the main editor.
 - Do not introduce Git branches in the interface.
 - Do not use blue as the main action color.
 - Do not execute Git from React components.
-- Do not mix backend or business logic into visual components.
-- Do not build a complex real backend before storage and security decisions are defined.
+- Do not mix runtime or business logic into visual components.
 - Do not scatter mock data across the UI.
-

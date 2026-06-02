@@ -1,4 +1,4 @@
-import { API_BASE_URL, requestFormData, requestJson } from "./client";
+import { requestDataUrl, requestFormData, requestJson } from "./client";
 import type {
   AssetImportResponse,
   AssetMetadata,
@@ -143,7 +143,11 @@ export async function getProjectImageUsage(projectId: string, assetId: string): 
 }
 
 export function getProjectImageContentUrl(projectId: string, assetId: string): string {
-  return `${API_BASE_URL}/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/content`;
+  return `knownext-asset://${encodeURIComponent(projectId)}/${encodeURIComponent(assetId)}`;
+}
+
+export async function getProjectImageContentDataUrl(projectId: string, assetId: string): Promise<string> {
+  return requestDataUrl(`/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/content`);
 }
 
 export async function buildImageReference(projectId: string, documentId: string, assetId: string, altText?: string | null): Promise<InsertImageReferenceResponse> {

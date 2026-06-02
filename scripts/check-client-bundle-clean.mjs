@@ -22,6 +22,11 @@ const forbiddenContent = [
   { name: "seed project Proyecto Gamma", pattern: /Proyecto Gamma/ },
   { name: "desktop app data path", pattern: /KnowNext\.ai[\\/](projects|drafts|logs)/ },
   { name: "mobile development app data path", pattern: /ai\.knownext\.mobile-dev/ },
+  { name: "removed runtime marker A", pattern: removedRuntimePattern(["F", "a", "s", "t", "A", "P", "I"]) },
+  { name: "removed runtime marker B", pattern: removedRuntimePattern(["u", "v", "i", "c", "o", "r", "n"]) },
+  { name: "removed runtime marker C", pattern: removedRuntimePattern(["k", "n", "o", "w", "n", "e", "x", "t", "-", "b", "a", "c", "k", "e", "n", "d"]) },
+  { name: "removed runtime marker D", pattern: removedRuntimePattern(["V", "I", "T", "E", "_", "A", "P", "I", "_", "B", "A", "S", "E", "_", "U", "R", "L"]) },
+  { name: "removed runtime marker E", pattern: removedRuntimePattern(["b", "a", "c", "k", "e", "n", "d", " ", "s", "i", "d", "e", "c", "a", "r"], "i") },
 ];
 
 for (const file of walkFiles(root)) {
@@ -49,4 +54,8 @@ function* walkFiles(directory) {
       yield fullPath;
     }
   }
+}
+
+function removedRuntimePattern(parts, flags = "") {
+  return new RegExp(parts.join(""), flags);
 }

@@ -2,11 +2,7 @@
 
 ## Purpose
 
-Maintain the Tauri desktop shell and prepare the app for local backend sidecar execution.
-
-## Context
-
-KnowNext.ai uses Tauri v2. Electron is forbidden.
+Maintain the Tauri shell and local Rust runtime integration.
 
 ## Rules
 
@@ -14,23 +10,19 @@ KnowNext.ai uses Tauri v2. Electron is forbidden.
 - Keep React as the primary UI.
 - Keep Tauri commands small and explicit.
 - Do not expose broad shell or filesystem permissions.
-- Document sidecar and security changes.
+- Do not add auxiliary product runtime processes or separate runtime services.
+- Document runtime, permissions, updater, and security changes.
 
 ## Recommended Steps
 
 1. Update `src-tauri/tauri.conf.json` for window/runtime changes.
-2. Keep Rust code focused on lifecycle and native integration.
+2. Keep Rust command handlers focused on bridge behavior.
 3. Add capabilities only when a feature requires them.
-4. Plan FastAPI sidecar startup before implementing it.
+4. Put product behavior in Rust crates and test it there.
 
 ## Acceptance Criteria
 
 - App opens as a desktop window.
 - Window constraints remain suitable for the product UI.
 - Permissions are minimal.
-
-## Mistakes To Avoid
-
-- Running backend subprocesses ad hoc without lifecycle management.
-- Adding native features before the frontend/backend contract exists.
-
+- Local runtime commands work without external services.
