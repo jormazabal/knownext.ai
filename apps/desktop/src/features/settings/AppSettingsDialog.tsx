@@ -6,7 +6,7 @@ import { defaultAiConfig } from "../../lib/api/config";
 import { accentPalettes } from "../../lib/theme/appearance";
 import type { AiConfigStatus, AiImageGenerationModelId, AiIndexStatusResponse, AiModelId, AiTranscriptionLanguage, AiVisionModelId, AppearanceAccentColor, AppearanceConfig, AppearanceThemeMode, DiagnosticsConfig, ExportTemplateConfig, ExportTemplateUpdate, ExportTextFormat } from "../../types/domain";
 import type { TraceLogStatus } from "../../lib/runtime/logging";
-import type { RuntimePortConfig, RuntimeServicesStatus } from "../../lib/runtime/services";
+import type { RuntimeServicesStatus } from "../../lib/runtime/services";
 
 type AppSettingsSection = "summary" | "interface" | "export" | "ai" | "capabilities" | "system";
 
@@ -45,8 +45,6 @@ type AppSettingsDialogProps = {
   onDeleteAiIndex: () => void;
   onOpenTraceLogFolder: () => void;
   onRefreshRuntimeServices: () => void;
-  onRestartRuntimeService: () => void;
-  onUpdateRuntimePortConfig: (config: RuntimePortConfig) => void;
 };
 
 const aiModelIds: AiModelId[] = ["gpt-5.4-mini", "gpt-5.4", "gpt-5.5", "gpt-5.4-nano"];
@@ -134,8 +132,6 @@ export function AppSettingsDialog({
   onDeleteAiIndex,
   onOpenTraceLogFolder,
   onRefreshRuntimeServices,
-  onRestartRuntimeService,
-  onUpdateRuntimePortConfig,
 }: AppSettingsDialogProps) {
   const [activeSection, setActiveSection] = useStableSection(open);
   const text = settingsCopy[appearance.language];
@@ -256,8 +252,6 @@ export function AppSettingsDialog({
                 onDiagnosticsChange={onDiagnosticsChange}
                 onOpenTraceLogFolder={onOpenTraceLogFolder}
                 onRefresh={onRefreshRuntimeServices}
-                onRestartRuntimeService={onRestartRuntimeService}
-                onUpdateRuntimePortConfig={onUpdateRuntimePortConfig}
               />
             )}
           </div>
@@ -403,7 +397,7 @@ function SummarySettings({
           <div className="overflow-hidden rounded-md border border-line">
             <SummaryRow icon={<Server size={13} />} label={text.versionLabel} value={runtimeService?.version ?? text.unavailableValue} />
             <SummaryRow icon={<Settings size={13} />} label={text.profileLabel} value={runtimeService?.profile ?? text.unavailableValue} />
-            <SummaryRow icon={<Activity size={13} />} label={text.portLabel} value={runtimeService?.port ? String(runtimeService.port) : text.unavailableValue} />
+            <SummaryRow icon={<Server size={13} />} label={text.localContractLabel} value={runtimeService?.endpoint ?? text.unavailableValue} />
             <SummaryRow icon={<ListChecks size={13} />} label={text.traceToggleLabel} value={diagnostics.traceLoggingEnabled ? text.enabled : text.disabled} />
             <SummaryRow icon={<Check size={13} />} label={text.servicesNav} value={runtimeService?.statusLabel ?? text.servicesPending} success={runtimeService?.status === "running"} />
           </div>
@@ -1604,8 +1598,6 @@ function SystemSettings({
   onDiagnosticsChange,
   onOpenTraceLogFolder,
   onRefresh,
-  onRestartRuntimeService,
-  onUpdateRuntimePortConfig,
 }: {
   diagnostics: DiagnosticsConfig;
   traceLogStatus: TraceLogStatus | null;
@@ -1615,8 +1607,6 @@ function SystemSettings({
   onDiagnosticsChange: (diagnostics: Partial<DiagnosticsConfig>) => void;
   onOpenTraceLogFolder: () => void;
   onRefresh: () => void;
-  onRestartRuntimeService: () => void;
-  onUpdateRuntimePortConfig: (config: RuntimePortConfig) => void;
 }) {
   const services = runtimeServicesStatus?.services ?? [];
   const runtimeService = services.find((service) => service.id === "local-runtime") ?? services[0] ?? null;
@@ -1650,8 +1640,6 @@ function SystemSettings({
             text={text}
             refreshing={refreshing}
             onRefresh={onRefresh}
-            onRestartRuntimeService={onRestartRuntimeService}
-            onUpdateRuntimePortConfig={onUpdateRuntimePortConfig}
           />
         ) : (
           <div className="mt-4 rounded-md border border-line bg-panel px-4 py-3 text-[11px] text-ink-secondary">{text.servicesPending}</div>
@@ -1668,7 +1656,7 @@ function SystemSettings({
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <SystemInfoRow icon={<FolderOpen size={14} />} label={text.appDataDirLabel} value={runtimeService?.appDataDir ?? text.unavailableValue} mono />
           <SystemInfoRow icon={<FolderOpen size={14} />} label={text.expectedAppDataDirLabel} value={runtimeService?.expectedAppDataDir || text.unavailableValue} mono />
-          <SystemInfoRow icon={<Server size={14} />} label={text.endpointLabel} value={runtimeService?.endpoint ?? text.unavailableValue} mono />
+          <SystemInfoRow icon={<Server size={14} />} label={text.localContractLabel} value={runtimeService?.endpoint ?? text.unavailableValue} mono />
           <SystemInfoRow icon={<Activity size={14} />} label={text.profileLabel} value={runtimeService?.profile ?? text.unavailableValue} />
         </div>
       </SettingsPanel>
@@ -1707,10 +1695,9 @@ function SystemSettings({
       <SettingsPanel>
         <h4 className="text-[15px] font-semibold text-ink-primary">{text.diagnosticToolsHeading}</h4>
         <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.diagnosticToolsDescription}</p>
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
           <DiagnosticAction icon={<RefreshCw size={16} />} title={text.refreshServicesTool} description={text.refreshServicesDescription} onClick={onRefresh} disabled={refreshing} />
           <DiagnosticAction icon={<Copy size={16} />} title={text.copyDiagnosticTool} description={text.copyDiagnosticDescription} onClick={() => runtimeService ? void copyText(buildServiceDiagnostic(runtimeService)) : undefined} disabled={!runtimeService} />
-          <DiagnosticAction icon={<RotateCcw size={16} />} title={text.restartRuntimeTool} description={text.restartRuntimeDescription} onClick={onRestartRuntimeService} disabled={!runtimeService?.canRestart || refreshing} danger />
         </div>
       </SettingsPanel>
     </div>
@@ -1748,32 +1735,20 @@ function SystemServiceCard({
   text,
   refreshing,
   onRefresh,
-  onRestartRuntimeService,
-  onUpdateRuntimePortConfig,
 }: {
   service: RuntimeServicesStatus["services"][number];
   text: SettingsCopy;
   refreshing: boolean;
   onRefresh: () => void;
-  onRestartRuntimeService: () => void;
-  onUpdateRuntimePortConfig: (config: RuntimePortConfig) => void;
 }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [portMode, setPortMode] = useState<RuntimePortConfig["mode"]>(service.portConfig?.mode ?? "automatic");
-  const [fixedPort, setFixedPort] = useState(service.portConfig?.port ?? service.port ?? 8765);
-  const [autoStart, setAutoStart] = useState(service.portConfig?.autoPortStart ?? 8765);
-  const [autoEnd, setAutoEnd] = useState(service.portConfig?.autoPortEnd ?? 8799);
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   const diagnostic = buildServiceDiagnostic(service);
   const stateTone = service.status === "running" ? "success" : service.status === "degraded" ? "warning" : "danger";
 
   useEffect(() => {
-    setPortMode(service.portConfig?.mode ?? "automatic");
-    setFixedPort(service.portConfig?.port ?? service.port ?? 8765);
-    setAutoStart(service.portConfig?.autoPortStart ?? 8765);
-    setAutoEnd(service.portConfig?.autoPortEnd ?? 8799);
     setCopyStatus("idle");
-  }, [service.portConfig, service.port]);
+  }, [service]);
 
   async function handleCopyDiagnostic() {
     const copied = await copyText(diagnostic);
@@ -1783,7 +1758,7 @@ function SystemServiceCard({
 
   return (
     <div className="mt-4 overflow-hidden rounded-md border border-line bg-white">
-      <div className="grid items-center gap-3 border-b border-line px-4 py-3 md:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
+      <div className="grid items-center gap-3 border-b border-line px-4 py-3 md:grid-cols-[minmax(0,1fr)_auto_auto]">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-[12px] font-semibold text-ink-primary">{service.name}</p>
@@ -1812,7 +1787,7 @@ function SystemServiceCard({
       <div className="grid gap-0 sm:grid-cols-2 lg:grid-cols-4">
         <RagMetric label={text.versionLabel} value={service.version ?? text.unavailableValue} tone={service.version === service.expectedVersion ? "success" : "warning"} />
         <RagMetric label={text.profileLabel} value={service.profile ?? text.unavailableValue} tone={service.profile === service.expectedProfile ? "success" : "warning"} />
-        <RagMetric label={text.portLabel} value={String(service.port ?? text.unavailableValue)} />
+        <RagMetric label={text.localContractLabel} value={service.endpoint} />
         <RagMetric label={text.managedByLabel} value={service.managedBy ?? text.unavailableValue} />
       </div>
 
@@ -1824,24 +1799,14 @@ function SystemServiceCard({
       ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line px-4 py-3">
-        <div className="flex flex-wrap gap-2">
-          <button
-            className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange"
-            onClick={() => void handleCopyDiagnostic()}
-          >
-            <Copy size={14} />
-            {copyStatus === "copied" ? text.copyDiagnosticCopied : copyStatus === "failed" ? text.copyDiagnosticFailed : text.copyDiagnostic}
-          </button>
-          <button
-            className="inline-flex h-8 items-center gap-2 rounded-md border border-brand-orange bg-white px-3 text-[11px] font-semibold text-brand-orange hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={!service.canRestart || refreshing}
-            onClick={onRestartRuntimeService}
-          >
-            <RotateCcw size={14} />
-            {text.restartRuntime}
-          </button>
-        </div>
-        {!service.canRestart ? <p className="text-[10px] text-ink-secondary">{text.restartUnavailable}</p> : null}
+        <button
+          className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange"
+          onClick={() => void handleCopyDiagnostic()}
+        >
+          <Copy size={14} />
+          {copyStatus === "copied" ? text.copyDiagnosticCopied : copyStatus === "failed" ? text.copyDiagnosticFailed : text.copyDiagnostic}
+        </button>
+        <p className="text-[10px] text-ink-secondary">{text.localRuntimeIntegratedNote}</p>
       </div>
 
       {advancedOpen ? (
@@ -1849,42 +1814,8 @@ function SystemServiceCard({
           <div className="grid gap-3 md:grid-cols-2">
             <SystemInfoRow icon={<Server size={14} />} label={text.expectedVersionLabel} value={service.expectedVersion} />
             <SystemInfoRow icon={<Activity size={14} />} label={text.expectedProfileLabel} value={service.expectedProfile} />
+            <SystemInfoRow icon={<Server size={14} />} label={text.localContractLabel} value={service.endpoint} mono />
             {service.instanceId ? <SystemInfoRow icon={<Settings size={14} />} label={text.instanceLabel} value={service.instanceId} mono /> : null}
-            {service.externalExecutablePath ? <SystemInfoRow icon={<FolderOpen size={14} />} label={text.externalExecutablePathLabel} value={service.externalExecutablePath} mono /> : null}
-          </div>
-          <div className="mt-3 rounded-md border border-line bg-white px-3 py-3">
-            <div className="flex flex-wrap items-end gap-3">
-              <label className="min-w-[150px] flex-1">
-                <span className="text-[10px] font-semibold text-ink-secondary">{text.portModeLabel}</span>
-                <select
-                  className="mt-1 h-8 w-full rounded-md border border-line bg-white px-2 text-[11px] text-ink-primary outline-none focus:border-brand-orange"
-                  value={portMode}
-                  disabled={!service.canConfigurePort || refreshing}
-                  onChange={(event) => setPortMode(event.target.value as RuntimePortConfig["mode"])}
-                >
-                  <option value="automatic">{text.portModeAutomatic}</option>
-                  <option value="fixed">{text.portModeFixed}</option>
-                </select>
-              </label>
-              <NumberField label={text.fixedPortLabel} value={fixedPort} disabled={!service.canConfigurePort || refreshing} onChange={setFixedPort} />
-              <NumberField label={text.autoStartLabel} value={autoStart} disabled={!service.canConfigurePort || refreshing || portMode !== "automatic"} onChange={setAutoStart} />
-              <NumberField label={text.autoEndLabel} value={autoEnd} disabled={!service.canConfigurePort || refreshing || portMode !== "automatic"} onChange={setAutoEnd} />
-              <button
-                className="h-8 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={!service.canConfigurePort || refreshing || !isValidPortConfig(portMode, fixedPort, autoStart, autoEnd)}
-                onClick={() => onUpdateRuntimePortConfig({
-                  mode: portMode,
-                  port: fixedPort,
-                  autoPortStart: autoStart,
-                  autoPortEnd: autoEnd,
-                })}
-              >
-                {text.applyAndRestart}
-              </button>
-            </div>
-            <p className="mt-2 text-[10px] leading-4 text-ink-secondary">
-              {service.canConfigurePort ? text.portAdvancedDescription : text.portAdvancedUnavailable}
-            </p>
           </div>
         </div>
       ) : null}
@@ -1939,223 +1870,6 @@ function DiagnosticAction({ icon, title, description, onClick, disabled, danger 
   );
 }
 
-function ServicesSettings({
-  runtimeServicesStatus,
-  refreshing,
-  text,
-  onRefresh,
-  onRestartRuntimeService,
-  onUpdateRuntimePortConfig,
-}: {
-  runtimeServicesStatus: RuntimeServicesStatus | null;
-  refreshing: boolean;
-  text: SettingsCopy;
-  onRefresh: () => void;
-  onRestartRuntimeService: () => void;
-  onUpdateRuntimePortConfig: (config: RuntimePortConfig) => void;
-}) {
-  const services = runtimeServicesStatus?.services ?? [];
-  const runtimeService = services.find((service) => service.id === "local-runtime") ?? services[0];
-
-  return (
-    <div className="space-y-5">
-      <section>
-        <div className="flex items-center gap-2">
-          <Activity size={16} className="text-brand-orange" />
-          <h3 className="text-[13px] font-semibold text-ink-primary">{text.servicesHeading}</h3>
-        </div>
-        <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.servicesDescription}</p>
-      </section>
-
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-line bg-panel px-4 py-3">
-        <div>
-          <p className="text-[11px] font-semibold text-ink-primary">{text.servicesSummary}</p>
-          <p className="mt-1 text-[10px] text-ink-secondary">
-            {runtimeServicesStatus?.checkedAt ? `${text.lastChecked}: ${formatDateTime(runtimeServicesStatus.checkedAt)}` : text.servicesPending}
-          </p>
-        </div>
-        <button
-          className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={refreshing}
-          onClick={onRefresh}
-        >
-          <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
-          {text.refreshServices}
-        </button>
-      </div>
-
-      {runtimeService ? (
-        <ServiceCard
-          service={runtimeService}
-          text={text}
-          refreshing={refreshing}
-          onRestartRuntimeService={onRestartRuntimeService}
-          onUpdateRuntimePortConfig={onUpdateRuntimePortConfig}
-        />
-      ) : (
-        <div className="rounded-md border border-line px-4 py-3 text-[11px] text-ink-secondary">{text.servicesPending}</div>
-      )}
-    </div>
-  );
-}
-
-function ServiceCard({
-  service,
-  text,
-  refreshing,
-  onRestartRuntimeService,
-  onUpdateRuntimePortConfig,
-}: {
-  service: RuntimeServicesStatus["services"][number];
-  text: SettingsCopy;
-  refreshing: boolean;
-  onRestartRuntimeService: () => void;
-  onUpdateRuntimePortConfig: (config: RuntimePortConfig) => void;
-}) {
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [portMode, setPortMode] = useState<RuntimePortConfig["mode"]>(service.portConfig?.mode ?? "automatic");
-  const [fixedPort, setFixedPort] = useState(service.portConfig?.port ?? service.port ?? 8765);
-  const [autoStart, setAutoStart] = useState(service.portConfig?.autoPortStart ?? 8765);
-  const [autoEnd, setAutoEnd] = useState(service.portConfig?.autoPortEnd ?? 8799);
-  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
-  const diagnostic = buildServiceDiagnostic(service);
-
-  useEffect(() => {
-    setPortMode(service.portConfig?.mode ?? "automatic");
-    setFixedPort(service.portConfig?.port ?? service.port ?? 8765);
-    setAutoStart(service.portConfig?.autoPortStart ?? 8765);
-    setAutoEnd(service.portConfig?.autoPortEnd ?? 8799);
-    setCopyStatus("idle");
-  }, [service.portConfig, service.port]);
-
-  async function handleCopyDiagnostic() {
-    const copied = await copyText(diagnostic);
-    setCopyStatus(copied ? "copied" : "failed");
-    window.setTimeout(() => setCopyStatus("idle"), 1800);
-  }
-  const stateClass =
-    service.status === "running"
-      ? "bg-emerald-50 text-emerald-700"
-      : service.status === "degraded"
-        ? "bg-amber-50 text-amber-700"
-        : "bg-red-50 text-red-700";
-  const dotClass =
-    service.status === "running" ? "bg-emerald-500" : service.status === "degraded" ? "bg-amber-500" : "bg-red-500";
-
-  return (
-    <section className="rounded-md border border-line px-4 py-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-3">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-brand-hover text-brand-orange">
-            <Server size={16} />
-          </span>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="text-[12px] font-semibold text-ink-primary">{service.name}</p>
-              <span className={`inline-flex items-center gap-1.5 rounded px-2 py-1 text-[10px] font-semibold ${stateClass}`}>
-                <span className={`h-1.5 w-1.5 rounded-full ${dotClass}`} />
-                {service.statusLabel}
-              </span>
-            </div>
-            <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{service.description}</p>
-          </div>
-        </div>
-        <button
-          className="inline-flex h-8 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={!service.canRestart || refreshing}
-          onClick={onRestartRuntimeService}
-        >
-          <RotateCcw size={14} />
-          {text.restartRuntime}
-        </button>
-      </div>
-      {!service.canRestart ? (
-        <p className="mt-2 text-[10px] leading-4 text-ink-secondary">{text.restartUnavailable}</p>
-      ) : null}
-
-      <dl className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <ServiceField label={text.endpointLabel} value={service.endpoint} mono />
-        <ServiceField label={text.profileLabel} value={service.profile ?? text.unavailableValue} />
-        <ServiceField label={text.expectedProfileLabel} value={service.expectedProfile} />
-        <ServiceField label={text.portLabel} value={String(service.port ?? text.unavailableValue)} />
-        <ServiceField label={text.managedByLabel} value={service.managedBy ?? text.unavailableValue} />
-        <ServiceField label={text.versionLabel} value={service.version ?? text.unavailableValue} />
-        <ServiceField label={text.expectedVersionLabel} value={service.expectedVersion} />
-        <ServiceField label={text.restartAvailableLabel} value={service.canRestart ? text.yes : text.no} />
-        {service.instanceId ? <ServiceField label={text.instanceLabel} value={service.instanceId} mono /> : null}
-        {service.startedAt ? <ServiceField label={text.startedAtLabel} value={formatDateTime(service.startedAt)} /> : null}
-        <ServiceField label={text.appDataDirLabel} value={service.appDataDir ?? text.unavailableValue} mono wide />
-        <ServiceField label={text.expectedAppDataDirLabel} value={service.expectedAppDataDir || text.unavailableValue} mono wide />
-        {service.externalExecutablePath ? <ServiceField label={text.externalExecutablePathLabel} value={service.externalExecutablePath} mono wide /> : null}
-      </dl>
-
-      {service.lastError ? (
-        <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2">
-          <p className="text-[10px] font-semibold text-red-700">{text.lastErrorLabel}</p>
-          <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-[10px] leading-4 text-red-700">{service.lastError}</pre>
-        </div>
-      ) : null}
-
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange"
-          onClick={() => void handleCopyDiagnostic()}
-        >
-          <Copy size={14} />
-          {copyStatus === "copied" ? text.copyDiagnosticCopied : copyStatus === "failed" ? text.copyDiagnosticFailed : text.copyDiagnostic}
-        </button>
-        <button
-          className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange"
-          onClick={() => setAdvancedOpen((isOpen) => !isOpen)}
-        >
-          <ChevronDown size={14} className={advancedOpen ? "rotate-180 transition" : "transition"} />
-          {text.advancedRuntime}
-        </button>
-      </div>
-
-      {advancedOpen ? (
-        <div className="mt-3 rounded-md border border-line bg-panel px-3 py-3">
-          <div className="flex flex-wrap items-end gap-3">
-            <label className="min-w-[150px] flex-1">
-              <span className="text-[10px] font-semibold text-ink-secondary">{text.portModeLabel}</span>
-              <select
-                className="mt-1 h-8 w-full rounded-md border border-line bg-white px-2 text-[11px] text-ink-primary outline-none focus:border-brand-orange"
-                value={portMode}
-                disabled={!service.canConfigurePort || refreshing}
-                onChange={(event) => setPortMode(event.target.value as RuntimePortConfig["mode"])}
-              >
-                <option value="automatic">{text.portModeAutomatic}</option>
-                <option value="fixed">{text.portModeFixed}</option>
-              </select>
-            </label>
-            <NumberField label={text.fixedPortLabel} value={fixedPort} disabled={!service.canConfigurePort || refreshing} onChange={setFixedPort} />
-            <NumberField label={text.autoStartLabel} value={autoStart} disabled={!service.canConfigurePort || refreshing || portMode !== "automatic"} onChange={setAutoStart} />
-            <NumberField label={text.autoEndLabel} value={autoEnd} disabled={!service.canConfigurePort || refreshing || portMode !== "automatic"} onChange={setAutoEnd} />
-            <button
-              className="h-8 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={!service.canConfigurePort || refreshing || !isValidPortConfig(portMode, fixedPort, autoStart, autoEnd)}
-              onClick={() => onUpdateRuntimePortConfig({
-                mode: portMode,
-                port: fixedPort,
-                autoPortStart: autoStart,
-                autoPortEnd: autoEnd,
-              })}
-            >
-              {text.applyAndRestart}
-            </button>
-          </div>
-          <p className="mt-2 text-[10px] leading-4 text-ink-secondary">
-            {service.canConfigurePort ? text.portAdvancedDescription : text.portAdvancedUnavailable}
-          </p>
-        </div>
-      ) : null}
-      <p className="sr-only" aria-live="polite">
-        {copyStatus === "copied" ? text.copyDiagnosticCopied : copyStatus === "failed" ? text.copyDiagnosticFailed : ""}
-      </p>
-    </section>
-  );
-}
-
 async function copyText(text: string) {
   try {
     if (navigator.clipboard?.writeText) {
@@ -2182,52 +1896,19 @@ async function copyText(text: string) {
   }
 }
 
-function NumberField({ label, value, disabled, onChange }: { label: string; value: number; disabled: boolean; onChange: (value: number) => void }) {
-  return (
-    <label className="w-[112px]">
-      <span className="text-[10px] font-semibold text-ink-secondary">{label}</span>
-      <input
-        className="mt-1 h-8 w-full rounded-md border border-line bg-white px-2 font-mono text-[11px] text-ink-primary outline-none focus:border-brand-orange disabled:bg-line/40"
-        type="number"
-        min={1024}
-        max={65535}
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(Number(event.target.value))}
-      />
-    </label>
-  );
-}
-
-function isValidPortConfig(mode: RuntimePortConfig["mode"], port: number, autoStart: number, autoEnd: number) {
-  const validPort = Number.isInteger(port) && port >= 1024 && port <= 65535;
-  const validRange = Number.isInteger(autoStart) && Number.isInteger(autoEnd) && autoStart >= 1024 && autoEnd <= 65535 && autoStart <= autoEnd;
-  return mode === "fixed" ? validPort : validPort && validRange;
-}
-
 function buildServiceDiagnostic(service: RuntimeServicesStatus["services"][number]) {
   return [
     `status=${service.status}`,
-    `endpoint=${service.endpoint}`,
+    `localContract=${service.endpoint}`,
     `expectedProfile=${service.expectedProfile}`,
     `profile=${service.profile ?? "unknown"}`,
     `expectedVersion=${service.expectedVersion}`,
     `version=${service.version ?? "unknown"}`,
-    `port=${service.port ?? "unknown"}`,
     `managedBy=${service.managedBy ?? "unknown"}`,
     `appDataDir=${service.appDataDir ?? "unknown"}`,
     `expectedAppDataDir=${service.expectedAppDataDir}`,
     service.lastError ? `lastError=${service.lastError}` : null,
   ].filter(Boolean).join("\n");
-}
-
-function ServiceField({ label, value, mono, wide }: { label: string; value: string; mono?: boolean; wide?: boolean }) {
-  return (
-    <div className={["rounded-md border border-line bg-panel px-3 py-2", wide ? "sm:col-span-2" : ""].join(" ")}>
-      <dt className="text-[10px] font-semibold text-ink-secondary">{label}</dt>
-      <dd className={["mt-1 break-all text-[11px] text-ink-primary", mono ? "font-mono" : ""].join(" ")}>{value}</dd>
-    </div>
-  );
 }
 
 function AppearanceSettings({
@@ -3692,43 +3373,29 @@ const settingsCopy = {
     aiNavDescription: "OpenAI y contexto documental",
     diagnosticsNav: "Trazas",
     diagnosticsNavDescription: "Registro local de errores",
-    servicesHeading: "Estado de servicios",
-    servicesDescription: "Revisa si el runtime local Rust necesario para trabajar está activo y deja el detalle en el log.",
+    servicesHeading: "Runtime local",
+    servicesDescription: "Revisa la salud del runtime Rust integrado que gestiona archivos, historial, IA y diagnósticos locales.",
     servicesSummary: "Supervisión local",
-    servicesPending: "Consultando estado de servicios",
+    servicesPending: "Consultando estado del runtime local",
     lastChecked: "Última comprobación",
     refreshServices: "Comprobar",
-    restartRuntime: "Reiniciar runtime",
-    restartUnavailable: "El runtime local Rust no usa procesos externos reiniciables ni puertos configurables.",
-    endpointLabel: "Endpoint",
+    localContractLabel: "Contrato local",
+    localRuntimeIntegratedNote: "Runtime integrado en Tauri; no hay backend externo ni proceso auxiliar.",
     profileLabel: "Perfil activo",
     expectedProfileLabel: "Perfil esperado",
-    portLabel: "Puerto activo",
     managedByLabel: "Gestionado por",
     instanceLabel: "Instancia",
     startedAtLabel: "Arrancado",
     versionLabel: "Versión activa",
     expectedVersionLabel: "Versión esperada",
-    restartAvailableLabel: "Reinicio automático",
     appDataDirLabel: "Datos usados por el runtime",
     expectedAppDataDirLabel: "Datos esperados por la app",
-    externalExecutablePathLabel: "Ejecutable externo",
     lastErrorLabel: "Último problema detectado",
     copyDiagnostic: "Copiar diagnóstico",
     copyDiagnosticCopied: "Diagnóstico copiado",
     copyDiagnosticFailed: "No se pudo copiar",
     copyDiagnosticTool: "Informe del sistema",
     copyDiagnosticDescription: "Copia un resumen técnico del runtime local.",
-    advancedRuntime: "Avanzado",
-    portModeLabel: "Modo de puerto",
-    portModeAutomatic: "Automático",
-    portModeFixed: "Fijo",
-    fixedPortLabel: "Puerto",
-    autoStartLabel: "Rango inicio",
-    autoEndLabel: "Rango fin",
-    applyAndRestart: "Aplicar y reiniciar",
-    portAdvancedDescription: "En automático, la app usa el puerto preferido si está libre y cambia a otro del rango si detecta conflicto. Usa fijo solo cuando necesites reservar un puerto concreto.",
-    portAdvancedUnavailable: "KnowNext.ai 2.0.0 no usa endpoint ni puerto configurable.",
     checkConnection: "Probar conexión",
     viewDetails: "Ver detalles",
     unavailableValue: "No disponible",
@@ -3982,11 +3649,9 @@ const settingsCopy = {
     storageDescription: "Ubicaciones que usa la aplicación para guardar datos locales, configuración e índices.",
     logsSensitiveNotice: "Los logs pueden contener información sensible. Úsalos solo para diagnóstico.",
     diagnosticToolsHeading: "Herramientas de diagnóstico",
-    diagnosticToolsDescription: "Acciones disponibles para comprobar el estado local y resolver incidencias.",
+    diagnosticToolsDescription: "Acciones disponibles para comprobar el estado local y preparar información para soporte.",
     refreshServicesTool: "Actualizar estado",
     refreshServicesDescription: "Vuelve a consultar el estado del runtime local.",
-    restartRuntimeTool: "Reinicio controlado",
-    restartRuntimeDescription: "El runtime local no tiene proceso externo que reiniciar.",
     summaryHeading: "Resumen de configuración",
     summaryDescription: "Revisa los ajustes actuales de tu aplicación. Puedes cambiar cualquier configuración desde su sección correspondiente.",
     summaryInterfaceDescription: "Apariencia general y comportamiento de la aplicación.",
@@ -4103,43 +3768,29 @@ const settingsCopy = {
     aiNavDescription: "OpenAI and document context",
     diagnosticsNav: "Traces",
     diagnosticsNavDescription: "Local error logging",
-    servicesHeading: "Service status",
-    servicesDescription: "Check whether the local Rust runtime required by the workspace is available and records diagnostics in the log.",
+    servicesHeading: "Local runtime",
+    servicesDescription: "Check the integrated Rust runtime that manages local files, history, AI, and diagnostics.",
     servicesSummary: "Local supervision",
-    servicesPending: "Checking service status",
+    servicesPending: "Checking local runtime status",
     lastChecked: "Last checked",
     refreshServices: "Check",
-    restartRuntime: "Restart runtime",
-    restartUnavailable: "The local Rust runtime does not use external restartable processes or configurable ports.",
-    endpointLabel: "Endpoint",
+    localContractLabel: "Local contract",
+    localRuntimeIntegratedNote: "Runtime integrated in Tauri; there is no external backend or auxiliary process.",
     profileLabel: "Active profile",
     expectedProfileLabel: "Expected profile",
-    portLabel: "Active port",
     managedByLabel: "Managed by",
     instanceLabel: "Instance",
     startedAtLabel: "Started",
     versionLabel: "Active version",
     expectedVersionLabel: "Expected version",
-    restartAvailableLabel: "Automatic restart",
     appDataDirLabel: "Data used by runtime",
     expectedAppDataDirLabel: "Data expected by app",
-    externalExecutablePathLabel: "External executable",
     lastErrorLabel: "Last detected problem",
     copyDiagnostic: "Copy diagnostic",
     copyDiagnosticCopied: "Diagnostic copied",
     copyDiagnosticFailed: "Could not copy",
     copyDiagnosticTool: "System report",
     copyDiagnosticDescription: "Copies a technical summary of the local runtime.",
-    advancedRuntime: "Advanced",
-    portModeLabel: "Port mode",
-    portModeAutomatic: "Automatic",
-    portModeFixed: "Fixed",
-    fixedPortLabel: "Port",
-    autoStartLabel: "Range start",
-    autoEndLabel: "Range end",
-    applyAndRestart: "Apply and restart",
-    portAdvancedDescription: "In automatic mode, the app uses the preferred port when available and moves to another port in the range when it detects a conflict. Use fixed only when you need a specific reserved port.",
-    portAdvancedUnavailable: "KnowNext.ai 2.0.0 does not use a configurable endpoint or port.",
     checkConnection: "Test connection",
     viewDetails: "View details",
     unavailableValue: "Unavailable",
@@ -4393,11 +4044,9 @@ const settingsCopy = {
     storageDescription: "Locations used by the application to store local data, configuration, and indexes.",
     logsSensitiveNotice: "Logs may contain sensitive information. Use them only for diagnostics.",
     diagnosticToolsHeading: "Diagnostic tools",
-    diagnosticToolsDescription: "Available actions to check local status and resolve incidents.",
+    diagnosticToolsDescription: "Available actions to check local status and prepare support information.",
     refreshServicesTool: "Refresh status",
     refreshServicesDescription: "Checks the local runtime status again.",
-    restartRuntimeTool: "Controlled restart",
-    restartRuntimeDescription: "The local runtime has no external process to restart.",
     summaryHeading: "Configuration summary",
     summaryDescription: "Review the current app settings. You can change any setting from its corresponding section.",
     summaryInterfaceDescription: "General appearance and application behavior.",

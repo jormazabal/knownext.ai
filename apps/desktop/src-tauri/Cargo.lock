@@ -1720,7 +1720,7 @@ dependencies = [
 
 [[package]]
 name = "knownext-ai"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "knownext-core",
  "serde_json",
@@ -1728,7 +1728,7 @@ dependencies = [
 
 [[package]]
 name = "knownext-ai-desktop"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "knownext-core",
  "knownext-storage",
@@ -1746,7 +1746,7 @@ dependencies = [
 
 [[package]]
 name = "knownext-core"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "serde_json",
  "time",
@@ -1754,7 +1754,7 @@ dependencies = [
 
 [[package]]
 name = "knownext-docs"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "knownext-core",
  "serde_json",
@@ -1763,7 +1763,7 @@ dependencies = [
 
 [[package]]
 name = "knownext-storage"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "base64 0.22.1",
  "knownext-ai",

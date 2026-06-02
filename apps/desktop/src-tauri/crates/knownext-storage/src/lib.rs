@@ -95,8 +95,8 @@ impl LocalApi {
                 "interval": 5,
                 "mock": true
             })),
-            ("POST", ["api", "auth", "github", "device", "poll"]) => ok(json!({ "status": "authenticated", "auth": self.auth_status(), "interval": null, "error": null })),
-            ("POST", ["api", "auth", "logout"]) => ok(self.auth_status()),
+            ("POST", ["api", "auth", "github", "device", "poll"]) => ok(json!({ "status": "authenticated", "auth": self.authenticate_mock_github(), "interval": null, "error": null })),
+            ("POST", ["api", "auth", "logout"]) => ok(self.clear_auth_status()),
             ("GET", ["api", "github", "repositories"]) => ok(json!([])),
             ("GET", ["api", "projects"]) => ok(json!(self.list_projects())),
             ("POST", ["api", "projects"]) => ok(self.create_project(body)?),
@@ -237,6 +237,7 @@ impl LocalApi {
     fn config_path(&self) -> PathBuf { self.app_data_dir.join("config.json") }
     fn notes_path(&self) -> PathBuf { self.app_data_dir.join("notes.json") }
     fn export_template_path(&self) -> PathBuf { self.app_data_dir.join("export-template.json") }
+    fn auth_path(&self) -> PathBuf { self.app_data_dir.join("auth.json") }
     fn credentials_path(&self) -> PathBuf { self.app_data_dir.join("credentials.json") }
     fn logs_dir(&self) -> PathBuf { self.app_data_dir.join("logs") }
     fn previews_dir(&self) -> PathBuf { self.app_data_dir.join("previews") }
@@ -614,7 +615,30 @@ impl LocalApi {
         let _ = self.write_json(&self.notes_path(), &notes);
         notes
     }
-    fn auth_status(&self) -> Value { json!({ "isAuthenticated": false, "provider": null, "user": null, "scopes": [], "expiresAt": null }) }
+    fn auth_status(&self) -> Value {
+        self.read_json(&self.auth_path(), default_auth_status())
+    }
+
+    fn authenticate_mock_github(&self) -> Value {
+        let auth = json!({
+            "isAuthenticated": true,
+            "provider": "github",
+            "user": {
+                "login": "knownext-dev",
+                "name": "KnowNext Dev",
+                "avatarUrl": null
+            },
+            "scopes": ["repo"],
+            "expiresAt": null
+        });
+        let _ = self.write_json(&self.auth_path(), &auth);
+        auth
+    }
+
+    fn clear_auth_status(&self) -> Value {
+        let _ = std::fs::remove_file(self.auth_path());
+        default_auth_status()
+    }
 
     fn project_activity(&self, project_id: &str) -> Value {
         let path = self.app_data_dir.join("activity").join(format!("{}.json", safe_name(project_id)));
@@ -645,7 +669,72 @@ impl LocalApi {
         json!({ "enabled": true, "available": true, "reason": null, "storageMode": project["storageMode"], "versioningMode": project["versioningMode"], "syncMode": project["syncMode"], "statusLabel": "Historial local", "hasLocalChanges": false, "hasRemoteChanges": false, "lastVersionHash": null, "lastVersionRelativeTime": null })
     }
     fn sync_status(&self, project_id: &str) -> Value {
-        json!({ "projectId": project_id, "mode": "local-history", "state": "local-history", "label": "Local-first", "detail": "Historial y sincronización se gestionan localmente desde Rust/Tauri.", "pendingPush": false, "pendingPull": false, "hasConflicts": false, "lastSyncAt": null, "lastLocalVersionHash": null, "lastRemoteHash": null, "conflicts": [] })
+        let project = self.list_projects().into_iter().find(|project| project["id"].as_str() == Some(project_id)).unwrap_or_default();
+        let sync_mode = project["syncMode"].as_str().unwrap_or("none");
+        let is_github = sync_mode == "manual-github" || sync_mode == "auto-github";
+        if is_github {
+            let mode = if sync_mode == "auto-github" { "github-auto" } else { "github-manual" };
+            let authenticated = self.auth_status()["isAuthenticated"].as_bool().unwrap_or(false);
+            if authenticated {
+                return json!({
+                    "projectId": project_id,
+                    "mode": mode,
+                    "state": "local-history",
+                    "label": "GitHub conectado",
+                    "detail": "El historial local está activo y la sincronización remota está disponible.",
+                    "remoteAccess": "available",
+                    "remotePaused": false,
+                    "remoteReason": null,
+                    "remoteAction": null,
+                    "localState": "clean",
+                    "pendingPush": false,
+                    "pendingPull": false,
+                    "hasConflicts": false,
+                    "lastSyncAt": null,
+                    "lastLocalVersionHash": null,
+                    "lastRemoteHash": null,
+                    "conflicts": []
+                });
+            }
+            return json!({
+                "projectId": project_id,
+                "mode": mode,
+                "state": "local-history",
+                "label": "GitHub pausado",
+                "detail": "Sin cuenta GitHub. El historial local sigue disponible y la sincronización remota queda pausada.",
+                "remoteAccess": "unauthenticated",
+                "remotePaused": true,
+                "remoteReason": "Sin cuenta GitHub",
+                "remoteAction": "connect-github",
+                "localState": "clean",
+                "pendingPush": false,
+                "pendingPull": false,
+                "hasConflicts": false,
+                "lastSyncAt": null,
+                "lastLocalVersionHash": null,
+                "lastRemoteHash": null,
+                "conflicts": []
+            });
+        }
+        json!({
+            "projectId": project_id,
+            "mode": "local-history",
+            "state": "local-history",
+            "label": "Local-first",
+            "detail": "Historial y sincronización se gestionan localmente desde Rust/Tauri.",
+            "remoteAccess": "not-configured",
+            "remotePaused": false,
+            "remoteReason": null,
+            "remoteAction": null,
+            "localState": "clean",
+            "pendingPush": false,
+            "pendingPull": false,
+            "hasConflicts": false,
+            "lastSyncAt": null,
+            "lastLocalVersionHash": null,
+            "lastRemoteHash": null,
+            "conflicts": []
+        })
     }
     fn external_changes(&self, project_id: &str) -> Value {
         json!({ "id": format!("changes-{project_id}"), "projectId": project_id, "title": "Sin cambios externos", "source": "filesystem", "status": "none", "detectedAt": knownext_core::now_iso(), "requiresReview": false, "summary": { "total": 0, "safe": 0, "review": 0, "blocked": 0, "added": 0, "modified": 0, "deleted": 0, "folders": 0, "documents": 0, "images": 0, "attachments": 0, "omitted": 0, "totalBytes": 0 }, "items": [], "message": null })
@@ -920,6 +1009,16 @@ fn mime_for_path(path: &Path) -> String {
     }.to_string()
 }
 
+fn default_auth_status() -> Value {
+    json!({
+        "isAuthenticated": false,
+        "provider": null,
+        "user": null,
+        "scopes": [],
+        "expiresAt": null
+    })
+}
+
 fn safe_name(value: &str) -> String {
     value.chars().map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' }).collect()
 }
@@ -1002,7 +1101,7 @@ mod tests {
 
     fn api() -> LocalApi {
         let root = std::env::temp_dir().join(knownext_core::compact_id("knownext-test"));
-        LocalApi::new(root, "2.0.0".to_string(), "desktop".to_string())
+        LocalApi::new(root, "2.0.1".to_string(), "desktop".to_string())
     }
 
     fn create_project(api: &LocalApi) -> (String, PathBuf) {
@@ -1033,9 +1132,46 @@ mod tests {
         assert_eq!(response.status, 200);
         assert_eq!(response.body["app"], "knownext");
         assert_eq!(response.body["service"], "local-tauri-rust");
-        assert_eq!(response.body["version"], "2.0.0");
+        assert_eq!(response.body["version"], "2.0.1");
         assert_eq!(response.body["profile"], "desktop");
         assert_eq!(response.body["endpoint"], "tauri://local-api");
+    }
+
+    #[test]
+    fn github_sync_pauses_without_auth_and_recovers_after_dev_login() {
+        let api = api();
+        let root = std::env::temp_dir().join(knownext_core::compact_id("knownext-github-project"));
+        let created = api.handle("POST", "/api/projects", json!({
+            "name": "GitHub docs",
+            "folderPath": root.to_string_lossy(),
+            "syncMode": "auto-github",
+            "githubRepository": {
+                "owner": "knownext",
+                "name": "docs",
+                "defaultBranch": "main"
+            }
+        }), vec![]).unwrap();
+        let project_id = created.body["id"].as_str().unwrap();
+
+        let paused = api.handle("GET", &format!("/api/projects/{project_id}/sync/status"), Value::Null, vec![]).unwrap();
+        assert_eq!(paused.body["remoteAccess"], "unauthenticated");
+        assert_eq!(paused.body["remotePaused"], true);
+        assert_eq!(paused.body["state"], "local-history");
+
+        let login = api.handle("POST", "/api/auth/github/device/poll", json!({ "deviceCode": "dev" }), vec![]).unwrap();
+        assert_eq!(login.body["status"], "authenticated");
+        assert_eq!(login.body["auth"]["isAuthenticated"], true);
+
+        let available = api.handle("GET", &format!("/api/projects/{project_id}/sync/status"), Value::Null, vec![]).unwrap();
+        assert_eq!(available.body["remoteAccess"], "available");
+        assert_eq!(available.body["remotePaused"], false);
+        assert_eq!(available.body["label"], "GitHub conectado");
+
+        let logout = api.handle("POST", "/api/auth/logout", Value::Null, vec![]).unwrap();
+        assert_eq!(logout.body["isAuthenticated"], false);
+        let paused_again = api.handle("GET", &format!("/api/projects/{project_id}/sync/status"), Value::Null, vec![]).unwrap();
+        assert_eq!(paused_again.body["remoteAccess"], "unauthenticated");
+        assert_eq!(paused_again.body["remotePaused"], true);
     }
 
     #[test]

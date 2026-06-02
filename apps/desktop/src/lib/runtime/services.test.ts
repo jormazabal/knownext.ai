@@ -26,21 +26,16 @@ describe("runtime services", () => {
           statusLabel: "Operativo",
           description: "La aplicación usa Tauri commands.",
           endpoint: "tauri://local-api/health",
-          expectedVersion: "2.0.0",
-          version: "2.0.0",
+          expectedVersion: "2.0.1",
+          version: "2.0.1",
           expectedProfile: "desktop",
           profile: "desktop",
           expectedAppDataDir: "C:\\Users\\user\\AppData\\Roaming\\ai.knownext.desktop",
           appDataDir: "C:\\Users\\user\\AppData\\Roaming\\ai.knownext.desktop",
-          port: null,
           managedBy: "tauri",
           instanceId: "tauri-rust-local",
           startedAt: "2026-06-02T09:59:00.000Z",
-          externalExecutablePath: null,
           lastError: null,
-          canRestart: false,
-          canConfigurePort: false,
-          portConfig: { mode: "local", port: 0, autoPortStart: 0, autoPortEnd: 0 },
         },
       ],
     });
@@ -51,10 +46,12 @@ describe("runtime services", () => {
       id: "local-runtime",
       status: "running",
       statusLabel: "Operativo",
-      canRestart: false,
-      canConfigurePort: false,
       endpoint: "tauri://local-api/health",
     });
+    expect(status.services[0]).not.toHaveProperty("canRestart");
+    expect(status.services[0]).not.toHaveProperty("canConfigurePort");
+    expect(status.services[0]).not.toHaveProperty("portConfig");
+    expect(status.services[0]).not.toHaveProperty("port");
   });
 
   it("reports unavailable outside Tauri instead of probing HTTP", async () => {
@@ -64,8 +61,8 @@ describe("runtime services", () => {
       id: "local-runtime",
       status: "unavailable",
       statusLabel: "No disponible",
-      canRestart: false,
     });
+    expect(status.services[0]).not.toHaveProperty("canRestart");
     expect(status.services[0].lastError).toContain("runtime");
   });
 });

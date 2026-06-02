@@ -3,14 +3,6 @@ import { expectedRuntimeProfile, requestJson, setApiBaseUrl, type RuntimeHealth 
 import { APP_VERSION } from "../appVersion";
 
 export type RuntimeServiceState = "running" | "degraded" | "unavailable";
-export type RuntimePortMode = "local" | "automatic" | "fixed";
-
-export type RuntimePortConfig = {
-  mode: RuntimePortMode;
-  port: number;
-  autoPortStart: number;
-  autoPortEnd: number;
-};
 
 export type RuntimeServiceStatus = {
   id: string;
@@ -25,15 +17,10 @@ export type RuntimeServiceStatus = {
   profile?: string | null;
   expectedAppDataDir: string;
   appDataDir?: string | null;
-  port?: number | null;
   managedBy?: string | null;
   instanceId?: string | null;
   startedAt?: string | null;
-  externalExecutablePath?: string | null;
   lastError?: string | null;
-  canRestart: boolean;
-  canConfigurePort: boolean;
-  portConfig?: RuntimePortConfig | null;
 };
 
 export type RuntimeServicesStatus = {
@@ -55,25 +42,6 @@ export async function getRuntimeServiceStatus() {
   }
 
   return getBrowserRuntimeServiceStatus();
-}
-
-export async function restartLocalRuntime() {
-  if (isTauriRuntime()) {
-    return invoke<RuntimeServicesStatus>("restart_local_runtime");
-  }
-
-  throw new Error("El runtime local Rust no usa procesos externos reiniciables.");
-}
-
-export async function updateRuntimePortConfig(config: RuntimePortConfig) {
-  if (isTauriRuntime()) {
-    const status = await invoke<RuntimeServicesStatus>("update_runtime_port_config", { config });
-    const runtime = status.services[0];
-    if (runtime?.endpoint) setApiBaseUrl(runtime.endpoint.replace(/\/health$/, ""));
-    return status;
-  }
-
-  throw new Error("KnowNext.ai 2.0.0 no usa un puerto de API configurable.");
 }
 
 async function getBrowserRuntimeServiceStatus(): Promise<RuntimeServicesStatus> {
@@ -104,11 +72,9 @@ async function getBrowserRuntimeServiceStatus(): Promise<RuntimeServicesStatus> 
           profile: health.profile ?? null,
           expectedAppDataDir: health.appDataDir ?? "",
           appDataDir: health.appDataDir ?? null,
-          port: health.port ?? null,
           managedBy: health.managedBy ?? null,
           instanceId: health.instanceId ?? null,
           startedAt: health.startedAt ?? null,
-          externalExecutablePath: null,
           lastError: isCompatible
             ? null
             : [
@@ -118,9 +84,6 @@ async function getBrowserRuntimeServiceStatus(): Promise<RuntimeServicesStatus> 
               `actualProfile=${health.profile ?? "unknown"}`,
               `app=${health.app ?? "unknown"}`,
             ].join("\n"),
-          canRestart: false,
-          canConfigurePort: false,
-          portConfig: null,
         },
       ],
     };
@@ -141,15 +104,10 @@ async function getBrowserRuntimeServiceStatus(): Promise<RuntimeServicesStatus> 
           profile: null,
           expectedAppDataDir: "",
           appDataDir: null,
-          port: null,
           managedBy: null,
           instanceId: null,
           startedAt: null,
-          externalExecutablePath: null,
           lastError: describeBrowserHealthError(error),
-          canRestart: false,
-          canConfigurePort: false,
-          portConfig: null,
         },
       ],
     };

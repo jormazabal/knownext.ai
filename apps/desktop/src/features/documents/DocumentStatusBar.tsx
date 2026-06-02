@@ -1,5 +1,5 @@
 import { AlertCircle, CheckCircle2, FileCode2, RefreshCw, RotateCcw } from "lucide-react";
-import type { DocumentSyncStatus } from "../../types/domain";
+import type { DocumentSyncStatus, RemoteAccessState } from "../../types/domain";
 
 type DocumentStatusBarProps = {
   isDirty: boolean;
@@ -8,6 +8,9 @@ type DocumentStatusBarProps = {
   gitEnabled: boolean;
   canSave: boolean;
   documentSyncStatus?: DocumentSyncStatus | null;
+  remoteAccess?: RemoteAccessState;
+  remotePaused?: boolean;
+  remoteReason?: string | null;
   isSyncing: boolean;
   onSave: () => void;
   onSynchronize: () => void;
@@ -33,6 +36,9 @@ export function DocumentStatusBar({
   gitEnabled,
   canSave,
   documentSyncStatus,
+  remoteAccess,
+  remotePaused,
+  remoteReason,
   isSyncing,
   onSave,
   onSynchronize,
@@ -44,6 +50,9 @@ export function DocumentStatusBar({
     saveState,
     gitEnabled,
     documentSyncStatus,
+    remoteAccess,
+    remotePaused,
+    remoteReason,
     isSyncing,
     canSave,
   });
@@ -122,6 +131,9 @@ function getFooterState({
   saveState,
   gitEnabled,
   documentSyncStatus,
+  remoteAccess,
+  remotePaused,
+  remoteReason,
   isSyncing,
   canSave,
 }: {
@@ -129,6 +141,9 @@ function getFooterState({
   saveState: "idle" | "saving" | "saved";
   gitEnabled: boolean;
   documentSyncStatus?: DocumentSyncStatus | null;
+  remoteAccess?: RemoteAccessState;
+  remotePaused?: boolean;
+  remoteReason?: string | null;
   isSyncing: boolean;
   canSave: boolean;
 }): FooterState {
@@ -136,9 +151,17 @@ function getFooterState({
   const versionState = documentSyncStatus?.versionState ?? (gitEnabled ? "ok" : "unversioned");
   const incomingAvailable = versionState === "remote-ahead" || versionState === "diverged";
   const localAhead = Boolean(gitEnabled && (documentSyncStatus?.localChanged || versionState === "local-ahead"));
-  const syncAvailable = gitEnabled && localAhead;
+  const githubPaused = Boolean(remotePaused || (remoteAccess && remoteAccess !== "available" && remoteAccess !== "not-configured"));
+  const githubPausedLabel = remoteAccess === "unauthorized"
+    ? "Sin permiso GitHub"
+    : remoteAccess === "offline"
+      ? "GitHub sin conexión"
+      : remoteAccess === "unauthenticated"
+        ? "Sin acceso a GitHub"
+        : remoteReason ?? "GitHub pausado";
+  const syncAvailable = gitEnabled && localAhead && !githubPaused;
 
-  if (incomingAvailable) {
+  if (incomingAvailable && !githubPaused) {
     const hasConflict = versionState === "diverged";
     return {
       tone: "danger",
@@ -166,7 +189,9 @@ function getFooterState({
       label: syncAvailable ? "Cambios pendientes · sincronización disponible" : "Cambios pendientes",
       detail: syncAvailable
         ? "Puedes guardar el borrador o sincronizar la última versión guardada."
-        : "Guarda el documento para convertir el borrador en la versión local.",
+        : githubPaused
+          ? "Puedes seguir guardando en local. GitHub se sincronizará cuando vuelva el acceso."
+          : "Guarda el documento para convertir el borrador en la versión local.",
       showSave: canSave,
       showDiscard: canSave,
       showSync: syncAvailable,
@@ -183,6 +208,21 @@ function getFooterState({
       showSave: false,
       showDiscard: false,
       showSync: true,
+      showUpdate: false,
+      busy,
+    };
+  }
+
+  if (gitEnabled && githubPaused) {
+    return {
+      tone: "warning",
+      label: localAhead ? `Guardado local · ${githubPausedLabel}` : `OK · Guardado local · ${githubPausedLabel}`,
+      detail: localAhead
+        ? "Hay cambios locales guardados. La sincronización remota queda pausada hasta recuperar acceso a GitHub."
+        : "El documento está guardado localmente. La sincronización con GitHub está pausada.",
+      showSave: false,
+      showDiscard: false,
+      showSync: false,
       showUpdate: false,
       busy,
     };

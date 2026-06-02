@@ -565,7 +565,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
               <MarkdownToolbar
                 historyOpen={props.historyOpen}
                 historyEnabled={props.historyEnabled}
-                historyDisabledReason={getHistoryDisabledReason(props.activeProject, props.authStatus, props.versioningStatus)}
+                historyDisabledReason={getHistoryDisabledReason(props.activeProject, props.versioningStatus)}
                 editorReady={activeEditorController !== null && !activeHistoryPreview}
                 extendedUnderlineEnabled={props.markdownExtendedUnderlineEnabled}
                 markdownZoomPercent={markdownZoomPercent}
@@ -800,6 +800,9 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                   gitEnabled={props.historyEnabled}
                   canSave={Boolean(props.activeDocument && props.activeDocumentId)}
                   documentSyncStatus={props.activeDocumentSyncStatus}
+                  remoteAccess={props.projectSyncStatus?.remoteAccess}
+                  remotePaused={props.projectSyncStatus?.remotePaused}
+                  remoteReason={props.projectSyncStatus?.remoteReason}
                   isSyncing={props.isSyncingProject || props.externalChangesBusy}
                   onSave={props.onSave}
                   onSynchronize={props.onSynchronizeDocument}
@@ -1715,9 +1718,8 @@ function keepStableHistoryStateForDocument(
   return { ...currentHistoryStates, [documentId]: nextHistoryState };
 }
 
-function getHistoryDisabledReason(project: Project | null, authStatus: AuthStatus, versioningStatus: ProjectVersioningStatus | null) {
+function getHistoryDisabledReason(project: Project | null, versioningStatus: ProjectVersioningStatus | null) {
   if (!project || project.versioningMode === "none") return "Historial no disponible en proyectos de archivos locales";
-  if ((project.syncMode === "manual-github" || project.syncMode === "auto-github") && !authStatus.isAuthenticated) return "Inicia sesión con GitHub para activar la sincronización";
   return versioningStatus?.reason ?? "Historial no disponible";
 }
 
@@ -1767,7 +1769,22 @@ function buildProjectTreeStatus(
   const state = syncStatus?.state ?? syncState;
   const hasGithub = Boolean(project.githubRepository) || project.syncMode === "manual-github" || project.syncMode === "auto-github";
   const hasLocalGit = hasGithub || project.versioningMode === "local-git" || project.isGitRepository || project.syncMode === "manual-local" || project.syncMode === "auto-local";
-  const scopeLabel = hasGithub ? "GitHub conectado" : hasLocalGit ? "Historial local" : "Archivos locales";
+  const remoteAccess = syncStatus?.remoteAccess;
+  const remotePaused = Boolean(syncStatus?.remotePaused || (hasGithub && remoteAccess && remoteAccess !== "available" && remoteAccess !== "not-configured"));
+  const remoteLabel = remoteAccess === "unauthorized"
+    ? "Sin permiso GitHub"
+    : remoteAccess === "offline"
+      ? "GitHub sin conexión"
+      : remoteAccess === "unauthenticated"
+        ? "Sin acceso a GitHub"
+        : "GitHub pausado";
+  const scopeLabel = hasGithub
+    ? remotePaused
+      ? remoteLabel
+      : "GitHub conectado"
+    : hasLocalGit
+      ? "Historial local"
+      : "Archivos locales";
 
   if (acknowledged) {
     return {
@@ -1837,6 +1854,18 @@ function buildProjectTreeStatus(
       showFooter: true,
       footerLabel: "Cambios para guardar",
       footerDetail: "Puedes guardarlos en el historial.",
+    };
+  }
+
+  if (hasGithub && remotePaused) {
+    return {
+      label: remoteLabel,
+      detail: syncStatus?.remoteReason ?? "Puedes seguir trabajando con historial local.",
+      badge: null,
+      tone: "warning",
+      showFooter: true,
+      footerLabel: remoteLabel,
+      footerDetail: "GitHub se reanudará cuando recuperes cuenta, conexión o permisos.",
     };
   }
 

@@ -7,26 +7,6 @@ use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 static TRACE_LOG_LOCK: Mutex<()> = Mutex::new(());
 
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct RuntimePortConfig {
-    mode: String,
-    port: u16,
-    auto_port_start: u16,
-    auto_port_end: u16,
-}
-
-impl Default for RuntimePortConfig {
-    fn default() -> Self {
-        Self {
-            mode: "local".to_string(),
-            port: 0,
-            auto_port_start: 0,
-            auto_port_end: 0,
-        }
-    }
-}
-
 struct LocalApiState(Mutex<LocalApi>);
 
 #[derive(serde::Deserialize)]
@@ -64,23 +44,14 @@ struct RuntimeServiceStatus {
     expected_app_data_dir: String,
     #[serde(rename = "appDataDir")]
     app_data_dir: Option<String>,
-    port: Option<u16>,
     #[serde(rename = "managedBy")]
     managed_by: Option<String>,
     #[serde(rename = "instanceId")]
     instance_id: Option<String>,
     #[serde(rename = "startedAt")]
     started_at: Option<String>,
-    #[serde(rename = "externalExecutablePath")]
-    external_executable_path: Option<String>,
     #[serde(rename = "lastError")]
     last_error: Option<String>,
-    #[serde(rename = "canRestart")]
-    can_restart: bool,
-    #[serde(rename = "canConfigurePort")]
-    can_configure_port: bool,
-    #[serde(rename = "portConfig")]
-    port_config: Option<RuntimePortConfig>,
 }
 
 #[derive(serde::Serialize)]
@@ -155,7 +126,10 @@ fn append_trace_log(
 }
 
 #[tauri::command]
-fn local_api_request(app: tauri::AppHandle, request: LocalApiRequest) -> Result<LocalApiResponse, String> {
+fn local_api_request(
+    app: tauri::AppHandle,
+    request: LocalApiRequest,
+) -> Result<LocalApiResponse, String> {
     let api = app.state::<LocalApiState>();
     let api = api.0.lock().map_err(|error| error.to_string())?;
     api.handle(
@@ -167,10 +141,16 @@ fn local_api_request(app: tauri::AppHandle, request: LocalApiRequest) -> Result<
 }
 
 #[tauri::command]
-fn local_api_content(app: tauri::AppHandle, request: LocalApiRequest) -> Result<LocalApiContentResponse, String> {
+fn local_api_content(
+    app: tauri::AppHandle,
+    request: LocalApiRequest,
+) -> Result<LocalApiContentResponse, String> {
     let api = app.state::<LocalApiState>();
     let api = api.0.lock().map_err(|error| error.to_string())?;
-    api.content(&request.path, request.body.unwrap_or(serde_json::Value::Null))
+    api.content(
+        &request.path,
+        request.body.unwrap_or(serde_json::Value::Null),
+    )
 }
 
 #[tauri::command]
@@ -243,28 +223,13 @@ fn get_runtime_service_status(app: tauri::AppHandle) -> Result<RuntimeServicesSt
             profile: health["profile"].as_str().map(ToString::to_string),
             expected_app_data_dir: app_data_dir.clone(),
             app_data_dir: Some(app_data_dir),
-            port: None,
             managed_by: Some("tauri".to_string()),
             instance_id: health["instanceId"].as_str().map(ToString::to_string),
             started_at: health["startedAt"].as_str().map(ToString::to_string),
-            external_executable_path: None,
             last_error: None,
-            can_restart: false,
-            can_configure_port: false,
-            port_config: Some(RuntimePortConfig::default()),
         }],
         checked_at: trace_timestamp(),
     })
-}
-
-#[tauri::command]
-fn update_runtime_port_config(_config: RuntimePortConfig) -> Result<RuntimeServicesStatus, String> {
-    Err("KnowNext.ai 2.0.0 no usa puertos de API configurables. La API local vive en comandos Tauri.".to_string())
-}
-
-#[tauri::command]
-fn restart_local_runtime() -> Result<RuntimeServicesStatus, String> {
-    Err("KnowNext.ai 2.0.0 no usa procesos externos reiniciables.".to_string())
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -318,9 +283,7 @@ pub fn run() {
             get_trace_log_status,
             record_trace_log,
             open_folder,
-            get_runtime_service_status,
-            restart_local_runtime,
-            update_runtime_port_config
+            get_runtime_service_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running KnowNext.ai");
