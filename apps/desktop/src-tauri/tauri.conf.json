@@ -40,6 +40,7 @@
       },
       "signCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File ../../../scripts/sign-windows.ps1 %1",
       "wix": {
+        "template": "./windows/wix/per-user-main.wxs",
         "upgradeCode": "389ecb95-c3d2-5327-872c-5e9508c14b2a"
       }
     }
