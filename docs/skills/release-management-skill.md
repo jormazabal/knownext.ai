@@ -64,8 +64,11 @@ Invoke-WebRequest -UseBasicParsing -Method Head -Uri "https://github.com/jormaza
 
 $androidManifest = Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/jormazabal/knownext.ai/releases/latest/download/android-latest.json" -MaximumRedirection 10
 $android = [System.Text.Encoding]::UTF8.GetString($androidManifest.Content) | ConvertFrom-Json
-$android.version
-$android.url
+$android.versionName
+$android.applicationId
+$artifact = $android.artifacts | Where-Object { $_.abi -eq "arm64-v8a" } | Select-Object -First 1
+$artifact.url
+$artifact.sha256
 Invoke-WebRequest -UseBasicParsing -Method Head -Uri "https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai-android-arm64-v${version}.apk" -MaximumRedirection 10
 ```
 
@@ -78,7 +81,7 @@ Invoke-WebRequest -UseBasicParsing -Method Head -Uri "https://github.com/jormaza
 - GitHub Actions release workflow succeeds.
 - The release is not left as a draft.
 - `latest.json` returns the new version and points Windows updates to `KnowNext.ai_<version>_x64_en-US.msi`.
-- `android-latest.json` returns the new version and points Android updates to `KnowNext.ai-android-arm64-v<version>.apk`.
+- `android-latest.json` returns `versionName=<version>`, `applicationId=ai.knownext.mobile`, and an `arm64-v8a` artifact pointing to `KnowNext.ai-android-arm64-v<version>.apk` with the matching SHA-256.
 - README download URLs return HTTP 200.
 - A previously installed per-user Windows version updates without requiring administrator permissions and without deleting app data.
 - Android updates preserve app data and the app works offline with no workstation app or external product service running.
