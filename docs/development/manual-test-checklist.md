@@ -5,7 +5,7 @@ Use this checklist before publishing a KnowNext.ai release. For 2.0.1, run criti
 ## Build Under Test
 
 - Version: `2.0.1`
-- Windows artifact: `KnowNext.ai_2.0.1_x64-setup.exe` and `KnowNext.ai_2.0.1_x64_en-US.msi`
+- Windows artifact: primary installer `KnowNext.ai_2.0.1_x64_en-US.msi`; secondary NSIS asset `KnowNext.ai_2.0.1_x64-setup.exe`
 - Android artifact: `KnowNext.ai-android-arm64-v2.0.1.apk`
 - Runtime: local Tauri/Rust, no external product service or workstation service dependency.
 
@@ -62,7 +62,7 @@ Use this checklist before publishing a KnowNext.ai release. For 2.0.1, run criti
 - GitHub release draft contains Windows NSIS, Windows MSI, both `.sig` files, `latest.json`, Android APK, and `android-latest.json`.
 - `latest.json` resolves to `2.0.1` and points `windows-x86_64.url` to the MSI artifact.
 - `android-latest.json` resolves to `2.0.1` and points to `KnowNext.ai-android-arm64-v2.0.1.apk`.
-- README Windows and Android download URLs return HTTP 200.
+- README Windows MSI and Android download URLs return HTTP 200.
 - A previous Windows install updates to 2.0.1 without deleting app data.
 - An Android install updates to 2.0.1 while preserving app data and still works offline.
 

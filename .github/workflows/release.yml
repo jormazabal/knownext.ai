@@ -113,7 +113,7 @@ jobs:
           projectPath: apps/desktop
           tagName: ${{ env.KNOWNEXT_RELEASE_TAG }}
           releaseName: KnowNext.ai ${{ env.KNOWNEXT_RELEASE_VERSION }}
-          releaseBody: See docs/releases/${{ env.KNOWNEXT_RELEASE_VERSION }}.md for release notes. Installable Windows and Android assets are attached below.
+          releaseBody: See docs/releases/${{ env.KNOWNEXT_RELEASE_VERSION }}.md for release notes. For Windows, install the MSI asset; the NSIS executable is attached as a secondary asset.
           releaseDraft: true
           prerelease: false
           tauriScript: pnpm tauri

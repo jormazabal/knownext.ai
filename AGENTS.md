@@ -66,10 +66,10 @@ KnowNext.ai is a local-first Tauri application for managing, editing, versioning
 - Use `docs/skills/release-management-skill.md` when preparing or publishing a release.
 - Keep `VERSION` as the release source of truth and keep all checked manifests aligned.
 - Public Windows releases are distributed from GitHub Releases in `jormazabal/knownext.ai`.
-- The README manual download link must point to the versioned NSIS installer using the `/releases/latest/download/KnowNext.ai_<version>_x64-setup.exe` URL.
+- The README manual download link must point to the versioned MSI installer using the `/releases/latest/download/KnowNext.ai_<version>_x64_en-US.msi` URL.
 - The Windows updater must use the signed Tauri `latest.json` manifest and currently must prefer the MSI artifact for `windows-x86_64`.
 - Android releases must include the signed APK and `android-latest.json`.
-- Do not publish a release unless the GitHub release contains the NSIS installer, MSI installer, both Windows `.sig` files, `latest.json`, Android APK, and `android-latest.json`.
+- Do not publish a release unless the GitHub release contains the MSI installer, NSIS installer, both Windows `.sig` files, `latest.json`, Android APK, and `android-latest.json`.
 - After publishing, verify that both update manifests resolve to the new version and point to the expected assets.
 - Updater signing with `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` is mandatory; Authenticode is recommended but optional until a public code-signing certificate exists.
 - Do not regenerate the Tauri updater key unless explicitly requested; changing it can strand already installed clients.

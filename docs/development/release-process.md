@@ -61,7 +61,7 @@ Optional hardening:
 
 The public updater key is configured in `apps/desktop/src-tauri/tauri.conf.json`. Do not regenerate the updater key unless the maintainer explicitly accepts the migration impact.
 
-The Windows updater currently prefers the MSI artifact when generating `latest.json`. Keep the NSIS setup executable as the manual installer linked from the README and GitHub Releases.
+The Windows updater and README manual download both use the MSI artifact. Keep the NSIS setup executable attached to GitHub Releases as a secondary installer asset, but do not make it the primary public download unless it is validated on Windows security policy for downloaded unsigned executables.
 
 The WiX `upgradeCode` is pinned in `apps/desktop/src-tauri/tauri.conf.json`; do not change it during a routine release. The MSI uses `apps/desktop/src-tauri/windows/wix/per-user-main.wxs` so the updater can install under the current user without Administrator rights. A host with an older MSI registered as a per-machine install may require Administrator rights to remove that older install and is not valid evidence for the per-user updater acceptance gate. Validate updater preservation against a previous current-user install.
 
@@ -69,7 +69,7 @@ Android private APK updates use `android-latest.json`. The APK must keep `applic
 
 Distribution contract:
 
-- Manual Windows installer: `https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_<version>_x64-setup.exe`
+- Manual Windows installer: `https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_<version>_x64_en-US.msi`
 - Windows updater manifest: `https://github.com/jormazabal/knownext.ai/releases/latest/download/latest.json`
 - Windows updater artifact inside `latest.json`: `KnowNext.ai_<version>_x64_en-US.msi`
 - Android updater manifest: `https://github.com/jormazabal/knownext.ai/releases/latest/download/android-latest.json`
@@ -125,7 +125,7 @@ $manifest = Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/jormazab
 $json = [System.Text.Encoding]::UTF8.GetString($manifest.Content) | ConvertFrom-Json
 $json.version
 $json.platforms.'windows-x86_64'.url
-Invoke-WebRequest -UseBasicParsing -Method Head -Uri "https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_${version}_x64-setup.exe" -MaximumRedirection 10
+Invoke-WebRequest -UseBasicParsing -Method Head -Uri "https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_${version}_x64_en-US.msi" -MaximumRedirection 10
 
 $androidManifest = Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/jormazabal/knownext.ai/releases/latest/download/android-latest.json" -MaximumRedirection 10
 $android = [System.Text.Encoding]::UTF8.GetString($androidManifest.Content) | ConvertFrom-Json

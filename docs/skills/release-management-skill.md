@@ -12,9 +12,9 @@ Use this skill for every version bump, GitHub Release, updater change, installer
 
 - `VERSION` is the source of truth.
 - These files must match `VERSION`: root `package.json`, `apps/desktop/package.json`, `apps/desktop/src-tauri/tauri.conf.json`, and `apps/desktop/src-tauri/Cargo.toml`.
-- The README manual installer link must use `releases/latest/download/KnowNext.ai_<version>_x64-setup.exe`.
+- The README manual installer link must use `releases/latest/download/KnowNext.ai_<version>_x64_en-US.msi`.
 - The README Android link must use `releases/latest/download/KnowNext.ai-android-arm64-v<version>.apk`.
-- GitHub Releases must include `KnowNext.ai_<version>_x64-setup.exe`, `KnowNext.ai_<version>_x64_en-US.msi`, both Windows `.sig` files, `latest.json`, `KnowNext.ai-android-arm64-v<version>.apk`, and `android-latest.json`.
+- GitHub Releases must include `KnowNext.ai_<version>_x64_en-US.msi`, `KnowNext.ai_<version>_x64-setup.exe`, both Windows `.sig` files, `latest.json`, `KnowNext.ai-android-arm64-v<version>.apk`, and `android-latest.json`.
 - The published Windows updater manifest must resolve to the new version and point `windows-x86_64.url` to the MSI artifact.
 - The published Android manifest must resolve to the new version, declare `applicationId=ai.knownext.mobile`, and point to the Android APK asset with the matching SHA-256.
 - Do not publish a release from an unclean or unrelated worktree.
@@ -39,7 +39,7 @@ Optional hardening:
 
 1. Start from `origin/main` on a `codex/release-<version>` branch.
 2. Bump `VERSION` and every checked manifest.
-3. Update README download URLs to the new versioned Windows NSIS `.exe` and Android APK.
+3. Update README download URLs to the new versioned Windows MSI and Android APK.
 4. Add `CHANGELOG.md` notes and `docs/releases/<version>.md`.
 5. Run `cargo update -p knownext-ai-desktop` in `apps/desktop/src-tauri` when dependency metadata changes.
 6. Run `pnpm release:check`.
@@ -60,7 +60,7 @@ $manifest = Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/jormazab
 $json = [System.Text.Encoding]::UTF8.GetString($manifest.Content) | ConvertFrom-Json
 $json.version
 $json.platforms.'windows-x86_64'.url
-Invoke-WebRequest -UseBasicParsing -Method Head -Uri "https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_${version}_x64-setup.exe" -MaximumRedirection 10
+Invoke-WebRequest -UseBasicParsing -Method Head -Uri "https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_${version}_x64_en-US.msi" -MaximumRedirection 10
 
 $androidManifest = Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/jormazabal/knownext.ai/releases/latest/download/android-latest.json" -MaximumRedirection 10
 $android = [System.Text.Encoding]::UTF8.GetString($androidManifest.Content) | ConvertFrom-Json
