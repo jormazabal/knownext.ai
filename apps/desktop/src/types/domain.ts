@@ -257,6 +257,8 @@ export type GithubDeviceStartResponse = {
   expiresIn: number;
   interval: number;
   mock: boolean;
+  status?: "error" | null;
+  error?: string | null;
 };
 
 export type GithubDevicePollResponse = {

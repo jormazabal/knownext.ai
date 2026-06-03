@@ -91,7 +91,9 @@ git push origin v2.0.2
 
 Pushing the tag runs `.github/workflows/release.yml`. The workflow builds Windows, uploads the NSIS installer, MSI installer, updater signatures, and publishes `latest.json` through `tauri-apps/tauri-action@v0.6.2`. It then builds and uploads the signed Android APK plus `android-latest.json`.
 
-The workflow starts with `pnpm release:secrets:check`. If mandatory updater or Android signing inputs are missing, CI stops before creating partial release assets.
+The workflow starts with `pnpm release:secrets:check`. If mandatory updater, GitHub device login, or Android signing inputs are missing, CI stops before creating partial release assets.
+
+`KNOWNEXT_GITHUB_CLIENT_ID` must be the public client ID for the KnowNext.ai GitHub OAuth App or GitHub App that supports device flow login. Do not use a personal access token or another product's OAuth application.
 
 After the workflow completes, inspect the draft release before publishing it:
 

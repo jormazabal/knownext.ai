@@ -1,8 +1,11 @@
 use base64::Engine;
+use reqwest::blocking::Client;
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone)]
 pub struct LocalApi {
@@ -87,14 +90,7 @@ impl LocalApi {
             ("GET", ["api", "notes"]) => ok(self.read_notes()),
             ("PUT", ["api", "notes"]) => ok(self.write_notes(body.get("markdown").and_then(Value::as_str).unwrap_or("").to_string())),
             ("GET", ["api", "auth", "status"]) => ok(self.auth_status()),
-            ("POST", ["api", "auth", "github", "device", "start"]) => ok(json!({
-                "deviceCode": knownext_core::compact_id("device"),
-                "userCode": "KNOW-NEXT",
-                "verificationUri": "https://github.com/login/device",
-                "expiresIn": 900,
-                "interval": 5,
-                "mock": true
-            })),
+            ("POST", ["api", "auth", "github", "device", "start"]) => ok(self.start_github_device()),
             ("POST", ["api", "auth", "github", "device", "poll"]) => ok(self.poll_github_device()),
             ("POST", ["api", "auth", "logout"]) => ok(self.clear_auth_status()),
             ("GET", ["api", "github", "repositories"]) => ok(json!([])),
@@ -238,6 +234,7 @@ impl LocalApi {
     fn notes_path(&self) -> PathBuf { self.app_data_dir.join("notes.json") }
     fn export_template_path(&self) -> PathBuf { self.app_data_dir.join("export-template.json") }
     fn auth_path(&self) -> PathBuf { self.app_data_dir.join("auth.json") }
+    fn github_device_path(&self) -> PathBuf { self.app_data_dir.join("github-device.json") }
     fn credentials_path(&self) -> PathBuf { self.app_data_dir.join("credentials.json") }
     fn logs_dir(&self) -> PathBuf { self.app_data_dir.join("logs") }
     fn previews_dir(&self) -> PathBuf { self.app_data_dir.join("previews") }
@@ -616,26 +613,242 @@ impl LocalApi {
         notes
     }
     fn auth_status(&self) -> Value {
-        let auth = self.read_json(&self.auth_path(), default_auth_status());
+        let mut auth = self.read_json(&self.auth_path(), default_auth_status());
         if is_mock_github_auth(&auth) {
             let _ = std::fs::remove_file(self.auth_path());
             return default_auth_status();
         }
+        if remove_public_auth_secrets(&mut auth) {
+            let _ = self.write_json(&self.auth_path(), &auth);
+        }
         auth
     }
 
-    fn poll_github_device(&self) -> Value {
+    fn start_github_device(&self) -> Value {
+        let Some(client_id) = self.github_client_id() else {
+            let _ = std::fs::remove_file(self.github_device_path());
+            return github_unconfigured_device_response();
+        };
+
+        let client = github_http_client();
+        let response = client
+            .post("https://github.com/login/device/code")
+            .form(&[
+                ("client_id", client_id.as_str()),
+                ("scope", "repo read:user user:email"),
+            ])
+            .send();
+
+        let Ok(response) = response else {
+            return json!({
+                "deviceCode": "",
+                "userCode": "",
+                "verificationUri": "https://github.com/login/device",
+                "expiresIn": 0,
+                "interval": 5,
+                "mock": false,
+                "status": "error",
+                "error": "github_network_unavailable"
+            });
+        };
+
+        let body = response.json::<Value>().unwrap_or_else(|_| json!({}));
+        if let Some(error) = body.get("error").and_then(Value::as_str) {
+            return json!({
+                "deviceCode": "",
+                "userCode": "",
+                "verificationUri": "https://github.com/login/device",
+                "expiresIn": 0,
+                "interval": 5,
+                "mock": false,
+                "status": "error",
+                "error": error
+            });
+        }
+
+        let device_code = body.get("device_code").and_then(Value::as_str).unwrap_or("");
+        let user_code = body.get("user_code").and_then(Value::as_str).unwrap_or("");
+        let verification_uri = body
+            .get("verification_uri")
+            .or_else(|| body.get("verification_uri_complete"))
+            .and_then(Value::as_str)
+            .unwrap_or("https://github.com/login/device");
+        let expires_in = body.get("expires_in").and_then(Value::as_i64).unwrap_or(900).max(1);
+        let interval = body.get("interval").and_then(Value::as_i64).unwrap_or(5).max(1);
+
+        if device_code.is_empty() || user_code.is_empty() {
+            return json!({
+                "deviceCode": "",
+                "userCode": "",
+                "verificationUri": "https://github.com/login/device",
+                "expiresIn": 0,
+                "interval": 5,
+                "mock": false,
+                "status": "error",
+                "error": "github_device_start_failed"
+            });
+        }
+
+        let pending = json!({
+            "deviceCode": device_code,
+            "expiresAtEpochSeconds": unix_now_seconds() + expires_in,
+            "interval": interval
+        });
+        let _ = self.write_json(&self.github_device_path(), &pending);
+
         json!({
-            "status": "error",
-            "auth": self.auth_status(),
+            "deviceCode": device_code,
+            "userCode": user_code,
+            "verificationUri": verification_uri,
+            "expiresIn": expires_in,
+            "interval": interval,
+            "mock": false
+        })
+    }
+
+    fn poll_github_device(&self) -> Value {
+        let Some(client_id) = self.github_client_id() else {
+            return json!({
+                "status": "error",
+                "auth": self.auth_status(),
+                "interval": null,
+                "error": "github_remote_not_configured"
+            });
+        };
+
+        let pending = self.read_json(&self.github_device_path(), json!({}));
+        let device_code = pending.get("deviceCode").and_then(Value::as_str).unwrap_or("");
+        let expires_at = pending.get("expiresAtEpochSeconds").and_then(Value::as_i64).unwrap_or(0);
+        if device_code.is_empty() {
+            return json!({
+                "status": "error",
+                "auth": self.auth_status(),
+                "interval": null,
+                "error": "incorrect_device_code"
+            });
+        }
+        if expires_at <= unix_now_seconds() {
+            let _ = std::fs::remove_file(self.github_device_path());
+            return json!({
+                "status": "error",
+                "auth": self.auth_status(),
+                "interval": null,
+                "error": "expired_token"
+            });
+        }
+
+        let client = github_http_client();
+        let response = client
+            .post("https://github.com/login/oauth/access_token")
+            .form(&[
+                ("client_id", client_id.as_str()),
+                ("device_code", device_code),
+                ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+            ])
+            .send();
+
+        let Ok(response) = response else {
+            return json!({
+                "status": "error",
+                "auth": self.auth_status(),
+                "interval": pending.get("interval").cloned().unwrap_or(Value::Null),
+                "error": "github_network_unavailable"
+            });
+        };
+
+        let token_body = response.json::<Value>().unwrap_or_else(|_| json!({}));
+        if let Some(error) = token_body.get("error").and_then(Value::as_str) {
+            if error == "authorization_pending" {
+                return json!({
+                    "status": "pending",
+                    "auth": self.auth_status(),
+                    "interval": pending.get("interval").cloned().unwrap_or(Value::Null),
+                    "error": null
+                });
+            }
+            return json!({
+                "status": "error",
+                "auth": self.auth_status(),
+                "interval": if error == "slow_down" {
+                    Some(pending.get("interval").and_then(Value::as_i64).unwrap_or(5) + 5)
+                } else {
+                    None
+                },
+                "error": error
+            });
+        }
+
+        let access_token = token_body.get("access_token").and_then(Value::as_str).unwrap_or("");
+        if access_token.is_empty() {
+            return json!({
+                "status": "error",
+                "auth": self.auth_status(),
+                "interval": null,
+                "error": "github_token_missing"
+            });
+        }
+
+        let user = client
+            .get("https://api.github.com/user")
+            .bearer_auth(access_token)
+            .send()
+            .ok()
+            .and_then(|response| response.json::<Value>().ok())
+            .unwrap_or_else(|| json!({}));
+
+        let login = user.get("login").and_then(Value::as_str).unwrap_or("");
+        if login.is_empty() {
+            return json!({
+                "status": "error",
+                "auth": self.auth_status(),
+                "interval": null,
+                "error": "github_user_unavailable"
+            });
+        }
+
+        let scopes = parse_github_scopes(token_body.get("scope").and_then(Value::as_str).unwrap_or(""));
+        let auth = json!({
+            "isAuthenticated": true,
+            "provider": "github",
+            "user": {
+                "login": login,
+                "name": user.get("name").and_then(Value::as_str).unwrap_or(login),
+                "avatarUrl": user.get("avatar_url").and_then(Value::as_str)
+            },
+            "scopes": scopes.clone(),
+            "expiresAt": null,
+            "updatedAt": knownext_core::now_iso()
+        });
+        let credentials = json!({
+            "provider": "github",
+            "accessToken": access_token,
+            "scopes": scopes,
+            "updatedAt": knownext_core::now_iso()
+        });
+        let _ = self.write_json(&self.auth_path(), &auth);
+        let _ = self.write_json(&self.credentials_path(), &credentials);
+        let _ = std::fs::remove_file(self.github_device_path());
+
+        json!({
+            "status": "authenticated",
+            "auth": auth,
             "interval": null,
-            "error": "github_remote_not_configured"
+            "error": null
         })
     }
 
     fn clear_auth_status(&self) -> Value {
         let _ = std::fs::remove_file(self.auth_path());
+        let _ = std::fs::remove_file(self.credentials_path());
+        let _ = std::fs::remove_file(self.github_device_path());
         default_auth_status()
+    }
+
+    fn github_client_id(&self) -> Option<String> {
+        if cfg!(test) || self.profile == "test" {
+            return None;
+        }
+        github_client_id()
     }
 
     fn project_activity(&self, project_id: &str) -> Value {
@@ -1017,6 +1230,67 @@ fn default_auth_status() -> Value {
     })
 }
 
+fn github_unconfigured_device_response() -> Value {
+    json!({
+        "deviceCode": "",
+        "userCode": "",
+        "verificationUri": "https://github.com/login/device",
+        "expiresIn": 0,
+        "interval": 5,
+        "mock": true,
+        "status": "error",
+        "error": "github_remote_not_configured"
+    })
+}
+
+fn github_client_id() -> Option<String> {
+    std::env::var("KNOWNEXT_GITHUB_CLIENT_ID")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            option_env!("KNOWNEXT_GITHUB_CLIENT_ID")
+                .map(str::to_string)
+                .filter(|value| !value.trim().is_empty())
+        })
+}
+
+fn github_http_client() -> Client {
+    let mut headers = HeaderMap::new();
+    headers.insert(USER_AGENT, HeaderValue::from_static("KnowNext.ai"));
+    headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+    Client::builder()
+        .default_headers(headers)
+        .timeout(Duration::from_secs(20))
+        .build()
+        .unwrap_or_else(|_| Client::new())
+}
+
+fn unix_now_seconds() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn parse_github_scopes(scope: &str) -> Vec<String> {
+    scope
+        .split(|ch: char| ch == ',' || ch.is_whitespace())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn remove_public_auth_secrets(auth: &mut Value) -> bool {
+    let Some(object) = auth.as_object_mut() else {
+        return false;
+    };
+    let mut changed = false;
+    changed |= object.remove("accessToken").is_some();
+    changed |= object.remove("token").is_some();
+    changed
+}
+
 fn is_mock_github_auth(auth: &Value) -> bool {
     auth.get("provider").and_then(Value::as_str) == Some("github")
         && auth.get("user").and_then(|user| user.get("login")).and_then(Value::as_str) == Some("knownext-dev")
@@ -1161,6 +1435,12 @@ mod tests {
         assert_eq!(paused.body["remotePaused"], true);
         assert_eq!(paused.body["state"], "local-history");
 
+        let start = api.handle("POST", "/api/auth/github/device/start", Value::Null, vec![]).unwrap();
+        assert_eq!(start.body["mock"], true);
+        assert_eq!(start.body["status"], "error");
+        assert_eq!(start.body["error"], "github_remote_not_configured");
+        assert_eq!(start.body["deviceCode"], "");
+
         let login = api.handle("POST", "/api/auth/github/device/poll", json!({ "deviceCode": "dev" }), vec![]).unwrap();
         assert_eq!(login.body["status"], "error");
         assert_eq!(login.body["auth"]["isAuthenticated"], false);
@@ -1207,6 +1487,33 @@ mod tests {
 
         assert_eq!(auth.body["isAuthenticated"], false);
         assert!(!api.auth_path().exists());
+    }
+
+    #[test]
+    fn auth_status_never_exposes_persisted_github_tokens_to_frontend() {
+        let api = api();
+        let _ = api.write_json(&api.auth_path(), &json!({
+            "isAuthenticated": true,
+            "provider": "github",
+            "user": {
+                "login": "octocat",
+                "name": "Octocat",
+                "avatarUrl": null
+            },
+            "scopes": ["repo"],
+            "expiresAt": null,
+            "accessToken": "secret-token",
+            "token": "legacy-secret-token"
+        }));
+
+        let auth = api.handle("GET", "/api/auth/status", Value::Null, vec![]).unwrap();
+        let persisted = api.read_json(&api.auth_path(), json!({}));
+
+        assert_eq!(auth.body["isAuthenticated"], true);
+        assert!(auth.body.get("accessToken").is_none());
+        assert!(auth.body.get("token").is_none());
+        assert!(persisted.get("accessToken").is_none());
+        assert!(persisted.get("token").is_none());
     }
 
     #[test]
