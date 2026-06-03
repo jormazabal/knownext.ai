@@ -18,7 +18,7 @@ There is no external product service, packaged auxiliary runtime, API port, or m
 
 The latest installers are published on GitHub Releases:
 
-- [Download KnowNext.ai for Windows](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_2.0.1_x64-setup.exe)
+- [Download KnowNext.ai for Windows](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_2.0.1_x64_en-US.msi)
 - [Download KnowNext.ai for Android arm64](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai-android-arm64-v2.0.1.apk)
 - [View all releases](https://github.com/jormazabal/knownext.ai/releases)
 
