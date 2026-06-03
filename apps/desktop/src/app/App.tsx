@@ -1991,6 +1991,12 @@ export function App() {
     setGithubLoginError(null);
     try {
       const device = await startGithubDeviceFlow();
+      if (device.status === "error" && !device.mock) {
+        setGithubDevice(null);
+        setGithubLoginState("error");
+        setGithubLoginError(getGithubDeviceFlowErrorMessage(device.error));
+        return;
+      }
       setGithubDevice(device);
       setGithubLoginState("waiting");
     } catch (error) {
@@ -4147,6 +4153,11 @@ function GithubLoginDialog({
 }
 
 function getGithubDeviceFlowErrorMessage(error?: string | null) {
+  if (error === "github_remote_not_configured") return "GitHub remoto no está configurado en esta instalación.";
+  if (error === "github_network_unavailable") return "No se pudo contactar con GitHub. Comprueba la conexión e inténtalo de nuevo.";
+  if (error === "github_device_start_failed") return "GitHub no devolvió un código de autorización válido. Inicia el login de nuevo.";
+  if (error === "github_token_missing") return "GitHub autorizó el flujo, pero no devolvió un token válido. Inicia el login de nuevo.";
+  if (error === "github_user_unavailable") return "No se pudo leer el usuario de GitHub autorizado. Revisa permisos e inténtalo de nuevo.";
   if (error === "expired_token") return "El código ha caducado. Inicia un nuevo login para generar otro código.";
   if (error === "access_denied") return "La autorización fue cancelada en GitHub.";
   if (error === "incorrect_device_code") return "GitHub no reconoce este código de dispositivo. Inicia el login de nuevo.";

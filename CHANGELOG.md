@@ -6,6 +6,7 @@ All KnowNext.ai releases use one monolithic application version for the frontend
 
 - Fixed GitHub login in installed builds so an unavailable remote GitHub OAuth flow can no longer persist or display an internal development placeholder account.
 - Added runtime cleanup for any previously persisted development GitHub auth marker; affected users are returned to the correct unauthenticated GitHub-paused state after updating.
+- Added real GitHub device authorization through the local Rust runtime when the release is built with the KnowNext.ai GitHub client ID.
 - Limited mock GitHub authentication to internal test profiles and kept Windows/Android `desktop` and `mobile` profiles from accepting mock auth.
 - Stopped frontend polling for GitHub device auth when the runtime reports GitHub remote auth is not configured.
 - Strengthened the production bundle gate so development GitHub mock strings fail release validation if they leak into packaged frontend assets.

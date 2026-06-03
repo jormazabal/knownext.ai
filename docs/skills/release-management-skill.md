@@ -25,6 +25,7 @@ Use this skill for every version bump, GitHub Release, updater change, installer
 
 - `TAURI_SIGNING_PRIVATE_KEY`
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+- `KNOWNEXT_GITHUB_CLIENT_ID`
 - `ANDROID_KEYSTORE_BASE64`
 - `ANDROID_KEYSTORE_PASSWORD`
 - `ANDROID_KEY_ALIAS`
@@ -94,3 +95,4 @@ Invoke-WebRequest -UseBasicParsing -Method Head -Uri "https://github.com/jormaza
 - Pointing the Windows updater manifest back to NSIS without explicitly changing the updater distribution policy.
 - Replacing the updater key as a routine release step.
 - Reintroducing separate runtime dependencies or connection screens for Android.
+- Publishing a build without `KNOWNEXT_GITHUB_CLIENT_ID`, which leaves the GitHub device login unavailable in installed apps.

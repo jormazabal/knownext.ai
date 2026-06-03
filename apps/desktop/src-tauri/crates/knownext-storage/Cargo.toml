@@ -9,5 +9,6 @@ base64 = "0.22"
 knownext-ai = { path = "../knownext-ai" }
 knownext-core = { path = "../knownext-core" }
 knownext-docs = { path = "../knownext-docs" }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "form", "json", "rustls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
