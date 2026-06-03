@@ -656,6 +656,7 @@ export function App() {
 
   useEffect(() => {
     if (!githubLoginOpen || githubLoginState !== "waiting" || !githubDevice) return;
+    if (githubDevice.mock && !import.meta.env.DEV) return;
 
     const interval = window.setInterval(() => {
       void handlePollGithubLogin();
@@ -2000,6 +2001,7 @@ export function App() {
 
   async function handlePollGithubLogin() {
     if (!githubDevice || githubLoginPollingRef.current) return;
+    if (githubDevice.mock && !import.meta.env.DEV) return;
     githubLoginPollingRef.current = true;
     setGithubLoginPolling(true);
     setGithubLoginError(null);
@@ -4078,7 +4080,6 @@ function GithubLoginDialog({
 
   const busy = state === "starting";
   const localGithubFallback = Boolean(device?.mock && !import.meta.env.DEV);
-  const developmentGithubMock = Boolean(device?.mock && import.meta.env.DEV);
   return (
     <div className="knownext-modal-overlay fixed inset-0 z-[95] grid place-items-center bg-black/20">
       <section className="w-[460px] rounded-lg border border-line bg-white shadow-menu">
@@ -4107,11 +4108,6 @@ function GithubLoginDialog({
               </div>
               <p>Abre GitHub, introduce el código y vuelve aquí para confirmar la conexión.</p>
               <p>KnowNext.ai comprobará la autorización automáticamente cada {Math.max(device.interval, 1)} s.</p>
-              {developmentGithubMock ? (
-                <p className="rounded-md border border-orange-200 bg-brand-hover px-3 py-2">
-                  Modo desarrollo: no hay `KNOWNEXT_GITHUB_CLIENT_ID`, así que la autorización se completará con una cuenta mock.
-                </p>
-              ) : null}
             </>
           ) : (
             <p>Inicia el flujo de dispositivo para autorizar KnowNext.ai desde GitHub.</p>

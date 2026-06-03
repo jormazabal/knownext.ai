@@ -53,7 +53,7 @@ The Services settings panel reports the local Rust runtime:
 - instance id and start time
 - latest diagnostic error
 
-There are no auxiliary product processes, restart controls, or API ports to configure in 2.0.1.
+There are no auxiliary product processes, restart controls, or API ports to configure in 2.0.2.
 
 ## Security Notes
 

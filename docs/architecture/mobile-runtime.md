@@ -1,6 +1,6 @@
 # Mobile Runtime
 
-KnowNext.ai 2.0.1 can be packaged as a native Android app through Tauri v2. Android is an autonomous local app and uses Rust/Tauri command contracts for product state and operations.
+KnowNext.ai 2.0.2 can be packaged as a native Android app through Tauri v2. Android is an autonomous local app and uses Rust/Tauri command contracts for product state and operations.
 
 ## Scope
 

@@ -95,7 +95,7 @@ impl LocalApi {
                 "interval": 5,
                 "mock": true
             })),
-            ("POST", ["api", "auth", "github", "device", "poll"]) => ok(json!({ "status": "authenticated", "auth": self.authenticate_mock_github(), "interval": null, "error": null })),
+            ("POST", ["api", "auth", "github", "device", "poll"]) => ok(self.poll_github_device()),
             ("POST", ["api", "auth", "logout"]) => ok(self.clear_auth_status()),
             ("GET", ["api", "github", "repositories"]) => ok(json!([])),
             ("GET", ["api", "projects"]) => ok(json!(self.list_projects())),
@@ -616,23 +616,21 @@ impl LocalApi {
         notes
     }
     fn auth_status(&self) -> Value {
-        self.read_json(&self.auth_path(), default_auth_status())
+        let auth = self.read_json(&self.auth_path(), default_auth_status());
+        if is_mock_github_auth(&auth) {
+            let _ = std::fs::remove_file(self.auth_path());
+            return default_auth_status();
+        }
+        auth
     }
 
-    fn authenticate_mock_github(&self) -> Value {
-        let auth = json!({
-            "isAuthenticated": true,
-            "provider": "github",
-            "user": {
-                "login": "knownext-dev",
-                "name": "KnowNext Dev",
-                "avatarUrl": null
-            },
-            "scopes": ["repo"],
-            "expiresAt": null
-        });
-        let _ = self.write_json(&self.auth_path(), &auth);
-        auth
+    fn poll_github_device(&self) -> Value {
+        json!({
+            "status": "error",
+            "auth": self.auth_status(),
+            "interval": null,
+            "error": "github_remote_not_configured"
+        })
     }
 
     fn clear_auth_status(&self) -> Value {
@@ -1019,6 +1017,11 @@ fn default_auth_status() -> Value {
     })
 }
 
+fn is_mock_github_auth(auth: &Value) -> bool {
+    auth.get("provider").and_then(Value::as_str) == Some("github")
+        && auth.get("user").and_then(|user| user.get("login")).and_then(Value::as_str) == Some("knownext-dev")
+}
+
 fn safe_name(value: &str) -> String {
     value.chars().map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' }).collect()
 }
@@ -1101,7 +1104,7 @@ mod tests {
 
     fn api() -> LocalApi {
         let root = std::env::temp_dir().join(knownext_core::compact_id("knownext-test"));
-        LocalApi::new(root, "2.0.1".to_string(), "desktop".to_string())
+        LocalApi::new(root, "2.0.2".to_string(), "desktop".to_string())
     }
 
     fn create_project(api: &LocalApi) -> (String, PathBuf) {
@@ -1132,13 +1135,13 @@ mod tests {
         assert_eq!(response.status, 200);
         assert_eq!(response.body["app"], "knownext");
         assert_eq!(response.body["service"], "local-tauri-rust");
-        assert_eq!(response.body["version"], "2.0.1");
+        assert_eq!(response.body["version"], "2.0.2");
         assert_eq!(response.body["profile"], "desktop");
         assert_eq!(response.body["endpoint"], "tauri://local-api");
     }
 
     #[test]
-    fn github_sync_pauses_without_auth_and_recovers_after_dev_login() {
+    fn github_sync_pauses_without_auth_and_recovers_after_real_auth_state() {
         let api = api();
         let root = std::env::temp_dir().join(knownext_core::compact_id("knownext-github-project"));
         let created = api.handle("POST", "/api/projects", json!({
@@ -1159,19 +1162,51 @@ mod tests {
         assert_eq!(paused.body["state"], "local-history");
 
         let login = api.handle("POST", "/api/auth/github/device/poll", json!({ "deviceCode": "dev" }), vec![]).unwrap();
-        assert_eq!(login.body["status"], "authenticated");
-        assert_eq!(login.body["auth"]["isAuthenticated"], true);
+        assert_eq!(login.body["status"], "error");
+        assert_eq!(login.body["auth"]["isAuthenticated"], false);
+        assert_eq!(login.body["error"], "github_remote_not_configured");
+
+        let paused_again = api.handle("GET", &format!("/api/projects/{project_id}/sync/status"), Value::Null, vec![]).unwrap();
+        assert_eq!(paused_again.body["remoteAccess"], "unauthenticated");
+        assert_eq!(paused_again.body["remotePaused"], true);
+
+        let _ = api.write_json(&api.auth_path(), &json!({
+            "isAuthenticated": true,
+            "provider": "github",
+            "user": {
+                "login": "octocat",
+                "name": "Octocat",
+                "avatarUrl": null
+            },
+            "scopes": ["repo"],
+            "expiresAt": null
+        }));
 
         let available = api.handle("GET", &format!("/api/projects/{project_id}/sync/status"), Value::Null, vec![]).unwrap();
         assert_eq!(available.body["remoteAccess"], "available");
         assert_eq!(available.body["remotePaused"], false);
         assert_eq!(available.body["label"], "GitHub conectado");
+    }
 
-        let logout = api.handle("POST", "/api/auth/logout", Value::Null, vec![]).unwrap();
-        assert_eq!(logout.body["isAuthenticated"], false);
-        let paused_again = api.handle("GET", &format!("/api/projects/{project_id}/sync/status"), Value::Null, vec![]).unwrap();
-        assert_eq!(paused_again.body["remoteAccess"], "unauthenticated");
-        assert_eq!(paused_again.body["remotePaused"], true);
+    #[test]
+    fn production_auth_status_clears_persisted_dev_github_account() {
+        let api = api();
+        let _ = api.write_json(&api.auth_path(), &json!({
+            "isAuthenticated": true,
+            "provider": "github",
+            "user": {
+                "login": "knownext-dev",
+                "name": "KnowNext Dev",
+                "avatarUrl": null
+            },
+            "scopes": ["repo"],
+            "expiresAt": null
+        }));
+
+        let auth = api.handle("GET", "/api/auth/status", Value::Null, vec![]).unwrap();
+
+        assert_eq!(auth.body["isAuthenticated"], false);
+        assert!(!api.auth_path().exists());
     }
 
     #[test]
