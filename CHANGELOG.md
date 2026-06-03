@@ -2,6 +2,14 @@
 
 All KnowNext.ai releases use one monolithic application version for the frontend, Tauri shell, Rust runtime, Windows updater, and Android updater.
 
+## 2.0.2 - 2026-06-03
+
+- Fixed GitHub login in installed builds so an unavailable remote GitHub OAuth flow can no longer persist or display an internal development placeholder account.
+- Added runtime cleanup for any previously persisted development GitHub auth marker; affected users are returned to the correct unauthenticated GitHub-paused state after updating.
+- Limited mock GitHub authentication to internal test profiles and kept Windows/Android `desktop` and `mobile` profiles from accepting mock auth.
+- Stopped frontend polling for GitHub device auth when the runtime reports GitHub remote auth is not configured.
+- Strengthened the production bundle gate so development GitHub mock strings fail release validation if they leak into packaged frontend assets.
+
 ## 2.0.1 - 2026-06-02
 
 - Improved GitHub sync degradation when the user is not signed in, loses connectivity, or no longer has repository access: documents remain editable, local history stays available, automatic remote sync pauses, and the document footer shows a quiet `Sin acceso a GitHub` state instead of repeated save/sync prompts.

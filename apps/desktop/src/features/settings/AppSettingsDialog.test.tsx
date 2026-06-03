@@ -49,8 +49,8 @@ describe("AppSettingsDialog", () => {
               statusLabel: "Operativo",
               description: "El runtime local responde y coincide con esta instalación.",
               endpoint: "tauri://local-api/health",
-              expectedVersion: "2.0.1",
-              version: "2.0.1",
+              expectedVersion: "2.0.2",
+              version: "2.0.2",
               expectedProfile: "desktop",
               profile: "desktop",
               expectedAppDataDir: "C:\\Users\\user\\AppData\\Roaming\\ai.knownext.desktop",
@@ -78,7 +78,7 @@ describe("AppSettingsDialog", () => {
     expect(screen.getByRole("heading", { name: /runtime local/i })).toBeInTheDocument();
     expect(screen.getByText("Runtime local Rust")).toBeInTheDocument();
     expect(screen.getByText("Operativo")).toBeInTheDocument();
-    expect(screen.getByText("2.0.1")).toBeInTheDocument();
+    expect(screen.getByText("2.0.2")).toBeInTheDocument();
     expect(screen.getAllByText("Contrato local").length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: /reiniciar runtime/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/puerto/i)).not.toBeInTheDocument();
@@ -100,7 +100,7 @@ describe("AppSettingsDialog", () => {
               statusLabel: "No disponible",
               description: "El runtime local no responde al chequeo de salud.",
               endpoint: "tauri://local-api/health",
-              expectedVersion: "2.0.1",
+              expectedVersion: "2.0.2",
               version: null,
               expectedProfile: "desktop",
               profile: null,
@@ -141,7 +141,7 @@ describe("AppSettingsDialog", () => {
               statusLabel: "No disponible",
               description: "El runtime local no responde al chequeo de salud.",
               endpoint: "tauri://local-api/health",
-              expectedVersion: "2.0.1",
+              expectedVersion: "2.0.2",
               version: null,
               expectedProfile: "web-dev",
               profile: null,
@@ -186,7 +186,7 @@ describe("AppSettingsDialog", () => {
               statusLabel: "Incompatible",
               description: "El runtime local responde, pero no coincide.",
               endpoint: "tauri://local-api/health",
-              expectedVersion: "2.0.1",
+              expectedVersion: "2.0.2",
               version: "1.0.1",
               expectedProfile: "web-dev",
               profile: null,

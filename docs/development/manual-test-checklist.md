@@ -1,12 +1,12 @@
 # Manual Test Checklist
 
-Use this checklist before publishing a KnowNext.ai release. For 2.0.1, run critical acceptance on packaged Windows and Android builds. Do not publish if a critical item fails.
+Use this checklist before publishing a KnowNext.ai release. For 2.0.2, run critical acceptance on packaged Windows and Android builds. Do not publish if a critical item fails.
 
 ## Build Under Test
 
-- Version: `2.0.1`
-- Windows artifact: primary installer `KnowNext.ai_2.0.1_x64_en-US.msi`; secondary NSIS asset `KnowNext.ai_2.0.1_x64-setup.exe`
-- Android artifact: `KnowNext.ai-android-arm64-v2.0.1.apk`
+- Version: `2.0.2`
+- Windows artifact: primary installer `KnowNext.ai_2.0.2_x64_en-US.msi`; secondary NSIS asset `KnowNext.ai_2.0.2_x64-setup.exe`
+- Android artifact: `KnowNext.ai-android-arm64-v2.0.2.apk`
 - Runtime: local Tauri/Rust, no external product service or workstation service dependency.
 
 ## Automated Gate
@@ -37,6 +37,7 @@ Use this checklist before publishing a KnowNext.ai release. For 2.0.1, run criti
 - Use the AI panel on the active document. Mocked responses are acceptable only when clearly routed through the local runtime contract.
 - Open settings, confirm Services shows `Runtime local`, `Contrato local`, `tauri://local-api/health`, no port control, no restart action, and no external executable.
 - Open a GitHub-synced project without a GitHub account or without repository access. Confirm editing, saving, and local history continue; the document footer shows `Sin acceso a GitHub`; automatic remote sync pauses without repeated save/sync error prompts.
+- If a previous 2.0.1 install shows an internal development GitHub placeholder account, update to 2.0.2 and confirm it is cleared to `Sin cuenta GitHub`; attempting GitHub login while remote auth is unavailable must not reconnect that placeholder account.
 - Enable diagnostics, trigger a visible error, and confirm trace/log access works.
 - Check for updates and confirm the updater uses the signed Windows manifest.
 - Resize the window across compact and normal widths without overlapping core controls.
@@ -60,16 +61,16 @@ Use this checklist before publishing a KnowNext.ai release. For 2.0.1, run criti
 ## Release Publication Gate
 
 - GitHub release draft contains Windows NSIS, Windows MSI, both `.sig` files, `latest.json`, Android APK, and `android-latest.json`.
-- `latest.json` resolves to `2.0.1` and points `windows-x86_64.url` to the MSI artifact.
-- `android-latest.json` resolves to `2.0.1` and points to `KnowNext.ai-android-arm64-v2.0.1.apk`.
+- `latest.json` resolves to `2.0.2` and points `windows-x86_64.url` to the MSI artifact.
+- `android-latest.json` resolves to `2.0.2` and points to `KnowNext.ai-android-arm64-v2.0.2.apk`.
 - README Windows MSI and Android download URLs return HTTP 200.
-- A previous Windows install updates to 2.0.1 without deleting app data.
-- An Android install updates to 2.0.1 while preserving app data and still works offline.
+- A previous Windows install updates to 2.0.2 without deleting app data.
+- An Android install updates to 2.0.2 while preserving app data and still works offline.
 
-## Known 2.0.1 Limitations To Record If Still Present
+## Known 2.0.2 Limitations To Record If Still Present
 
 - GitHub synchronization may remain mock-backed unless a real Rust GitHub service is validated.
 - AI provider execution may remain mock-backed unless credentials, privacy, and provider routing are validated.
 - Some document previews may be best-effort depending on Rust conversion support.
 
-Any limitation here must be repeated in `docs/releases/2.0.1.md` before publication.
+Any limitation here must be repeated in `docs/releases/2.0.2.md` before publication.
