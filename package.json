@@ -1,7 +1,7 @@
 {
   "name": "knownext-ai",
   "private": true,
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "KnowNext.ai desktop product for Markdown project documentation.",
   "license": "Apache-2.0",
   "packageManager": "pnpm@11.0.8",
@@ -19,7 +19,7 @@
     "bundle:check-clean": "node scripts/check-client-bundle-clean.mjs",
     "test": "pnpm --filter @knownext/desktop test",
     "rust:check": "cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
-    "rust:test": "cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml -p knownext-storage && cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
+    "rust:test": "cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --workspace && cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
     "version:check": "node scripts/check-version.mjs",
     "release:secrets:check": "node scripts/check-release-secrets.mjs",
     "release:check": "pnpm version:check && pnpm build && pnpm bundle:check-clean && pnpm test && pnpm rust:test"

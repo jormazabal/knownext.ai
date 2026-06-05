@@ -3,6 +3,7 @@ dist/
 .vite/
 target/
 .playwright-mcp/
+.codex/
 output/
 __pycache__/
 .pytest_cache/

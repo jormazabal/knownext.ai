@@ -14,15 +14,21 @@
 pnpm install
 ```
 
-## Browser Development
+## Frontend-Only Development
 
 ```bash
 pnpm dev
 ```
 
-Open `http://127.0.0.1:1420`.
+This starts Vite for frontend-only work. Opening `http://127.0.0.1:1420` directly is not a valid product runtime check: the UI intentionally returns `503 Runtime unavailable` when it is not running inside Tauri.
 
-The browser development UI uses the same frontend API boundary as the native app. Requests are routed through the local Tauri-command adapter abstraction, represented as `tauri://local-api`, so feature code does not talk to a separate product service.
+Use the native Tauri window for functional development and QA:
+
+```bash
+pnpm --filter @knownext/desktop tauri:dev
+```
+
+The frontend still uses the same API boundary as the native app, but product requests are served by Tauri commands through the local Rust runtime represented as `tauri://local-api`. Feature code must not talk to a separate product service.
 
 ## Desktop
 

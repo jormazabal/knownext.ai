@@ -27,6 +27,14 @@ const nodes: DocumentTreeNode[] = [
     children: [],
   },
   {
+    id: "image-diagram",
+    name: "diagram.png",
+    type: "image",
+    path: "assets/diagram.png",
+    mimeType: "image/png",
+    sizeBytes: 640,
+  },
+  {
     id: "attachment-brief",
     name: "brief.pdf",
     type: "attachment",
@@ -134,10 +142,24 @@ describe("DocumentTree", () => {
     expect(screen.queryByText("Exportar PDF")).not.toBeInTheDocument();
 
     await userEvent.hover(screen.getByText("Exportar"));
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: /markdown/i })).toBeInTheDocument());
+    await userEvent.click(screen.getByRole("menuitem", { name: /markdown/i }));
+
+    await userEvent.hover(screen.getByRole("button", { name: /abrir menú de requisitos-funcionales\.md/i }));
+    await waitFor(() => expect(screen.getByText("Exportar")).toBeInTheDocument());
+    await userEvent.hover(screen.getByText("Exportar"));
     await waitFor(() => expect(screen.getByRole("menuitem", { name: /pdf/i })).toBeInTheDocument());
     await userEvent.click(screen.getByRole("menuitem", { name: /pdf/i }));
 
-    expect(onContextAction).toHaveBeenCalledWith("export-pdf", documentNode);
+    await userEvent.hover(screen.getByRole("button", { name: /abrir menú de requisitos-funcionales\.md/i }));
+    await waitFor(() => expect(screen.getByText("Exportar")).toBeInTheDocument());
+    await userEvent.hover(screen.getByText("Exportar"));
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: /docx/i })).toBeInTheDocument());
+    await userEvent.click(screen.getByRole("menuitem", { name: /docx/i }));
+
+    expect(onContextAction).toHaveBeenNthCalledWith(1, "export-md", documentNode);
+    expect(onContextAction).toHaveBeenNthCalledWith(2, "export-pdf", documentNode);
+    expect(onContextAction).toHaveBeenNthCalledWith(3, "export-docx", documentNode);
   });
 
   it("moves a document by dragging it onto a folder", () => {
@@ -177,6 +199,57 @@ describe("DocumentTree", () => {
     fireEvent.drop(folderRow!, { dataTransfer });
 
     expect(onMoveNode).toHaveBeenCalledWith(documentNode, "folder-archive");
+  });
+
+  it("moves a document with the desktop mouse drag fallback", () => {
+    const onMoveNode = vi.fn();
+    const onOpenDocument = vi.fn();
+    const documentNode = nodes[0].children![0];
+
+    render(
+      <DocumentTree
+        nodes={nodes}
+        activeDocumentId=""
+        onOpenDocument={onOpenDocument}
+        onActivateTreeNode={vi.fn()}
+        onSelectTreeNode={vi.fn()}
+        onCreateFolder={vi.fn()}
+        onCreateDocument={vi.fn()}
+        onExpandTree={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onConfigureProject={vi.fn()}
+        onRenameNode={vi.fn()}
+        onToggleNode={vi.fn()}
+        onContextAction={vi.fn()}
+        onMoveNode={onMoveNode}
+      />,
+    );
+
+    const documentRow = screen.getByText("requisitos-funcionales.md").closest(".tree-row") as HTMLElement;
+    const folderRow = screen.getByText("Archivo").closest(".tree-row") as HTMLElement;
+    expect(documentRow).not.toBeNull();
+    expect(folderRow).not.toBeNull();
+
+    const originalElementsFromPoint = document.elementsFromPoint;
+    Object.defineProperty(document, "elementsFromPoint", {
+      configurable: true,
+      value: vi.fn(() => [folderRow]),
+    });
+
+    try {
+      fireEvent.mouseDown(documentRow, { button: 0, clientX: 80, clientY: 80 });
+      fireEvent.mouseMove(window, { clientX: 120, clientY: 112 });
+      fireEvent.mouseUp(window, { clientX: 120, clientY: 112 });
+      fireEvent.click(documentRow);
+    } finally {
+      Object.defineProperty(document, "elementsFromPoint", {
+        configurable: true,
+        value: originalElementsFromPoint,
+      });
+    }
+
+    expect(onMoveNode).toHaveBeenCalledWith(documentNode, "folder-archive");
+    expect(onOpenDocument).not.toHaveBeenCalled();
   });
 
   it("moves a folder by dragging it onto another folder", () => {
@@ -233,7 +306,7 @@ describe("DocumentTree", () => {
 
   it("moves a file to the target file parent when dropped onto a file row", () => {
     const onMoveNode = vi.fn();
-    const attachmentNode = nodes[2];
+    const attachmentNode = nodes[3];
 
     render(
       <DocumentTree
@@ -350,12 +423,20 @@ describe("DocumentTree", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Vista del árbol" }));
     await userEvent.click(screen.getByRole("button", { name: "Solo Markdown" }));
+    expect(screen.getByText("Markdown")).toBeInTheDocument();
     expect(screen.queryByText("Archivo")).not.toBeInTheDocument();
     expect(screen.queryByText("brief.pdf")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Vista del árbol" }));
     await userEvent.click(screen.getByRole("button", { name: "Ver todo" }));
+    expect(screen.queryByText("Markdown")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Vista del árbol" }));
+    await userEvent.click(screen.getByRole("button", { name: "Solo imágenes" }));
+    expect(screen.getByText("Imágenes")).toBeInTheDocument();
+    expect(screen.getByText("diagram.png")).toBeInTheDocument();
+    expect(screen.queryByText("requisitos-funcionales.md")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Vista del árbol" }));
     await userEvent.click(screen.getByRole("button", { name: "Solo archivos" }));
+    expect(screen.getAllByText("Archivos").length).toBeGreaterThan(1);
     expect(screen.getByText("brief.pdf")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Vista del árbol" }));
     await userEvent.click(screen.getByRole("button", { name: "Expandir carpetas" }));
@@ -524,7 +605,7 @@ describe("DocumentTree", () => {
     const onContextAction = vi.fn();
     const onActivateTreeNode = vi.fn();
     const onOpenReferenceDocument = vi.fn();
-    const attachmentNode = nodes[2];
+    const attachmentNode = nodes[3];
 
     render(
       <DocumentTree
@@ -556,6 +637,49 @@ describe("DocumentTree", () => {
     await userEvent.click(screen.getByText("Usar como contexto IA"));
 
     expect(onContextAction).toHaveBeenCalledWith("add-attachment-context", attachmentNode);
+  });
+
+  it("dispatches image open and context actions without treating images as Markdown documents", async () => {
+    const onContextAction = vi.fn();
+    const onActivateTreeNode = vi.fn();
+    const onOpenDocument = vi.fn();
+    const onOpenImage = vi.fn();
+    const imageNode = nodes[2];
+
+    render(
+      <DocumentTree
+        nodes={nodes}
+        activeDocumentId=""
+        onOpenDocument={onOpenDocument}
+        onOpenImage={onOpenImage}
+        onActivateTreeNode={onActivateTreeNode}
+        onSelectTreeNode={vi.fn()}
+        onCreateFolder={vi.fn()}
+        onCreateDocument={vi.fn()}
+        onExpandTree={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onConfigureProject={vi.fn()}
+        onRenameNode={vi.fn()}
+        onToggleNode={vi.fn()}
+        onContextAction={onContextAction}
+        onMoveNode={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByText("diagram.png"));
+    expect(onOpenImage).toHaveBeenCalledWith("image-diagram", "diagram.png", "assets/diagram.png");
+    expect(onOpenDocument).not.toHaveBeenCalled();
+    expect(onActivateTreeNode).not.toHaveBeenCalled();
+
+    await userEvent.hover(screen.getByRole("button", { name: /abrir menú de diagram\.png/i }));
+    await waitFor(() => expect(screen.getByText("Insertar en documento")).toBeInTheDocument());
+    await userEvent.click(screen.getByText("Insertar en documento"));
+    expect(onContextAction).toHaveBeenCalledWith("insert-image", imageNode);
+
+    await userEvent.hover(screen.getByRole("button", { name: /abrir menú de diagram\.png/i }));
+    await waitFor(() => expect(screen.getByText("Copiar referencia")).toBeInTheDocument());
+    await userEvent.click(screen.getByText("Copiar referencia"));
+    expect(onContextAction).toHaveBeenCalledWith("copy-image-reference", imageNode);
   });
 });
 

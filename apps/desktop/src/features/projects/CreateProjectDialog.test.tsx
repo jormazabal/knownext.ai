@@ -103,6 +103,44 @@ describe("CreateProjectDialog", () => {
     });
   });
 
+  it("enables automatic local Git sync for an existing local project", async () => {
+    const onUpdate = vi.fn();
+    const gitProject: Project = {
+      ...activeProject,
+      id: "project-git",
+      name: "Proyecto Git",
+      versioningMode: "local-git",
+      syncMode: "manual-local",
+      isGitRepository: true,
+    };
+
+    render(
+      <CreateProjectDialog
+        open
+        mode="edit"
+        project={gitProject}
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onUpdate={onUpdate}
+      />,
+    );
+
+    const automaticSync = screen.getByRole("switch", { name: /sincronización automática/i });
+    expect(automaticSync).toBeEnabled();
+    expect(automaticSync).toHaveAttribute("aria-checked", "false");
+
+    await userEvent.click(automaticSync);
+    expect(automaticSync).toHaveAttribute("aria-checked", "true");
+
+    await userEvent.click(screen.getByRole("button", { name: /guardar cambios/i }));
+
+    expect(onUpdate).toHaveBeenCalledWith("project-git", expect.objectContaining({
+      versioningMode: "local-git",
+      syncMode: "auto-local",
+      githubRepository: null,
+    }));
+  });
+
   it("keeps GitHub project technical configuration read-only while editing identity", async () => {
     const onUpdate = vi.fn();
     const githubProject: Project = {
@@ -110,8 +148,8 @@ describe("CreateProjectDialog", () => {
       id: "project-github",
       name: "Docs GitHub",
       folderPath: "C:\\Users\\Joseba\\AppData\\Roaming\\Knownext\\github-cache\\project-github",
-      storageMode: "local-cache",
-      versioningMode: "github-api",
+      storageMode: "local-files",
+      versioningMode: "local-git",
       syncMode: "manual-github",
       authRequired: true,
       githubRepository: {
@@ -153,8 +191,8 @@ describe("CreateProjectDialog", () => {
       iconColor: "#F37021",
       folderPath: "C:\\Users\\Joseba\\AppData\\Roaming\\Knownext\\github-cache\\project-github",
       creationMode: "open-local",
-      storageMode: "local-cache",
-      versioningMode: "github-api",
+      storageMode: "local-files",
+      versioningMode: "local-git",
       syncMode: "manual-github",
       githubRepository: {
         owner: "knownext",
@@ -165,6 +203,58 @@ describe("CreateProjectDialog", () => {
       },
       publishToGithub: null,
     });
+  });
+
+  it("enables automatic GitHub sync for an existing GitHub project without replacing repository metadata", async () => {
+    const onUpdate = vi.fn();
+    const githubProject: Project = {
+      ...activeProject,
+      id: "project-github-auto",
+      name: "Docs GitHub",
+      storageMode: "local-files",
+      versioningMode: "local-git",
+      syncMode: "manual-github",
+      authRequired: true,
+      githubRepository: {
+        owner: "knownext",
+        repo: "docs",
+        defaultRef: "main",
+        rootPath: "manual",
+        permissions: ["pull", "push"],
+      },
+    };
+
+    render(
+      <CreateProjectDialog
+        open
+        mode="edit"
+        project={githubProject}
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onUpdate={onUpdate}
+      />,
+    );
+
+    const automaticSync = screen.getByRole("switch", { name: /sincronización automática/i });
+    expect(automaticSync).toBeEnabled();
+    expect(automaticSync).toHaveAttribute("aria-checked", "false");
+
+    await userEvent.click(automaticSync);
+    expect(automaticSync).toHaveAttribute("aria-checked", "true");
+
+    await userEvent.click(screen.getByRole("button", { name: /guardar cambios/i }));
+
+    expect(onUpdate).toHaveBeenCalledWith("project-github-auto", expect.objectContaining({
+      versioningMode: "local-git",
+      syncMode: "auto-github",
+      githubRepository: {
+        owner: "knownext",
+        repo: "docs",
+        defaultRef: "main",
+        rootPath: "manual",
+        permissions: ["pull", "push"],
+      },
+    }));
   });
 
   it("offers GitHub credential recovery when sync credentials are rejected", async () => {
@@ -549,8 +639,8 @@ describe("CreateProjectDialog", () => {
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
       name: "docs",
       folderPath: "C:\\Docs\\knownext-docs",
-      storageMode: "local-cache",
-      versioningMode: "github-api",
+      storageMode: "local-files",
+      versioningMode: "local-git",
       syncMode: "manual-github",
       githubRepository: expect.objectContaining({
         owner: "knownext",

@@ -1,8 +1,34 @@
 import { cleanup, fireEvent, render, screen, waitForElementToBeRemoved } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DOCUMENT_TREE_FILE_DRAG_MIME } from "../../lib/dragData";
 import { AiPromptInput } from "./AiPromptInput";
+
+const transcriptionMock = vi.hoisted(() => ({
+  state: {
+    status: "idle",
+    activeTarget: null,
+    error: null,
+    start: vi.fn(),
+    stop: vi.fn(),
+    resetError: vi.fn(),
+  },
+}));
+
+vi.mock("../transcription/useRealtimeTranscription", () => ({
+  useRealtimeTranscription: () => transcriptionMock.state,
+}));
+
+beforeEach(() => {
+  transcriptionMock.state = {
+    status: "idle",
+    activeTarget: null,
+    error: null,
+    start: vi.fn(),
+    stop: vi.fn(),
+    resetError: vi.fn(),
+  };
+});
 
 afterEach(() => {
   cleanup();
@@ -194,6 +220,38 @@ describe("AiPromptInput", () => {
     expect(onUploadContextFiles).not.toHaveBeenCalled();
   });
 
+  it("allows preparing document context even when the AI provider is not configured", async () => {
+    const onSubmit = vi.fn();
+    const onAddProjectDocumentContext = vi.fn();
+
+    render(
+      <AiPromptInput
+        documentId="doc-1"
+        projectId="project-1"
+        markdown="Contenido"
+        providerReady={false}
+        onSubmit={onSubmit}
+        onAddProjectDocumentContext={onAddProjectDocumentContext}
+        onSearchProjectDocuments={async () => [{
+          documentId: "doc-functional",
+          name: "requisitos-funcionales.md",
+          path: "docs/requisitos-funcionales.md",
+          kind: "project_document",
+        }]}
+      />,
+    );
+
+    const prompt = screen.getByPlaceholderText(/Configura OpenAI/);
+    expect(prompt).toBeEnabled();
+    expect(screen.getByLabelText("Enviar")).toBeDisabled();
+
+    await userEvent.type(prompt, "@req");
+    await userEvent.click(await screen.findByText("requisitos-funcionales.md"));
+
+    expect(onAddProjectDocumentContext).toHaveBeenCalledWith("doc-functional");
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it("allows XLSX files in the context file picker", () => {
     const { container } = render(
       <AiPromptInput
@@ -209,6 +267,86 @@ describe("AiPromptInput", () => {
     expect(container.querySelector('input[type="file"]')).toHaveAttribute("accept", expect.stringContaining(".xlsx"));
   });
 
+  it("opens the prompt context menu from pointer activation", () => {
+    render(
+      <AiPromptInput
+        documentId="doc-1"
+        projectId="project-1"
+        markdown="Contenido"
+        providerReady
+        onSubmit={vi.fn()}
+        onAddProjectDocumentContext={vi.fn()}
+        onUploadContextFiles={vi.fn()}
+      />,
+    );
+
+    fireEvent.pointerDown(screen.getByLabelText("Añadir contexto"));
+
+    expect(screen.getByText("Archivo del proyecto")).toBeInTheDocument();
+    expect(screen.getByText("Adjuntar archivo")).toBeInTheDocument();
+    expect(screen.getByText("Pegar imagen")).toBeInTheDocument();
+  });
+
+  it("uses the local file picker handler for context attachments when available", async () => {
+    const onPickLocalContextFiles = vi.fn();
+    const onUploadContextFiles = vi.fn();
+
+    render(
+      <AiPromptInput
+        documentId="doc-1"
+        projectId="project-1"
+        markdown="Contenido"
+        providerReady
+        onSubmit={vi.fn()}
+        onAddProjectDocumentContext={vi.fn()}
+        onUploadContextFiles={onUploadContextFiles}
+        onPickLocalContextFiles={onPickLocalContextFiles}
+      />,
+    );
+
+    await userEvent.click(screen.getByLabelText("Añadir contexto"));
+    await userEvent.click(screen.getByText("Adjuntar archivo"));
+
+    expect(onPickLocalContextFiles).toHaveBeenCalledTimes(1);
+    expect(onUploadContextFiles).not.toHaveBeenCalled();
+  });
+
+  it("uploads selected and dropped external files as prompt context", async () => {
+    const onUploadContextFiles = vi.fn();
+    const selectedFile = new File(["# seleccionado"], "seleccionado.md", { type: "text/markdown" });
+    const droppedFile = new File(["presupuesto"], "presupuesto.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+
+    const { container } = render(
+      <AiPromptInput
+        documentId="doc-1"
+        projectId="project-1"
+        markdown="Contenido"
+        providerReady
+        onSubmit={vi.fn()}
+        onUploadContextFiles={onUploadContextFiles}
+      />,
+    );
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(input).not.toBeNull();
+    fireEvent.change(input!, { target: { files: [selectedFile] } });
+
+    expect(onUploadContextFiles).toHaveBeenCalledWith([selectedFile]);
+
+    const promptShell = screen.getByPlaceholderText(/Pregunta algo sobre este documento/).closest(".knownext-ai-prompt");
+    const dataTransfer = {
+      types: ["Files"],
+      files: [droppedFile],
+      dropEffect: "",
+    } as unknown as DataTransfer;
+
+    fireEvent.dragEnter(promptShell!, { dataTransfer });
+    expect(screen.getByText("Suelta archivos para usarlos como contexto IA")).toBeInTheDocument();
+    fireEvent.drop(promptShell!, { dataTransfer });
+
+    expect(onUploadContextFiles).toHaveBeenLastCalledWith([droppedFile]);
+  });
+
   it("lets the microphone menu choose transcription target and language", async () => {
     const onTranscriptionConfigChange = vi.fn();
 
@@ -220,7 +358,7 @@ describe("AiPromptInput", () => {
         providerReady
         transcriptionConfig={{
           enabled: true,
-          model: "gpt-realtime-whisper",
+          model: "gpt-4o-mini-transcribe",
           defaultTarget: "prompt",
           defaultLanguage: "auto",
           favoriteLanguages: ["es", "en"],
@@ -241,6 +379,97 @@ describe("AiPromptInput", () => {
     expect(onTranscriptionConfigChange).toHaveBeenCalledWith({ defaultLanguage: "es" });
   });
 
+  it("opens the transcription menu from pointer activation", () => {
+    render(
+      <AiPromptInput
+        documentId="doc-1"
+        projectId="project-1"
+        markdown="Contenido"
+        providerReady
+        transcriptionConfig={{
+          enabled: true,
+          model: "gpt-4o-mini-transcribe",
+          defaultTarget: "prompt",
+          defaultLanguage: "auto",
+          favoriteLanguages: ["es", "en"],
+        }}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    fireEvent.pointerDown(screen.getByLabelText("Opciones de transcripción"));
+
+    expect(screen.getByRole("menuitemradio", { name: "Transcribir al prompt" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: "Dictar en documento" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: "Español" })).toBeInTheDocument();
+  });
+
+  it("commits completed transcription into the prompt text", async () => {
+    transcriptionMock.state.start.mockImplementation(async ({ handlers }) => {
+      handlers.onCompleted({ itemId: "dictation", transcript: "nota dictada al prompt" });
+    });
+
+    render(
+      <AiPromptInput
+        documentId="doc-1"
+        projectId="project-1"
+        markdown="Contenido"
+        providerReady
+        transcriptionConfig={{
+          enabled: true,
+          model: "gpt-4o-mini-transcribe",
+          defaultTarget: "prompt",
+          defaultLanguage: "auto",
+          favoriteLanguages: ["es"],
+        }}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByLabelText("Iniciar transcripción"));
+
+    expect(transcriptionMock.state.start).toHaveBeenCalledWith(expect.objectContaining({
+      target: "prompt",
+      language: "auto",
+    }));
+    expect(screen.getByPlaceholderText(/Pregunta algo sobre este documento/)).toHaveValue("nota dictada al prompt ");
+  });
+
+  it("commits completed transcription into the active document when dictation target is document", async () => {
+    const onCommitDocumentDictation = vi.fn();
+    transcriptionMock.state.start.mockImplementation(async ({ handlers }) => {
+      handlers.onCompleted({ itemId: "dictation", transcript: "texto dictado al documento" });
+    });
+
+    render(
+      <AiPromptInput
+        documentId="doc-1"
+        projectId="project-1"
+        markdown="Contenido"
+        providerReady
+        documentDictationReady
+        transcriptionConfig={{
+          enabled: true,
+          model: "gpt-4o-mini-transcribe",
+          defaultTarget: "document",
+          defaultLanguage: "es",
+          favoriteLanguages: ["es"],
+        }}
+        onSubmit={vi.fn()}
+        onCommitDocumentDictation={onCommitDocumentDictation}
+      />,
+    );
+
+    await userEvent.click(screen.getByLabelText("Iniciar transcripción"));
+
+    expect(transcriptionMock.state.start).toHaveBeenCalledWith(expect.objectContaining({
+      target: "document",
+      language: "es",
+    }));
+    expect(onCommitDocumentDictation).toHaveBeenCalledWith("texto dictado al documento ");
+    expect(screen.getByPlaceholderText(/Pregunta algo sobre este documento/)).toHaveValue("");
+  });
+
   it("uses a compact prompt action group and modal options in narrow responsive mode", async () => {
     mockCompactPromptMode(true);
     const onSubmit = vi.fn();
@@ -254,7 +483,7 @@ describe("AiPromptInput", () => {
         providerReady
         transcriptionConfig={{
           enabled: true,
-          model: "gpt-realtime-whisper",
+          model: "gpt-4o-mini-transcribe",
           defaultTarget: "prompt",
           defaultLanguage: "auto",
           favoriteLanguages: ["es", "en"],

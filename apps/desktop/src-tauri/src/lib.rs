@@ -126,31 +126,39 @@ fn append_trace_log(
 }
 
 #[tauri::command]
-fn local_api_request(
+async fn local_api_request(
     app: tauri::AppHandle,
     request: LocalApiRequest,
 ) -> Result<LocalApiResponse, String> {
-    let api = app.state::<LocalApiState>();
-    let api = api.0.lock().map_err(|error| error.to_string())?;
-    api.handle(
-        &request.method,
-        &request.path,
-        request.body.unwrap_or(serde_json::Value::Null),
-        request.files.unwrap_or_default(),
-    )
+    tauri::async_runtime::spawn_blocking(move || {
+        let api = app.state::<LocalApiState>();
+        let api = api.0.lock().map_err(|error| error.to_string())?;
+        api.handle(
+            &request.method,
+            &request.path,
+            request.body.unwrap_or(serde_json::Value::Null),
+            request.files.unwrap_or_default(),
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn local_api_content(
+async fn local_api_content(
     app: tauri::AppHandle,
     request: LocalApiRequest,
 ) -> Result<LocalApiContentResponse, String> {
-    let api = app.state::<LocalApiState>();
-    let api = api.0.lock().map_err(|error| error.to_string())?;
-    api.content(
-        &request.path,
-        request.body.unwrap_or(serde_json::Value::Null),
-    )
+    tauri::async_runtime::spawn_blocking(move || {
+        let api = app.state::<LocalApiState>();
+        let api = api.0.lock().map_err(|error| error.to_string())?;
+        api.content(
+            &request.path,
+            request.body.unwrap_or(serde_json::Value::Null),
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

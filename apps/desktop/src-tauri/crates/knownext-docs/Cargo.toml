@@ -1,10 +1,11 @@
 [package]
 name = "knownext-docs"
-version = "2.0.2"
+version = "2.0.3"
 edition = "2021"
 license = "Apache-2.0"
 
 [dependencies]
 knownext-core = { path = "../knownext-core" }
+roxmltree = "0.20"
 serde_json = "1"
 zip = { version = "2", default-features = false, features = ["deflate"] }

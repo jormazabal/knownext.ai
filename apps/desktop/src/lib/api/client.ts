@@ -18,35 +18,8 @@ export type RuntimeHealth = {
   appDataDir?: string;
 };
 
-export let API_BASE_URL = "tauri://local-api";
-
-export function setApiBaseUrl(url: string) {
-  API_BASE_URL = url || "tauri://local-api";
-}
-
-export function getApiBaseUrl() {
-  return API_BASE_URL;
-}
-
-export function setPersistentMobileApiBaseUrl(_url: string) {
-  API_BASE_URL = "tauri://local-api";
-}
-
-export function clearPersistentMobileApiBaseUrl() {
-  API_BASE_URL = "tauri://local-api";
-}
-
-export function isMobileApiBaseUrlConfigured() {
-  return true;
-}
-
-export async function initializeApiBaseUrl() {
-  API_BASE_URL = "tauri://local-api";
-  return API_BASE_URL;
-}
-
-export async function getApiWebSocketUrl(_path: string): Promise<string> {
-  throw new Error(`La transcripción en tiempo real por WebSocket no está disponible en el runtime local-first ${APP_VERSION}.`);
+async function initializeApiBaseUrl() {
+  return "tauri://local-api";
 }
 
 export function isRuntimeApiEnabled() {
@@ -169,11 +142,6 @@ export async function requestDataUrl(path: string, init?: ApiRequestInit): Promi
 export async function waitForApiReady(_options: { attempts?: number; intervalMs?: number } = {}) {
   const health = await requestJson<RuntimeHealth>("/health");
   validateRuntimeHealth(health);
-}
-
-export async function discoverMobileApiBaseUrl(_options: unknown = {}) {
-  API_BASE_URL = "tauri://local-api";
-  return API_BASE_URL;
 }
 
 export function getApiErrorMessage(error: unknown, fallback: string) {

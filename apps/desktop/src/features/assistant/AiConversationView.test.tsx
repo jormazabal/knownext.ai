@@ -129,10 +129,10 @@ const config: AiConfigStatus = {
     createFolders: true,
     createDocuments: true,
     deleteDocumentsAndFolders: false,
-    generateImages: true,
-    createImageAssets: true,
-    insertImagesIntoDocuments: true,
-    useDocumentContextForImageGeneration: true,
+    generateImages: false,
+    createImageAssets: false,
+    insertImagesIntoDocuments: false,
+    useDocumentContextForImageGeneration: false,
   },
   rag: {
     enabled: false,
@@ -152,7 +152,7 @@ const config: AiConfigStatus = {
   },
   imageGeneration: {
     enabled: true,
-    model: "gpt-image-2",
+    model: "gpt-image-1.5",
     size: "auto",
     quality: "auto",
     outputFormat: "png",
@@ -174,7 +174,7 @@ const config: AiConfigStatus = {
   },
   transcription: {
     enabled: true,
-    model: "gpt-realtime-whisper",
+    model: "gpt-4o-mini-transcribe",
     defaultTarget: "prompt",
     defaultLanguage: "auto",
     favoriteLanguages: ["es", "en"],

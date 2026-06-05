@@ -157,7 +157,7 @@ export function CreateProjectDialog({
       setFolderPath(project.folderPath);
       setNewProjectParentPath("");
       setNewProjectFolderName("");
-      setStartMode(project.versioningMode === "github-api" ? "github-existing" : project.versioningMode === "local-git" ? "local-existing-git" : "local-existing");
+      setStartMode(project.githubRepository ? "github-existing" : project.versioningMode === "local-git" ? "local-existing-git" : "local-existing");
       setLocalHistoryChoice(project.githubRepository && project.syncMode === "auto-github" ? "existing-github-auto" : project.githubRepository ? "existing-github-remote" : project.versioningMode === "local-git" ? "local-git" : "files-only");
       setGithubOwner(project.githubRepository?.owner ?? "");
       setGithubRepo(project.githubRepository?.repo ?? "");
@@ -202,7 +202,7 @@ export function CreateProjectDialog({
       owner: githubOwner.trim(),
       repo: slugifyGithubRepoName(githubRepo),
       defaultRef: selectedGithubRepository?.defaultRef ?? existingRepository?.defaultRef ?? null,
-      rootPath: "",
+      rootPath: selectedGithubRepository?.rootPath ?? existingRepository?.rootPath ?? "",
       permissions: selectedGithubRepository?.permissions ?? existingRepository?.permissions ?? (localHistoryChoice === "publish-github" || localHistoryChoice === "publish-github-auto" ? ["pull", "push"] : []),
     };
   }
@@ -214,7 +214,7 @@ export function CreateProjectDialog({
         || localHistoryChoice === "existing-github-auto"
         || localHistoryChoice === "publish-github"
         || localHistoryChoice === "publish-github-auto";
-      const nextVersioningMode: VersioningMode = wantsGithubConnection ? (project.versioningMode === "github-api" ? "github-api" : "local-git") : localHistoryChoice === "local-git" ? "local-git" : "none";
+      const nextVersioningMode: VersioningMode = wantsGithubConnection ? "local-git" : localHistoryChoice === "local-git" ? "local-git" : "none";
       const nextSyncMode: SyncMode = localHistoryChoice === "existing-github-auto" || localHistoryChoice === "publish-github-auto"
         ? "auto-github"
         : localHistoryChoice === "existing-github-remote" || localHistoryChoice === "publish-github"
@@ -222,7 +222,7 @@ export function CreateProjectDialog({
           : localHistoryChoice === "local-git"
             ? githubSyncPreference === "auto" ? "auto-local" : "manual-local"
             : "none";
-      const nextStorageMode = nextVersioningMode === "none" ? "local-files" : nextVersioningMode === "local-git" && project.versioningMode === "github-api" ? "local-files" : project.storageMode;
+      const nextStorageMode = nextVersioningMode === "none" ? "local-files" : project.storageMode;
       return {
         name: name.trim() || project.name || "Nuevo proyecto",
         icon,
@@ -1152,8 +1152,9 @@ function EditProjectForm({
   onDetachGitConfirmedChange: (confirmed: boolean) => void;
   isWebRuntime: boolean;
 }) {
-  const canEditFolder = !isWebRuntime && project?.storageMode !== "local-cache";
   const githubRepository = project?.githubRepository;
+  const githubConnected = Boolean(githubRepository || project?.syncMode === "manual-github" || project?.syncMode === "auto-github");
+  const canEditFolder = !isWebRuntime && !githubConnected;
   const folderReadOnlyLabel = isWebRuntime ? "Almacenamiento gestionado" : "Carpeta local gestionada";
   const folderReadOnlyHelp = isWebRuntime
     ? "En navegador los proyectos viven en la carpeta sandbox del runtime local. No se reasigna desde la interfaz."
@@ -2460,7 +2461,7 @@ function getProtectionLevel(project: Project | null | undefined, localHistoryCho
 }
 
 function getProjectProtectionLevel(project: Project | null | undefined): ProjectProtectionLevel {
-  if (project?.githubRepository || project?.versioningMode === "github-api" || project?.syncMode === "manual-github" || project?.syncMode === "auto-github") return "github";
+  if (project?.githubRepository || project?.syncMode === "manual-github" || project?.syncMode === "auto-github") return "github";
   if (project?.versioningMode === "local-git") return "git";
   return "files";
 }
@@ -2476,8 +2477,8 @@ function deriveProjectMode(startMode: ProjectStartMode, localHistoryChoice: Loca
   if (startMode === "github-existing") {
     return {
       creationMode: "github-repository",
-      versioningMode: "github-api",
-      storageMode: "local-cache",
+      versioningMode: "local-git",
+      storageMode: "local-files",
       syncMode: "manual-github",
       requiresGithubRepository: true,
     };
@@ -2662,7 +2663,6 @@ function githubStatusDetail(projectSyncStatus: ProjectSyncStatus | null | undefi
 }
 
 function versioningModeLabel(versioningMode: VersioningMode) {
-  if (versioningMode === "github-api") return "GitHub";
   if (versioningMode === "local-git") return "Git local";
   return "desactivado";
 }

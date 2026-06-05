@@ -49,7 +49,7 @@ type AppSettingsDialogProps = {
 
 const aiModelIds: AiModelId[] = ["gpt-5.4-mini", "gpt-5.4", "gpt-5.5", "gpt-5.4-nano"];
 const aiVisionModelIds: AiVisionModelId[] = ["gpt-5.4-mini", "gpt-5.4", "gpt-5.5"];
-const aiImageGenerationModelIds: AiImageGenerationModelId[] = ["gpt-image-2", "gpt-image-1.5", "gpt-image-1-mini", "gpt-image-1"];
+const aiImageGenerationModelIds: AiImageGenerationModelId[] = ["gpt-image-1.5", "gpt-image-1-mini", "gpt-image-1"];
 const transcriptionLanguages: AiTranscriptionLanguage[] = ["auto", "es", "en", "fr", "de", "it", "pt", "ca", "eu", "gl"];
 
 const aiModelMeter: Record<AiModelId, { intelligence: number; cost: number }> = {
@@ -91,20 +91,20 @@ const permissionModePresets: Record<Exclude<PermissionModeId, "custom">, AiConfi
     createFolders: false,
     createDocuments: false,
     deleteDocumentsAndFolders: false,
-    generateImages: true,
+    generateImages: false,
     createImageAssets: false,
     insertImagesIntoDocuments: false,
-    useDocumentContextForImageGeneration: true,
+    useDocumentContextForImageGeneration: false,
   },
   productive: {
     editDocuments: true,
     createFolders: true,
     createDocuments: true,
     deleteDocumentsAndFolders: true,
-    generateImages: true,
-    createImageAssets: true,
-    insertImagesIntoDocuments: true,
-    useDocumentContextForImageGeneration: true,
+    generateImages: false,
+    createImageAssets: false,
+    insertImagesIntoDocuments: false,
+    useDocumentContextForImageGeneration: false,
   },
 };
 
@@ -284,7 +284,6 @@ function SummarySettings({
   const modelMeter = aiModelMeter[settingsAi.model];
   const modelPrice = aiModelPriceParts[settingsAi.model];
   const accentPalette = accentPalettes.find((palette) => palette.id === appearance.primaryColor) ?? accentPalettes[0];
-  const indexedCount = aiIndexStatus?.indexedDocumentCount ?? 0;
   const documentCount = aiIndexStatus?.documentCount ?? 0;
 
   return (
@@ -364,9 +363,9 @@ function SummarySettings({
                 </span>
               )}
             />
-            <SummaryRow icon={<FolderOpen size={13} />} label={text.ragDocuments} value={`${indexedCount}/${documentCount}`} />
+            <SummaryRow icon={<FolderOpen size={13} />} label={text.ragDocuments} value={documentCount ? String(documentCount) : text.summaryNone} />
             <SummaryRow icon={<Eye size={13} />} label={text.summarySearch} value={aiIndexStatus?.localExactReady ? text.ragExactReady : describeIndexStatus(aiIndexStatus?.status ?? settingsAi.rag.status)} />
-            <SummaryRow icon={<Server size={13} />} label={text.summaryVectorStore} value={settingsAi.rag.vectorStoreId || aiIndexStatus?.vectorStoreId ? text.enabled : text.summaryNone} />
+            <SummaryRow icon={<Server size={13} />} label={text.summaryVectorStore} value={text.unavailableValue} />
           </div>
         </SummaryCard>
 
@@ -379,10 +378,10 @@ function SummarySettings({
           onAction={() => onSelectSection("capabilities")}
         >
           <div className="overflow-hidden rounded-md border border-line">
-            <SummaryRow icon={<ImageIcon size={13} />} label={text.summaryImages} value={settingsAi.imageGeneration.model} valueTone="brand" />
+            <SummaryRow icon={<ImageIcon size={13} />} label={text.summaryImages} value={settingsAi.vision.model} valueTone="brand" />
             <SummaryRow icon={<Mic size={13} />} label={text.transcriptionHeading} value={settingsAi.transcription.model} valueTone="brand" />
             <SummaryRow icon={<ShieldCheck size={13} />} label={text.aiPermissionsHeading} value={text.summaryProductive} valueTone="brand" />
-            <SummaryRow icon={<Gauge size={13} />} label={text.agenticHeading} value={settingsAi.agentic.webResearchEnabled ? text.enabled : text.disabled} valueTone={settingsAi.agentic.webResearchEnabled ? "success" : "neutral"} />
+            <SummaryRow icon={<Gauge size={13} />} label={text.agenticHeading} value={text.unavailableValue} valueTone="neutral" />
           </div>
         </SummaryCard>
 
@@ -411,7 +410,7 @@ function SummarySettings({
         </div>
         <div className="overflow-hidden rounded-md border border-line">
           <SummaryModelRow label={text.summaryMainAi} description={text.aiModelHeading} modelId={settingsAi.model} capability={modelMeter.intelligence} cost={modelMeter.cost} price={`${modelPrice.input} / ${modelPrice.output}`} tag={model.recommended ? text.recommendedModel : null} capabilityLabel={text.summaryCapabilityMetric} costLabel={text.summaryCostMetric} />
-          <SummaryModelRow label={text.summaryImageAi} description={text.imageGenerationHeading} modelId={settingsAi.imageGeneration.model} capability={4} cost={3} price={text.summaryImagePricing} tag={text.recommendedModel} capabilityLabel={text.summaryCapabilityMetric} costLabel={text.summaryCostMetric} />
+          <SummaryModelRow label={text.summaryImageAi} description={text.visionHeading} modelId={settingsAi.vision.model} capability={3} cost={2} price={text.summaryImagePricing} tag={text.recommendedModel} capabilityLabel={text.summaryCapabilityMetric} costLabel={text.summaryCostMetric} />
           <SummaryModelRow label={text.summaryAudioAi} description={text.transcriptionHeading} modelId={settingsAi.transcription.model} capability={2} cost={1} price={text.summaryAudioPricing} tag={text.summaryEconomy} capabilityLabel={text.summaryCapabilityMetric} costLabel={text.summaryCostMetric} />
         </div>
       </section>
@@ -434,7 +433,6 @@ function CapabilitiesSettings({
   const [localAi, setLocalAi] = useState<AiConfigStatus>(() => normalizeAiStatus(ai));
   const localAiRef = useRef<AiConfigStatus>(normalizeAiStatus(ai));
   const settingsAi = localAi;
-  const imageModelOptions = buildImageGenerationModelOptions(text);
   const visionModelOptions = buildVisionModelOptions(text);
 
   useEffect(() => {
@@ -448,17 +446,6 @@ function CapabilitiesSettings({
     localAiRef.current = normalizedAi;
     setLocalAi(normalizedAi);
     onAiChange(normalizedAi);
-  }
-
-  function updateImageGeneration(nextImageGeneration: Partial<AiConfigStatus["imageGeneration"]>) {
-    const currentAi = localAiRef.current;
-    commitAi({
-      ...currentAi,
-      imageGeneration: {
-        ...currentAi.imageGeneration,
-        ...nextImageGeneration,
-      },
-    });
   }
 
   function updateVision(nextVision: Partial<AiConfigStatus["vision"]>) {
@@ -502,17 +489,6 @@ function CapabilitiesSettings({
     });
   }
 
-  function updateAgentic(nextAgentic: Partial<AiConfigStatus["agentic"]>) {
-    const currentAi = localAiRef.current;
-    commitAi({
-      ...currentAi,
-      agentic: {
-        ...currentAi.agentic,
-        ...nextAgentic,
-      },
-    });
-  }
-
   function toggleFavoriteLanguage(language: AiTranscriptionLanguage) {
     const currentFavorites = settingsAi.transcription.favoriteLanguages;
     const nextFavorites = currentFavorites.includes(language)
@@ -535,78 +511,12 @@ function CapabilitiesSettings({
 
       <CapabilitySection icon={<ImageIcon size={22} />} title={text.capabilityImagesTitle} description={text.capabilityImagesDescription}>
         <div className="grid gap-4 xl:grid-cols-2">
-          <CapabilityPanel
+          <CapabilityUnavailablePanel
             icon={<ImageIcon size={15} />}
             title={text.capabilityGenerateImagesTitle}
-            description={text.capabilityGenerateImagesDescription}
-            enabled={settingsAi.imageGeneration.enabled}
-            onToggle={() => updateImageGeneration({ enabled: !settingsAi.imageGeneration.enabled })}
-          >
-            <CapabilityField label={text.imageGenerationModelHeading}>
-              <AiModelSelector
-                value={settingsAi.imageGeneration.model}
-                options={imageModelOptions}
-                onChange={(model) => updateImageGeneration({ model })}
-                variant="compact"
-                title={text.aiModelSelectorTitle}
-                recommendedOnlyLabel={text.aiModelRecommendedOnly}
-                guideLabel={text.aiModelGuide}
-                guideDescription={text.aiModelGuideDescription}
-              />
-            </CapabilityField>
-
-            <div className="grid gap-3 md:grid-cols-3">
-              <CapabilitySelect label={text.imageGenerationSize} value={settingsAi.imageGeneration.size} onChange={(value) => updateImageGeneration({ size: value as AiConfigStatus["imageGeneration"]["size"] })}>
-                <option value="auto">Auto</option>
-                <option value="1024x1024">1024 x 1024</option>
-                <option value="1536x1024">1536 x 1024</option>
-                <option value="1024x1536">1024 x 1536</option>
-              </CapabilitySelect>
-              <CapabilitySelect label={text.imageGenerationQuality} value={settingsAi.imageGeneration.quality} onChange={(value) => updateImageGeneration({ quality: value as AiConfigStatus["imageGeneration"]["quality"] })}>
-                <option value="auto">Auto</option>
-                <option value="low">{text.qualityLow}</option>
-                <option value="medium">{text.qualityMedium}</option>
-                <option value="high">{text.qualityHigh}</option>
-              </CapabilitySelect>
-              <CapabilitySelect label={text.imageGenerationFormat} value={settingsAi.imageGeneration.outputFormat} onChange={(value) => updateImageGeneration({ outputFormat: value as AiConfigStatus["imageGeneration"]["outputFormat"] })}>
-                <option value="png">PNG</option>
-                <option value="webp">WEBP</option>
-                <option value="jpeg">JPEG</option>
-              </CapabilitySelect>
-            </div>
-
-            <div className="rounded-md border border-orange-200 bg-orange-50/45 p-3">
-              <p className="text-[11px] leading-5 text-ink-secondary">{text.imageGenerationFolderExplanation}</p>
-              <div className="mt-3 grid gap-3">
-                <CapabilitySelect
-                  label={text.imageGenerationFolder}
-                  value={settingsAi.imageGeneration.defaultFolder}
-                  help={text.imageGenerationFolderHelp}
-                  onChange={(value) => updateImageGeneration({ defaultFolder: value as AiConfigStatus["imageGeneration"]["defaultFolder"] })}
-                >
-                  <option value="document_folder">{text.imageGenerationFolderDocument}</option>
-                  <option value="generated_assets">{text.imageGenerationFolderAssets}</option>
-                  <option value="custom_folder">{text.imageGenerationFolderCustom}</option>
-                </CapabilitySelect>
-                {settingsAi.imageGeneration.defaultFolder === "custom_folder" ? (
-                  <CapabilityField label={text.imageGenerationCustomFolder} help={text.imageGenerationCustomFolderHelp}>
-                    <input
-                      className="h-9 w-full rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary outline-none focus:border-brand-orange"
-                      value={settingsAi.imageGeneration.customFolderPath}
-                      placeholder={text.imageGenerationCustomFolderPlaceholder}
-                      onChange={(event) => updateImageGeneration({ customFolderPath: event.target.value })}
-                    />
-                  </CapabilityField>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="divide-y divide-line border-t border-line pt-2">
-              <CapabilityToggleRow icon={<SaveIcon />} label={text.imageGenerationStorePrompt} description={text.imageGenerationStorePromptDescription} enabled={settingsAi.imageGeneration.storePromptMetadata} onToggle={() => updateImageGeneration({ storePromptMetadata: !settingsAi.imageGeneration.storePromptMetadata })} />
-              <CapabilityToggleRow icon={<Check size={14} />} label={text.imageGenerationConfirmInsert} description={text.imageGenerationConfirmInsertDescription} enabled={settingsAi.imageGeneration.confirmBeforeDocumentInsert} onToggle={() => updateImageGeneration({ confirmBeforeDocumentInsert: !settingsAi.imageGeneration.confirmBeforeDocumentInsert })} />
-              <CapabilityToggleRow icon={<LinkIcon />} label={text.imageGenerationConfirmSources} description={text.imageGenerationConfirmSourcesDescription} enabled={settingsAi.imageGeneration.confirmBeforeUsingMultipleSources} onToggle={() => updateImageGeneration({ confirmBeforeUsingMultipleSources: !settingsAi.imageGeneration.confirmBeforeUsingMultipleSources })} />
-            </div>
-          </CapabilityPanel>
+            description={text.imageGenerationUnavailableDescription}
+            badge={text.unavailableValue}
+          />
 
           <CapabilityPanel
             icon={<Eye size={15} />}
@@ -662,6 +572,10 @@ function CapabilitiesSettings({
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(260px,0.9fr)_minmax(0,1.3fr)]">
           <CapabilityModelCard modelId={settingsAi.transcription.model} name={text.transcriptionModelName} description={text.transcriptionModelDescription} capability={5} cost={4} inputPrice="$0.006" outputPrice="$0.018" tag={text.recommendedModel} />
           <div className="grid gap-3 md:grid-cols-2">
+            <CapabilitySelect label={text.transcriptionDefaultTarget} value={settingsAi.transcription.defaultTarget} help={text.transcriptionDefaultTargetHelp} onChange={(value) => updateTranscription({ defaultTarget: value as AiConfigStatus["transcription"]["defaultTarget"] })}>
+              <option value="prompt">{text.transcriptionTargetPrompt}</option>
+              <option value="document">{text.transcriptionTargetDocument}</option>
+            </CapabilitySelect>
             <CapabilitySelect label={text.transcriptionDefaultLanguage} value={settingsAi.transcription.defaultLanguage} help={text.transcriptionDefaultLanguageHelp} onChange={(value) => updateTranscription({ defaultLanguage: value as AiTranscriptionLanguage })}>
               {transcriptionLanguages.map((language) => (
                 <option key={language} value={language}>{text.transcriptionLanguages[language]}</option>
@@ -694,32 +608,21 @@ function CapabilitiesSettings({
             <CapabilityPermissionRow icon={<FileIcon />} label={text.createDocuments} description={text.createDocumentsDescription} enabled={settingsAi.permissions.createDocuments} onToggle={() => updatePermissions({ createDocuments: !settingsAi.permissions.createDocuments })} />
             <CapabilityPermissionRow icon={<Trash2 size={14} />} label={text.deleteDocuments} description={text.deleteDocumentsDescription} enabled={settingsAi.permissions.deleteDocumentsAndFolders} onToggle={() => updatePermissions({ deleteDocumentsAndFolders: !settingsAi.permissions.deleteDocumentsAndFolders })} />
           </div>
-          <div className="overflow-hidden rounded-md border border-line">
-            <CapabilityPermissionRow icon={<ImageIcon size={14} />} label={text.generateImages} description={text.generateImagesDescription} enabled={settingsAi.permissions.generateImages} onToggle={() => updatePermissions({ generateImages: !settingsAi.permissions.generateImages })} />
-            <CapabilityPermissionRow icon={<FolderOpen size={14} />} label={text.createImageAssets} description={text.createImageAssetsDescription} enabled={settingsAi.permissions.createImageAssets} onToggle={() => updatePermissions({ createImageAssets: !settingsAi.permissions.createImageAssets })} />
-            <CapabilityPermissionRow icon={<ImageIcon size={14} />} label={text.insertImagesIntoDocuments} description={text.insertImagesIntoDocumentsDescription} enabled={settingsAi.permissions.insertImagesIntoDocuments} onToggle={() => updatePermissions({ insertImagesIntoDocuments: !settingsAi.permissions.insertImagesIntoDocuments })} />
-            <CapabilityPermissionRow icon={<Server size={14} />} label={text.useDocumentContextForImages} description={text.useDocumentContextForImagesDescription} enabled={settingsAi.permissions.useDocumentContextForImageGeneration} onToggle={() => updatePermissions({ useDocumentContextForImageGeneration: !settingsAi.permissions.useDocumentContextForImageGeneration })} />
+          <div className="rounded-md border border-orange-100 bg-brand-hover px-3 py-3">
+            <p className="text-[11px] font-semibold text-ink-primary">{text.imageGenerationUnavailableTitle}</p>
+            <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{text.imageGenerationUnavailableDescription}</p>
           </div>
         </div>
         <p className="mt-3 rounded-md border border-orange-100 bg-brand-hover px-3 py-2 text-[11px] font-semibold text-brand-orange">{text.permissionScopeNotice}</p>
       </CapabilitySection>
 
-      <CapabilitySection icon={<Gauge size={22} />} title={text.capabilityAgenticTitle} description={text.capabilityAgenticDescription} enabled={settingsAi.agentic.webResearchEnabled || settingsAi.agentic.confirmBeforeApplying} onToggle={() => updateAgentic({ webResearchEnabled: !settingsAi.agentic.webResearchEnabled })}>
-        <div className="grid gap-3 md:grid-cols-2">
-          <CapabilityToggleRow icon={<Globe2 size={15} />} label={text.agenticWebResearchHeading} description={text.agenticWebResearchDescription} enabled={settingsAi.agentic.webResearchEnabled} onToggle={() => updateAgentic({ webResearchEnabled: !settingsAi.agentic.webResearchEnabled })} bordered />
-          <CapabilityToggleRow icon={<Check size={15} />} label={text.agenticConfirmHeading} description={text.agenticConfirmDescription} enabled={settingsAi.agentic.confirmBeforeApplying} onToggle={() => updateAgentic({ confirmBeforeApplying: !settingsAi.agentic.confirmBeforeApplying })} bordered />
-        </div>
-        <div className="mt-4">
-          <p className="text-[11px] font-semibold text-ink-primary">{text.agenticLimitsHeading}</p>
-          <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{text.agenticLimitsDescription}</p>
-          <p className="mt-3 rounded-md border border-line bg-panel px-3 py-3 text-[10px] leading-4 text-ink-secondary">{text.agenticLimitsImpact}</p>
-          <div className="mt-3 grid gap-3 md:grid-cols-4">
-            <LimitField label={text.agenticMaxSteps} value={settingsAi.agentic.maxSteps} min={1} max={12} step={1} onChange={(maxSteps) => updateAgentic({ maxSteps })} />
-            <LimitField label={text.agenticMaxDocuments} value={settingsAi.agentic.maxDocuments} min={1} max={30} step={1} onChange={(maxDocuments) => updateAgentic({ maxDocuments })} />
-            <LimitField label={text.agenticMaxSources} value={settingsAi.agentic.maxSources} min={1} max={20} step={1} onChange={(maxSources) => updateAgentic({ maxSources })} />
-            <LimitField label={text.agenticMaxCost} value={settingsAi.agentic.maxEstimatedCostEur} min={0.1} max={25} step={0.1} suffix="€" onChange={(maxEstimatedCostEur) => updateAgentic({ maxEstimatedCostEur })} />
-          </div>
-        </div>
+      <CapabilitySection icon={<Gauge size={22} />} title={text.capabilityAgenticTitle} description={text.capabilityAgenticDescription}>
+        <CapabilityUnavailablePanel
+          icon={<Gauge size={15} />}
+          title={text.agenticUnavailableTitle}
+          description={text.agenticUnavailableDescription}
+          badge={text.unavailableValue}
+        />
       </CapabilitySection>
     </div>
   );
@@ -997,32 +900,6 @@ function buildVisionModelOptions(text: SettingsCopy): Array<AiModelSelectorOptio
   });
 }
 
-function buildImageGenerationModelOptions(text: SettingsCopy): Array<AiModelSelectorOption<AiImageGenerationModelId>> {
-  return [
-    { id: "gpt-image-2", name: text.imageModelGptImage2Name, description: text.imageModelGptImage2Description, capability: 6, cost: 4, inputPrice: "$0.005-$0.211", outputPrice: "", priceUnit: text.priceUnitPerImage, recommended: true, tag: { label: text.recommendedModel, tone: "recommended" } },
-    { id: "gpt-image-1.5", name: text.imageModelGptImage15Name, description: text.imageModelGptImage15Description, capability: 5, cost: 3, inputPrice: "$0.009-$0.200", outputPrice: "", priceUnit: text.priceUnitPerImage, tag: { label: text.aiModels["gpt-5.4"].name, tone: "advanced" } },
-    { id: "gpt-image-1-mini", name: text.imageModelGptImageMiniName, description: text.imageModelGptImageMiniDescription, capability: 3, cost: 1, inputPrice: "$0.005-$0.052", outputPrice: "", priceUnit: text.priceUnitPerImage, tag: { label: text.summaryEconomy, tone: "economy" } },
-    { id: "gpt-image-1", name: text.imageModelGptImage1Name, description: text.imageModelGptImage1Description, capability: 4, cost: 4, inputPrice: "$0.011-$0.250", outputPrice: "", priceUnit: text.priceUnitPerImage, tag: { label: text.aiModels["gpt-5.5"].name, tone: "maximum" } },
-  ];
-}
-
-function SaveIcon() {
-  return (
-    <svg className="h-[14px] w-[14px]" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M5 5.5A2.5 2.5 0 0 1 7.5 3h8.1L20 7.4v11.1a2.5 2.5 0 0 1-2.5 2.5h-10A2.5 2.5 0 0 1 5 18.5v-13Z" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M8 3v6h7V3M8.5 21v-6h7v6" stroke="currentColor" strokeWidth="1.8" />
-    </svg>
-  );
-}
-
-function LinkIcon() {
-  return (
-    <svg className="h-[14px] w-[14px]" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M9.5 14.5 14.5 9.5M10.5 7.5l1.2-1.2a4 4 0 1 1 5.7 5.7l-1.2 1.2M13.5 16.5l-1.2 1.2a4 4 0 1 1-5.7-5.7l1.2-1.2" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
-    </svg>
-  );
-}
-
 function FileIcon() {
   return (
     <svg className="h-[14px] w-[14px]" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -1186,17 +1063,17 @@ function normalizeAiStatus(ai: Partial<AiConfigStatus> | null | undefined): AiCo
       createFolders: permissions?.createFolders ?? defaultAiConfig.permissions.createFolders,
       createDocuments: permissions?.createDocuments ?? defaultAiConfig.permissions.createDocuments,
       deleteDocumentsAndFolders: permissions?.deleteDocumentsAndFolders ?? defaultAiConfig.permissions.deleteDocumentsAndFolders,
-      generateImages: permissions?.generateImages ?? defaultAiConfig.permissions.generateImages,
-      createImageAssets: permissions?.createImageAssets ?? defaultAiConfig.permissions.createImageAssets,
-      insertImagesIntoDocuments: permissions?.insertImagesIntoDocuments ?? defaultAiConfig.permissions.insertImagesIntoDocuments,
-      useDocumentContextForImageGeneration: permissions?.useDocumentContextForImageGeneration ?? defaultAiConfig.permissions.useDocumentContextForImageGeneration,
+      generateImages: false,
+      createImageAssets: false,
+      insertImagesIntoDocuments: false,
+      useDocumentContextForImageGeneration: false,
     },
     rag: {
-      enabled: rag?.enabled ?? defaultAiConfig.rag.enabled,
-      vectorStoreId: rag?.vectorStoreId ?? defaultAiConfig.rag.vectorStoreId,
-      lastIndexedAt: rag?.lastIndexedAt ?? defaultAiConfig.rag.lastIndexedAt,
-      status: normalizeRagStatus(rag?.status),
-      error: rag?.error ?? defaultAiConfig.rag.error,
+      enabled: false,
+      vectorStoreId: null,
+      lastIndexedAt: null,
+      status: "not-indexed",
+      error: null,
     },
     vision: {
       enabled: vision?.enabled ?? defaultAiConfig.vision.enabled,
@@ -1208,7 +1085,7 @@ function normalizeAiStatus(ai: Partial<AiConfigStatus> | null | undefined): AiCo
       storeVisualDescriptions: vision?.storeVisualDescriptions ?? defaultAiConfig.vision.storeVisualDescriptions,
     },
     imageGeneration: {
-      enabled: imageGeneration?.enabled ?? defaultAiConfig.imageGeneration.enabled,
+      enabled: false,
       model: normalizeImageGenerationModel(imageGeneration?.model),
       size: normalizeImageGenerationSize(imageGeneration?.size),
       quality: normalizeImageGenerationQuality(imageGeneration?.quality),
@@ -1222,7 +1099,7 @@ function normalizeAiStatus(ai: Partial<AiConfigStatus> | null | undefined): AiCo
     },
     agentic: {
       depth: normalizeAgenticDepth(agentic?.depth),
-      webResearchEnabled: agentic?.webResearchEnabled ?? defaultAiConfig.agentic.webResearchEnabled,
+      webResearchEnabled: false,
       confirmBeforeApplying: agentic?.confirmBeforeApplying ?? defaultAiConfig.agentic.confirmBeforeApplying,
       maxSteps: clampSettingsNumber(agentic?.maxSteps, 1, 12, defaultAiConfig.agentic.maxSteps),
       maxDocuments: clampSettingsNumber(agentic?.maxDocuments, 1, 30, defaultAiConfig.agentic.maxDocuments),
@@ -1236,14 +1113,62 @@ function normalizeAiStatus(ai: Partial<AiConfigStatus> | null | undefined): AiCo
 }
 
 function normalizeAiModel(model: unknown): AiModelId {
-  return aiModelIds.includes(model as AiModelId) ? model as AiModelId : defaultAiConfig.model;
+  return normalizeLegacyAiModel(model) ?? defaultAiConfig.model;
+}
+
+function CapabilityUnavailablePanel({
+  icon,
+  title,
+  description,
+  badge,
+}: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+  badge: string;
+}) {
+  return (
+    <section className="rounded-md border border-orange-100 bg-brand-hover px-4 py-4">
+      <header className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="mt-0.5 shrink-0 text-brand-orange">{icon}</span>
+          <div className="min-w-0">
+            <h5 className="text-[12px] font-semibold text-ink-primary">{title}</h5>
+            <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{description}</p>
+          </div>
+        </div>
+        <span className="rounded border border-orange-200 bg-white px-2 py-1 text-[10px] font-semibold text-brand-orange">{badge}</span>
+      </header>
+    </section>
+  );
 }
 
 function normalizeAiVisionModel(model: unknown): AiVisionModelId {
-  return aiVisionModelIds.includes(model as AiVisionModelId) ? model as AiVisionModelId : defaultAiConfig.vision.model;
+  const normalized = normalizeLegacyAiModel(model);
+  return normalized && normalized !== "gpt-5.4-nano" ? normalized : defaultAiConfig.vision.model;
+}
+
+function normalizeLegacyAiModel(model: unknown): AiModelId | null {
+  switch (String(model)) {
+    case "gpt-5.5":
+    case "gpt-5.2":
+      return "gpt-5.5";
+    case "gpt-5.4":
+    case "gpt-5":
+      return "gpt-5.4";
+    case "gpt-5.4-mini":
+    case "gpt-5-mini":
+      return "gpt-5.4-mini";
+    case "gpt-5.4-nano":
+    case "gpt-5-nano":
+      return "gpt-5.4-nano";
+    default:
+      return null;
+  }
 }
 
 function normalizeImageGenerationModel(model: unknown): AiImageGenerationModelId {
+  if (String(model) === "gpt-image-2") return "gpt-image-1.5";
   return aiImageGenerationModelIds.includes(model as AiImageGenerationModelId) ? model as AiImageGenerationModelId : defaultAiConfig.imageGeneration.model;
 }
 
@@ -1310,7 +1235,7 @@ function normalizeTranscription(transcription: Partial<AiConfigStatus["transcrip
   const uniqueFavorites = Array.from(new Set(favorites.length ? favorites : defaultAiConfig.transcription.favoriteLanguages));
   return {
     enabled: transcription?.enabled ?? defaultAiConfig.transcription.enabled,
-    model: transcription?.model === "gpt-realtime-whisper" ? transcription.model : defaultAiConfig.transcription.model,
+    model: ["gpt-4o-mini-transcribe", "gpt-realtime-whisper"].includes(String(transcription?.model)) ? "gpt-4o-mini-transcribe" : defaultAiConfig.transcription.model,
     defaultTarget: transcription?.defaultTarget === "document" ? "document" : "prompt",
     defaultLanguage: isTranscriptionLanguage(transcription?.defaultLanguage) ? transcription.defaultLanguage : defaultAiConfig.transcription.defaultLanguage,
     favoriteLanguages: uniqueFavorites.slice(0, 6),
@@ -1352,11 +1277,8 @@ function AiDocumentalSettings({
   const [localAi, setLocalAi] = useState<AiConfigStatus>(() => normalizeAiStatus(ai));
   const localAiRef = useRef<AiConfigStatus>(normalizeAiStatus(ai));
   const settingsAi = localAi;
-  const indexStatus = aiIndexStatus?.status ?? settingsAi.rag.status;
-  const indexedCount = aiIndexStatus?.indexedDocumentCount ?? 0;
   const documentCount = aiIndexStatus?.documentCount ?? 0;
   const failedCount = aiIndexStatus?.failedDocumentCount ?? 0;
-  const vectorStore = aiIndexStatus?.vectorStoreId ?? settingsAi.rag.vectorStoreId;
   const openAiKeySuffix = settingsAi.openaiKeyPreview?.slice(-4) ?? "";
   const modelOptions: Array<AiModelSelectorOption<AiModelId>> = aiModelIds.map((modelId) => {
     const model = text.aiModels[modelId];
@@ -1396,17 +1318,6 @@ function AiDocumentalSettings({
     commitAi({
       ...localAiRef.current,
       model,
-    });
-  }
-
-  function updateRag(enabled: boolean) {
-    const currentAi = localAiRef.current;
-    commitAi({
-      ...currentAi,
-      rag: {
-        ...currentAi.rag,
-        enabled,
-      },
     });
   }
 
@@ -1539,17 +1450,17 @@ function AiDocumentalSettings({
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h4 className="text-[15px] font-semibold text-ink-primary">{text.ragContextHeading}</h4>
-            <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.ragDescription}</p>
+            <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.ragUnavailableDescription}</p>
           </div>
-          <Switch enabled={settingsAi.rag.enabled} label={text.ragContextHeading} onToggle={() => updateRag(!settingsAi.rag.enabled)} />
+          <span className="rounded border border-orange-200 bg-brand-hover px-2 py-1 text-[10px] font-semibold text-brand-orange">{text.unavailableValue}</span>
         </div>
 
         <div className="mt-4 overflow-hidden rounded-md border border-line bg-white">
           <div className="grid gap-0 md:grid-cols-[minmax(0,1.25fr)_minmax(240px,0.75fr)]">
             <div className="grid gap-0 sm:grid-cols-2 lg:grid-cols-4">
-              <RagMetric label={text.ragStatus} value={describeIndexStatus(indexStatus)} tone={indexStatus === "updated" ? "success" : "warning"} />
-              <RagMetric label={text.ragDocuments} value={`${indexedCount} / ${documentCount}`} />
-              <RagMetric label={text.summaryVectorStore} value={vectorStore ? text.enabled : text.summaryNone} />
+              <RagMetric label={text.ragStatus} value={text.unavailableValue} tone="neutral" />
+              <RagMetric label={text.ragDocuments} value={documentCount ? String(documentCount) : text.summaryNone} />
+              <RagMetric label={text.summaryVectorStore} value={text.unavailableValue} />
               <RagMetric label={text.ragExactReady} value={aiIndexStatus?.localExactReady ? text.enabled : text.disabled} tone={aiIndexStatus?.localExactReady ? "success" : "neutral"} />
             </div>
             <div className="border-t border-line bg-panel px-4 py-3 md:border-l md:border-t-0">
@@ -1560,27 +1471,10 @@ function AiDocumentalSettings({
             <div className="min-w-0">
               <p className="text-[10px] font-semibold text-ink-secondary">{text.lastStatusLabel}</p>
               <p className={["mt-1 text-[11px] leading-5", aiIndexStatus?.error ? "text-red-700" : "text-ink-secondary"].join(" ")}>
-                {aiIndexStatus?.error ?? (settingsAi.rag.lastIndexedAt ? formatDateTime(settingsAi.rag.lastIndexedAt) : text.noIndexGenerated)}
+                {text.ragUnavailableTitle}
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                className="inline-flex h-9 items-center gap-2 rounded-md border border-brand-orange bg-white px-3 text-[11px] font-semibold text-brand-orange hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={!settingsAi.rag.enabled || !settingsAi.openaiKeyConfigured}
-                onClick={onRebuildAiIndex}
-              >
-                <RefreshCw size={14} />
-                {text.rebuildIndex}
-              </button>
-              <button
-                className="inline-flex h-9 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-secondary hover:bg-panel disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={!vectorStore}
-                onClick={onDeleteAiIndex}
-              >
-                <Trash2 size={14} />
-                {text.deleteIndex}
-              </button>
-            </div>
+            <p className="max-w-sm text-[11px] leading-5 text-ink-secondary">{text.ragExplicitContextNotice}</p>
           </div>
         </div>
         {failedCount > 0 ? <p className="mt-2 text-[10px] leading-4 text-red-700">{text.ragFailed}: {failedCount}</p> : null}
@@ -2598,8 +2492,6 @@ function AiSettings({
   const [localAi, setLocalAi] = useState<AiConfigStatus>(() => normalizeAiStatus(ai));
   const localAiRef = useRef<AiConfigStatus>(normalizeAiStatus(ai));
   const settingsAi = localAi;
-  const indexStatus = aiIndexStatus?.status ?? settingsAi.rag.status;
-  const indexedCount = aiIndexStatus?.indexedDocumentCount ?? 0;
   const documentCount = aiIndexStatus?.documentCount ?? 0;
   const failedCount = aiIndexStatus?.failedDocumentCount ?? 0;
   const openAiKeySuffix = settingsAi.openaiKeyPreview?.slice(-4) ?? "";
@@ -2660,17 +2552,6 @@ function AiSettings({
     });
   }
 
-  function updateRag(enabled: boolean) {
-    const currentAi = localAiRef.current;
-    commitAi({
-      ...currentAi,
-      rag: {
-        ...currentAi.rag,
-        enabled,
-      },
-    });
-  }
-
   function updateVision(nextVision: Partial<AiConfigStatus["vision"]>) {
     const currentAi = localAiRef.current;
     commitAi({
@@ -2680,29 +2561,6 @@ function AiSettings({
         ...nextVision,
       },
     });
-  }
-
-  function updateImageGeneration(nextImageGeneration: Partial<AiConfigStatus["imageGeneration"]>) {
-    const currentAi = localAiRef.current;
-    commitAi({
-      ...currentAi,
-      imageGeneration: {
-        ...currentAi.imageGeneration,
-        ...nextImageGeneration,
-      },
-    });
-  }
-
-  function updateAgentic(nextAgentic: Partial<AiConfigStatus["agentic"]>) {
-    const currentAi = localAiRef.current;
-    const nextAi = {
-      ...currentAi,
-      agentic: {
-        ...currentAi.agentic,
-        ...nextAgentic,
-      },
-    };
-    commitAi(nextAi);
   }
 
   function updateTranscription(nextTranscription: Partial<AiConfigStatus["transcription"]>) {
@@ -2797,114 +2655,16 @@ function AiSettings({
         </div>
       </section>
 
-      <section className="rounded-md border border-line px-3 py-3">
+      <section className="rounded-md border border-orange-100 bg-brand-hover px-3 py-3">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <ImageIcon size={15} className="text-brand-orange" />
-              <p className="text-[11px] font-semibold text-ink-primary">{text.imageGenerationHeading}</p>
+              <p className="text-[11px] font-semibold text-ink-primary">{text.imageGenerationUnavailableTitle}</p>
             </div>
-            <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.imageGenerationDescription}</p>
+            <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.imageGenerationUnavailableDescription}</p>
           </div>
-          <Switch enabled={settingsAi.imageGeneration.enabled} label={text.imageGenerationHeading} onToggle={() => updateImageGeneration({ enabled: !settingsAi.imageGeneration.enabled })} />
-        </div>
-
-        <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(135px,1fr))] gap-2">
-          <label className="block min-w-0">
-            <span className="block text-[9px] font-semibold uppercase text-ink-secondary">{text.imageGenerationModelHeading}</span>
-            <select
-              className="mt-1 h-8 w-full rounded-md border border-line bg-white px-2 text-[11px] font-semibold text-ink-primary outline-none focus:border-brand-orange"
-              value={settingsAi.imageGeneration.model}
-              onChange={(event) => updateImageGeneration({ model: event.target.value as AiImageGenerationModelId })}
-            >
-              {aiImageGenerationModelIds.map((modelId) => (
-                <option key={modelId} value={modelId}>{modelId}</option>
-              ))}
-            </select>
-          </label>
-          <label className="block min-w-0">
-            <span className="block text-[9px] font-semibold uppercase text-ink-secondary">{text.imageGenerationSize}</span>
-            <select
-              className="mt-1 h-8 w-full rounded-md border border-line bg-white px-2 text-[11px] font-semibold text-ink-primary outline-none focus:border-brand-orange"
-              value={settingsAi.imageGeneration.size}
-              onChange={(event) => updateImageGeneration({ size: event.target.value as AiConfigStatus["imageGeneration"]["size"] })}
-            >
-              <option value="auto">auto</option>
-              <option value="1024x1024">1024x1024</option>
-              <option value="1536x1024">1536x1024</option>
-              <option value="1024x1536">1024x1536</option>
-            </select>
-          </label>
-          <label className="block min-w-0">
-            <span className="block text-[9px] font-semibold uppercase text-ink-secondary">{text.imageGenerationQuality}</span>
-            <select
-              className="mt-1 h-8 w-full rounded-md border border-line bg-white px-2 text-[11px] font-semibold text-ink-primary outline-none focus:border-brand-orange"
-              value={settingsAi.imageGeneration.quality}
-              onChange={(event) => updateImageGeneration({ quality: event.target.value as AiConfigStatus["imageGeneration"]["quality"] })}
-            >
-              <option value="auto">auto</option>
-              <option value="low">low</option>
-              <option value="medium">medium</option>
-              <option value="high">high</option>
-            </select>
-          </label>
-          <label className="block min-w-0">
-            <span className="block text-[9px] font-semibold uppercase text-ink-secondary">{text.imageGenerationFormat}</span>
-            <select
-              className="mt-1 h-8 w-full rounded-md border border-line bg-white px-2 text-[11px] font-semibold text-ink-primary outline-none focus:border-brand-orange"
-              value={settingsAi.imageGeneration.outputFormat}
-              onChange={(event) => updateImageGeneration({ outputFormat: event.target.value as AiConfigStatus["imageGeneration"]["outputFormat"] })}
-            >
-              <option value="png">PNG</option>
-              <option value="webp">WebP</option>
-              <option value="jpeg">JPEG</option>
-            </select>
-          </label>
-          <label className="block min-w-0">
-            <span className="block text-[9px] font-semibold uppercase text-ink-secondary">{text.imageGenerationFolder}</span>
-            <select
-              className="mt-1 h-8 w-full rounded-md border border-line bg-white px-2 text-[11px] font-semibold text-ink-primary outline-none focus:border-brand-orange"
-              value={settingsAi.imageGeneration.defaultFolder}
-              onChange={(event) => updateImageGeneration({ defaultFolder: event.target.value as AiConfigStatus["imageGeneration"]["defaultFolder"] })}
-            >
-              <option value="document_folder">{text.imageGenerationFolderDocument}</option>
-              <option value="generated_assets">{text.imageGenerationFolderAssets}</option>
-              <option value="custom_folder">{text.imageGenerationFolderCustom}</option>
-            </select>
-          </label>
-          {settingsAi.imageGeneration.defaultFolder === "custom_folder" ? (
-            <label className="block min-w-0">
-              <span className="block text-[9px] font-semibold uppercase text-ink-secondary">{text.imageGenerationCustomFolder}</span>
-              <input
-                className="mt-1 h-8 w-full rounded-md border border-line bg-white px-2 text-[11px] font-semibold text-ink-primary outline-none focus:border-brand-orange"
-                value={settingsAi.imageGeneration.customFolderPath}
-                placeholder={text.imageGenerationCustomFolderPlaceholder}
-                onChange={(event) => updateImageGeneration({ customFolderPath: event.target.value })}
-              />
-            </label>
-          ) : null}
-          <LimitField label={text.imageGenerationMaxImages} value={settingsAi.imageGeneration.maxImagesPerPrompt} min={1} max={4} step={1} onChange={(maxImagesPerPrompt) => updateImageGeneration({ maxImagesPerPrompt })} />
-        </div>
-
-        <div className="mt-3 grid gap-x-6 border-t border-line md:grid-cols-2">
-          <CompactToggle
-            label={text.imageGenerationStorePrompt}
-            description={text.imageGenerationStorePromptDescription}
-            enabled={settingsAi.imageGeneration.storePromptMetadata}
-            onToggle={() => updateImageGeneration({ storePromptMetadata: !settingsAi.imageGeneration.storePromptMetadata })}
-          />
-          <CompactToggle
-            label={text.imageGenerationConfirmInsert}
-            description={text.imageGenerationConfirmInsertDescription}
-            enabled={settingsAi.imageGeneration.confirmBeforeDocumentInsert}
-            onToggle={() => updateImageGeneration({ confirmBeforeDocumentInsert: !settingsAi.imageGeneration.confirmBeforeDocumentInsert })}
-          />
-          <CompactToggle
-            label={text.imageGenerationConfirmSources}
-            description={text.imageGenerationConfirmSourcesDescription}
-            enabled={settingsAi.imageGeneration.confirmBeforeUsingMultipleSources}
-            onToggle={() => updateImageGeneration({ confirmBeforeUsingMultipleSources: !settingsAi.imageGeneration.confirmBeforeUsingMultipleSources })}
-          />
+          <span className="rounded border border-orange-200 bg-white px-2 py-1 text-[10px] font-semibold text-brand-orange">{text.unavailableValue}</span>
         </div>
       </section>
 
@@ -2995,7 +2755,7 @@ function AiSettings({
               value={settingsAi.transcription.model}
               onChange={(event) => updateTranscription({ model: event.target.value as AiConfigStatus["transcription"]["model"] })}
             >
-              <option value="gpt-realtime-whisper">gpt-realtime-whisper</option>
+              <option value="gpt-4o-mini-transcribe">gpt-4o-mini-transcribe</option>
             </select>
           </label>
           <label className="block min-w-0">
@@ -3056,15 +2816,14 @@ function AiSettings({
           <PermissionToggle label={text.editDocuments} enabled={settingsAi.permissions.editDocuments} onToggle={() => updatePermissions({ editDocuments: !settingsAi.permissions.editDocuments })} />
           <PermissionToggle label={text.createFolders} enabled={settingsAi.permissions.createFolders} onToggle={() => updatePermissions({ createFolders: !settingsAi.permissions.createFolders })} />
           <PermissionToggle label={text.createDocuments} enabled={settingsAi.permissions.createDocuments} onToggle={() => updatePermissions({ createDocuments: !settingsAi.permissions.createDocuments })} />
-          <PermissionToggle label={text.generateImages} enabled={settingsAi.permissions.generateImages} onToggle={() => updatePermissions({ generateImages: !settingsAi.permissions.generateImages })} />
-          <PermissionToggle label={text.createImageAssets} enabled={settingsAi.permissions.createImageAssets} onToggle={() => updatePermissions({ createImageAssets: !settingsAi.permissions.createImageAssets })} />
-          <PermissionToggle label={text.insertImagesIntoDocuments} enabled={settingsAi.permissions.insertImagesIntoDocuments} onToggle={() => updatePermissions({ insertImagesIntoDocuments: !settingsAi.permissions.insertImagesIntoDocuments })} />
-          <PermissionToggle label={text.useDocumentContextForImages} enabled={settingsAi.permissions.useDocumentContextForImageGeneration} onToggle={() => updatePermissions({ useDocumentContextForImageGeneration: !settingsAi.permissions.useDocumentContextForImageGeneration })} />
           <PermissionToggle
             label={text.deleteDocuments}
             enabled={settingsAi.permissions.deleteDocumentsAndFolders}
             onToggle={() => updatePermissions({ deleteDocumentsAndFolders: !settingsAi.permissions.deleteDocumentsAndFolders })}
           />
+        </div>
+        <div className="mt-3 rounded-md border border-orange-100 bg-brand-hover px-3 py-2">
+          <p className="text-[10px] leading-4 text-ink-secondary">{text.imageGenerationUnavailableDescription}</p>
         </div>
       </section>
 
@@ -3075,33 +2834,9 @@ function AiSettings({
               <Gauge size={15} className="text-brand-orange" />
               <p className="text-[11px] font-semibold text-ink-primary">{text.agenticHeading}</p>
             </div>
-            <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.agenticDescription}</p>
+            <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.agenticUnavailableDescription}</p>
           </div>
-          <span className="rounded bg-panel px-2 py-1 text-[10px] font-semibold text-ink-secondary">{text.agenticModeHint}</span>
-        </div>
-
-        <div className="mt-3 grid gap-x-6 border-y border-line md:grid-cols-2">
-          <CompactToggle
-            icon={<Globe2 size={14} />}
-            label={text.webResearchHeading}
-            description={text.webResearchDescription}
-            enabled={settingsAi.agentic.webResearchEnabled}
-            onToggle={() => updateAgentic({ webResearchEnabled: !settingsAi.agentic.webResearchEnabled })}
-          />
-          <CompactToggle
-            icon={<ShieldCheck size={14} />}
-            label={text.agenticConfirmHeading}
-            description={text.agenticConfirmDescription}
-            enabled={settingsAi.agentic.confirmBeforeApplying}
-            onToggle={() => updateAgentic({ confirmBeforeApplying: !settingsAi.agentic.confirmBeforeApplying })}
-          />
-        </div>
-
-        <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-2">
-          <LimitField label={text.agenticMaxSteps} value={settingsAi.agentic.maxSteps} min={1} max={12} step={1} onChange={(maxSteps) => updateAgentic({ maxSteps })} />
-          <LimitField label={text.agenticMaxDocuments} value={settingsAi.agentic.maxDocuments} min={1} max={30} step={1} onChange={(maxDocuments) => updateAgentic({ maxDocuments })} />
-          <LimitField label={text.agenticMaxSources} value={settingsAi.agentic.maxSources} min={1} max={20} step={1} onChange={(maxSources) => updateAgentic({ maxSources })} />
-          <LimitField label={text.agenticMaxCost} value={settingsAi.agentic.maxEstimatedCostEur} min={0.1} max={25} step={0.1} suffix="€" onChange={(maxEstimatedCostEur) => updateAgentic({ maxEstimatedCostEur })} />
+          <span className="rounded border border-orange-200 bg-brand-hover px-2 py-1 text-[10px] font-semibold text-brand-orange">{text.unavailableValue}</span>
         </div>
       </section>
 
@@ -3109,33 +2844,18 @@ function AiSettings({
         <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4">
           <div className="min-w-0">
             <p className="text-[11px] font-semibold text-ink-primary">{text.ragHeading}</p>
-            <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.ragDescription}</p>
+            <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.ragUnavailableDescription}</p>
           </div>
-          <Switch enabled={settingsAi.rag.enabled} label={text.ragHeading} onToggle={() => updateRag(!settingsAi.rag.enabled)} />
+          <span className="rounded border border-orange-200 bg-brand-hover px-2 py-1 text-[10px] font-semibold text-brand-orange">{text.unavailableValue}</span>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
-          <StatusPill label={text.ragStatus} value={describeIndexStatus(indexStatus)} />
-          <StatusPill label={text.ragDocuments} value={`${indexedCount}/${documentCount}`} />
+          <StatusPill label={text.ragStatus} value={text.unavailableValue} />
+          <StatusPill label={text.ragDocuments} value={documentCount ? String(documentCount) : text.summaryNone} />
           {failedCount > 0 ? <StatusPill label={text.ragFailed} value={String(failedCount)} tone="danger" /> : null}
           {aiIndexStatus?.localExactReady ? <StatusPill label={text.ragExactReady} value={text.enabled} tone="success" /> : null}
         </div>
         {aiIndexStatus?.error ? <p className="mt-2 text-[10px] leading-4 text-red-700">{aiIndexStatus.error}</p> : null}
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            className="h-8 rounded-md border border-brand-orange px-3 text-[11px] font-semibold text-brand-orange hover:bg-brand-hover disabled:opacity-50"
-            disabled={!settingsAi.rag.enabled || !settingsAi.openaiKeyConfigured}
-            onClick={onRebuildAiIndex}
-          >
-            {text.rebuildIndex}
-          </button>
-          <button
-            className="h-8 rounded-md border border-line px-3 text-[11px] text-ink-secondary hover:bg-panel disabled:opacity-50"
-            disabled={!settingsAi.rag.vectorStoreId && !aiIndexStatus?.vectorStoreId}
-            onClick={onDeleteAiIndex}
-          >
-            {text.deleteIndex}
-          </button>
-        </div>
+        <p className="mt-3 rounded-md border border-orange-100 bg-brand-hover px-3 py-2 text-[10px] leading-4 text-ink-secondary">{text.ragExplicitContextNotice}</p>
       </section>
     </div>
   );
@@ -3380,7 +3100,7 @@ const settingsCopy = {
     lastChecked: "Última comprobación",
     refreshServices: "Comprobar",
     localContractLabel: "Contrato local",
-    localRuntimeIntegratedNote: "Runtime integrado en Tauri; no hay backend externo ni proceso auxiliar.",
+    localRuntimeIntegratedNote: "Runtime integrado en Tauri; no hay servicio externo ni proceso auxiliar.",
     profileLabel: "Perfil activo",
     expectedProfileLabel: "Perfil esperado",
     managedByLabel: "Gestionado por",
@@ -3525,30 +3245,10 @@ const settingsCopy = {
     visionStoreHeading: "Guardar descripciones visuales",
     visionStoreDescription: "Conserva metadatos locales para reutilizar contexto sin volver a analizar cada imagen.",
     reindexImages: "Reindexar imágenes",
-    imageGenerationHeading: "Generación de imágenes",
-    imageGenerationDescription: "Crea assets visuales desde el prompt IA usando el documento activo, selección y fuentes añadidas al contexto.",
-    imageGenerationModelHeading: "Modelo imagen",
-    imageGenerationSize: "Tamaño",
-    imageGenerationQuality: "Calidad",
-    imageGenerationFormat: "Formato",
-    imageGenerationFolder: "Carpeta por defecto",
-    imageGenerationFolderDocument: "Junto al documento",
-    imageGenerationFolderAssets: "assets/generated",
-    imageGenerationFolderCustom: "Personalizada",
-    imageGenerationFolderExplanation: "Define dónde se guardan las imágenes generadas antes de abrirlas o insertarlas. Puedes mantenerlas junto al documento, centralizarlas en assets/generated o indicar una carpeta propia visible dentro del árbol del proyecto.",
-    imageGenerationFolderHelp: "La carpeta se crea automáticamente dentro del proyecto si todavía no existe.",
-    imageGenerationCustomFolder: "Ruta personalizada",
-    imageGenerationCustomFolderPlaceholder: "assets/infografias",
-    imageGenerationCustomFolderHelp: "Usa una ruta relativa al proyecto, por ejemplo assets/infografias o media/imagenes. No uses rutas absolutas ni segmentos ..",
-    imageGenerationMaxImages: "Imágenes",
-    imageGenerationStorePrompt: "Guardar prompt visual",
-    imageGenerationStorePromptDescription: "Conserva metadata local para trazabilidad del asset generado.",
-    imageGenerationConfirmInsert: "Confirmar inserción",
-    imageGenerationConfirmInsertDescription: "Pide confirmación antes de modificar documentos con una imagen generada.",
-    imageGenerationConfirmSources: "Confirmar múltiples fuentes",
-    imageGenerationConfirmSourcesDescription: "Evita usar varios documentos o fuentes como contexto visual sin revisión previa.",
+    imageGenerationUnavailableTitle: "Generación de imágenes no disponible",
+    imageGenerationUnavailableDescription: "La app mantiene imágenes importadas, previews y contexto visual, pero no ofrece generación de imágenes hasta que exista un contrato Rust/Tauri validado que cree assets locales.",
     transcriptionHeading: "Audio y transcripción",
-    transcriptionDescription: "Controla el dictado realtime usado por el micrófono del prompt. React captura el audio y el runtime local Rust media cualquier proveedor configurado.",
+    transcriptionDescription: "Controla el dictado usado por el micrófono del prompt. React captura el audio y el runtime local Rust lo transcribe antes de insertarlo en el prompt o el documento.",
     transcriptionModelHeading: "Modelo",
     transcriptionDefaultTarget: "Destino por defecto",
     transcriptionDefaultLanguage: "Idioma por defecto",
@@ -3607,16 +3307,18 @@ const settingsCopy = {
     editDocuments: "Editar documentos",
     createFolders: "Crear y mover carpetas",
     createDocuments: "Crear, duplicar y mover documentos",
-    generateImages: "Generar imágenes",
+    generateImages: "Generación de imágenes no disponible",
     createImageAssets: "Crear archivos de imagen",
     insertImagesIntoDocuments: "Insertar imágenes en documentos",
     useDocumentContextForImages: "Usar contexto documental en imágenes",
     deleteDocuments: "Eliminar documentos y carpetas",
     agenticHeading: "Tareas agénticas",
-    agenticDescription: "Define límites y permisos máximos. La profundidad se elige en el prompt con el modo Razonar para no gastar tokens por defecto.",
+    agenticDescription: "Modo reservado para flujos de varios pasos cuando el runtime pueda planificar, ejecutar y confirmar acciones de forma estructurada.",
+    agenticUnavailableTitle: "Tareas agénticas no disponibles",
+    agenticUnavailableDescription: "La IA documental responde sobre el documento activo y el contexto añadido al prompt, pero no realiza investigación web ni flujos autónomos de varios pasos hasta que el runtime Rust/Tauri tenga ese contrato validado.",
     agenticModeHint: "Control desde el prompt",
     webResearchHeading: "Investigación web",
-    webResearchDescription: "Permite planificar tareas que consulten fuentes externas y muestren las fuentes usadas. Las acciones siguen pasando por confirmación.",
+    webResearchDescription: "No se ofrece hasta que exista un servicio runtime validado para consultar fuentes externas, citar resultados y auditar coste.",
     agenticConfirmHeading: "Confirmar antes de aplicar",
     agenticConfirmDescription: "Las tareas pueden preparar cambios, pero no crear ni modificar documentos sin un checkpoint visible.",
     agenticMaxSteps: "Pasos",
@@ -3624,11 +3326,14 @@ const settingsCopy = {
     agenticMaxSources: "Fuentes",
     agenticMaxCost: "Coste máx.",
     ragHeading: "Indexar documentación del proyecto",
-    ragDescription: "Permite consultar el proyecto completo con búsqueda semántica. El contenido Markdown se enviará a OpenAI para indexación.",
+    ragDescription: "Contexto explícito desde el prompt. El índice semántico automático todavía no está disponible.",
+    ragUnavailableTitle: "Índice semántico automático no disponible",
+    ragUnavailableDescription: "Puedes añadir documentos, imágenes y adjuntos como contexto explícito desde el prompt. La indexación semántica automática y el vector store no se ofrecen hasta que el runtime los use realmente en las interacciones IA.",
+    ragExplicitContextNotice: "Para trabajar con más contexto, adjunta archivos desde el prompt o arrástralos desde el árbol del proyecto.",
     ragContextHeading: "Contexto documental (RAG)",
-    ragContextHelp: "Cuando está activo, la aplicación prepara los documentos del proyecto para que la IA pueda encontrarlos y citarlos como contexto.",
+    ragContextHelp: "La búsqueda exacta local y el contexto seleccionado manualmente siguen disponibles; no se envía contenido a OpenAI para crear un índice automático.",
     ragStatus: "Estado",
-    ragDocuments: "Documentos indexados",
+    ragDocuments: "Documentos disponibles",
     ragFailed: "fallidos",
     ragExactReady: "búsqueda exacta local lista",
     rebuildIndex: "Reindexar ahora",
@@ -3667,15 +3372,15 @@ const settingsCopy = {
     summaryVectorStore: "Vector store",
     summaryNone: "Ninguno",
     summaryImages: "Imágenes",
-    summaryImagesDescription: "Generar y entender imágenes",
-    summaryAudioDescription: "Transcribir y generar audio",
+    summaryImagesDescription: "Entender imágenes importadas",
+    summaryAudioDescription: "Transcribir audio a texto",
     summaryPermissionsDescription: "Configurar lo que la IA puede hacer",
     summaryAgenticDescription: "Investigación y ejecución de tareas",
     summaryProductive: "Productivo",
     summaryModelsHeading: "Modelos de IA utilizados",
     summaryModelsDescription: "Resumen de todos los modelos seleccionados en la aplicación.",
     summaryMainAi: "IA principal (respuestas)",
-    summaryImageAi: "Imágenes (generación y visión)",
+    summaryImageAi: "Imágenes (visión)",
     summaryAudioAi: "Audio y transcripción",
     summaryImagePricing: "$0.75 / $4.50",
     summaryAudioPricing: "$0.006 / $0.018",
@@ -3689,9 +3394,8 @@ const settingsCopy = {
     goToSystem: "Ir a Sistema y diagnóstico",
     capabilitiesDescription: "Activa y configura las funciones avanzadas que la IA puede utilizar.",
     capabilityImagesTitle: "1. Imágenes",
-    capabilityImagesDescription: "Generación y comprensión de imágenes para trabajar con contenido visual.",
-    capabilityGenerateImagesTitle: "Generar imágenes",
-    capabilityGenerateImagesDescription: "Crea imágenes a partir de instrucciones o contexto del documento.",
+    capabilityImagesDescription: "Comprensión de imágenes para trabajar con contenido visual importado al proyecto.",
+    capabilityGenerateImagesTitle: "Generación de imágenes",
     capabilityUnderstandImagesTitle: "Entender imágenes (visión)",
     capabilityUnderstandImagesDescription: "Analiza imágenes del proyecto y puede usarlas como contexto.",
     capabilityAudioTitle: "2. Audio y transcripción",
@@ -3699,7 +3403,7 @@ const settingsCopy = {
     capabilityPermissionsTitle: "3. Acciones permitidas",
     capabilityPermissionsDescription: "Define hasta qué punto la IA puede modificar y gestionar el contenido del proyecto.",
     capabilityAgenticTitle: "4. Tareas agénticas",
-    capabilityAgenticDescription: "Permite flujos de varios pasos en modo Razonar: la IA puede planificar, consultar contexto o web, preparar cambios y aplicar acciones solo dentro de los permisos configurados.",
+    capabilityAgenticDescription: "Estado de las capacidades de planificación, investigación web y ejecución autónoma.",
     qualityLow: "Baja",
     qualityMedium: "Media",
     qualityHigh: "Alta",
@@ -3722,25 +3426,16 @@ const settingsCopy = {
     createFoldersDescription: "Puede crear, duplicar y mover carpetas.",
     createDocumentsDescription: "Puede crear y organizar documentos del proyecto.",
     deleteDocumentsDescription: "Puede eliminar documentos y carpetas.",
-    generateImagesDescription: "Puede generar imágenes a partir de instrucciones.",
+    generateImagesDescription: "Permiso reservado; no está disponible hasta que exista contrato Rust/Tauri validado.",
     createImageAssetsDescription: "Puede guardar imágenes como archivos en el proyecto.",
     insertImagesIntoDocumentsDescription: "Puede añadir imágenes dentro de documentos.",
-    useDocumentContextForImagesDescription: "Puede usar documentos como contexto al generar imágenes.",
+    useDocumentContextForImagesDescription: "Permiso reservado para generación de imágenes; la visión usa contexto explícito del prompt.",
     permissionScopeNotice: "Estos permisos se aplican a la IA en todas las tareas que realice dentro del proyecto.",
     agenticWebResearchHeading: "Investigación web",
-    agenticWebResearchDescription: "Permite consultar fuentes web cuando la tarea necesita información externa al proyecto.",
+    agenticWebResearchDescription: "No disponible hasta que el runtime local implemente investigación web con fuentes y trazabilidad.",
     agenticLimitsHeading: "Límites de ejecución",
     agenticLimitsDescription: "Limita el alcance máximo de cada tarea antes de que la IA siga investigando o aplicando cambios.",
     agenticLimitsImpact: "Pasos controla cuántas iteraciones puede hacer; documentos limita cuántos archivos del proyecto puede revisar; fuentes limita referencias externas o añadidas; coste máx. corta la tarea si la estimación supera ese importe.",
-    imageModelGptImage15Name: "Máxima calidad",
-    imageModelGptImage15Description: "Modelo de imagen más avanzado",
-    imageModelGptImage2Name: "Más reciente",
-    imageModelGptImage2Description: "Modelo GPT Image recomendado",
-    imageModelGptImage1Name: "Alta calidad",
-    imageModelGptImage1Description: "Modelo anterior de generación de imágenes",
-    imageModelGptImageMiniName: "Económico",
-    imageModelGptImageMiniDescription: "Borradores y tareas simples",
-    priceUnitPerImage: "por imagen",
     capabilitiesPlaceholderDescription: "Esta sección agrupa las capacidades avanzadas de IA. Por ahora mantiene una vista de resumen; los controles detallados siguen disponibles en IA documental.",
     capabilitiesEditInAi: "Configurar en IA documental",
   },
@@ -3775,7 +3470,7 @@ const settingsCopy = {
     lastChecked: "Last checked",
     refreshServices: "Check",
     localContractLabel: "Local contract",
-    localRuntimeIntegratedNote: "Runtime integrated in Tauri; there is no external backend or auxiliary process.",
+    localRuntimeIntegratedNote: "Runtime integrated in Tauri; there is no external service or auxiliary process.",
     profileLabel: "Active profile",
     expectedProfileLabel: "Expected profile",
     managedByLabel: "Managed by",
@@ -3920,30 +3615,10 @@ const settingsCopy = {
     visionStoreHeading: "Store visual descriptions",
     visionStoreDescription: "Keep local metadata to reuse context without analyzing each image again.",
     reindexImages: "Reindex images",
-    imageGenerationHeading: "Image generation",
-    imageGenerationDescription: "Create visual assets from the AI prompt using the active document, selection, and attached context sources.",
-    imageGenerationModelHeading: "Image model",
-    imageGenerationSize: "Size",
-    imageGenerationQuality: "Quality",
-    imageGenerationFormat: "Format",
-    imageGenerationFolder: "Default folder",
-    imageGenerationFolderDocument: "Next to document",
-    imageGenerationFolderAssets: "assets/generated",
-    imageGenerationFolderCustom: "Custom",
-    imageGenerationFolderExplanation: "Defines where generated images are saved before they are opened or inserted. Keep them next to the document, centralize them in assets/generated, or choose your own folder inside the project tree.",
-    imageGenerationFolderHelp: "The folder is created automatically inside the project if it does not exist yet.",
-    imageGenerationCustomFolder: "Custom path",
-    imageGenerationCustomFolderPlaceholder: "assets/infographics",
-    imageGenerationCustomFolderHelp: "Use a project-relative path such as assets/infographics or media/images. Do not use absolute paths or .. segments.",
-    imageGenerationMaxImages: "Images",
-    imageGenerationStorePrompt: "Store visual prompt",
-    imageGenerationStorePromptDescription: "Keep local metadata for generated asset traceability.",
-    imageGenerationConfirmInsert: "Confirm insertion",
-    imageGenerationConfirmInsertDescription: "Ask before modifying documents with a generated image.",
-    imageGenerationConfirmSources: "Confirm multiple sources",
-    imageGenerationConfirmSourcesDescription: "Avoid using several documents or sources as visual context without review.",
+    imageGenerationUnavailableTitle: "Image generation unavailable",
+    imageGenerationUnavailableDescription: "The app keeps imported images, previews, and visual context, but image generation is not offered until a validated Rust/Tauri contract can create local assets.",
     transcriptionHeading: "Audio and transcription",
-    transcriptionDescription: "Controls realtime dictation from the prompt microphone. React captures audio and the local Rust runtime mediates any configured provider.",
+    transcriptionDescription: "Controls dictation from the prompt microphone. React captures audio and the local Rust runtime transcribes it before inserting it into the prompt or document.",
     transcriptionModelHeading: "Model",
     transcriptionDefaultTarget: "Default target",
     transcriptionDefaultLanguage: "Default language",
@@ -4002,16 +3677,18 @@ const settingsCopy = {
     editDocuments: "Edit documents",
     createFolders: "Create and move folders",
     createDocuments: "Create, duplicate, and move documents",
-    generateImages: "Generate images",
+    generateImages: "Image generation unavailable",
     createImageAssets: "Create image files",
     insertImagesIntoDocuments: "Insert images in documents",
     useDocumentContextForImages: "Use document context for images",
     deleteDocuments: "Delete documents and folders",
     agenticHeading: "Agentic tasks",
-    agenticDescription: "Set maximum limits and permissions. Depth is chosen in the prompt with Reasoning mode so tokens are not spent by default.",
+    agenticDescription: "Reserved for multi-step flows once the runtime can plan, execute, and confirm structured actions.",
+    agenticUnavailableTitle: "Agentic tasks unavailable",
+    agenticUnavailableDescription: "Documentation AI can answer about the active document and explicitly attached prompt context, but it does not run web research or autonomous multi-step flows until the Rust/Tauri runtime contract is validated.",
     agenticModeHint: "Controlled from prompt",
     webResearchHeading: "Web research",
-    webResearchDescription: "Allows tasks that consult external sources and show the sources used. Actions still go through confirmation.",
+    webResearchDescription: "Not offered until a validated runtime service can consult external sources, cite results, and audit cost.",
     agenticConfirmHeading: "Confirm before applying",
     agenticConfirmDescription: "Tasks can prepare changes, but cannot create or modify documents without a visible checkpoint.",
     agenticMaxSteps: "Steps",
@@ -4019,11 +3696,14 @@ const settingsCopy = {
     agenticMaxSources: "Sources",
     agenticMaxCost: "Max cost",
     ragHeading: "Index project documentation",
-    ragDescription: "Allows project-wide semantic search. Markdown content will be sent to OpenAI for indexing.",
+    ragDescription: "Explicit prompt context. Automatic semantic indexing is not available yet.",
+    ragUnavailableTitle: "Automatic semantic index unavailable",
+    ragUnavailableDescription: "You can add documents, images, and attachments as explicit context from the prompt. Automatic semantic indexing and vector stores are not offered until the runtime actually uses them in AI interactions.",
+    ragExplicitContextNotice: "To work with more context, attach files from the prompt or drag them from the project tree.",
     ragContextHeading: "Document context (RAG)",
-    ragContextHelp: "When enabled, the application prepares project documents so the AI can find and cite them as context.",
+    ragContextHelp: "Local exact search and manually selected context remain available; content is not sent to OpenAI to create an automatic index.",
     ragStatus: "Status",
-    ragDocuments: "Indexed documents",
+    ragDocuments: "Available documents",
     ragFailed: "failed",
     ragExactReady: "local exact search ready",
     rebuildIndex: "Reindex now",
@@ -4062,15 +3742,15 @@ const settingsCopy = {
     summaryVectorStore: "Vector store",
     summaryNone: "None",
     summaryImages: "Images",
-    summaryImagesDescription: "Generate and understand images",
-    summaryAudioDescription: "Transcribe and generate audio",
+    summaryImagesDescription: "Understand imported images",
+    summaryAudioDescription: "Transcribe audio to text",
     summaryPermissionsDescription: "Configure what AI can do",
     summaryAgenticDescription: "Research and task execution",
     summaryProductive: "Productive",
     summaryModelsHeading: "AI models in use",
     summaryModelsDescription: "Summary of all selected models in the application.",
     summaryMainAi: "Main AI (responses)",
-    summaryImageAi: "Images (generation and vision)",
+    summaryImageAi: "Images (vision)",
     summaryAudioAi: "Audio and transcription",
     summaryImagePricing: "$0.75 / $4.50",
     summaryAudioPricing: "$0.006 / $0.018",
@@ -4084,9 +3764,8 @@ const settingsCopy = {
     goToSystem: "Go to System and diagnostics",
     capabilitiesDescription: "Enable and configure the advanced functions the AI can use.",
     capabilityImagesTitle: "1. Images",
-    capabilityImagesDescription: "Image generation and understanding for working with visual content.",
-    capabilityGenerateImagesTitle: "Generate images",
-    capabilityGenerateImagesDescription: "Create images from instructions or document context.",
+    capabilityImagesDescription: "Image understanding for working with visual content imported into the project.",
+    capabilityGenerateImagesTitle: "Image generation",
     capabilityUnderstandImagesTitle: "Understand images (vision)",
     capabilityUnderstandImagesDescription: "Analyze project images and use them as context.",
     capabilityAudioTitle: "2. Audio and transcription",
@@ -4094,7 +3773,7 @@ const settingsCopy = {
     capabilityPermissionsTitle: "3. Allowed actions",
     capabilityPermissionsDescription: "Define how far the AI can modify and manage project content.",
     capabilityAgenticTitle: "4. Agentic tasks",
-    capabilityAgenticDescription: "Allows multi-step workflows in Reasoning mode: the AI can plan, consult context or web, prepare changes, and apply actions only within configured permissions.",
+    capabilityAgenticDescription: "Status of planning, web research, and autonomous execution capabilities.",
     qualityLow: "Low",
     qualityMedium: "Medium",
     qualityHigh: "High",
@@ -4117,25 +3796,16 @@ const settingsCopy = {
     createFoldersDescription: "Can create, duplicate, and move folders.",
     createDocumentsDescription: "Can create and organize project documents.",
     deleteDocumentsDescription: "Can delete documents and folders.",
-    generateImagesDescription: "Can generate images from instructions.",
+    generateImagesDescription: "Reserved permission; unavailable until a validated Rust/Tauri contract exists.",
     createImageAssetsDescription: "Can save images as project files.",
     insertImagesIntoDocumentsDescription: "Can add images inside documents.",
-    useDocumentContextForImagesDescription: "Can use documents as context when generating images.",
+    useDocumentContextForImagesDescription: "Reserved for image generation; vision uses explicit prompt context.",
     permissionScopeNotice: "These permissions apply to AI across every task it performs inside the project.",
     agenticWebResearchHeading: "Web research",
-    agenticWebResearchDescription: "Allows consulting web sources when a task needs information outside the project.",
+    agenticWebResearchDescription: "Unavailable until the local runtime implements web research with sources and traceability.",
     agenticLimitsHeading: "Execution limits",
     agenticLimitsDescription: "Limits the maximum scope of each task before the AI continues researching or applying changes.",
     agenticLimitsImpact: "Steps controls how many iterations it may run; documents limits how many project files it may inspect; sources limits external or attached references; max cost stops the task if the estimate exceeds that amount.",
-    imageModelGptImage15Name: "Maximum quality",
-    imageModelGptImage15Description: "Most advanced image model",
-    imageModelGptImage2Name: "Latest",
-    imageModelGptImage2Description: "Recommended GPT Image model",
-    imageModelGptImage1Name: "High quality",
-    imageModelGptImage1Description: "Previous image generation model",
-    imageModelGptImageMiniName: "Economy",
-    imageModelGptImageMiniDescription: "Drafts and simple tasks",
-    priceUnitPerImage: "per image",
     capabilitiesPlaceholderDescription: "This section groups advanced AI capabilities. For now it keeps a summary view; detailed controls remain available in Documentation AI.",
     capabilitiesEditInAi: "Configure in Documentation AI",
   },

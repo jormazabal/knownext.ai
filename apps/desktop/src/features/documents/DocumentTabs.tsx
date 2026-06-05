@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronLeft, ChevronRight, FileText, FileSpreadsheet, Image, List, NotebookPen, PanelLeftOpen, ScrollText, Sparkles, X } from "lucide-react";
-import type { DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type { DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 import { xsViewportQuery } from "../../lib/runtime/responsive";
 import type { WorkspaceTab } from "../../types/domain";
@@ -27,6 +27,7 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
   const [tabListOpen, setTabListOpen] = useState(false);
   const [tabContextMenu, setTabContextMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
   const [draggedDocumentTabId, setDraggedDocumentTabId] = useState<string | null>(null);
+  const draggedDocumentTabIdRef = useRef<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ tabId: string; placement: "before" | "after" } | null>(null);
   const pointerDragRef = useRef<{ tabId: string; startX: number; startY: number; dragging: boolean } | null>(null);
   const suppressNextTabClickRef = useRef(false);
@@ -123,36 +124,74 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
 
   function handleDocumentPointerDown(tabId: string, event: ReactPointerEvent<HTMLElement>) {
     if (!onReorderDocumentTabs || event.button !== 0) return;
+    draggedDocumentTabIdRef.current = tabId;
     pointerDragRef.current = { tabId, startX: event.clientX, startY: event.clientY, dragging: false };
     window.addEventListener("pointermove", handleDocumentPointerMove);
     window.addEventListener("pointerup", handleDocumentPointerUp, { once: true });
   }
 
+  function handleDocumentMouseDown(tabId: string, event: ReactMouseEvent<HTMLElement>) {
+    if (!onReorderDocumentTabs || event.button !== 0 || pointerDragRef.current) return;
+    draggedDocumentTabIdRef.current = tabId;
+    pointerDragRef.current = { tabId, startX: event.clientX, startY: event.clientY, dragging: false };
+    window.addEventListener("mousemove", handleDocumentMouseMove);
+    window.addEventListener("mouseup", handleDocumentMouseUp, { once: true });
+  }
+
   function handleDocumentPointerMove(event: PointerEvent) {
+    updateDocumentPointerDrag(event.clientX, event.clientY);
+    event.preventDefault();
+  }
+
+  function handleDocumentMouseMove(event: globalThis.MouseEvent) {
+    updateDocumentPointerDrag(event.clientX, event.clientY);
+    event.preventDefault();
+  }
+
+  function updateDocumentPointerDrag(clientX: number, clientY: number) {
     const drag = pointerDragRef.current;
     if (!drag) return;
     if (!drag.dragging) {
-      const distance = Math.abs(event.clientX - drag.startX) + Math.abs(event.clientY - drag.startY);
+      const distance = Math.abs(clientX - drag.startX) + Math.abs(clientY - drag.startY);
       if (distance < 8) return;
       drag.dragging = true;
       setDraggedDocumentTabId(drag.tabId);
     }
-    const target = findDocumentDropTarget(event.clientX, event.clientY, drag.tabId);
+    const target = findDocumentDropTarget(clientX, clientY, drag.tabId);
     setDropTarget(target);
-    event.preventDefault();
   }
 
   function handleDocumentPointerUp(event: PointerEvent) {
     window.removeEventListener("pointermove", handleDocumentPointerMove);
+    finishDocumentPointerDrag(event.clientX, event.clientY);
+  }
+
+  function handleDocumentMouseUp(event: globalThis.MouseEvent) {
+    window.removeEventListener("mousemove", handleDocumentMouseMove);
+    finishDocumentPointerDrag(event.clientX, event.clientY);
+  }
+
+  function finishDocumentPointerDrag(clientX: number, clientY: number) {
     const drag = pointerDragRef.current;
     pointerDragRef.current = null;
     if (!drag) return;
-
-    const target = drag.dragging ? findDocumentDropTarget(event.clientX, event.clientY, drag.tabId) ?? dropTarget : null;
+    const target = drag.dragging ? findDocumentDropTarget(clientX, clientY, drag.tabId) ?? dropTarget : null;
     if (drag.dragging) suppressNextTabClickRef.current = true;
+    draggedDocumentTabIdRef.current = null;
     setDraggedDocumentTabId(null);
     setDropTarget(null);
     if (target && onReorderDocumentTabs) onReorderDocumentTabs(drag.tabId, target.tabId, target.placement);
+  }
+
+  function startNativeDocumentTabDrag(tabId: string) {
+    draggedDocumentTabIdRef.current = tabId;
+    setDraggedDocumentTabId(tabId);
+  }
+
+  function endNativeDocumentTabDrag() {
+    draggedDocumentTabIdRef.current = null;
+    setDraggedDocumentTabId(null);
+    setDropTarget(null);
   }
 
   function findDocumentDropTarget(clientX: number, clientY: number, draggedTabId: string) {
@@ -233,13 +272,12 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
             onCloseTab={onCloseTab}
             onOpenTabContextMenu={openTabContextMenu}
             onReorderDocumentTabs={onReorderDocumentTabs}
-            onDocumentDragStart={setDraggedDocumentTabId}
-            onDocumentDragEnd={() => {
-              setDraggedDocumentTabId(null);
-              setDropTarget(null);
-            }}
+            onDocumentDragStart={startNativeDocumentTabDrag}
+            onDocumentDragEnd={endNativeDocumentTabDrag}
             onDocumentDragOver={setDropTarget}
+            activeDraggedDocumentTabIdRef={draggedDocumentTabIdRef}
             onDocumentPointerDown={handleDocumentPointerDown}
+            onDocumentMouseDown={handleDocumentMouseDown}
           />
         ))}
       </div>
@@ -532,7 +570,9 @@ function WorkspaceTabButton({
   onDocumentDragStart,
   onDocumentDragEnd,
   onDocumentDragOver,
+  activeDraggedDocumentTabIdRef,
   onDocumentPointerDown,
+  onDocumentMouseDown,
 }: {
   tab: WorkspaceTab;
   active: boolean;
@@ -548,7 +588,9 @@ function WorkspaceTabButton({
   onDocumentDragStart?: (tabId: string) => void;
   onDocumentDragEnd?: () => void;
   onDocumentDragOver?: (target: { tabId: string; placement: "before" | "after" } | null) => void;
+  activeDraggedDocumentTabIdRef?: RefObject<string | null>;
   onDocumentPointerDown?: (tabId: string, event: ReactPointerEvent<HTMLElement>) => void;
+  onDocumentMouseDown?: (tabId: string, event: ReactMouseEvent<HTMLElement>) => void;
 }) {
   const Icon = getTabIcon(tab);
   const closeable = isCloseableTab(tab);
@@ -556,7 +598,8 @@ function WorkspaceTabButton({
   return (
     <button
       aria-label={tab.name}
-      draggable={draggable}
+      draggable={false}
+      data-reorderable={draggable ? "true" : undefined}
       data-tab-id={fixed ? undefined : tab.id}
       data-tooltip={fixed ? tab.name : undefined}
       data-tooltip-placement={fixed ? "bottom" : undefined}
@@ -569,7 +612,20 @@ function WorkspaceTabButton({
       onClick={() => onSelectTab(tab.id)}
       onContextMenu={(event) => onOpenTabContextMenu(tab, event)}
       onPointerDown={(event) => {
-        if (draggable) onDocumentPointerDown?.(tab.id, event);
+        if (!draggable) return;
+        if (!event.pointerType || event.pointerType === "mouse") return;
+        event.preventDefault();
+        try {
+          event.currentTarget.setPointerCapture(event.pointerId);
+        } catch {
+          // Pointer capture is best-effort; the window listener still handles desktop drags.
+        }
+        onDocumentPointerDown?.(tab.id, event);
+      }}
+      onMouseDown={(event) => {
+        if (!draggable) return;
+        event.preventDefault();
+        onDocumentMouseDown?.(tab.id, event);
       }}
       onDragStart={(event) => {
         if (!draggable) {
@@ -584,7 +640,10 @@ function WorkspaceTabButton({
       onDragEnd={() => onDocumentDragEnd?.()}
       onDragOver={(event) => {
         if (!isReorderableWorkspaceTab(tab) || !onReorderDocumentTabs) return;
-        const draggedTabId = draggedDocumentTabId || event.dataTransfer.getData("application/x-knownext-document-tab") || event.dataTransfer.getData("text/plain");
+        const draggedTabId = draggedDocumentTabId
+          || activeDraggedDocumentTabIdRef?.current
+          || event.dataTransfer.getData("application/x-knownext-document-tab")
+          || event.dataTransfer.getData("text/plain");
         if (!draggedTabId || draggedTabId === tab.id) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
@@ -596,7 +655,10 @@ function WorkspaceTabButton({
       }}
       onDrop={(event) => {
         if (!isReorderableWorkspaceTab(tab) || !onReorderDocumentTabs) return;
-        const draggedTabId = event.dataTransfer.getData("application/x-knownext-document-tab") || event.dataTransfer.getData("text/plain") || draggedDocumentTabId;
+        const draggedTabId = event.dataTransfer.getData("application/x-knownext-document-tab")
+          || event.dataTransfer.getData("text/plain")
+          || draggedDocumentTabId
+          || activeDraggedDocumentTabIdRef?.current;
         if (!draggedTabId || draggedTabId === tab.id) return;
         event.preventDefault();
         const placement = getDropPlacement(event);

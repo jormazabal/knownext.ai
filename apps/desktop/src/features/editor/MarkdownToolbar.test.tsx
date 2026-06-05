@@ -144,6 +144,37 @@ describe("MarkdownToolbar", () => {
     expect(onMarkdownZoomChange).toHaveBeenCalledWith(125);
   });
 
+  it("dispatches document export actions for Markdown, PDF and DOCX", async () => {
+    const onExportDocument = vi.fn();
+
+    render(
+      <MarkdownToolbar
+        historyOpen={false}
+        historyEnabled
+        historyDisabledReason="Historial no disponible"
+        editorReady
+        markdownZoomPercent={100}
+        activeActions={{}}
+        editorHistoryState={{ canUndo: false, canRedo: false, undoDepth: 0, redoDepth: 0 }}
+        onRunEditorAction={vi.fn()}
+        onExportDocument={onExportDocument}
+        onMarkdownZoomChange={vi.fn()}
+        onToggleHistory={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Exportar documento" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Markdown (.md)" }));
+    await userEvent.click(screen.getByRole("button", { name: "Exportar documento" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "PDF (.pdf)" }));
+    await userEvent.click(screen.getByRole("button", { name: "Exportar documento" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Word (.docx)" }));
+
+    expect(onExportDocument).toHaveBeenNthCalledWith(1, "md");
+    expect(onExportDocument).toHaveBeenNthCalledWith(2, "pdf");
+    expect(onExportDocument).toHaveBeenNthCalledWith(3, "docx");
+  });
+
   it("enables undo and redo independently from editor readiness", async () => {
     const onRunEditorAction = vi.fn();
 

@@ -32,7 +32,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { DocumentNameSearchResult, DocumentTreeNode } from "../../types/domain";
-import { setDocumentTreeDragData } from "../../lib/dragData";
+import { clearDocumentTreeDragData, getDocumentTreeDragData, setDocumentTreeDragData } from "../../lib/dragData";
 import { getInlineNameCompletion, searchDocumentTreeByName } from "./documentNameSearch";
 
 type DocumentTreeProps = {
@@ -72,6 +72,8 @@ export type ProjectTreeStatus = {
 
 type TreeFilter = "all" | "documents" | "images";
 type ExtendedTreeFilter = TreeFilter | "attachments";
+type TreeDropTarget = { id: string | null; valid: boolean; label: string };
+type TreeMouseDropTarget = TreeDropTarget & { targetFolderId?: string | null };
 
 export type DocumentTreeAction =
   | "create-folder"
@@ -126,7 +128,12 @@ export function DocumentTree({
     y: number;
   } | null>(null);
   const [draggedNode, setDraggedNode] = useState<DocumentTreeNode | null>(null);
-  const [dropTarget, setDropTarget] = useState<{ id: string | null; valid: boolean; label: string } | null>(null);
+  const draggedNodeRef = useRef<DocumentTreeNode | null>(null);
+  const [dropTarget, setDropTarget] = useState<TreeDropTarget | null>(null);
+  const rootDropRef = useRef<HTMLDivElement | null>(null);
+  const mouseDragRef = useRef<{ node: DocumentTreeNode; startX: number; startY: number; dragging: boolean } | null>(null);
+  const mouseDropTargetRef = useRef<TreeMouseDropTarget | null>(null);
+  const suppressNextNodeClickRef = useRef(false);
   const [filter, setFilter] = useState<ExtendedTreeFilter>("all");
   const [showFileExtensions, setShowFileExtensions] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -185,25 +192,36 @@ export function DocumentTree({
     }
     clearCloseTimer();
     setOpenMenu(null);
+    draggedNodeRef.current = node;
     setDraggedNode(node);
     event.dataTransfer.effectAllowed = node.type === "folder" ? "move" : "copyMove";
-    event.dataTransfer.setData("text/plain", node.id);
     setDocumentTreeDragData(event.dataTransfer, node);
   }
 
   function finishDrag() {
     clearExpandTimer();
     autoExpandedNodeIds.current.clear();
+    draggedNodeRef.current = null;
+    mouseDragRef.current = null;
+    mouseDropTargetRef.current = null;
+    clearDocumentTreeDragData();
     setDraggedNode(null);
     setDropTarget(null);
   }
 
+  function getActiveDraggedNode(dataTransfer?: DataTransfer | null) {
+    if (draggedNodeRef.current) return draggedNodeRef.current;
+    const dragData = getDocumentTreeDragData(dataTransfer);
+    return dragData ? findNodeById(nodes, dragData.id) : null;
+  }
+
   function handleRootDragOver(event: DragEvent<HTMLDivElement>) {
-    if (!draggedNode) return;
+    const activeDraggedNode = getActiveDraggedNode(event.dataTransfer);
+    if (!activeDraggedNode) return;
     if (isDragOverTreeRow(event)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
-    const valid = canMoveToParent(nodes, draggedNode, null);
+    const valid = canMoveToParent(nodes, activeDraggedNode, null);
     setDropTarget({
       id: null,
       valid,
@@ -212,19 +230,21 @@ export function DocumentTree({
   }
 
   function handleRootDrop(event: DragEvent<HTMLDivElement>) {
-    if (!draggedNode) return;
+    const activeDraggedNode = getActiveDraggedNode(event.dataTransfer);
+    if (!activeDraggedNode) return;
     if (isDragOverTreeRow(event)) return;
     event.preventDefault();
-    const valid = canMoveToParent(nodes, draggedNode, null);
-    if (valid) void onMoveNode(draggedNode, null);
+    const valid = canMoveToParent(nodes, activeDraggedNode, null);
+    if (valid) void onMoveNode(activeDraggedNode, null);
     finishDrag();
   }
 
   function handleNodeDragOver(targetNode: DocumentTreeNode, event: DragEvent<HTMLDivElement>) {
-    if (!draggedNode) return;
+    const activeDraggedNode = getActiveDraggedNode(event.dataTransfer);
+    if (!activeDraggedNode) return;
     event.preventDefault();
     event.stopPropagation();
-    const targetFolderId = getNodeDropTargetFolderId(nodes, draggedNode, targetNode);
+    const targetFolderId = getNodeDropTargetFolderId(nodes, activeDraggedNode, targetNode);
     const valid = targetFolderId !== undefined;
     event.dataTransfer.dropEffect = valid ? "move" : "none";
     setDropTarget({ id: targetNode.id, valid, label: targetNode.name });
@@ -239,14 +259,110 @@ export function DocumentTree({
   }
 
   function handleNodeDrop(targetNode: DocumentTreeNode, event: DragEvent<HTMLDivElement>) {
-    if (!draggedNode) return;
+    const activeDraggedNode = getActiveDraggedNode(event.dataTransfer);
+    if (!activeDraggedNode) return;
     event.preventDefault();
     event.stopPropagation();
-    const targetFolderId = getNodeDropTargetFolderId(nodes, draggedNode, targetNode);
+    const targetFolderId = getNodeDropTargetFolderId(nodes, activeDraggedNode, targetNode);
     if (targetFolderId !== undefined) {
-      void onMoveNode(draggedNode, targetFolderId);
+      void onMoveNode(activeDraggedNode, targetFolderId);
     }
     finishDrag();
+  }
+
+  function startMouseDrag(node: DocumentTreeNode, event: MouseEvent<HTMLDivElement>) {
+    if (node.isEditing || event.button !== 0) return;
+    if (event.target instanceof Element && event.target.closest("button,input,textarea")) return;
+    draggedNodeRef.current = node;
+    mouseDragRef.current = { node, startX: event.clientX, startY: event.clientY, dragging: false };
+    mouseDropTargetRef.current = null;
+    window.addEventListener("mousemove", handleMouseDragMove);
+    window.addEventListener("mouseup", handleMouseDragUp, { once: true });
+  }
+
+  function handleMouseDragMove(event: globalThis.MouseEvent) {
+    const drag = mouseDragRef.current;
+    if (!drag) return;
+    if (!drag.dragging) {
+      const distance = Math.abs(event.clientX - drag.startX) + Math.abs(event.clientY - drag.startY);
+      if (distance < 8) return;
+      drag.dragging = true;
+      clearCloseTimer();
+      setOpenMenu(null);
+      setDraggedNode(drag.node);
+    }
+
+    const target = findMouseDropTarget(event.clientX, event.clientY, drag.node);
+    mouseDropTargetRef.current = target;
+    setDropTarget(target ? { id: target.id, valid: target.valid, label: target.label } : null);
+    maybeAutoExpandDropTarget(target);
+    event.preventDefault();
+  }
+
+  function handleMouseDragUp(event: globalThis.MouseEvent) {
+    window.removeEventListener("mousemove", handleMouseDragMove);
+    const drag = mouseDragRef.current;
+    if (!drag) return;
+    const target = drag.dragging ? findMouseDropTarget(event.clientX, event.clientY, drag.node) ?? mouseDropTargetRef.current : null;
+    if (drag.dragging) suppressNextNodeClickRef.current = true;
+    if (target?.valid && target.targetFolderId !== undefined) {
+      void onMoveNode(drag.node, target.targetFolderId);
+    }
+    finishDrag();
+  }
+
+  function findMouseDropTarget(clientX: number, clientY: number, activeDraggedNode: DocumentTreeNode): TreeMouseDropTarget | null {
+    const row = getElementAtPoint(clientX, clientY)
+      .map((element) => element.closest("[data-tree-node-id]"))
+      .find((element): element is HTMLElement => element instanceof HTMLElement);
+    if (row) {
+      const targetNodeId = row.getAttribute("data-tree-node-id");
+      const targetNode = targetNodeId ? findNodeById(nodes, targetNodeId) : null;
+      if (!targetNode) return null;
+      const targetFolderId = getNodeDropTargetFolderId(nodes, activeDraggedNode, targetNode);
+      return {
+        id: targetNode.id,
+        valid: targetFolderId !== undefined,
+        label: targetNode.name,
+        targetFolderId,
+      };
+    }
+
+    const rootRect = rootDropRef.current?.getBoundingClientRect();
+    if (!rootRect || clientX < rootRect.left || clientX > rootRect.right || clientY < rootRect.top || clientY > rootRect.bottom) {
+      return null;
+    }
+    const valid = canMoveToParent(nodes, activeDraggedNode, null);
+    return { id: null, valid, label: "Raíz del proyecto", targetFolderId: valid ? null : undefined };
+  }
+
+  function maybeAutoExpandDropTarget(target: TreeMouseDropTarget | null) {
+    if (!target?.valid || !target.id || target.targetFolderId !== target.id || autoExpandedNodeIds.current.has(target.id)) return;
+    const targetNode = findNodeById(nodes, target.id);
+    if (!targetNode || targetNode.type !== "folder" || targetNode.open) return;
+    clearExpandTimer();
+    expandTimer.current = window.setTimeout(() => {
+      autoExpandedNodeIds.current.add(targetNode.id);
+      onToggleNode(targetNode.id);
+    }, 600);
+  }
+
+  function handleNodeClick(node: DocumentTreeNode) {
+    if (suppressNextNodeClickRef.current) {
+      suppressNextNodeClickRef.current = false;
+      return;
+    }
+    if (node.isEditing) return;
+    if (node.type === "folder") {
+      onActivateTreeNode(node.id);
+      onToggleNode(node.id);
+    }
+    if (node.type === "document") onOpenDocument(node.id, node.name);
+    if (node.type === "image" && node.path) onOpenImage?.(node.id, node.name, node.path);
+    if (node.type === "attachment") {
+      if (node.path && isReferenceDocumentName(node.name)) onOpenReferenceDocument?.(node.id, node.name, node.path);
+      else onActivateTreeNode(node.id);
+    }
   }
 
   return (
@@ -273,6 +389,7 @@ export function DocumentTree({
         projectStatus={projectStatus}
       />
       <div
+        ref={rootDropRef}
         className={[
           "min-h-0 flex-1 overflow-y-auto overflow-x-hidden pb-2",
           draggedNode && dropTarget?.id === null && dropTarget.valid ? "rounded-md bg-brand-hover/45" : "",
@@ -304,6 +421,8 @@ export function DocumentTree({
               onDragEnd={finishDrag}
               onNodeDragOver={handleNodeDragOver}
               onNodeDrop={handleNodeDrop}
+              onMouseDragStart={startMouseDrag}
+              onNodeClick={handleNodeClick}
               changeBadges={changeBadges}
               showFileExtensions={showFileExtensions}
             />
@@ -337,8 +456,9 @@ export function DocumentTree({
           onDragOver={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            if (!draggedNode) return;
-            const valid = canMoveToParent(nodes, draggedNode, null);
+            const activeDraggedNode = getActiveDraggedNode(event.dataTransfer);
+            if (!activeDraggedNode) return;
+            const valid = canMoveToParent(nodes, activeDraggedNode, null);
             event.dataTransfer.dropEffect = valid ? "move" : "none";
             setDropTarget({ id: null, valid, label: "Raíz del proyecto" });
           }}
@@ -400,6 +520,8 @@ type TreeNodeProps = {
   onDragEnd: () => void;
   onNodeDragOver: (node: DocumentTreeNode, event: DragEvent<HTMLDivElement>) => void;
   onNodeDrop: (node: DocumentTreeNode, event: DragEvent<HTMLDivElement>) => void;
+  onMouseDragStart: (node: DocumentTreeNode, event: MouseEvent<HTMLDivElement>) => void;
+  onNodeClick: (node: DocumentTreeNode) => void;
   changeBadges: Record<string, string>;
   showFileExtensions: boolean;
 };
@@ -423,6 +545,8 @@ function TreeNode({
   onDragEnd,
   onNodeDragOver,
   onNodeDrop,
+  onMouseDragStart,
+  onNodeClick,
   changeBadges,
   showFileExtensions,
 }: TreeNodeProps) {
@@ -452,25 +576,15 @@ function TreeNode({
           !isDropTarget && !isActive ? "border-transparent" : "",
         ].join(" ")}
         style={{ paddingLeft: 6 + depth * 18 }}
-        draggable={!node.isEditing}
+        draggable={false}
+        data-reorderable={!node.isEditing ? "true" : undefined}
         onDragStart={(event) => onDragStart(node, event)}
         onDragEnd={onDragEnd}
         onDragOver={(event) => onNodeDragOver(node, event)}
         onDrop={(event) => onNodeDrop(node, event)}
+        onMouseDown={(event) => onMouseDragStart(node, event)}
         data-tree-node-id={node.id}
-        onClick={() => {
-          if (node.isEditing) return;
-          if (isFolder) {
-            onActivateTreeNode(node.id);
-            onToggleNode(node.id);
-          }
-          if (node.type === "document") onOpenDocument(node.id, node.name);
-          if (node.type === "image" && node.path) onOpenImage?.(node.id, node.name, node.path);
-          if (node.type === "attachment") {
-            if (node.path && isReferenceDocumentName(node.name)) onOpenReferenceDocument?.(node.id, node.name, node.path);
-            else onActivateTreeNode(node.id);
-          }
-        }}
+        onClick={() => onNodeClick(node)}
       >
         <span className="mr-0.5 grid h-5 w-4 place-items-center">
           {isFolder ? (node.open ? <ChevronDown size={14} /> : <ChevronRight size={14} />) : null}
@@ -547,6 +661,8 @@ function TreeNode({
               onDragEnd={onDragEnd}
               onNodeDragOver={onNodeDragOver}
               onNodeDrop={onNodeDrop}
+              onMouseDragStart={onMouseDragStart}
+              onNodeClick={onNodeClick}
               changeBadges={changeBadges}
               showFileExtensions={showFileExtensions}
             />
@@ -862,7 +978,14 @@ function DocumentTreeToolbar({
 
   return (
     <div ref={toolbarRef} className="relative mb-2 flex h-8 items-center justify-between gap-2 px-1.5">
-      <span className="text-[10px] font-semibold uppercase text-ink-secondary">Archivos</span>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <span className="text-[10px] font-semibold uppercase text-ink-secondary">Archivos</span>
+        {filter !== "all" ? (
+          <span className="max-w-[92px] truncate rounded-full border border-orange-200 bg-brand-hover px-1.5 py-0.5 text-[9px] font-semibold text-brand-orange">
+            {getTreeFilterLabel(filter)}
+          </span>
+        ) : null}
+      </div>
       <div className="flex items-center gap-0.5">
         <ToolbarIconButton label="Buscar archivos y carpetas" disabled={disabled} icon={Search} onClick={() => runAction(onSearch)} />
         <ToolbarIconButton
@@ -975,6 +1098,13 @@ function getToolbarToneClass(tone: ProjectTreeStatus["tone"]) {
   return "text-ink-secondary hover:border-orange-100 hover:bg-brand-hover hover:text-brand-orange";
 }
 
+function getTreeFilterLabel(filter: ExtendedTreeFilter) {
+  if (filter === "documents") return "Markdown";
+  if (filter === "images") return "Imágenes";
+  if (filter === "attachments") return "Archivos";
+  return "Todo";
+}
+
 function getBadgeToneClass(tone: ProjectTreeStatus["tone"]) {
   if (tone === "danger") return "bg-red-600 text-white";
   if (tone === "ok") return "bg-green-600 text-white";
@@ -1066,6 +1196,12 @@ function containsNodeId(nodes: DocumentTreeNode[], nodeId: string): boolean {
 
 function isDragOverTreeRow(event: DragEvent<HTMLDivElement>) {
   return event.target instanceof Element && event.target.closest(".tree-row") !== null;
+}
+
+function getElementAtPoint(clientX: number, clientY: number): Element[] {
+  if (typeof document.elementsFromPoint === "function") return document.elementsFromPoint(clientX, clientY);
+  const element = document.elementFromPoint?.(clientX, clientY);
+  return element ? [element] : [];
 }
 
 function getNodeDropTargetFolderId(
