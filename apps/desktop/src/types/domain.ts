@@ -27,7 +27,7 @@ export type ProjectPayload = {
 };
 
 export type StorageMode = "local-files" | "local-cache";
-export type VersioningMode = "none" | "local-git" | "github-api";
+export type VersioningMode = "none" | "local-git";
 export type SyncMode = "none" | "manual-local" | "auto-local" | "manual-github" | "auto-github";
 export type ProjectCreationMode = "new-local" | "open-local" | "github-repository";
 export type GithubPublishVisibility = "private" | "public";
@@ -208,7 +208,7 @@ export type ExternalChangeSet = {
   id: string;
   projectId: string;
   title: string;
-  source: "filesystem" | "git" | "github-api-cache";
+  source: "filesystem" | "git";
   status: ExternalChangeSetStatus;
   detectedAt: string;
   requiresReview: boolean;
@@ -393,7 +393,7 @@ export type AiVisionConfig = {
   storeVisualDescriptions: boolean;
 };
 
-export type AiImageGenerationModelId = "gpt-image-2" | "gpt-image-1.5" | "gpt-image-1" | "gpt-image-1-mini";
+export type AiImageGenerationModelId = "gpt-image-1.5" | "gpt-image-1" | "gpt-image-1-mini";
 
 export type AiImageGenerationConfig = {
   enabled: boolean;
@@ -413,7 +413,7 @@ export type AiModelId = "gpt-5.5" | "gpt-5.4" | "gpt-5.4-mini" | "gpt-5.4-nano";
 export type AiAgenticDepth = "quick" | "guided" | "deep" | "bounded_autonomous";
 export type AiTranscriptionTarget = "prompt" | "document";
 export type AiTranscriptionLanguage = "auto" | "es" | "en" | "fr" | "de" | "it" | "pt" | "ca" | "eu" | "gl";
-export type AiTranscriptionModelId = "gpt-realtime-whisper";
+export type AiTranscriptionModelId = "gpt-4o-mini-transcribe";
 
 export type AiAgenticConfig = {
   depth: AiAgenticDepth;

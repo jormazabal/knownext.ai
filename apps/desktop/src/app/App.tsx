@@ -1,9 +1,19 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import type { DocumentTreeAction } from "../features/documents/DocumentTree";
 import type { MarkdownEditorExternalOperation, MarkdownEditorSelection } from "../features/editor/editorTypes";
 import type { AiPromptExecutionOptions } from "../features/assistant/AiPromptInput";
+import { AiDeleteConfirmationDialog } from "../features/assistant/AiDeleteConfirmationDialog";
 import { CreateDocumentDialog } from "../features/documents/CreateDocumentDialog";
+import { MoveDocumentDialog } from "../features/documents/MoveDocumentDialog";
+import {
+  CloseDirtyDocumentDialog,
+  DocumentFooterActionDialog,
+  RecoverableDraftsDialog,
+  type DocumentFooterDialogAction,
+} from "../features/documents/DocumentProtectionDialogs";
 import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
+import { GithubLoginDialog, type GithubLoginState } from "../features/projects/GithubLoginDialog";
+import { UpdateAvailableDialog, type UpdateDialogState } from "../features/projects/UpdateAvailableDialog";
 import { AppSettingsDialog } from "../features/settings/AppSettingsDialog";
 import { BrandMark } from "../components/brand/BrandMark";
 import { CountdownCloseButton } from "../components/ui/CountdownCloseButton";
@@ -57,18 +67,14 @@ import {
   saveOpenAiKey,
   searchAiContextDocuments,
   sendAiInteraction,
+  uploadLocalAiContextFiles,
   uploadAiContextFiles,
 } from "../lib/api/ai";
 import {
   ApiError,
-  discoverMobileApiBaseUrl,
-  getApiBaseUrl,
   getApiErrorMessage,
   isApiConnectionError,
   isRuntimeApiEnabled,
-  isMobileApiBaseUrlConfigured,
-  setApiBaseUrl,
-  setPersistentMobileApiBaseUrl,
   waitForApiReady,
 } from "../lib/api/client";
 import { getProjectActivity, recordProjectActivity } from "../lib/api/activity";
@@ -102,10 +108,11 @@ import {
 import { getTraceLogStatus, openTraceLogFolder, recordTraceLog, type TraceLogStatus } from "../lib/runtime/logging";
 import { openExternalUrl } from "../lib/runtime/links";
 import { isTauriRuntime, selectBrowserExportTarget, selectExportFilePath, withExportExtension } from "../lib/runtime/exportDialogs";
+import { selectAiContextFilePaths } from "../lib/runtime/fileDialogs";
 import { isTauriMobileRuntime } from "../lib/runtime/platform";
 import { getRuntimeServiceStatus, type RuntimeServicesStatus } from "../lib/runtime/services";
 import { applyAppearanceAttributes, useResolvedAppearanceTheme } from "../lib/theme/appearance";
-import { AlertCircle, ArchiveRestore, Check, FileWarning, Info, RefreshCw, Server, Trash2, X } from "lucide-react";
+import { AlertCircle, Info, RefreshCw } from "lucide-react";
 import {
   createFolder,
   createProjectDocument,
@@ -198,14 +205,9 @@ type AppNotice = {
   tone: "error" | "info";
 };
 
-type DocumentFooterDialog =
-  | "discard-draft"
-  | "update-remote"
-  | "update-remote-discard-draft"
-  | "sync-saved-while-draft";
+type DocumentFooterDialog = DocumentFooterDialogAction;
 
-type UpdateState = "idle" | "checking" | "available" | "not-available" | "unsupported" | "downloading" | "installing" | "error";
-type GithubLoginState = "idle" | "starting" | "waiting" | "authenticated" | "error";
+type UpdateState = UpdateDialogState;
 type NotesSaveState = "idle" | "saving" | "error";
 const AI_CONVERSATION_TAB_ID = "project-ai-conversation" as const;
 const ACKNOWLEDGED_EXTERNAL_CHANGES_STORAGE_KEY = "knownext.acknowledgedExternalChanges";
@@ -266,10 +268,8 @@ export function App() {
   const [configPersistenceAvailable, setConfigPersistenceAvailable] = useState(true);
   const [notice, setNotice] = useState<AppNotice | null>(null);
   const [startupRetrySequence, setStartupRetrySequence] = useState(0);
-  const [mobileApiSetupOpen, setMobileApiSetupOpen] = useState(false);
-  const [mobileApiSetupError, setMobileApiSetupError] = useState<string | null>(null);
-  const [mobileApiSetupBusy, setMobileApiSetupBusy] = useState(false);
-  const [mobileApiAutoDiscovering, setMobileApiAutoDiscovering] = useState(false);
+  const [localRuntimeRecoveryOpen, setLocalRuntimeRecoveryOpen] = useState(false);
+  const [localRuntimeRecoveryError, setLocalRuntimeRecoveryError] = useState<string | null>(null);
   const [closeDocumentId, setCloseDocumentId] = useState<string | null>(null);
   const [orphanDrafts, setOrphanDrafts] = useState<OrphanDraft[]>([]);
   const [recoverableDraftsOpen, setRecoverableDraftsOpen] = useState(false);
@@ -310,45 +310,6 @@ export function App() {
     void (async () => {
       const localPreferences = readLocalAppPreferences();
       try {
-        if (isTauriMobileRuntime() && !isMobileApiBaseUrlConfigured()) {
-          setMobileApiSetupOpen(true);
-          setMobileApiAutoDiscovering(true);
-          setMobileApiSetupError(null);
-          setNotice(null);
-          setProjects([]);
-          setActiveProject(null);
-          setVersioningStatus(null);
-          setProjectSyncStatus(null);
-          setTree([]);
-          setTabs([]);
-          setActiveDocumentId("");
-          setActiveTreeNodeId("");
-          setAppearanceConfig(localPreferences.appearance ?? defaultAppearanceConfig);
-          setDiagnosticsConfig(localPreferences.diagnostics ?? defaultDiagnosticsConfig);
-          setExportTemplateConfig(defaultExportTemplateConfig);
-          setExportTemplatePath("");
-          setAiConfig({ ...(localPreferences.ai ?? defaultAiConfig), openaiKeyConfigured: false, openaiKeyPreview: null });
-          setAiUsageSummary(null);
-          setConfigPersistenceAvailable(false);
-          setTreeOpenPathsByProject({});
-          setOpenUtilityTabs([]);
-          setActiveUtilityTab(null);
-          setNotesMarkdown("");
-          setNotesSavedMarkdown("");
-          setNotesUpdatedAt(null);
-          setNotesLoaded(true);
-          setNotesSaveState("idle");
-          const discoveredEndpoint = await discoverMobileApiBaseUrl();
-          setMobileApiAutoDiscovering(false);
-
-          if (discoveredEndpoint) {
-            setPersistentMobileApiBaseUrl(discoveredEndpoint);
-            setMobileApiSetupOpen(false);
-          } else {
-            setMobileApiSetupError("No se pudo inicializar el runtime local de Android. Reinicia la app y revisa los permisos de almacenamiento si el problema continúa.");
-            return;
-          }
-        }
         await waitForApiReady();
         const [projectList, appConfig, auth, capabilities, loadedAiConfig, loadedExportTemplate, loadedExportTemplatePath, loadedAiUsageSummary, loadedNotes] = await Promise.all([
           listProjects(),
@@ -436,10 +397,9 @@ export function App() {
         setTabs(activeProjectTabs.openTabs);
         setActiveDocumentId(activeProjectTabs.activeDocumentId);
         setActiveTreeNodeId(activeProjectTabs.activeDocumentId);
-        setMobileApiSetupOpen(false);
-        setMobileApiSetupError(null);
+        setLocalRuntimeRecoveryOpen(false);
+        setLocalRuntimeRecoveryError(null);
       } catch (error) {
-        setMobileApiAutoDiscovering(false);
         const startupMessage = getApiErrorMessage(error, "La aplicación no pudo cargar la configuración inicial.");
         void recordTraceLog({
           source: "app.startup",
@@ -447,8 +407,8 @@ export function App() {
           detail: describeError(error),
         });
         if (isTauriMobileRuntime()) {
-          setMobileApiSetupOpen(true);
-          setMobileApiSetupError(startupMessage);
+          setLocalRuntimeRecoveryOpen(true);
+          setLocalRuntimeRecoveryError(startupMessage);
         }
         setNotice({
           title: "No se pudo iniciar KnowNext.ai",
@@ -1370,6 +1330,18 @@ export function App() {
     }
   }
 
+  async function handlePickLocalAiContextFiles() {
+    if (!activeProject) return;
+    try {
+      const paths = await selectAiContextFilePaths();
+      if (paths.length === 0) return;
+      const response = await uploadLocalAiContextFiles(activeProject.id, paths);
+      setAiContextSources(response.sources);
+    } catch (error) {
+      showError(error, "No se pudieron adjuntar los archivos al contexto IA.", { source: "app.aiContext.localUpload" });
+    }
+  }
+
   async function handleRemoveAiContextSource(sourceId: string) {
     if (!activeProject) return;
     setRemovingAiContextSourceIds((currentIds) => new Set(currentIds).add(sourceId));
@@ -1981,7 +1953,7 @@ export function App() {
 
   async function handleOpenGithubLogin() {
     setGithubLoginOpen(true);
-    if (!githubDevice && githubLoginState !== "starting" && githubLoginState !== "waiting") {
+    if ((githubDevice?.mock || !githubDevice || githubLoginState === "error") && githubLoginState !== "starting") {
       await handleStartGithubLogin();
     }
   }
@@ -1989,6 +1961,7 @@ export function App() {
   async function handleStartGithubLogin() {
     setGithubLoginState("starting");
     setGithubLoginError(null);
+    setGithubDevice(null);
     try {
       const device = await startGithubDeviceFlow();
       if (device.status === "error" && !device.mock) {
@@ -2046,6 +2019,15 @@ export function App() {
     }
   }
 
+  function handleCloseGithubLogin() {
+    setGithubLoginOpen(false);
+    if (githubDevice?.mock || githubLoginState === "error") {
+      setGithubDevice(null);
+      setGithubLoginState("idle");
+      setGithubLoginError(null);
+    }
+  }
+
   async function handleLogoutGithub() {
     try {
       const auth = await logoutGithub();
@@ -2062,7 +2044,7 @@ export function App() {
 
   async function handlePullProject() {
     if (!activeProject || syncState !== "idle") return;
-    if (!canUseGithubRemote(activeProject, authStatus)) {
+    if (!canUseGithubRemote(activeProject, authStatus, projectSyncStatus)) {
       const status = withDerivedRemoteSyncStatus(projectSyncStatus ?? {
         projectId: activeProject.id,
         mode: activeProject.syncMode === "auto-github" ? "github-auto" : "github-manual",
@@ -2125,7 +2107,7 @@ export function App() {
 
   async function handlePushProject() {
     if (!activeProject || syncState !== "idle") return;
-    if (!canUseGithubRemote(activeProject, authStatus)) {
+    if (!canUseGithubRemote(activeProject, authStatus, projectSyncStatus)) {
       const status = withDerivedRemoteSyncStatus(projectSyncStatus ?? {
         projectId: activeProject.id,
         mode: activeProject.syncMode === "auto-github" ? "github-auto" : "github-manual",
@@ -2221,7 +2203,7 @@ export function App() {
       }
 
       if (isGithubSyncMode(activeProject.syncMode)) {
-        if (!canUseGithubRemote(activeProject, authStatus)) {
+        if (!canUseGithubRemote(activeProject, authStatus, projectSyncStatus)) {
           await refreshProjectSyncStatus(activeProject.id, { silent: true });
           await checkOpenDocumentSync();
           setExternalChangesMessage("Documento guardado localmente. GitHub queda pendiente hasta recuperar acceso.");
@@ -2451,29 +2433,8 @@ export function App() {
     void recordTraceLog({ source, message, detail });
   }
 
-  async function handleSaveMobileApiBaseUrl(endpoint: string) {
-    const previousEndpoint = getApiBaseUrl();
-    setMobileApiSetupBusy(true);
-    setMobileApiSetupError(null);
-
-    try {
-      setApiBaseUrl(endpoint);
-      await waitForApiReady({ attempts: 5, intervalMs: 300 });
-      setPersistentMobileApiBaseUrl(endpoint);
-      setMobileApiSetupOpen(false);
-      setNotice(null);
-      setConfigLoaded(false);
-      setStartupRetrySequence((sequence) => sequence + 1);
-    } catch (error) {
-      setApiBaseUrl(previousEndpoint);
-      setMobileApiSetupError(getApiErrorMessage(error, "No se pudo validar el runtime local móvil."));
-    } finally {
-      setMobileApiSetupBusy(false);
-    }
-  }
-
-  function handleRetryMobileApiBaseUrl() {
-    setMobileApiSetupError(null);
+  function handleRetryLocalRuntimeRecovery() {
+    setLocalRuntimeRecoveryError(null);
     setConfigLoaded(false);
     setStartupRetrySequence((sequence) => sequence + 1);
   }
@@ -2956,16 +2917,12 @@ export function App() {
           return;
         }
 
-        if (["md", "markdown"].includes(extension)) {
-          const markdown = await file.text();
-          const result = await createProjectDocument(activeProject.id, parentId, file.name, markdown);
-          applyFileOperationResult(result);
-          if (result.node?.type === "document") openOrReplaceTab(result.node.id, result.node.name);
-          return;
-        }
-
         const result = await importProjectAttachment(activeProject.id, parentId, file);
         applyFileOperationResult(result);
+        if (result.node?.type === "document") {
+          openOrReplaceTab(result.node.id, result.node.name);
+          return;
+        }
         if (result.node?.type === "attachment") {
           setActiveTreeNodeId(result.node.id);
           setNotice({
@@ -3042,6 +2999,45 @@ export function App() {
       } else {
         setActiveTreeNodeId((currentNodeId) => (currentNodeId === sourceNode.id ? activeDocumentId : currentNodeId));
       }
+    }
+
+    if (sourceNode?.type === "folder" && sourceNode.path) {
+      const nextFolderPath = result.node?.type === "folder" ? result.node.path ?? null : null;
+      const projectId = activeProject?.id ?? "";
+      setImageTabs((currentTabs) => {
+        let nextActiveImageId = activeImageId;
+        const nextTabs = currentTabs.flatMap((tab) => {
+          if (!isPathInScope(tab.path, sourceNode.path ?? "")) return [tab];
+          if (!nextFolderPath) {
+            if (tab.id === activeImageId) nextActiveImageId = "";
+            return [];
+          }
+          const nextPath = remapPathInScope(tab.path, sourceNode.path ?? "", nextFolderPath);
+          const nextId = projectScopedNodeId(projectId, nextPath, tab.id);
+          if (tab.id === activeImageId) nextActiveImageId = nextId;
+          return [{ id: nextId, name: fileNameFromPath(nextPath), path: nextPath }];
+        });
+        if (nextActiveImageId && !nextTabs.some((tab) => tab.id === nextActiveImageId)) nextActiveImageId = nextTabs[0]?.id ?? "";
+        setActiveImageId(nextActiveImageId);
+        return nextTabs;
+      });
+      setReferenceDocumentTabs((currentTabs) => {
+        let nextActiveReferenceDocumentId = activeReferenceDocumentId;
+        const nextTabs = currentTabs.flatMap((tab) => {
+          if (!isPathInScope(tab.path, sourceNode.path ?? "")) return [tab];
+          if (!nextFolderPath) {
+            if (tab.id === activeReferenceDocumentId) nextActiveReferenceDocumentId = "";
+            return [];
+          }
+          const nextPath = remapPathInScope(tab.path, sourceNode.path ?? "", nextFolderPath);
+          const nextId = projectScopedNodeId(projectId, nextPath, tab.id);
+          if (tab.id === activeReferenceDocumentId) nextActiveReferenceDocumentId = nextId;
+          return [{ ...tab, id: nextId, name: fileNameFromPath(nextPath), path: nextPath }];
+        });
+        if (nextActiveReferenceDocumentId && !nextTabs.some((tab) => tab.id === nextActiveReferenceDocumentId)) nextActiveReferenceDocumentId = nextTabs[0]?.id ?? "";
+        setActiveReferenceDocumentId(nextActiveReferenceDocumentId);
+        return nextTabs;
+      });
     }
 
     if (result.affectedDocuments.length === 0) return;
@@ -3205,6 +3201,7 @@ export function App() {
         onAddProjectDocumentContext={handleAddProjectDocumentContext}
         onAddProjectImageContext={handleAddProjectImageContext}
         onUploadAiContextFiles={handleUploadAiContextFiles}
+        onPickLocalAiContextFiles={handlePickLocalAiContextFiles}
         onRemoveAiContextSource={handleRemoveAiContextSource}
         onExtendAiContextSource={handleExtendAiContextSource}
         onPreviewAiContextSource={handlePreviewAiContextSource}
@@ -3247,14 +3244,10 @@ export function App() {
       />
       <GlobalTooltip />
       <StartupOverlay loading={!configLoaded} />
-      <MobileApiSetupOverlay
-        open={mobileApiSetupOpen}
-        currentEndpoint={isMobileApiBaseUrlConfigured() ? getApiBaseUrl() : ""}
-        busy={mobileApiSetupBusy}
-        discovering={mobileApiAutoDiscovering}
-        error={mobileApiSetupError}
-        onSave={(endpoint) => void handleSaveMobileApiBaseUrl(endpoint)}
-        onRetry={handleRetryMobileApiBaseUrl}
+      <LocalRuntimeRecoveryOverlay
+        open={localRuntimeRecoveryOpen}
+        error={localRuntimeRecoveryError}
+        onRetry={handleRetryLocalRuntimeRecovery}
       />
       <AppNoticeBanner notice={notice} onClose={() => setNotice(null)} />
       <AppSettingsDialog
@@ -3306,7 +3299,7 @@ export function App() {
         device={githubDevice}
         error={githubLoginError}
         polling={githubLoginPolling}
-        onClose={() => setGithubLoginOpen(false)}
+        onClose={handleCloseGithubLogin}
         onStart={() => void handleStartGithubLogin()}
         onOpenGithub={() => void handleOpenGithubDevicePage()}
         onPoll={() => void handlePollGithubLogin()}
@@ -3651,6 +3644,29 @@ function isPathInDeletedScope(documentPath: string, deletedPaths: string[]) {
   return deletedPaths.some((deletedPath) => normalizedDocumentPath === deletedPath || normalizedDocumentPath.startsWith(`${deletedPath}/`));
 }
 
+function isPathInScope(path: string, scopePath: string) {
+  const normalizedPath = normalizeDocumentPath(path);
+  const normalizedScope = normalizeDocumentPath(scopePath);
+  return normalizedPath === normalizedScope || normalizedPath.startsWith(`${normalizedScope}/`);
+}
+
+function remapPathInScope(path: string, oldScopePath: string, newScopePath: string) {
+  const normalizedPath = normalizeDocumentPath(path);
+  const oldScope = normalizeDocumentPath(oldScopePath);
+  const newScope = normalizeDocumentPath(newScopePath);
+  const suffix = normalizedPath === oldScope ? "" : normalizedPath.slice(oldScope.length).replace(/^\/+/, "");
+  return suffix ? `${newScope}/${suffix}` : newScope;
+}
+
+function projectScopedNodeId(projectId: string, path: string, fallbackId: string) {
+  const normalizedPath = normalizeDocumentPath(path);
+  return projectId && normalizedPath ? `${projectId}::${normalizedPath}` : fallbackId;
+}
+
+function fileNameFromPath(path: string) {
+  return normalizeDocumentPath(path).split("/").filter(Boolean).pop() ?? path;
+}
+
 function normalizeDocumentPath(path: string) {
   return path.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
 }
@@ -3951,202 +3967,52 @@ function StartupOverlay({ loading }: { loading: boolean }) {
   );
 }
 
-function MobileApiSetupOverlay({
+function LocalRuntimeRecoveryOverlay({
   open,
-  currentEndpoint,
-  busy,
-  discovering,
   error,
-  onSave,
   onRetry,
 }: {
   open: boolean;
-  currentEndpoint: string;
-  busy: boolean;
-  discovering: boolean;
   error: string | null;
-  onSave: (endpoint: string) => void;
   onRetry: () => void;
 }) {
-  const [endpoint, setEndpoint] = useState(currentEndpoint);
-
-  useEffect(() => {
-    if (open) setEndpoint(currentEndpoint);
-  }, [currentEndpoint, open]);
-
   if (!open) return null;
-
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!busy && !discovering) onSave(endpoint);
-  }
 
   return (
     <div className="fixed inset-0 z-[130] flex min-h-[100dvh] items-center justify-center bg-white px-5 py-6">
       <section className="w-full max-w-[420px]">
         <BrandMark className="h-11 w-11" />
         <div className="mt-6 flex items-center gap-2 text-[11px] font-semibold uppercase text-brand-orange">
-          <Server size={14} strokeWidth={2} />
           Runtime móvil
         </div>
-        <h1 className="mt-2 text-[23px] font-semibold leading-tight text-ink-primary">Conectar KnowNext.ai</h1>
+        <h1 className="mt-2 text-[23px] font-semibold leading-tight text-ink-primary">Runtime local no disponible</h1>
         <p className="mt-3 text-[12px] leading-5 text-ink-secondary">
           Android usa el runtime local de Tauri/Rust para abrir proyectos y documentos sin depender de un ordenador encendido.
         </p>
-        {discovering ? (
-          <div className="mt-6 rounded-md border border-line bg-panel px-4 py-4">
-            <div className="flex items-start gap-3">
-              <RefreshCw size={18} className="mt-0.5 shrink-0 animate-spin text-brand-orange" strokeWidth={2} />
-              <div>
-                <div className="text-[12px] font-semibold text-ink-primary">Buscando tu ordenador</div>
-                <p className="mt-1 text-[11px] leading-5 text-ink-secondary">
-                  Preparando almacenamiento local y contratos Tauri para Android.
-                </p>
-              </div>
-            </div>
-          </div>
-        ) : null}
-        {!discovering ? (
-        <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
-          <label className="block">
-            <span className="text-[11px] font-semibold text-ink-primary">Dirección local</span>
-            <input
-              className="mt-2 h-11 w-full rounded-md border border-line bg-white px-3 font-mono text-[12px] text-ink-primary outline-none transition focus:border-brand-orange focus:ring-2 focus:ring-orange-200"
-              value={endpoint}
-              onChange={(event) => setEndpoint(event.target.value)}
-              placeholder="tauri://local-api"
-              inputMode="url"
-              autoCapitalize="none"
-              autoCorrect="off"
-              spellCheck={false}
-              disabled={busy || discovering}
-            />
-          </label>
-          <div className="rounded-md border border-line bg-panel px-3 py-3">
-            <div className="flex items-start gap-2">
-              <Check size={14} className="mt-0.5 shrink-0 text-brand-orange" strokeWidth={2} />
-              <p className="text-[11px] leading-5 text-ink-secondary">
-                KnowNext.ai {APP_VERSION} usa comandos Tauri locales. Este cuadro queda solo como diagnóstico si falla el arranque móvil.
+        <div className="mt-6 rounded-md border border-line bg-panel px-4 py-4">
+          <div className="flex items-start gap-3">
+            <RefreshCw size={18} className="mt-0.5 shrink-0 text-brand-orange" strokeWidth={2} />
+            <div>
+              <div className="text-[12px] font-semibold text-ink-primary">Contrato Tauri local</div>
+              <p className="mt-1 text-[11px] leading-5 text-ink-secondary">
+                KnowNext.ai {APP_VERSION} usa solo el runtime Tauri/Rust integrado en Android. Reintenta el arranque para volver a inicializarlo.
               </p>
             </div>
           </div>
-          {error ? (
-            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-3 text-[11px] leading-5 text-red-700" role="alert">
-              {error}
-            </div>
-          ) : null}
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <button
-              type="submit"
-              className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md bg-brand-orange px-4 text-[12px] font-semibold text-white transition hover:bg-brand-orange-dark disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={busy || discovering}
-            >
-              {busy ? <RefreshCw size={15} className="animate-spin" /> : <Check size={15} />}
-              Guardar y entrar
-            </button>
-            <button
-              type="button"
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-line bg-white px-4 text-[12px] font-semibold text-ink-primary transition hover:bg-panel disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={onRetry}
-              disabled={busy || discovering}
-            >
-              <RefreshCw size={15} />
-              Buscar de nuevo
-            </button>
-          </div>
-        </form>
-        ) : null}
-      </section>
-    </div>
-  );
-}
-
-function GithubLoginDialog({
-  open,
-  state,
-  device,
-  error,
-  polling,
-  onClose,
-  onStart,
-  onOpenGithub,
-  onPoll,
-}: {
-  open: boolean;
-  state: GithubLoginState;
-  device: GithubDeviceStartResponse | null;
-  error: string | null;
-  polling: boolean;
-  onClose: () => void;
-  onStart: () => void;
-  onOpenGithub: () => void;
-  onPoll: () => void;
-}) {
-  if (!open) return null;
-
-  const busy = state === "starting";
-  const localGithubFallback = Boolean(device?.mock && !import.meta.env.DEV);
-  return (
-    <div className="knownext-modal-overlay fixed inset-0 z-[95] grid place-items-center bg-black/20">
-      <section className="w-[460px] rounded-lg border border-line bg-white shadow-menu">
-        <header className="border-b border-line px-5 py-4">
-          <h2 className="text-[15px] font-semibold">Conectar GitHub</h2>
-          <p className="mt-1 text-[11px] leading-5 text-ink-secondary">
-            La cuenta GitHub activa el historial versionado, la sincronización manual y los proyectos conectados a repositorios.
-          </p>
-        </header>
-        <div className="space-y-4 px-5 py-5 text-[11px] text-ink-secondary">
-          {localGithubFallback ? (
-            <>
-              <div className="rounded-md border border-orange-200 bg-brand-hover px-3 py-3">
-                <p className="text-[11px] font-semibold text-ink-primary">GitHub remoto no configurado</p>
-                <p className="mt-1 leading-5">
-                  Esta instalación mantiene el historial local activo y pausa la sincronización remota hasta que la conexión GitHub esté disponible.
-                </p>
-              </div>
-              <p>Puedes seguir editando y guardando documentos. Los proyectos configurados con GitHub mostrarán el acceso remoto como pausado.</p>
-            </>
-          ) : device ? (
-            <>
-              <div className="rounded-md border border-line bg-panel px-3 py-3">
-                <div className="text-[10px] uppercase text-ink-secondary">Código de verificación</div>
-                <div className="mt-1 font-mono text-[22px] font-semibold tracking-normal text-ink-primary">{device.userCode}</div>
-              </div>
-              <p>Abre GitHub, introduce el código y vuelve aquí para confirmar la conexión.</p>
-              <p>KnowNext.ai comprobará la autorización automáticamente cada {Math.max(device.interval, 1)} s.</p>
-            </>
-          ) : (
-            <p>Inicia el flujo de dispositivo para autorizar KnowNext.ai desde GitHub.</p>
-          )}
-          {error ? <p className="text-red-700">{error}</p> : null}
         </div>
-        <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
-          <button className="h-9 rounded-md border border-line px-4 text-[11px] hover:bg-panel" onClick={onClose}>
-            Cerrar
-          </button>
-          {!device ? (
-            <button
-              className="h-9 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-60"
-              disabled={busy}
-              onClick={onStart}
-            >
-              {busy ? "Preparando" : "Iniciar login"}
-            </button>
-          ) : localGithubFallback ? null : (
-            <>
-              <button className="h-9 rounded-md border border-brand-orange px-4 text-[11px] font-semibold text-brand-orange hover:bg-brand-hover" onClick={onOpenGithub}>
-                Abrir GitHub
-              </button>
-              <button
-                className="h-9 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={polling}
-                onClick={onPoll}
-              >
-                {polling ? "Comprobando" : "Ya autoricé"}
-              </button>
-            </>
-          )}
-        </footer>
+        {error ? (
+          <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-3 text-[11px] leading-5 text-red-700" role="alert">
+            {error}
+          </div>
+        ) : null}
+        <button
+          type="button"
+          className="mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-brand-orange px-4 text-[12px] font-semibold text-white transition hover:bg-brand-orange-dark"
+          onClick={onRetry}
+        >
+          <RefreshCw size={15} />
+          Reintentar runtime local
+        </button>
       </section>
     </div>
   );
@@ -4162,400 +4028,6 @@ function getGithubDeviceFlowErrorMessage(error?: string | null) {
   if (error === "access_denied") return "La autorización fue cancelada en GitHub.";
   if (error === "incorrect_device_code") return "GitHub no reconoce este código de dispositivo. Inicia el login de nuevo.";
   return error ?? "GitHub no pudo completar la autorización.";
-}
-
-function UpdateAvailableDialog({
-  update,
-  state,
-  progress,
-  error,
-  onClose,
-  onInstall,
-}: {
-  update: AvailableUpdate | null;
-  state: UpdateState;
-  progress: UpdateDownloadProgress | null;
-  error: string | null;
-  onClose: () => void;
-  onInstall: () => void;
-}) {
-  if (!update) return null;
-
-  const busy = state === "downloading" || state === "installing";
-  const progressLabel = progress?.percent !== undefined ? `${progress.percent}%` : "Preparando";
-  const releaseDate = update.date ? formatDateTime(update.date) : null;
-  const sizeLabel = update.sizeBytes ? formatBytes(update.sizeBytes) : null;
-  const platformLabel = update.platform === "android-private" ? "APK Android privado" : "Actualizador de escritorio";
-
-  return (
-    <div className="knownext-modal-overlay fixed inset-0 z-[95] grid place-items-center bg-black/20">
-      <section className="w-[460px] rounded-lg border border-line bg-white shadow-menu">
-        <header className="border-b border-line px-5 py-4">
-          <h2 className="text-[15px] font-semibold">Actualización disponible</h2>
-          <p className="mt-1 text-[11px] text-ink-secondary">
-            KnowNext.ai v{update.version} está lista para instalar.
-          </p>
-        </header>
-        <div className="space-y-4 px-5 py-5 text-[11px] text-ink-secondary">
-          <div className="flex items-center justify-between rounded-md border border-line bg-panel px-3 py-2">
-            <span>Versión instalada</span>
-            <span className="font-mono text-[11px] text-ink-primary">v{update.currentVersion}</span>
-          </div>
-          <div className="flex items-center justify-between rounded-md border border-orange-200 bg-brand-hover px-3 py-2">
-            <span>Nueva versión</span>
-            <span className="font-mono text-[11px] font-semibold text-brand-orange">v{update.version}</span>
-          </div>
-          {releaseDate ? <p className="text-[11px]">Publicada el {releaseDate}.</p> : null}
-          <div className="flex items-center justify-between rounded-md border border-line bg-white px-3 py-2">
-            <span>Canal</span>
-            <span className="font-medium text-ink-primary">{platformLabel}</span>
-          </div>
-          {sizeLabel ? (
-            <div className="flex items-center justify-between rounded-md border border-line bg-white px-3 py-2">
-              <span>Tamaño</span>
-              <span className="font-mono text-[11px] text-ink-primary">{sizeLabel}</span>
-            </div>
-          ) : null}
-          {update.mandatory ? <p className="text-[11px] text-red-700">Esta actualización está marcada como obligatoria.</p> : null}
-          {update.notes ? (
-            <div className="max-h-28 overflow-y-auto rounded-md border border-line bg-white px-3 py-2 text-[11px] leading-5">
-              {update.notes}
-            </div>
-          ) : null}
-          {busy ? (
-            <div>
-              <div className="flex items-center justify-between text-[11px]">
-                <span>{state === "installing" ? "Instalando" : "Descargando"}</span>
-                <span>{progressLabel}</span>
-              </div>
-              <div className="mt-2 h-2 overflow-hidden rounded-full bg-panel">
-                <div
-                  className="h-full rounded-full bg-brand-orange transition-all"
-                  style={{ width: `${progress?.percent ?? 20}%` }}
-                />
-              </div>
-            </div>
-          ) : null}
-          {error ? <p className="text-[11px] text-red-700">{error}</p> : null}
-        </div>
-        <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
-          <button
-            className="h-9 rounded-md border border-line px-4 text-[11px] hover:bg-panel disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={busy}
-            onClick={onClose}
-          >
-            Más tarde
-          </button>
-          <button
-            className="h-9 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={busy}
-            onClick={onInstall}
-          >
-            {busy ? "Actualizando" : "Actualizar"}
-          </button>
-        </footer>
-      </section>
-    </div>
-  );
-}
-
-function CloseDirtyDocumentDialog({
-  open,
-  documentName,
-  onCancel,
-  onDiscard,
-  onSave,
-}: {
-  open: boolean;
-  documentName: string;
-  onCancel: () => void;
-  onDiscard: () => void;
-  onSave: () => void;
-}) {
-  if (!open) return null;
-
-  return (
-    <div className="knownext-modal-overlay fixed inset-0 z-[90] grid place-items-center bg-black/20">
-      <section className="w-[430px] rounded-lg border border-line bg-white shadow-menu">
-        <header className="border-b border-line px-5 py-4">
-          <h2 className="text-[15px] font-semibold">Cerrar documento con cambios</h2>
-          <p className="mt-1 truncate text-[11px] text-ink-secondary">{documentName}</p>
-        </header>
-        <div className="px-5 py-5 text-[11px] leading-5 text-ink-secondary">
-          El documento tiene cambios pendientes de guardar en disco. Puedes guardarlos, descartar el borrador interno o cancelar el cierre.
-        </div>
-        <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
-          <button className="h-9 rounded-md border border-line px-4 text-[11px] hover:bg-panel" onClick={onCancel}>
-            Cancelar
-          </button>
-          <button className="h-9 rounded-md border border-line px-4 text-[11px] text-red-700 hover:bg-red-50" onClick={onDiscard}>
-            Descartar
-          </button>
-          <button className="h-9 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark" onClick={onSave}>
-            Guardar
-          </button>
-        </footer>
-      </section>
-    </div>
-  );
-}
-
-function DocumentFooterActionDialog({
-  open,
-  action,
-  documentName,
-  onCancel,
-  onConfirm,
-}: {
-  open: boolean;
-  action: DocumentFooterDialog | null;
-  documentName: string;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  if (!open || !action) return null;
-  const copy = getDocumentFooterActionCopy(action, documentName);
-
-  return (
-    <div className="knownext-modal-overlay fixed inset-0 z-[90] grid place-items-center bg-black/20">
-      <section className="w-[440px] rounded-lg border border-line bg-white shadow-menu" role="dialog" aria-modal="true" aria-labelledby="document-footer-action-title">
-        <header className="border-b border-line px-5 py-4">
-          <h2 id="document-footer-action-title" className="text-[15px] font-semibold text-ink-primary">{copy.title}</h2>
-          <p className="mt-1 truncate text-[11px] text-ink-secondary">{documentName}</p>
-        </header>
-        <div className="px-5 py-5">
-          <p className="text-[12px] leading-5 text-ink-secondary">{copy.description}</p>
-        </div>
-        <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
-          <button className="h-9 rounded-md border border-line px-3 text-[11px] font-medium text-ink-primary hover:bg-panel" type="button" onClick={onCancel}>
-            Cancelar
-          </button>
-          <button
-            className={[
-              "h-9 rounded-md px-3 text-[11px] font-semibold text-white shadow-subtle",
-              copy.danger ? "bg-red-600 hover:bg-red-700" : "bg-brand-orange hover:bg-brand-dark",
-            ].join(" ")}
-            type="button"
-            onClick={onConfirm}
-          >
-            {copy.confirmLabel}
-          </button>
-        </footer>
-      </section>
-    </div>
-  );
-}
-
-function getDocumentFooterActionCopy(action: DocumentFooterDialog, documentName: string) {
-  if (action === "discard-draft") {
-    return {
-      title: "Descartar cambios pendientes",
-      description: `Se volverá a la última versión guardada de ${documentName}. Los cambios no guardados se perderán.`,
-      confirmLabel: "Descartar cambios",
-      danger: true,
-    };
-  }
-  if (action === "update-remote-discard-draft") {
-    return {
-      title: "Actualizar y perder cambios pendientes",
-      description: "Existe una versión más reciente en Git/GitHub. Si continúas, se descargará esa versión y se perderán los cambios pendientes que todavía no has guardado.",
-      confirmLabel: "Actualizar y descartar",
-      danger: true,
-    };
-  }
-  if (action === "sync-saved-while-draft") {
-    return {
-      title: "Sincronizar versión guardada",
-      description: "Se sincronizará la última versión guardada del documento. Los cambios pendientes seguirán abiertos como borrador hasta que los guardes.",
-      confirmLabel: "Sincronizar versión guardada",
-      danger: false,
-    };
-  }
-  return {
-    title: "Actualizar documento",
-    description: "Existe una versión más reciente en Git/GitHub. Se descargará y se mostrará la última versión del documento.",
-    confirmLabel: "Actualizar",
-    danger: false,
-  };
-}
-
-function RecoverableDraftsDialog({
-  open,
-  drafts,
-  onClose,
-  onRefresh,
-  onRestore,
-  onDiscard,
-}: {
-  open: boolean;
-  drafts: OrphanDraft[];
-  onClose: () => void;
-  onRefresh: () => void;
-  onRestore: (draft: OrphanDraft) => void;
-  onDiscard: (draftKey: string) => void;
-}) {
-  if (!open) return null;
-
-  return (
-    <div className="knownext-modal-overlay fixed inset-0 z-[90] grid place-items-center bg-black/20">
-      <section
-        className="flex max-h-[min(620px,calc(100dvh-48px))] w-[min(660px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="recoverable-drafts-title"
-      >
-        <header className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
-          <div className="flex min-w-0 gap-3">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-brand-hover text-brand-orange">
-              <ArchiveRestore size={18} />
-            </span>
-            <div className="min-w-0">
-              <h2 id="recoverable-drafts-title" className="text-[15px] font-semibold text-ink-primary">Borradores recuperables</h2>
-              <p className="mt-1 max-w-[500px] text-[11px] leading-5 text-ink-secondary">
-                Son copias locales de cambios sin guardar cuyo archivo original ya no está disponible. Puedes recrear el archivo desde el borrador o descartarlo si ya no lo necesitas.
-              </p>
-            </div>
-          </div>
-          <button
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
-            data-tooltip="Cerrar"
-            aria-label="Cerrar borradores recuperables"
-            onClick={onClose}
-          >
-            <X size={16} />
-          </button>
-        </header>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          <div className="mb-4 rounded-md border border-line bg-panel px-4 py-3 text-[11px] leading-5 text-ink-secondary">
-            <p className="font-semibold text-ink-primary">Cuándo aparece un borrador aquí</p>
-            <p className="mt-1">
-              Si editas un documento, quedan cambios pendientes y después el archivo se elimina, se mueve fuera del proyecto o deja de poder localizarse, KnowNext.ai conserva el contenido para evitar perder trabajo.
-            </p>
-          </div>
-          {drafts.length === 0 ? (
-            <div className="grid place-items-center rounded-md border border-dashed border-line bg-white px-4 py-8 text-center">
-              <FileWarning size={24} className="text-ink-secondary" />
-              <p className="mt-3 text-[12px] font-semibold text-ink-primary">No hay borradores pendientes</p>
-              <p className="mt-1 max-w-[420px] text-[11px] leading-5 text-ink-secondary">
-                Todos los borradores locales siguen asociados a sus archivos o ya se han resuelto. Puedes actualizar para volver a comprobar el estado del disco.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {drafts.map((draft) => (
-                <article key={draft.draftKey} className="rounded-md border border-line bg-white px-4 py-3">
-                  <div className="flex items-start gap-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[11px] font-semibold text-ink-primary">{draft.name}</p>
-                      <p className="mt-1 truncate text-[11px] text-ink-secondary">{draft.path}</p>
-                      <p className="mt-2 text-[11px] text-ink-secondary">
-                        {draft.wordCount} palabras · {formatDateTime(draft.draftUpdatedAt)}
-                        {!draft.recoverable && draft.reason ? ` · ${draft.reason}` : ""}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 gap-2">
-                      <button
-                        className="flex h-8 items-center gap-2 rounded-md border border-line px-3 text-[11px] font-medium text-red-700 hover:bg-red-50"
-                        onClick={() => onDiscard(draft.draftKey)}
-                      >
-                        <Trash2 size={14} />
-                        Descartar
-                      </button>
-                      <button
-                        className="flex h-8 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
-                        disabled={!draft.recoverable}
-                        onClick={() => onRestore(draft)}
-                      >
-                        <ArchiveRestore size={14} />
-                        Recrear archivo
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </div>
-        <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
-          <button className="h-9 rounded-md border border-line px-4 text-[11px] hover:bg-panel" onClick={onClose}>
-            Cerrar
-          </button>
-          <button className="flex h-9 items-center gap-2 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark" onClick={onRefresh}>
-            <RefreshCw size={14} />
-            Actualizar
-          </button>
-        </footer>
-      </section>
-    </div>
-  );
-}
-
-function AiDeleteConfirmationDialog({
-  pendingDelete,
-  onCancel,
-  onConfirm,
-}: {
-  pendingDelete: AiPendingDelete | null;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  if (!pendingDelete) return null;
-
-  return (
-    <div className="knownext-modal-overlay fixed inset-0 z-[96] grid place-items-center bg-black/20">
-      <section className="w-[min(520px,calc(100vw-32px))] rounded-lg border border-line bg-white shadow-menu">
-        <header className="border-b border-line px-5 py-4">
-          <h2 className="text-[15px] font-semibold text-ink-primary">La IA quiere eliminar elementos</h2>
-          <p className="mt-1 text-[11px] leading-5 text-ink-secondary">
-            Revisa la lista antes de confirmar. Esta acción modifica el árbol del proyecto.
-          </p>
-        </header>
-        <div className="max-h-64 overflow-y-auto px-5 py-4">
-          <div className="space-y-2">
-            {pendingDelete.paths.map((path) => (
-              <div key={path} className="rounded-md border border-line bg-panel px-3 py-2 font-mono text-[10px] text-ink-primary">
-                {path}
-              </div>
-            ))}
-          </div>
-          {pendingDelete.documentCount > 1 ? (
-            <p className="mt-3 text-[11px] text-ink-secondary">Se verán afectados {pendingDelete.documentCount} documentos.</p>
-          ) : null}
-        </div>
-        <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
-          <button className="h-9 rounded-md border border-line px-4 text-[11px] hover:bg-panel" onClick={onCancel}>
-            Cancelar
-          </button>
-          <button className="h-9 rounded-md bg-red-600 px-4 text-[11px] font-semibold text-white hover:bg-red-700" onClick={onConfirm}>
-            Eliminar
-          </button>
-        </footer>
-      </section>
-    </div>
-  );
-}
-
-function formatDateTime(value: string) {
-  try {
-    return new Intl.DateTimeFormat("es", {
-      dateStyle: "short",
-      timeStyle: "short",
-    }).format(new Date(value));
-  } catch {
-    return value;
-  }
-}
-
-function formatBytes(value: number) {
-  if (!Number.isFinite(value) || value <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  let size = value;
-  let unitIndex = 0;
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024;
-    unitIndex += 1;
-  }
-  return `${size >= 10 || unitIndex === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[unitIndex]}`;
 }
 
 function describeError(error: unknown) {
@@ -4706,67 +4178,6 @@ function mergeAiEvents(currentEvents: AiConversationEvent[], nextEvents: AiConve
   ];
 }
 
-function MoveDocumentDialog({
-  open,
-  node,
-  folders,
-  onClose,
-  onMove,
-}: {
-  open: boolean;
-  node: DocumentTreeNode | null;
-  folders: DocumentTreeNode[];
-  onClose: () => void;
-  onMove: (targetFolderId: string | null) => void;
-}) {
-  const [targetFolderId, setTargetFolderId] = useState("");
-
-  useEffect(() => {
-    if (open) setTargetFolderId("");
-  }, [open]);
-
-  if (!open || !node) return null;
-
-  return (
-    <div className="knownext-modal-overlay fixed inset-0 z-[80] grid place-items-center bg-black/20">
-      <section className="w-[420px] rounded-lg border border-line bg-white shadow-menu">
-        <header className="border-b border-line px-5 py-4">
-          <h2 className="text-[15px] font-semibold">Mover elemento</h2>
-          <p className="mt-1 truncate text-[11px] text-ink-secondary">{node.name}</p>
-        </header>
-        <div className="px-5 py-5">
-          <label className="block text-[11px] font-medium text-ink-secondary">
-            Carpeta de destino
-            <select
-              className="mt-2 h-10 w-full rounded-md border border-line bg-white px-3 text-[11px] text-ink-primary outline-none focus:border-brand-orange"
-              value={targetFolderId}
-              onChange={(event) => setTargetFolderId(event.target.value)}
-            >
-              <option value="">Raíz del proyecto</option>
-              {folders.map((folder) => (
-                <option key={folder.id} value={folder.id}>
-                  {folder.path || folder.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
-          <button className="h-9 rounded-md border border-line px-4 text-[11px] hover:bg-panel" onClick={onClose}>
-            Cancelar
-          </button>
-          <button
-            className="h-9 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark"
-            onClick={() => onMove(targetFolderId || null)}
-          >
-            Mover
-          </button>
-        </footer>
-      </section>
-    </div>
-  );
-}
-
 function isAutomaticSyncMode(syncMode?: SyncMode | null) {
   return syncMode === "auto-local" || syncMode === "auto-github";
 }
@@ -4782,8 +4193,12 @@ function shouldRunAutomaticSync(project: Project | null | undefined, authStatus:
   return false;
 }
 
-function canUseGithubRemote(project: Project | null | undefined, authStatus: AuthStatus) {
-  return !isGithubSyncMode(project?.syncMode) || authStatus.isAuthenticated;
+function canUseGithubRemote(project: Project | null | undefined, authStatus: AuthStatus, syncStatus?: ProjectSyncStatus | null) {
+  if (!isGithubSyncMode(project?.syncMode)) return true;
+  if (!authStatus.isAuthenticated) return false;
+  if (!syncStatus) return true;
+  if (syncStatus.remotePaused) return false;
+  return !syncStatus.remoteAccess || syncStatus.remoteAccess === "available";
 }
 
 function withDerivedRemoteSyncStatus(status: ProjectSyncStatus, project: Project | null | undefined, authStatus: AuthStatus): ProjectSyncStatus {

@@ -34,7 +34,7 @@ export async function enableProjectHistory(projectId: string): Promise<{ project
 
 export async function changeProjectSyncMode(projectId: string, syncMode: SyncMode): Promise<ProjectSyncStatus> {
   return requestJson<ProjectSyncStatus>(`/api/projects/${projectId}/sync-mode`, {
-    method: "POST",
+    method: "PUT",
     body: JSON.stringify({ syncMode }),
   });
 }

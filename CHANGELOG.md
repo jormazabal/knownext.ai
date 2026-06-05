@@ -2,6 +2,19 @@
 
 All KnowNext.ai releases use one monolithic application version for the frontend, Tauri shell, Rust runtime, Windows updater, and Android updater.
 
+## 2.0.3 - 2026-06-05
+
+- Added runtime cleanup for stale public GitHub auth state when the private GitHub credential is missing, so the UI cannot show a connected account that cannot actually authenticate sync.
+- Prevented the GitHub login dialog from showing an empty device-code flow when GitHub OAuth is not configured in either development or installed builds.
+- Normalized GitHub project configuration to local Git versioning with GitHub as the remote sync target; old GitHub-versioning metadata is converted by the Rust runtime when read or updated.
+- GitHub remote status now classifies missing credentials, missing permissions and offline remotes before enabling push/pull actions, so local history can continue without noisy remote errors.
+- Revalidated prompt context file handling for project-tree drag/drop, external file drag/drop, native file-picker uploads and nested Markdown imports.
+- Preserved active document Markdown and document identity in the auxiliary Rust `/ai/prompt` contract so all exposed AI prompt routes remain contextual.
+- Encoded document and AI context source IDs in auxiliary prompt/context API routes so documents inside folders reach the Rust local contracts correctly.
+- Routed imported Markdown files through the local Rust project-file import contract instead of reading Markdown file content directly in the React shell.
+- Added local Rust contracts for auxiliary runtime logging and log-folder opening routes so exposed diagnostics paths do not fall back to unimplemented local API responses.
+- Expanded automated coverage for settings, dialogs, tree drag/drop, tab reorder, prompt context, transcription, previews, release notes, updater UI, GitHub login states and local runtime contracts.
+
 ## 2.0.2 - 2026-06-03
 
 - Fixed GitHub login in installed builds so an unavailable remote GitHub OAuth flow can no longer persist or display an internal development placeholder account.

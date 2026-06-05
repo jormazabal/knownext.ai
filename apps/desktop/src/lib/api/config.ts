@@ -84,10 +84,10 @@ export const defaultAiConfig: AiConfig = {
     createFolders: false,
     createDocuments: false,
     deleteDocumentsAndFolders: false,
-    generateImages: true,
-    createImageAssets: true,
-    insertImagesIntoDocuments: true,
-    useDocumentContextForImageGeneration: true,
+    generateImages: false,
+    createImageAssets: false,
+    insertImagesIntoDocuments: false,
+    useDocumentContextForImageGeneration: false,
   },
   rag: {
     enabled: false,
@@ -106,8 +106,8 @@ export const defaultAiConfig: AiConfig = {
     storeVisualDescriptions: true,
   },
   imageGeneration: {
-    enabled: true,
-    model: "gpt-image-2",
+    enabled: false,
+    model: "gpt-image-1.5",
     size: "auto",
     quality: "auto",
     outputFormat: "png",
@@ -129,7 +129,7 @@ export const defaultAiConfig: AiConfig = {
   },
   transcription: {
     enabled: true,
-    model: "gpt-realtime-whisper",
+    model: "gpt-4o-mini-transcribe",
     defaultTarget: "prompt",
     defaultLanguage: "auto",
     favoriteLanguages: ["es", "en"],
@@ -142,7 +142,7 @@ export const defaultProjectTabsConfig: ProjectTabsConfig = {
 };
 
 export const defaultAppConfig: AppConfig = {
-  schemaVersion: 1,
+  schemaVersion: 3,
   layout: defaultLayoutConfig,
   appearance: defaultAppearanceConfig,
   diagnostics: defaultDiagnosticsConfig,
@@ -253,6 +253,7 @@ function normalizeAppConfig(config: AppConfig): AppConfig {
   const openUtilityTabs = normalizeUtilityTabs(config.openUtilityTabs);
   return {
     ...normalizedConfig,
+    schemaVersion: 3,
     layout: config.layout ?? defaultLayoutConfig,
     appearance: normalizeAppearance(config.appearance) ?? defaultAppearanceConfig,
     diagnostics: normalizeDiagnostics(config.diagnostics) ?? defaultDiagnosticsConfig,
@@ -383,21 +384,21 @@ function normalizeAi(ai: AiConfig | undefined): AiConfig | undefined {
       createFolders: Boolean(ai.permissions?.createFolders),
       createDocuments: Boolean(ai.permissions?.createDocuments),
       deleteDocumentsAndFolders: Boolean(ai.permissions?.deleteDocumentsAndFolders),
-      generateImages: ai.permissions?.generateImages !== false,
-      createImageAssets: ai.permissions?.createImageAssets !== false,
-      insertImagesIntoDocuments: ai.permissions?.insertImagesIntoDocuments !== false,
-      useDocumentContextForImageGeneration: ai.permissions?.useDocumentContextForImageGeneration !== false,
+      generateImages: false,
+      createImageAssets: false,
+      insertImagesIntoDocuments: false,
+      useDocumentContextForImageGeneration: false,
     },
     rag: {
-      enabled: Boolean(ai.rag?.enabled),
-      vectorStoreId: ai.rag?.vectorStoreId ?? null,
-      lastIndexedAt: ai.rag?.lastIndexedAt ?? null,
-      status: ["not-indexed", "indexing", "updated", "error"].includes(ai.rag?.status ?? "") ? ai.rag.status : "not-indexed",
-      error: ai.rag?.error ?? null,
+      enabled: false,
+      vectorStoreId: null,
+      lastIndexedAt: null,
+      status: "not-indexed",
+      error: null,
     },
     vision: {
       enabled: ai.vision?.enabled !== false,
-      model: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"].includes(String(ai.vision?.model)) ? ai.vision!.model : defaultAiConfig.vision.model,
+      model: normalizeAiVisionModel(ai.vision?.model),
       imageIndexingEnabled: Boolean(ai.vision?.imageIndexingEnabled),
       maxImagesPerPrompt: clampNumber(ai.vision?.maxImagesPerPrompt, 1, 12, defaultAiConfig.vision.maxImagesPerPrompt),
       maxImageSizeMb: clampNumber(ai.vision?.maxImageSizeMb, 1, 50, defaultAiConfig.vision.maxImageSizeMb),
@@ -407,7 +408,7 @@ function normalizeAi(ai: AiConfig | undefined): AiConfig | undefined {
     imageGeneration: normalizeImageGeneration(ai.imageGeneration),
     agentic: {
       depth: normalizeAgenticDepth(ai.agentic?.depth),
-      webResearchEnabled: Boolean(ai.agentic?.webResearchEnabled),
+      webResearchEnabled: false,
       confirmBeforeApplying: ai.agentic?.confirmBeforeApplying !== false,
       maxSteps: clampNumber(ai.agentic?.maxSteps, 1, 12, defaultAiConfig.agentic.maxSteps),
       maxDocuments: clampNumber(ai.agentic?.maxDocuments, 1, 30, defaultAiConfig.agentic.maxDocuments),
@@ -420,7 +421,7 @@ function normalizeAi(ai: AiConfig | undefined): AiConfig | undefined {
 
 function normalizeImageGeneration(imageGeneration: AiConfig["imageGeneration"] | undefined): AiConfig["imageGeneration"] {
   return {
-    enabled: imageGeneration?.enabled !== false,
+    enabled: false,
     model: normalizeImageGenerationModel(imageGeneration?.model),
     size: ["auto", "1024x1024", "1536x1024", "1024x1536"].includes(String(imageGeneration?.size)) ? imageGeneration!.size : defaultAiConfig.imageGeneration.size,
     quality: ["auto", "low", "medium", "high"].includes(String(imageGeneration?.quality)) ? imageGeneration!.quality : defaultAiConfig.imageGeneration.quality,
@@ -435,7 +436,8 @@ function normalizeImageGeneration(imageGeneration: AiConfig["imageGeneration"] |
 }
 
 function normalizeImageGenerationModel(model: unknown): AiImageGenerationModelId {
-  return ["gpt-image-2", "gpt-image-1.5", "gpt-image-1", "gpt-image-1-mini"].includes(String(model))
+  if (String(model) === "gpt-image-2") return "gpt-image-1.5";
+  return ["gpt-image-1.5", "gpt-image-1", "gpt-image-1-mini"].includes(String(model))
     ? model as AiImageGenerationModelId
     : defaultAiConfig.imageGeneration.model;
 }
@@ -461,9 +463,32 @@ function normalizeProjectRelativeFolderPath(path: unknown, fallback: string): st
 }
 
 function normalizeAiModel(model: unknown): AiModelId {
-  return ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"].includes(String(model))
-    ? model as AiModelId
-    : defaultAiConfig.model;
+  const normalized = normalizeLegacyAiModel(model);
+  return normalized ?? defaultAiConfig.model;
+}
+
+function normalizeAiVisionModel(model: unknown) {
+  const normalized = normalizeLegacyAiModel(model);
+  return normalized && normalized !== "gpt-5.4-nano" ? normalized : defaultAiConfig.vision.model;
+}
+
+function normalizeLegacyAiModel(model: unknown): AiModelId | null {
+  switch (String(model)) {
+    case "gpt-5.5":
+    case "gpt-5.2":
+      return "gpt-5.5";
+    case "gpt-5.4":
+    case "gpt-5":
+      return "gpt-5.4";
+    case "gpt-5.4-mini":
+    case "gpt-5-mini":
+      return "gpt-5.4-mini";
+    case "gpt-5.4-nano":
+    case "gpt-5-nano":
+      return "gpt-5.4-nano";
+    default:
+      return null;
+  }
 }
 
 function normalizeAgenticDepth(depth: unknown) {
@@ -480,7 +505,7 @@ function normalizeTranscription(transcription: AiConfig["transcription"] | undef
 
   return {
     enabled: transcription?.enabled !== false,
-    model: transcription?.model === "gpt-realtime-whisper" ? transcription.model : defaultAiConfig.transcription.model,
+    model: ["gpt-4o-mini-transcribe", "gpt-realtime-whisper"].includes(String(transcription?.model)) ? "gpt-4o-mini-transcribe" : defaultAiConfig.transcription.model,
     defaultTarget: transcription?.defaultTarget === "document" ? "document" : "prompt",
     defaultLanguage: isTranscriptionLanguage(transcription?.defaultLanguage) ? transcription.defaultLanguage : defaultAiConfig.transcription.defaultLanguage,
     favoriteLanguages: uniqueFavoriteLanguages.slice(0, 6),

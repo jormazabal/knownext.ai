@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AiTranscriptionLanguage, AiTranscriptionTarget } from "../../types/domain";
-import { createRealtimeTranscriptionSocket, parseRealtimeTranscriptionEvent } from "../../lib/api/transcription";
+import { transcribePcmAudio } from "../../lib/api/transcription";
 import { startPcmAudioCapture, type PcmAudioCapture } from "./audioCapture";
 
 export type RealtimeTranscriptionStatus = "idle" | "connecting" | "listening" | "stopping" | "error";
@@ -22,9 +22,10 @@ export function useRealtimeTranscription() {
   const [status, setStatus] = useState<RealtimeTranscriptionStatus>("idle");
   const [activeTarget, setActiveTarget] = useState<AiTranscriptionTarget | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const socketRef = useRef<WebSocket | null>(null);
   const captureRef = useRef<PcmAudioCapture | null>(null);
   const handlersRef = useRef<RealtimeTranscriptionHandlers | null>(null);
+  const chunksRef = useRef<ArrayBuffer[]>([]);
+  const languageRef = useRef<AiTranscriptionLanguage>("auto");
   const statusRef = useRef<RealtimeTranscriptionStatus>("idle");
 
   useEffect(() => {
@@ -35,98 +36,69 @@ export function useRealtimeTranscription() {
     const capture = captureRef.current;
     captureRef.current = null;
     if (capture) await capture.stop().catch(() => undefined);
-
-    const socket = socketRef.current;
-    socketRef.current = null;
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.close();
-    }
     setActiveTarget(null);
   }, []);
 
   const stop = useCallback(async () => {
-    if (status === "idle") return;
+    if (statusRef.current !== "listening" && statusRef.current !== "connecting") return;
     setStatus("stopping");
-    const socket = socketRef.current;
-    if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "stop" }));
-    } else {
-      await cleanup();
+    const capture = captureRef.current;
+    captureRef.current = null;
+    if (capture) await capture.stop().catch(() => undefined);
+
+    const chunks = chunksRef.current;
+    chunksRef.current = [];
+    try {
+      if (chunks.length === 0) {
+        throw new Error("No se ha capturado audio para transcribir.");
+      }
+      const response = await transcribePcmAudio(chunks, languageRef.current);
+      if (response.status !== "completed") {
+        throw new Error(response.message || "No se pudo transcribir el audio.");
+      }
+      handlersRef.current?.onCompleted({ itemId: "dictation", transcript: response.transcript });
+      setError(null);
+      statusRef.current = "idle";
       setStatus("idle");
+      setActiveTarget(null);
       handlersRef.current?.onStopped?.();
+    } catch (stopError) {
+      const message = stopError instanceof Error ? stopError.message : "No se pudo transcribir el audio.";
+      setError(message);
+      statusRef.current = "error";
+      setStatus("error");
+      setActiveTarget(null);
+      handlersRef.current?.onError?.(message);
+      await cleanup();
     }
-  }, [cleanup, status]);
+  }, [cleanup]);
 
   const start = useCallback(async ({ target, language, handlers }: StartRealtimeTranscriptionOptions) => {
-    if (status !== "idle" && status !== "error") return;
+    if (statusRef.current !== "idle" && statusRef.current !== "error") return;
     setStatus("connecting");
+    statusRef.current = "connecting";
     setError(null);
     setActiveTarget(target);
     handlersRef.current = handlers;
+    languageRef.current = language;
+    chunksRef.current = [];
 
     try {
-      const socket = await createRealtimeTranscriptionSocket(language);
-      socketRef.current = socket;
-
-      socket.addEventListener("message", (rawEvent) => {
-        const event = parseRealtimeTranscriptionEvent(rawEvent);
-        if (!event) return;
-        if (event.type === "started") {
-          setStatus("listening");
-          return;
-        }
-        if (event.type === "stopping") {
-          setStatus("stopping");
-          return;
-        }
-        if (event.type === "stopped") {
-          statusRef.current = "idle";
-          setStatus("idle");
-          void cleanup().then(() => {
-            handlersRef.current?.onStopped?.();
-          });
-          return;
-        }
-        if (event.type === "delta") {
-          handlersRef.current?.onDelta({ itemId: event.itemId, delta: event.delta });
-          return;
-        }
-        if (event.type === "completed") {
-          handlersRef.current?.onCompleted({ itemId: event.itemId, transcript: event.transcript });
-          return;
-        }
-        if (event.type === "error") {
-          setError(event.message);
-          statusRef.current = "error";
-          setStatus("error");
-          handlersRef.current?.onError?.(event.message);
-          void cleanup();
-        }
-      });
-
-      socket.addEventListener("close", () => {
-        if (statusRef.current === "idle") return;
-        void cleanup().then(() => {
-          setStatus("idle");
-          handlersRef.current?.onStopped?.();
-        });
-      });
-
       const capture = await startPcmAudioCapture((chunk) => {
-        const currentSocket = socketRef.current;
-        if (currentSocket?.readyState === WebSocket.OPEN) {
-          currentSocket.send(chunk);
-        }
+        chunksRef.current.push(chunk.slice(0));
       });
       captureRef.current = capture;
+      statusRef.current = "listening";
+      setStatus("listening");
     } catch (startError) {
       const message = describeTranscriptionStartError(startError);
       setError(message);
+      statusRef.current = "error";
       setStatus("error");
       handlers.onError?.(message);
       await cleanup();
     }
-  }, [cleanup, status]);
+  }, [cleanup]);
 
   return {
     status,
@@ -135,7 +107,10 @@ export function useRealtimeTranscription() {
     start,
     stop,
     resetError: () => {
-      if (status === "error") setStatus("idle");
+      if (statusRef.current === "error") {
+        statusRef.current = "idle";
+        setStatus("idle");
+      }
       setError(null);
     },
   };

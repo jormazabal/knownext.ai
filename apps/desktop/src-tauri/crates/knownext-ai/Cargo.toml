@@ -1,9 +1,11 @@
 [package]
 name = "knownext-ai"
-version = "2.0.2"
+version = "2.0.3"
 edition = "2021"
 license = "Apache-2.0"
 
 [dependencies]
 knownext-core = { path = "../knownext-core" }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "multipart", "rustls"] }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"

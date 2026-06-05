@@ -1014,8 +1014,16 @@ function getProtectionSummary(
   const hasLocalGit = hasGithub || project?.versioningMode === "local-git" || project?.isGitRepository || project?.syncMode === "manual-local" || project?.syncMode === "auto-local";
   const protection = hasGithub ? "Historial local + GitHub" : hasLocalGit ? "Historial local" : "Solo archivos locales";
   const syncMode = project?.syncMode?.startsWith("auto") ? "Automático" : project?.syncMode && project.syncMode !== "none" ? "Manual" : "Sin sincronización remota";
-  const pendingGithubUpload = Boolean(hasGithub && (syncStatus?.pendingPush || state === "local-pending"));
-  const pendingGithubDownload = Boolean(hasGithub && (syncStatus?.pendingPull || state === "remote-available"));
+  const remotePaused = Boolean(syncStatus?.remotePaused || (hasGithub && syncStatus?.remoteAccess && syncStatus.remoteAccess !== "available" && syncStatus.remoteAccess !== "not-configured"));
+  const remotePausedLabel = syncStatus?.remoteAccess === "unauthorized"
+    ? "Sin permiso GitHub"
+    : syncStatus?.remoteAccess === "offline"
+      ? "GitHub sin conexión"
+      : syncStatus?.remoteAccess === "unauthenticated"
+        ? "Sin acceso a GitHub"
+        : "GitHub pausado";
+  const pendingGithubUpload = Boolean(hasGithub && !remotePaused && (syncStatus?.pendingPush || state === "local-pending"));
+  const pendingGithubDownload = Boolean(hasGithub && !remotePaused && (syncStatus?.pendingPull || state === "remote-available"));
   const needsAttention = busy || state === "conflict" || state === "error" || state === "offline" || review > 0 || blocked > 0 || Boolean(changeSet?.requiresReview);
   const hasPending = total > 0 || syncStatus?.pendingPush || syncStatus?.pendingPull || state === "local-pending" || state === "remote-available" || state === "pending";
   const common = {
@@ -1024,7 +1032,7 @@ function getProtectionSummary(
     protection,
     syncMode,
     lastActivity: formatDate(syncStatus?.lastSyncAt),
-    githubAttention: Boolean(hasGithub && (pendingGithubUpload || pendingGithubDownload || state === "conflict" || syncStatus?.hasConflicts || state === "error" || state === "offline")),
+    githubAttention: Boolean(hasGithub && (remotePaused || pendingGithubUpload || pendingGithubDownload || state === "conflict" || syncStatus?.hasConflicts || state === "error" || state === "offline")),
   };
 
   if (acknowledged && !pendingGithubUpload && !pendingGithubDownload && localWork === 0 && state !== "conflict" && !syncStatus?.hasConflicts && state !== "error" && state !== "offline") {
@@ -1087,6 +1095,27 @@ function getProtectionSummary(
       actionDetail: "Comprueba de nuevo. Si sigue fallando, revisa la cuenta de GitHub en la configuración del proyecto.",
       githubTitle: "GitHub no responde correctamente",
       githubDetail: syncStatus?.detail || "No se pudo validar el repositorio remoto con la conexión actual.",
+    };
+  }
+
+  if (hasGithub && remotePaused) {
+    return {
+      ...common,
+      icon: AlertTriangle,
+      iconClass: "bg-brand-hover text-brand-orange",
+      statusIcon: AlertTriangle,
+      status: remotePausedLabel,
+      tone: "warning" as const,
+      calloutClass: "border-orange-200 bg-brand-hover",
+      needsAttention: true,
+      primaryAction: "refresh" as ProtectionPrimaryAction,
+      footerText: "GitHub está pausado; el historial local sigue disponible.",
+      recommendationTitle: remotePausedLabel,
+      recommendationDetail: syncStatus?.detail || "Puedes seguir trabajando localmente. La sincronización remota se reanudará cuando vuelva el acceso.",
+      userExplanation: "KnowNext.ai mantiene la carpeta y el historial local operativos aunque GitHub no esté disponible para esta instalación.",
+      actionDetail: "Comprueba de nuevo cuando recuperes cuenta, conexión o permisos. No se subirá ni descargará nada de GitHub mientras esté pausado.",
+      githubTitle: remotePausedLabel,
+      githubDetail: syncStatus?.detail || "La sincronización remota está pausada hasta recuperar acceso a GitHub.",
     };
   }
 

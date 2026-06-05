@@ -711,7 +711,7 @@ const projectActionsCopy = {
   es: {
     noGithubAccount: "Sin cuenta GitHub",
     githubConnectedStatus: "Cuenta GitHub conectada",
-    githubBlockedStatus: "Historial bloqueado sin GitHub",
+    githubBlockedStatus: "GitHub pausado",
     accountOptionsTitle: "Opciones de cuenta",
     accountOptionsClose: "Cerrar opciones de cuenta",
     connectGithub: "Conectar GitHub",
@@ -746,7 +746,7 @@ const projectActionsCopy = {
   en: {
     noGithubAccount: "No GitHub account",
     githubConnectedStatus: "GitHub account connected",
-    githubBlockedStatus: "History locked without GitHub",
+    githubBlockedStatus: "GitHub paused",
     accountOptionsTitle: "Account options",
     accountOptionsClose: "Close account options",
     connectGithub: "Connect GitHub",

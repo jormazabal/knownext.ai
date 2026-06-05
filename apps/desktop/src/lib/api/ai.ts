@@ -23,7 +23,7 @@ const AI_CONTEXT_UPLOAD_TIMEOUT_MS = 120_000;
 
 export async function promptAssistant(request: AiPromptRequest): Promise<AiPromptResponse> {
   if (request.documentId) {
-    return requestJson<AiPromptResponse>(`/api/documents/${request.documentId}/ai/prompt`, {
+    return requestJson<AiPromptResponse>(`/api/documents/${encodeURIComponent(request.documentId)}/ai/prompt`, {
       method: "POST",
       body: JSON.stringify({ prompt: request.prompt, markdown: request.markdown ?? "" }),
       timeoutMs: AI_PROMPT_TIMEOUT_MS,
@@ -69,14 +69,14 @@ export async function addProjectDocumentAiContextSource(projectId: string, docum
 export async function addProjectImageAiContextSource(projectId: string, assetId: string): Promise<AiContextSource> {
   return requestJson<AiContextSource>(`/api/projects/${projectId}/ai/context/project-images`, {
     method: "POST",
-    body: JSON.stringify({ documentId: assetId }),
+    body: JSON.stringify({ assetId }),
   });
 }
 
 export async function addProjectAttachmentAiContextSource(projectId: string, attachmentId: string): Promise<AiContextSource> {
   return requestJson<AiContextSource>(`/api/projects/${projectId}/ai/context/project-attachments`, {
     method: "POST",
-    body: JSON.stringify({ documentId: attachmentId }),
+    body: JSON.stringify({ attachmentId }),
   });
 }
 
@@ -88,24 +88,32 @@ export async function uploadAiContextFiles(projectId: string, files: File[]): Pr
   });
 }
 
+export async function uploadLocalAiContextFiles(projectId: string, filePaths: string[]): Promise<AiContextSourceListResponse> {
+  return requestJson<AiContextSourceListResponse>(`/api/projects/${projectId}/ai/context/local-files`, {
+    method: "POST",
+    body: JSON.stringify({ paths: filePaths }),
+    timeoutMs: AI_CONTEXT_UPLOAD_TIMEOUT_MS,
+  });
+}
+
 export async function removeAiContextSource(projectId: string, sourceId: string): Promise<AiContextSourceListResponse> {
-  return requestJson<AiContextSourceListResponse>(`/api/projects/${projectId}/ai/context/sources/${sourceId}`, {
+  return requestJson<AiContextSourceListResponse>(`/api/projects/${projectId}/ai/context/sources/${encodeURIComponent(sourceId)}`, {
     method: "DELETE",
   });
 }
 
 export async function extendAiContextSource(projectId: string, sourceId: string): Promise<AiContextSource> {
-  return requestJson<AiContextSource>(`/api/projects/${projectId}/ai/context/sources/${sourceId}/extend`, {
+  return requestJson<AiContextSource>(`/api/projects/${projectId}/ai/context/sources/${encodeURIComponent(sourceId)}/extend`, {
     method: "POST",
   });
 }
 
 export async function previewAiContextSource(projectId: string, sourceId: string): Promise<AiContextSourcePreviewResponse> {
-  return requestJson<AiContextSourcePreviewResponse>(`/api/projects/${projectId}/ai/context/sources/${sourceId}/preview`);
+  return requestJson<AiContextSourcePreviewResponse>(`/api/projects/${projectId}/ai/context/sources/${encodeURIComponent(sourceId)}/preview`);
 }
 
 export async function addAiContextSourceToProject(projectId: string, sourceId: string, request: { name?: string | null; parentId?: string | null }): Promise<AiContextAddToProjectResponse> {
-  return requestJson<AiContextAddToProjectResponse>(`/api/projects/${projectId}/ai/context/sources/${sourceId}/add-to-project`, {
+  return requestJson<AiContextAddToProjectResponse>(`/api/projects/${projectId}/ai/context/sources/${encodeURIComponent(sourceId)}/add-to-project`, {
     method: "POST",
     body: JSON.stringify(request),
   });

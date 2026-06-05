@@ -67,6 +67,8 @@ describe("AppSettingsDialog", () => {
 
     expect(screen.getByRole("heading", { name: /resumen de configuración/i })).toBeInTheDocument();
     expect(screen.getByText("Modelos de IA utilizados")).toBeInTheDocument();
+    expect(screen.getByText("Imágenes (visión)")).toBeInTheDocument();
+    expect(screen.queryByText("Imágenes (generación y visión)")).not.toBeInTheDocument();
     expect(screen.queryByText("¿Necesitas ayuda?")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /copiar resumen/i })).not.toBeInTheDocument();
     expect(screen.queryByText("Coste por 1M tokens")).not.toBeInTheDocument();
@@ -84,7 +86,7 @@ describe("AppSettingsDialog", () => {
     expect(screen.queryByText(/puerto/i)).not.toBeInTheDocument();
   });
 
-  it("allows checking local runtime status without backend controls", () => {
+  it("allows checking local runtime status without external runtime controls", () => {
     const onRefreshRuntimeServices = vi.fn();
 
     render(
@@ -127,7 +129,7 @@ describe("AppSettingsDialog", () => {
     expect(screen.queryByText(/aplicar y reiniciar/i)).not.toBeInTheDocument();
   });
 
-  it("keeps backend-oriented runtime controls out of the system panel", () => {
+  it("keeps legacy runtime controls out of the system panel", () => {
     render(
       <AppSettingsDialog
         {...baseProps}
@@ -164,6 +166,7 @@ describe("AppSettingsDialog", () => {
     expect(screen.queryByText(/puerto activo/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/ejecutable externo/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/proceso externo/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/backend|fastapi|python/i)).not.toBeInTheDocument();
   });
 
   it("copies the runtime diagnostic and shows feedback", async () => {
@@ -208,6 +211,36 @@ describe("AppSettingsDialog", () => {
     expect(writeText).toHaveBeenCalledWith(expect.stringContaining("expectedProfile=web-dev"));
     expect(writeText).toHaveBeenCalledWith(expect.stringContaining("localContract=tauri://local-api/health"));
     expect(await screen.findByRole("button", { name: /diagnóstico copiado/i })).toBeInTheDocument();
+  });
+
+  it("enables trace logging controls and opens the local log folder", () => {
+    const onDiagnosticsChange = vi.fn();
+    const onOpenTraceLogFolder = vi.fn();
+
+    render(
+      <AppSettingsDialog
+        {...baseProps}
+        diagnostics={{ ...defaultDiagnosticsConfig, traceLoggingEnabled: false }}
+        traceLogStatus={{
+          enabled: false,
+          folderPath: "C:\\Users\\user\\AppData\\Roaming\\ai.knownext.desktop\\logs",
+          filePath: "C:\\Users\\user\\AppData\\Roaming\\ai.knownext.desktop\\logs\\knownext.log",
+        }}
+        runtimeServicesStatus={null}
+        onDiagnosticsChange={onDiagnosticsChange}
+        onOpenTraceLogFolder={onOpenTraceLogFolder}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: /sistema y diagnóstico/i }));
+
+    expect(screen.getByText("C:\\Users\\user\\AppData\\Roaming\\ai.knownext.desktop\\logs")).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("switch", { name: /activar registro de trazas/i })[0]);
+    expect(onDiagnosticsChange).toHaveBeenCalledWith({ traceLoggingEnabled: true });
+
+    fireEvent.click(screen.getByRole("button", { name: /abrir carpeta en el explorador/i }));
+    expect(onOpenTraceLogFolder).toHaveBeenCalledTimes(1);
   });
 
   it("shows AI model choices and saves the selected model", () => {
@@ -266,7 +299,7 @@ describe("AppSettingsDialog", () => {
     expect(screen.getByText("4. Tareas agénticas")).toBeInTheDocument();
   });
 
-  it("allows choosing a custom generated image folder", () => {
+  it("shows image generation as unavailable until the Rust runtime contract exists", () => {
     const onAiChange = vi.fn();
 
     render(
@@ -279,16 +312,53 @@ describe("AppSettingsDialog", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "Capacidades" }));
 
-    expect(screen.getByText(/Define dónde se guardan las imágenes generadas/i)).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(/carpeta por defecto/i), { target: { value: "custom_folder" } });
+    expect(screen.getAllByText(/Generación de imágenes no disponible/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/contrato Rust\/Tauri validado/i).length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText(/carpeta por defecto/i)).not.toBeInTheDocument();
+    expect(onAiChange).not.toHaveBeenCalled();
+  });
 
-    expect(screen.getByLabelText(/ruta personalizada/i)).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(/ruta personalizada/i), { target: { value: "assets/infografias" } });
+  it("updates transcription defaults from the capabilities panel", () => {
+    const onAiChange = vi.fn();
+
+    render(
+      <AppSettingsDialog
+        {...baseProps}
+        runtimeServicesStatus={null}
+        onAiChange={onAiChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Capacidades" }));
+
+    const targetSelect = screen.getByLabelText(/destino por defecto/i) as HTMLSelectElement;
+    expect(targetSelect.value).toBe("prompt");
+    fireEvent.change(targetSelect, { target: { value: "document" } });
 
     expect(onAiChange).toHaveBeenLastCalledWith(expect.objectContaining({
-      imageGeneration: expect.objectContaining({
-        defaultFolder: "custom_folder",
-        customFolderPath: "assets/infografias",
+      transcription: expect.objectContaining({ defaultTarget: "document" }),
+    }));
+
+    const languageSelect = screen.getByLabelText(/idioma por defecto/i) as HTMLSelectElement;
+    fireEvent.change(languageSelect, { target: { value: "eu" } });
+
+    expect(onAiChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      transcription: expect.objectContaining({
+        defaultTarget: "document",
+        defaultLanguage: "eu",
+      }),
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: /idiomas favoritos del micrófono/i }));
+    const euskeraFavoriteOption = screen.getAllByRole("option", { name: "Euskera" }).find((option) => option.tagName === "BUTTON");
+    expect(euskeraFavoriteOption).toBeTruthy();
+    fireEvent.click(euskeraFavoriteOption!);
+
+    expect(onAiChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      transcription: expect.objectContaining({
+        defaultTarget: "document",
+        defaultLanguage: "eu",
+        favoriteLanguages: expect.arrayContaining(["es", "en", "eu"]),
       }),
     }));
   });
@@ -421,7 +491,7 @@ describe("AppSettingsDialog", () => {
     });
   });
 
-  it("shows agentic limits and web research controls", () => {
+  it("shows agentic and web research as unavailable instead of actionable controls", () => {
     const onAiChange = vi.fn();
 
     render(
@@ -435,13 +505,48 @@ describe("AppSettingsDialog", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Capacidades" }));
 
     expect(screen.getByText("4. Tareas agénticas")).toBeInTheDocument();
-    expect(screen.getByText(/Permite flujos de varios pasos/i)).toBeInTheDocument();
-    expect(screen.getByText("Investigación web")).toBeInTheDocument();
+    expect(screen.getByText(/Tareas agénticas no disponibles/i)).toBeInTheDocument();
+    expect(screen.getByText(/no realiza investigación web ni flujos autónomos/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Investigación web")).not.toBeInTheDocument();
+    expect(onAiChange).not.toHaveBeenCalled();
+  });
 
-    fireEvent.click(screen.getByLabelText("Investigación web"));
+  it("applies AI permission presets and individual permission changes", () => {
+    const onAiChange = vi.fn();
 
-    expect(onAiChange).toHaveBeenCalledWith(expect.objectContaining({
-      agentic: expect.objectContaining({ webResearchEnabled: true }),
+    render(
+      <AppSettingsDialog
+        {...baseProps}
+        runtimeServicesStatus={null}
+        onAiChange={onAiChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Capacidades" }));
+    fireEvent.click(screen.getByRole("button", { name: /productivo/i }));
+
+    expect(onAiChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      permissions: {
+        editDocuments: true,
+        createFolders: true,
+        createDocuments: true,
+        deleteDocumentsAndFolders: true,
+        generateImages: false,
+        createImageAssets: false,
+        insertImagesIntoDocuments: false,
+        useDocumentContextForImageGeneration: false,
+      },
+    }));
+
+    fireEvent.click(screen.getByRole("switch", { name: "Eliminar documentos y carpetas" }));
+
+    expect(onAiChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      permissions: expect.objectContaining({
+        editDocuments: true,
+        createFolders: true,
+        createDocuments: true,
+        deleteDocumentsAndFolders: false,
+      }),
     }));
   });
 });

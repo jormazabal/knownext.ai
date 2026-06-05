@@ -1,5 +1,5 @@
 import { AlertCircle, Brain, Check, ChevronDown, Clock3, File, FileText, Image, MessageSquare, Mic, MoreVertical, Plus, Search, SendHorizontal, SlidersHorizontal, Sparkles, Square, X, Zap, type LucideIcon } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type ReactNode, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
 import type { AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiExecutionMode, AiReasoningDepth, AiSelectionFocus, AiTranscriptionLanguage, AiTranscriptionTarget } from "../../types/domain";
 import { getDocumentTreeFileDragData, hasDocumentTreeFileDragData } from "../../lib/dragData";
 import { isPhoneAppShell } from "../../lib/runtime/platform";
@@ -34,6 +34,7 @@ type AiPromptInputProps = {
   onSearchProjectDocuments?: (query: string) => Promise<AiContextSearchResult[]>;
   onAddProjectDocumentContext?: (documentId: string) => void | Promise<void>;
   onUploadContextFiles?: (files: File[]) => void | Promise<void>;
+  onPickLocalContextFiles?: () => void | Promise<void>;
   onRemoveContextSource?: (sourceId: string) => void | Promise<void>;
   onExtendContextSource?: (sourceId: string) => void | Promise<void>;
   onPreviewContextSource?: (sourceId: string) => Promise<AiContextSourcePreviewResponse>;
@@ -59,6 +60,7 @@ export function AiPromptInput({
   onSearchProjectDocuments,
   onAddProjectDocumentContext,
   onUploadContextFiles,
+  onPickLocalContextFiles,
   onRemoveContextSource,
   onExtendContextSource,
   onPreviewContextSource,
@@ -89,10 +91,13 @@ export function AiPromptInput({
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const sourcesRef = useRef<HTMLDivElement | null>(null);
   const transcriptionMenuRef = useRef<HTMLDivElement | null>(null);
+  const contextMenuPointerToggleRef = useRef(false);
+  const transcriptionMenuPointerToggleRef = useRef(false);
   const promptPartialRef = useRef<{ start: number; end: number; itemId?: string | null } | null>(null);
   const transcriptionItemBuffersRef = useRef<Record<string, string>>({});
   const hasContext = Boolean(documentId || projectId);
   const canPrompt = hasContext && providerReady;
+  const canManageContext = hasContext && Boolean(onAddProjectDocumentContext || onUploadContextFiles || onPickLocalContextFiles);
   const hasBlockingContext = activeContextSources.some((source) => source.status === "processing");
   const transcription = transcriptionConfig ?? defaultTranscriptionConfig;
   const transcriptionState = useRealtimeTranscription();
@@ -361,6 +366,17 @@ export function AiPromptInput({
     setCompactOptionsOpen(false);
   }
 
+  async function pickLocalContextFiles() {
+    if (onPickLocalContextFiles) {
+      await onPickLocalContextFiles();
+      setContextMenuOpen(false);
+      setCompactOptionsOpen(false);
+      setSourcesOpen(false);
+      return;
+    }
+    fileInputRef.current?.click();
+  }
+
   function isContextDrop(event: DragEvent<HTMLDivElement>) {
     return hasDocumentTreeFileDragData(event.dataTransfer) || Array.from(event.dataTransfer.types ?? []).includes("Files");
   }
@@ -404,6 +420,7 @@ export function AiPromptInput({
   }
 
   function focusProjectReferenceSearch() {
+    if (!hasContext || !onSearchProjectDocuments || !onAddProjectDocumentContext) return;
     setContextMenuOpen(false);
     setCompactOptionsOpen(false);
     setReferenceQuery("");
@@ -414,6 +431,39 @@ export function AiPromptInput({
     setContextMenuOpen(false);
     setCompactOptionsOpen(false);
     textareaRef.current?.focus();
+  }
+
+  function toggleContextMenuFromPointer(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (!canManageContext) return;
+    event.preventDefault();
+    event.stopPropagation();
+    contextMenuPointerToggleRef.current = true;
+    setContextMenuOpen((open) => !open);
+  }
+
+  function toggleContextMenuFromClick(event: ReactMouseEvent<HTMLButtonElement>) {
+    if (contextMenuPointerToggleRef.current) {
+      contextMenuPointerToggleRef.current = false;
+      event.preventDefault();
+      return;
+    }
+    setContextMenuOpen((open) => !open);
+  }
+
+  function toggleTranscriptionMenuFromPointer(event: ReactPointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    transcriptionMenuPointerToggleRef.current = true;
+    setTranscriptionMenuOpen((open) => !open);
+  }
+
+  function toggleTranscriptionMenuFromClick(event: ReactMouseEvent<HTMLButtonElement>) {
+    if (transcriptionMenuPointerToggleRef.current) {
+      transcriptionMenuPointerToggleRef.current = false;
+      event.preventDefault();
+      return;
+    }
+    setTranscriptionMenuOpen((open) => !open);
   }
 
   function openCompactOptions() {
@@ -542,8 +592,9 @@ export function AiPromptInput({
               data-tooltip="Añadir contexto"
               aria-label="Añadir contexto"
               aria-expanded={contextMenuOpen}
-              onClick={() => setContextMenuOpen((open) => !open)}
-              disabled={!canPrompt}
+              onPointerDown={toggleContextMenuFromPointer}
+              onClick={toggleContextMenuFromClick}
+              disabled={!canManageContext}
             >
               <Plus size={19} strokeWidth={1.8} />
             </button>
@@ -551,7 +602,7 @@ export function AiPromptInput({
               <div className="absolute bottom-full left-0 z-40 mb-2 grid w-64 gap-1 rounded-[16px] border border-line bg-white p-1.5 text-[11px] text-ink-primary shadow-menu">
                 <p className="px-2 pb-0.5 pt-0.5 text-[10px] text-ink-secondary">Añadir contexto</p>
                 <ContextMenuButton icon={FileText} title="Archivo del proyecto" detail="Escribe @ para buscar documentos" onClick={focusProjectReferenceSearch} />
-                <ContextMenuButton icon={File} title="Adjuntar archivo" detail="PDF, Office, CSV, Markdown e imagen" onClick={() => fileInputRef.current?.click()} />
+                <ContextMenuButton icon={File} title="Adjuntar archivo" detail="PDF, Office, CSV, Markdown e imagen" onClick={() => void pickLocalContextFiles()} />
                 <ContextMenuButton icon={Image} title="Pegar imagen" detail="Usa Ctrl+V dentro del prompt" onClick={focusPromptForPaste} />
               </div>
             ) : null}
@@ -613,7 +664,7 @@ export function AiPromptInput({
                 : "Pregunta algo sobre la documentación del proyecto..."
             }
             rows={1}
-            disabled={!canPrompt}
+            disabled={!hasContext}
           />
           {referenceQuery !== null ? (
             <ReferencePicker
@@ -630,7 +681,7 @@ export function AiPromptInput({
               aria-expanded={modeMenuOpen}
               aria-haspopup="menu"
               aria-label="Selector de modo IA"
-              data-tooltip={executionMode === "quick" ? "Rápido: una llamada, sin tareas agénticas" : `Razonar: ${selectedDepthLabel}`}
+              data-tooltip={executionMode === "quick" ? "Rápido: respuesta directa" : `Razonar: ${selectedDepthLabel}, sin web externa`}
               onClick={() => {
                 setModeMenuOpen((isOpen) => !isOpen);
                 setDepthMenuOpen(executionMode === "reasoning");
@@ -742,7 +793,8 @@ export function AiPromptInput({
                 data-tooltip="Opciones de transcripción"
                 aria-label="Opciones de transcripción"
                 aria-expanded={transcriptionMenuOpen}
-                onClick={() => setTranscriptionMenuOpen((open) => !open)}
+                onPointerDown={toggleTranscriptionMenuFromPointer}
+                onClick={toggleTranscriptionMenuFromClick}
               >
                 <ChevronDown size={13} />
               </button>
@@ -862,6 +914,7 @@ export function AiPromptInput({
         {compactOptionsOpen ? (
           <PromptOptionsDialog
             canPrompt={canPrompt}
+            canManageContext={canManageContext}
             hasBlockingContext={hasBlockingContext}
             transcriptionAvailable={transcriptionAvailable}
             canStartTranscription={canStartTranscription}
@@ -879,7 +932,7 @@ export function AiPromptInput({
             contextWeightLabel={contextWeightLabel}
             onClose={() => setCompactOptionsOpen(false)}
             onFocusProjectReferenceSearch={focusProjectReferenceSearch}
-            onUploadFiles={() => fileInputRef.current?.click()}
+            onUploadFiles={() => void pickLocalContextFiles()}
             onFocusPromptForPaste={focusPromptForPaste}
             onOpenSources={() => {
               setCompactOptionsOpen(false);
@@ -917,7 +970,7 @@ const reasoningDepthLabels: Record<AiReasoningDepth, string> = {
 
 const defaultTranscriptionConfig: AiConfigStatus["transcription"] = {
   enabled: true,
-  model: "gpt-realtime-whisper",
+  model: "gpt-4o-mini-transcribe",
   defaultTarget: "prompt",
   defaultLanguage: "auto",
   favoriteLanguages: ["es", "en"],
@@ -1030,6 +1083,7 @@ function ContextMenuButton({ icon: Icon, title, detail, onClick }: { icon: typeo
 
 function PromptOptionsDialog({
   canPrompt,
+  canManageContext,
   hasBlockingContext,
   transcriptionAvailable,
   canStartTranscription,
@@ -1057,6 +1111,7 @@ function PromptOptionsDialog({
   onChooseTranscriptionLanguage,
 }: {
   canPrompt: boolean;
+  canManageContext: boolean;
   hasBlockingContext: boolean;
   transcriptionAvailable: boolean;
   canStartTranscription: boolean;
@@ -1111,7 +1166,7 @@ function PromptOptionsDialog({
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3">
           <PromptOptionsSection title="Contexto">
-            <div className="grid gap-1 rounded-xl border border-line p-1">
+            <div className={`grid gap-1 rounded-xl border border-line p-1 ${canManageContext ? "" : "opacity-50"}`}>
               <ContextMenuButton icon={FileText} title="Archivo del proyecto" detail="Buscar con @ documentos del proyecto" onClick={onFocusProjectReferenceSearch} />
               <ContextMenuButton icon={File} title="Adjuntar archivo" detail="PDF, Office, CSV, Markdown e imagen" onClick={onUploadFiles} />
               <ContextMenuButton icon={Image} title="Pegar imagen" detail="Cierra este panel y usa Ctrl+V en el prompt" onClick={onFocusPromptForPaste} />

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { expectedRuntimeProfile, requestJson, setApiBaseUrl, type RuntimeHealth } from "../api/client";
+import { expectedRuntimeProfile, requestJson, type RuntimeHealth } from "../api/client";
 import { APP_VERSION } from "../appVersion";
 
 export type RuntimeServiceState = "running" | "degraded" | "unavailable";
@@ -35,10 +35,7 @@ type TauriWindow = Window & {
 const BROWSER_SERVICE_STATUS_TIMEOUT_MS = 5000;
 export async function getRuntimeServiceStatus() {
   if (isTauriRuntime()) {
-    const status = await invoke<RuntimeServicesStatus>("get_runtime_service_status");
-    const runtime = status.services[0];
-    if (runtime?.endpoint) setApiBaseUrl(runtime.endpoint.replace(/\/health$/, ""));
-    return status;
+    return invoke<RuntimeServicesStatus>("get_runtime_service_status");
   }
 
   return getBrowserRuntimeServiceStatus();

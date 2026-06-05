@@ -216,9 +216,11 @@ describe("DocumentTabs", () => {
 
       expect(screen.getByLabelText("IA")).toHaveAttribute("draggable", "false");
       expect(screen.getByLabelText("Notas")).toHaveAttribute("draggable", "false");
-      expect(screen.getByLabelText("Acta.md")).toHaveAttribute("draggable", "true");
+      expect(screen.getByLabelText("Acta.md")).toHaveAttribute("draggable", "false");
+      expect(screen.getByLabelText("Acta.md")).toHaveAttribute("data-reorderable", "true");
       expect(screen.getByLabelText("Acta.md")).toHaveClass("cursor-default");
-      expect(screen.getByLabelText("Notas de release")).toHaveAttribute("draggable", "true");
+      expect(screen.getByLabelText("Notas de release")).toHaveAttribute("draggable", "false");
+      expect(screen.getByLabelText("Notas de release")).toHaveAttribute("data-reorderable", "true");
 
       fireEvent.dragStart(screen.getByLabelText("Esquemas.md"), { dataTransfer });
       fireEvent.dragOver(screen.getByLabelText("Acta.md"), { dataTransfer, clientX: 120 });
@@ -232,6 +234,130 @@ describe("DocumentTabs", () => {
       fireEvent.drop(screen.getByLabelText("Acta.md"), { dataTransfer: releaseNotesDataTransfer, clientX: 120 });
 
       expect(onReorderDocumentTabs).toHaveBeenCalledWith("app-release-notes", "doc-a", "after");
+    } finally {
+      rectSpy.mockRestore();
+    }
+  });
+
+  it("reorders tabs when the drop event only exposes text/plain drag data", () => {
+    const onReorderDocumentTabs = vi.fn();
+    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 160,
+      bottom: 36,
+      width: 160,
+      height: 36,
+      toJSON: () => ({}),
+    });
+
+    try {
+      render(
+        <DocumentTabs
+          tabs={tabs}
+          activeTabId="doc-a"
+          dirtyDocumentIds={[]}
+          onSelectTab={vi.fn()}
+          onCloseTab={vi.fn()}
+          onReorderDocumentTabs={onReorderDocumentTabs}
+        />,
+      );
+
+      const textOnlyDataTransfer = createDataTransfer();
+      textOnlyDataTransfer.setData("text/plain", "doc-b");
+
+      fireEvent.dragOver(screen.getByLabelText("Acta.md"), { dataTransfer: textOnlyDataTransfer });
+      fireEvent.drop(screen.getByLabelText("Acta.md"), { dataTransfer: textOnlyDataTransfer });
+
+      expect(onReorderDocumentTabs).toHaveBeenCalledWith("doc-b", "doc-a", "after");
+    } finally {
+      rectSpy.mockRestore();
+    }
+  });
+
+  it("reorders document tabs with pointer dragging in the native WebView path", () => {
+    const onReorderDocumentTabs = vi.fn();
+    const onSelectTab = vi.fn();
+    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function getTabRect(this: HTMLElement) {
+      const tabId = this.getAttribute("data-tab-id");
+      const left = tabId === "doc-b" ? 160 : 0;
+      return {
+        x: left,
+        y: 0,
+        left,
+        top: 0,
+        right: left + 160,
+        bottom: 36,
+        width: 160,
+        height: 36,
+        toJSON: () => ({}),
+      };
+    });
+
+    try {
+      render(
+        <DocumentTabs
+          tabs={tabs}
+          activeTabId="doc-a"
+          dirtyDocumentIds={[]}
+          onSelectTab={onSelectTab}
+          onCloseTab={vi.fn()}
+          onReorderDocumentTabs={onReorderDocumentTabs}
+        />,
+      );
+
+      const pointerDown = new MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: 220, clientY: 18 });
+      Object.defineProperty(pointerDown, "pointerType", { value: "touch" });
+      fireEvent(screen.getByLabelText("Esquemas.md"), pointerDown);
+      fireEvent(window, new MouseEvent("pointermove", { bubbles: true, clientX: 120, clientY: 18 }));
+      fireEvent(window, new MouseEvent("pointerup", { bubbles: true, clientX: 120, clientY: 18 }));
+
+      expect(onReorderDocumentTabs).toHaveBeenCalledWith("doc-b", "doc-a", "after");
+      expect(onSelectTab).not.toHaveBeenCalled();
+    } finally {
+      rectSpy.mockRestore();
+    }
+  });
+
+  it("reorders document tabs with mouse dragging when WebView mouse events are used", () => {
+    const onReorderDocumentTabs = vi.fn();
+    const onSelectTab = vi.fn();
+    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function getTabRect(this: HTMLElement) {
+      const tabId = this.getAttribute("data-tab-id");
+      const left = tabId === "doc-b" ? 160 : 0;
+      return {
+        x: left,
+        y: 0,
+        left,
+        top: 0,
+        right: left + 160,
+        bottom: 36,
+        width: 160,
+        height: 36,
+        toJSON: () => ({}),
+      };
+    });
+
+    try {
+      render(
+        <DocumentTabs
+          tabs={tabs}
+          activeTabId="doc-a"
+          dirtyDocumentIds={[]}
+          onSelectTab={onSelectTab}
+          onCloseTab={vi.fn()}
+          onReorderDocumentTabs={onReorderDocumentTabs}
+        />,
+      );
+
+      fireEvent.mouseDown(screen.getByLabelText("Esquemas.md"), { button: 0, clientX: 220, clientY: 18 });
+      fireEvent.mouseMove(window, { clientX: 120, clientY: 18 });
+      fireEvent.mouseUp(window, { clientX: 120, clientY: 18 });
+
+      expect(onReorderDocumentTabs).toHaveBeenCalledWith("doc-b", "doc-a", "after");
+      expect(onSelectTab).not.toHaveBeenCalled();
     } finally {
       rectSpy.mockRestore();
     }

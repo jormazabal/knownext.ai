@@ -1,7 +1,7 @@
 {
   "identifier": "ai.knownext.mobile",
   "build": {
-    "beforeBuildCommand": "pnpm build && node ../../scripts/check-client-bundle-clean.mjs"
+    "beforeBuildCommand": "pnpm build && node ../../scripts/check-client-bundle-clean.mjs dist"
   },
   "bundle": {
     "active": true,
