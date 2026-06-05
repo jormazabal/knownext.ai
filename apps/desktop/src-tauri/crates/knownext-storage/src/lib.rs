@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone)]
@@ -69,6 +69,57 @@ impl LocalApi {
             "startedAt": self.started_at,
             "managedBy": "tauri",
             "appDataDir": self.app_data_dir.to_string_lossy(),
+        })
+    }
+
+    pub fn git_diagnostics(&self) -> Value {
+        let git = git_version();
+        let git_available = git.is_ok();
+        let git_version = git.as_ref().ok().cloned();
+        let git_error = git.err();
+        let registry = self.registry();
+        let active_project_id = registry.get("activeProjectId").and_then(Value::as_str);
+        let active_project = self
+            .list_projects()
+            .into_iter()
+            .find(|project| project["id"].as_str() == active_project_id || project["active"].as_bool().unwrap_or(false));
+        let folder_path = active_project.as_ref().and_then(|project| project["folderPath"].as_str()).map(str::to_string);
+        let root = folder_path.as_ref().map(PathBuf::from);
+        let root_exists = root.as_ref().map(|path| path.exists()).unwrap_or(false);
+        let git_initialized = root.as_ref().map(|path| path.join(".git").exists()).unwrap_or(false);
+        let origin = root
+            .as_ref()
+            .filter(|_| git_initialized)
+            .and_then(|path| git_remote_url(path, "origin").ok().flatten());
+        let sync_mode = active_project.as_ref().and_then(|project| project["syncMode"].as_str()).unwrap_or("none");
+        let is_github = is_github_sync_mode(sync_mode);
+        let auth = self.auth_status();
+        let authenticated = auth["isAuthenticated"].as_bool().unwrap_or(false);
+        let remote_access = if !is_github {
+            "not-configured"
+        } else if !authenticated {
+            "unauthenticated"
+        } else if origin.is_none() {
+            "unknown"
+        } else {
+            "available"
+        };
+        json!({
+            "gitAvailable": git_available,
+            "gitVersion": git_version,
+            "lastError": git_error,
+            "projectId": active_project.as_ref().and_then(|project| project["id"].as_str()),
+            "projectName": active_project.as_ref().and_then(|project| project["name"].as_str()),
+            "folderPath": folder_path,
+            "folderExists": root_exists,
+            "gitInitialized": git_initialized,
+            "origin": origin,
+            "syncMode": sync_mode,
+            "versioningMode": active_project.as_ref().and_then(|project| project["versioningMode"].as_str()),
+            "githubConfigured": is_github,
+            "githubAuthenticated": authenticated,
+            "remoteAccess": remote_access,
+            "checkedAt": knownext_core::now_iso()
         })
     }
 
@@ -212,6 +263,7 @@ impl LocalApi {
             ("DELETE", ["api", "projects", project_id, "ai", "index"]) => ok(self.ai_index_status(project_id)),
             ("POST", ["api", "runtime", "select-folder"]) => ok(json!({ "folderPath": body.get("currentPath").and_then(Value::as_str) })),
             ("GET", ["api", "runtime", "logging"]) => ok(self.runtime_logging_status()?),
+            ("GET", ["api", "runtime", "git"]) => ok(self.git_diagnostics()),
             ("POST", ["api", "runtime", "logging"]) => ok(self.record_runtime_log(body)?),
             ("POST", ["api", "runtime", "open-folder"]) => ok(self.open_runtime_folder(body)?),
             _ => bad(404, &format!("Contrato local no implementado: {method} {path}")),
@@ -2018,18 +2070,119 @@ impl LocalApi {
         self.read_json(&self.conversation_path(project_id), json!({ "events": [] }))
     }
     fn ai_interaction(&self, project_id: &str, body: Value) -> Value {
+        let user_event = self.ai_user_conversation_event(project_id, &body);
         let context_sources = self.resolve_ai_context_sources(project_id, &body);
         let mut runtime_body = body;
         if let Some(object) = runtime_body.as_object_mut() {
             object.insert("runtimePermissions".to_string(), self.read_config()["ai"]["permissions"].clone());
         }
-        let response = knownext_ai::answer_interaction(project_id, &runtime_body, context_sources, self.openai_key().as_deref(), self.ai_model().as_str());
+        let mut response = knownext_ai::answer_interaction(project_id, &runtime_body, context_sources, self.openai_key().as_deref(), self.ai_model().as_str());
+        if let Err(error) = self.apply_ai_document_creations(project_id, &mut response) {
+            self.mark_ai_response_error(project_id, runtime_body.get("documentId").and_then(Value::as_str), &mut response, &error);
+        }
+        let mut response_events = Vec::new();
+        if let Some(event) = user_event {
+            response_events.push(event);
+        }
+        response_events.extend(response["conversationEvents"].as_array().cloned().unwrap_or_default());
+        response["conversationEvents"] = Value::Array(response_events.clone());
         let mut conversation = self.ai_conversation(project_id);
         if let Some(events) = conversation["events"].as_array_mut() {
-            events.extend(response["conversationEvents"].as_array().cloned().unwrap_or_default());
+            events.extend(response_events);
         }
         let _ = self.write_json(&self.conversation_path(project_id), &conversation);
         response
+    }
+    fn ai_user_conversation_event(&self, project_id: &str, body: &Value) -> Option<Value> {
+        let prompt = body.get("prompt").and_then(Value::as_str)?.trim();
+        if prompt.is_empty() {
+            return None;
+        }
+        Some(json!({
+            "id": body.get("clientMessageId").and_then(Value::as_str).filter(|value| !value.trim().is_empty()).unwrap_or("client-message"),
+            "projectId": project_id,
+            "type": "user_message",
+            "role": "user",
+            "content": prompt,
+            "createdAt": knownext_core::now_iso(),
+            "documentId": body.get("documentId").and_then(Value::as_str),
+            "path": body.pointer("/clientContext/lastDocumentPath").and_then(Value::as_str),
+            "paths": [],
+            "summary": null,
+            "sourcesUsed": []
+        }))
+    }
+    fn apply_ai_document_creations(&self, project_id: &str, response: &mut Value) -> Result<(), String> {
+        let Some(operations) = response["operations"].as_array_mut() else {
+            return Ok(());
+        };
+        let mut created: Vec<(String, String)> = Vec::new();
+        for operation in operations.iter_mut() {
+            if operation["type"].as_str() != Some("document_created") || operation["documentId"].as_str().is_some() {
+                continue;
+            }
+            let name = operation.get("name").and_then(Value::as_str).unwrap_or("documento-ia.md");
+            let markdown = operation.get("markdown").and_then(Value::as_str).unwrap_or("");
+            let relative = self.unique_project_relative(project_id, None, name)?;
+            let path = self.resolve_project_relative(project_id, &relative)?;
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            std::fs::write(&path, markdown).map_err(|error| error.to_string())?;
+            let document_id = doc_id(project_id, &relative);
+            operation["status"] = Value::from("completed");
+            operation["documentId"] = Value::from(document_id.clone());
+            operation["nodeId"] = Value::from(document_id.clone());
+            operation["path"] = Value::from(relative.clone());
+            operation["paths"] = json!([relative.clone()]);
+            created.push((document_id, relative));
+        }
+        if !created.is_empty() {
+            response["tree"] = Value::Array(self.project_tree(project_id)?);
+            if let Some(events) = response["conversationEvents"].as_array_mut() {
+                for event in events.iter_mut().filter(|event| event["type"].as_str() == Some("document_created")) {
+                    if event["documentId"].as_str().is_none() {
+                        let (document_id, relative) = &created[0];
+                        event["documentId"] = Value::from(document_id.clone());
+                        event["path"] = Value::from(relative.clone());
+                        event["paths"] = json!([relative]);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    fn mark_ai_response_error(&self, project_id: &str, document_id: Option<&str>, response: &mut Value, error: &str) {
+        let message = format!("No se pudo crear el documento solicitado por IA: {error}");
+        response["status"] = Value::from("error");
+        response["answer"] = Value::from(message.clone());
+        response["conversationEvents"] = json!([{
+            "id": knownext_core::compact_id("ai-event"),
+            "projectId": project_id,
+            "type": "provider_error",
+            "role": "assistant",
+            "content": message,
+            "createdAt": knownext_core::now_iso(),
+            "documentId": document_id,
+            "path": null,
+            "paths": [],
+            "summary": null,
+            "sourcesUsed": []
+        }]);
+        response["operations"] = json!([{
+            "type": "provider_error",
+            "status": "error",
+            "message": response["answer"],
+            "documentId": document_id,
+            "nodeId": null,
+            "path": null,
+            "paths": [],
+            "summary": response["answer"],
+            "task": null,
+            "confirmationId": null
+        }]);
+        response["updatedDocument"] = Value::Null;
+        response["tree"] = Value::Null;
     }
     fn resolve_ai_context_sources(&self, project_id: &str, body: &Value) -> Value {
         let source_ids = body["contextSourceIds"].as_array().cloned().unwrap_or_default();
@@ -2778,16 +2931,51 @@ fn remote_action_for_access(remote_access: &str) -> &'static str {
     }
 }
 
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+fn local_git_command() -> Command {
+    let mut command = Command::new("git");
+    command
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "never")
+        .env("GCM_MODAL_PROMPT", "false");
+    configure_silent_process(&mut command);
+    command
+}
+
+#[cfg(target_os = "windows")]
+fn configure_silent_process(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(target_os = "windows"))]
+fn configure_silent_process(_command: &mut Command) {}
+
+fn run_local_git(command: &mut Command) -> Result<Output, String> {
+    command
+        .output()
+        .map_err(|error| format!("Git no está disponible: {error}"))
+}
+
+fn git_version() -> Result<String, String> {
+    let output = run_local_git(local_git_command().arg("--version"))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
 fn ensure_git_repo(root: &Path) -> Result<(), String> {
     if root.join(".git").exists() {
         return Ok(());
     }
-    let output = Command::new("git")
+    let output = run_local_git(local_git_command()
         .arg("-C")
         .arg(root)
-        .arg("init")
-        .output()
-        .map_err(|error| format!("Git no está disponible: {error}"))?;
+        .arg("init"))?;
     if output.status.success() {
         Ok(())
     } else {
@@ -2850,30 +3038,24 @@ fn ensure_github_remote(root: &Path, owner: &str, repo: &str) -> Result<(), Stri
     ensure_git_repo(root)?;
     let url = format!("https://github.com/{owner}/{repo}.git");
     if git_remote_url(root, "origin")?.is_some() {
-        let output = Command::new("git")
+        let output = run_local_git(local_git_command()
             .arg("-C")
             .arg(root)
-            .args(["remote", "set-url", "origin", &url])
-            .output()
-            .map_err(|error| format!("Git no está disponible: {error}"))?;
+            .args(["remote", "set-url", "origin", &url]))?;
         return command_ok(output);
     }
-    let output = Command::new("git")
+    let output = run_local_git(local_git_command()
         .arg("-C")
         .arg(root)
-        .args(["remote", "add", "origin", &url])
-        .output()
-        .map_err(|error| format!("Git no está disponible: {error}"))?;
+        .args(["remote", "add", "origin", &url]))?;
     command_ok(output)
 }
 
 fn git_remote_url(root: &Path, remote: &str) -> Result<Option<String>, String> {
-    let output = Command::new("git")
+    let output = run_local_git(local_git_command()
         .arg("-C")
         .arg(root)
-        .args(["remote", "get-url", remote])
-        .output()
-        .map_err(|error| format!("Git no está disponible: {error}"))?;
+        .args(["remote", "get-url", remote]))?;
     if output.status.success() {
         let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
         Ok((!value.is_empty()).then_some(value))
@@ -2883,12 +3065,10 @@ fn git_remote_url(root: &Path, remote: &str) -> Result<Option<String>, String> {
 }
 
 fn current_git_branch(root: &Path) -> Option<String> {
-    let output = Command::new("git")
+    let output = run_local_git(local_git_command()
         .arg("-C")
         .arg(root)
-        .args(["branch", "--show-current"])
-        .output()
-        .ok()?;
+        .args(["branch", "--show-current"])).ok()?;
     if !output.status.success() {
         return None;
     }
@@ -2897,12 +3077,10 @@ fn current_git_branch(root: &Path) -> Option<String> {
 }
 
 fn git_status_items(root: &Path) -> Result<Vec<Value>, String> {
-    let output = Command::new("git")
+    let output = run_local_git(local_git_command()
         .arg("-C")
         .arg(root)
-        .args(["status", "--porcelain=v1", "--untracked-files=all"])
-        .output()
-        .map_err(|error| format!("Git no está disponible: {error}"))?;
+        .args(["status", "--porcelain=v1", "--untracked-files=all"]))?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
@@ -2953,12 +3131,10 @@ fn git_status_items(root: &Path) -> Result<Vec<Value>, String> {
 }
 
 fn git_head_hash(root: &Path) -> Result<Option<String>, String> {
-    let output = Command::new("git")
+    let output = run_local_git(local_git_command()
         .arg("-C")
         .arg(root)
-        .args(["rev-parse", "--short=8", "HEAD"])
-        .output()
-        .map_err(|error| format!("Git no está disponible: {error}"))?;
+        .args(["rev-parse", "--short=8", "HEAD"]))?;
     if output.status.success() {
         let hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
         Ok((!hash.is_empty()).then_some(hash))
@@ -2973,14 +3149,12 @@ fn git_auth_header(token: &str) -> String {
 }
 
 fn git_remote_head_hash(root: &Path, token: &str, remote: &str, branch: &str) -> Result<Option<String>, String> {
-    let output = Command::new("git")
+    let output = run_local_git(local_git_command()
         .arg("-C")
         .arg(root)
         .arg("-c")
         .arg(format!("http.https://github.com/.extraheader={}", git_auth_header(token)))
-        .args(["ls-remote", remote, &format!("refs/heads/{branch}")])
-        .output()
-        .map_err(|error| format!("Git no está disponible: {error}"))?;
+        .args(["ls-remote", remote, &format!("refs/heads/{branch}")]))?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
@@ -2989,33 +3163,27 @@ fn git_remote_head_hash(root: &Path, token: &str, remote: &str, branch: &str) ->
 }
 
 fn git_push_origin(root: &Path, token: &str, branch: &str) -> Result<(), String> {
-    let output = Command::new("git")
+    let output = run_local_git(local_git_command()
         .arg("-C")
         .arg(root)
         .arg("-c")
         .arg(format!("http.https://github.com/.extraheader={}", git_auth_header(token)))
-        .args(["push", "-u", "origin", &format!("HEAD:{branch}")])
-        .output()
-        .map_err(|error| format!("Git no está disponible: {error}"))?;
+        .args(["push", "-u", "origin", &format!("HEAD:{branch}")]))?;
     command_ok(output)
 }
 
 fn git_pull_ff_only(root: &Path, token: &str, branch: &str) -> Result<(), String> {
-    let fetch = Command::new("git")
+    let fetch = run_local_git(local_git_command()
         .arg("-C")
         .arg(root)
         .arg("-c")
         .arg(format!("http.https://github.com/.extraheader={}", git_auth_header(token)))
-        .args(["fetch", "origin", branch])
-        .output()
-        .map_err(|error| format!("Git no está disponible: {error}"))?;
+        .args(["fetch", "origin", branch]))?;
     command_ok(fetch)?;
-    let merge = Command::new("git")
+    let merge = run_local_git(local_git_command()
         .arg("-C")
         .arg(root)
-        .args(["merge", "--ff-only", &format!("origin/{branch}")])
-        .output()
-        .map_err(|error| format!("Git no está disponible: {error}"))?;
+        .args(["merge", "--ff-only", &format!("origin/{branch}")]))?;
     command_ok(merge)
 }
 
@@ -3192,14 +3360,12 @@ fn external_change_set(project_id: &str, items: Vec<Value>, message: Option<Stri
 }
 
 fn git_add_path(root: &Path, relative: &str) -> Result<(), String> {
-    let output = Command::new("git")
+    let output = run_local_git(local_git_command()
         .arg("-C")
         .arg(root)
         .arg("add")
         .arg("--")
-        .arg(relative)
-        .output()
-        .map_err(|error| format!("Git no está disponible: {error}"))?;
+        .arg(relative))?;
     if output.status.success() {
         Ok(())
     } else {
@@ -3208,13 +3374,11 @@ fn git_add_path(root: &Path, relative: &str) -> Result<(), String> {
 }
 
 fn git_commit_all(root: &Path, title: &str) -> Result<(), String> {
-    let output = Command::new("git")
+    let output = run_local_git(local_git_command()
         .arg("-C")
         .arg(root)
         .args(["-c", "user.name=KnowNext.ai", "-c", "user.email=knownext.local@knownext.ai"])
-        .args(["commit", "-m", title])
-        .output()
-        .map_err(|error| format!("Git no está disponible: {error}"))?;
+        .args(["commit", "-m", title]))?;
     if output.status.success() {
         Ok(())
     } else {
@@ -3475,7 +3639,7 @@ fn default_ai_config() -> Value {
     json!({
         "provider": "openai",
         "model": "gpt-5.4-mini",
-        "permissions": { "editDocuments": true, "createFolders": false, "createDocuments": false, "deleteDocumentsAndFolders": false, "generateImages": false, "createImageAssets": false, "insertImagesIntoDocuments": false, "useDocumentContextForImageGeneration": false },
+        "permissions": { "editDocuments": true, "createFolders": false, "createDocuments": true, "deleteDocumentsAndFolders": false, "generateImages": false, "createImageAssets": false, "insertImagesIntoDocuments": false, "useDocumentContextForImageGeneration": false },
         "rag": { "enabled": false, "vectorStoreId": null, "lastIndexedAt": null, "status": "not-indexed", "error": null },
         "vision": { "enabled": true, "model": "gpt-5.4-mini", "imageIndexingEnabled": false, "maxImagesPerPrompt": 4, "maxImageSizeMb": 12, "detail": "auto", "storeVisualDescriptions": true },
         "imageGeneration": { "enabled": false, "model": "gpt-image-1.5", "size": "auto", "quality": "auto", "outputFormat": "png", "defaultFolder": "document_folder", "customFolderPath": "assets/generated", "maxImagesPerPrompt": 1, "confirmBeforeDocumentInsert": false, "confirmBeforeUsingMultipleSources": true, "storePromptMetadata": true },
@@ -3512,7 +3676,7 @@ mod tests {
 
     fn api() -> LocalApi {
         let root = std::env::temp_dir().join(knownext_core::compact_id("knownext-test"));
-        LocalApi::new(root, "2.0.3".to_string(), "desktop".to_string())
+        LocalApi::new(root, "2.0.4".to_string(), "desktop".to_string())
     }
 
     fn create_project(api: &LocalApi) -> (String, PathBuf) {
@@ -3561,7 +3725,7 @@ mod tests {
         assert_eq!(response.status, 200);
         assert_eq!(response.body["app"], "knownext");
         assert_eq!(response.body["service"], "local-tauri-rust");
-        assert_eq!(response.body["version"], "2.0.3");
+        assert_eq!(response.body["version"], "2.0.4");
         assert_eq!(response.body["profile"], "desktop");
         assert_eq!(response.body["endpoint"], "tauri://local-api");
     }
@@ -3578,6 +3742,39 @@ mod tests {
         assert_eq!(response.body["canConnectGithub"], true);
         assert_eq!(response.body["canUseGithubApi"], true);
         assert_eq!(response.body["requiresGithubLoginForVersioning"], true);
+    }
+
+    #[test]
+    fn git_diagnostics_reports_active_project_and_paused_github() {
+        let api = api();
+        let root = std::env::temp_dir().join(knownext_core::compact_id("knownext-git-diagnostics"));
+        let created = api.handle("POST", "/api/projects", json!({
+            "name": "Diagnostics docs",
+            "folderPath": root.to_string_lossy(),
+            "versioningMode": "local-git",
+            "syncMode": "auto-github",
+            "githubRepository": {
+                "owner": "knownext",
+                "repo": "docs",
+                "defaultRef": "main",
+                "permissions": ["pull"],
+                "rootPath": ""
+            }
+        }), vec![]).unwrap();
+        let project_id = created.body["id"].as_str().unwrap();
+
+        run_git(Command::new("git").arg("-C").arg(&root).arg("init"));
+
+        let diagnostics = api.handle("GET", "/api/runtime/git", Value::Null, vec![]).unwrap();
+
+        assert_eq!(diagnostics.status, 200);
+        assert_eq!(diagnostics.body["projectId"], project_id);
+        assert_eq!(diagnostics.body["projectName"], "Diagnostics docs");
+        assert_eq!(diagnostics.body["folderExists"], true);
+        assert_eq!(diagnostics.body["gitInitialized"], true);
+        assert_eq!(diagnostics.body["githubConfigured"], true);
+        assert_eq!(diagnostics.body["githubAuthenticated"], false);
+        assert_eq!(diagnostics.body["remoteAccess"], "unauthenticated");
     }
 
     #[test]
@@ -4464,13 +4661,19 @@ mod tests {
         let interaction = api.handle("POST", &format!("/api/projects/{project_id}/ai/interactions"), json!({
             "prompt": "Propón un siguiente paso",
             "documentId": document_id,
+            "clientMessageId": "client-test-message",
             "contextSourceIds": [document_id]
         }), vec![]).unwrap();
         assert_eq!(interaction.status, 200);
         assert_eq!(interaction.body["status"], "error");
         assert_eq!(interaction.body["operations"][0]["type"], "provider_unavailable");
-        assert!(interaction.body["conversationEvents"][0]["sourcesUsed"][0]["text"].is_null());
-        assert!(!interaction.body["conversationEvents"].as_array().unwrap().is_empty());
+        assert_eq!(interaction.body["conversationEvents"][0]["id"], "client-test-message");
+        assert_eq!(interaction.body["conversationEvents"][0]["type"], "user_message");
+        assert_eq!(interaction.body["conversationEvents"][0]["content"], "Propón un siguiente paso");
+        assert_eq!(interaction.body["conversationEvents"][1]["type"], "provider_unavailable");
+        assert!(interaction.body["conversationEvents"][1]["sourcesUsed"][0]["text"].is_null());
+        let conversation = api.handle("GET", &format!("/api/projects/{project_id}/ai/conversation"), Value::Null, vec![]).unwrap();
+        assert_eq!(conversation.body["events"].as_array().unwrap().len(), 2);
 
         let transcription = api.handle("POST", "/api/transcription", json!({ "language": "es" }), vec![]).unwrap();
         assert_eq!(transcription.body["status"], "error");
@@ -4484,5 +4687,54 @@ mod tests {
         assert!(index.body["lastIndexedAt"].is_null());
         assert_eq!(index.body["documentCount"], 4);
         assert_eq!(index.body["indexedDocumentCount"], 0);
+    }
+
+    #[test]
+    fn ai_document_creation_operation_materializes_markdown_and_tree() {
+        let api = api();
+        let (project_id, root) = create_project(&api);
+        let mut response = json!({
+            "status": "completed",
+            "answer": "He creado el documento.",
+            "conversationEvents": [{
+                "id": "event",
+                "projectId": project_id,
+                "type": "document_created",
+                "role": "assistant",
+                "content": "He creado el documento.",
+                "createdAt": "2026-06-05T00:00:00Z",
+                "documentId": null,
+                "path": null,
+                "paths": [],
+                "summary": "Documento creado",
+                "sourcesUsed": []
+            }],
+            "operations": [{
+                "type": "document_created",
+                "status": "ready",
+                "message": "Documento creado",
+                "documentId": null,
+                "nodeId": null,
+                "path": null,
+                "paths": [],
+                "summary": "Documento creado",
+                "task": null,
+                "confirmationId": null,
+                "name": "plan.md",
+                "markdown": "# Plan\n\nCreado por IA."
+            }],
+            "tree": null
+        });
+
+        api.apply_ai_document_creations(&project_id, &mut response).unwrap();
+
+        let document_id = doc_id(&project_id, "plan.md");
+        assert_eq!(response["operations"][0]["status"], "completed");
+        assert_eq!(response["operations"][0]["documentId"], document_id);
+        assert_eq!(response["operations"][0]["path"], "plan.md");
+        assert_eq!(response["conversationEvents"][0]["documentId"], document_id);
+        assert_eq!(response["conversationEvents"][0]["path"], "plan.md");
+        assert!(response["tree"].as_array().unwrap().iter().any(|node| node["id"] == document_id));
+        assert_eq!(std::fs::read_to_string(root.join("plan.md")).unwrap(), "# Plan\n\nCreado por IA.");
     }
 }

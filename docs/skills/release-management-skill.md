@@ -56,7 +56,7 @@ Optional hardening:
 ## Endpoint Verification
 
 ```powershell
-$version = "2.0.3"
+$version = "2.0.4"
 $manifest = Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/jormazabal/knownext.ai/releases/latest/download/latest.json" -MaximumRedirection 10
 $json = [System.Text.Encoding]::UTF8.GetString($manifest.Content) | ConvertFrom-Json
 $json.version

@@ -82,7 +82,7 @@ export const defaultAiConfig: AiConfig = {
   permissions: {
     editDocuments: true,
     createFolders: false,
-    createDocuments: false,
+    createDocuments: true,
     deleteDocumentsAndFolders: false,
     generateImages: false,
     createImageAssets: false,
@@ -382,7 +382,7 @@ function normalizeAi(ai: AiConfig | undefined): AiConfig | undefined {
     permissions: {
       editDocuments: ai.permissions?.editDocuments !== false,
       createFolders: Boolean(ai.permissions?.createFolders),
-      createDocuments: Boolean(ai.permissions?.createDocuments),
+      createDocuments: ai.permissions?.createDocuments !== false,
       deleteDocumentsAndFolders: Boolean(ai.permissions?.deleteDocumentsAndFolders),
       generateImages: false,
       createImageAssets: false,

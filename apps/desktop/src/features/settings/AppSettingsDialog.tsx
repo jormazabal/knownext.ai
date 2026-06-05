@@ -89,7 +89,7 @@ const permissionModePresets: Record<Exclude<PermissionModeId, "custom">, AiConfi
   assisted: {
     editDocuments: true,
     createFolders: false,
-    createDocuments: false,
+    createDocuments: true,
     deleteDocumentsAndFolders: false,
     generateImages: false,
     createImageAssets: false,
@@ -1528,13 +1528,18 @@ function SystemSettings({
           <p className="mt-2 text-[10px] text-ink-secondary">{text.lastChecked}: {formatDateTime(runtimeServicesStatus.checkedAt)}</p>
         ) : null}
 
-        {runtimeService ? (
-          <SystemServiceCard
-            service={runtimeService}
-            text={text}
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-          />
+        {services.length > 0 ? (
+          <div className="mt-4 space-y-3">
+            {services.map((service) => (
+              <SystemServiceCard
+                key={service.id}
+                service={service}
+                text={text}
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+              />
+            ))}
+          </div>
         ) : (
           <div className="mt-4 rounded-md border border-line bg-panel px-4 py-3 text-[11px] text-ink-secondary">{text.servicesPending}</div>
         )}
