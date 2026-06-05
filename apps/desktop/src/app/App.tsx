@@ -304,7 +304,14 @@ export function App() {
   const lastTraceLogRef = useRef<{ fingerprint: string; timestamp: number } | null>(null);
   const githubLoginPollingRef = useRef(false);
   const lastDocumentContextRef = useRef<{ id: string | null; path: string | null }>({ id: null, path: null });
+  const documentSessionsRef = useRef(documentSessions);
+  const externalChangesLastCheckRef = useRef(0);
+  const projectSyncLastCheckRef = useRef(0);
   const resolvedTheme = useResolvedAppearanceTheme(appearanceConfig.themeMode);
+
+  useEffect(() => {
+    documentSessionsRef.current = documentSessions;
+  }, [documentSessions]);
 
   useEffect(() => {
     void (async () => {
@@ -562,11 +569,23 @@ export function App() {
       return;
     }
     if (externalChangesBusy) return;
-    void refreshExternalChangeSet(activeProject.id, { refreshTreeOnChanges: true, silent: true });
-    const interval = window.setInterval(() => {
+    externalChangesLastCheckRef.current = 0;
+    const check = () => {
+      const now = Date.now();
+      if (now - externalChangesLastCheckRef.current < 55_000) return;
+      externalChangesLastCheckRef.current = now;
       void refreshExternalChangeSet(activeProject.id, { refreshTreeOnChanges: true, silent: true });
-    }, 8000);
-    return () => window.clearInterval(interval);
+    };
+    const startupTimeout = window.setTimeout(check, 1200);
+    const interval = window.setInterval(() => {
+      check();
+    }, 60_000);
+    window.addEventListener("focus", check);
+    return () => {
+      window.clearTimeout(startupTimeout);
+      window.clearInterval(interval);
+      window.removeEventListener("focus", check);
+    };
   }, [activeProject?.id, acknowledgedExternalChangeSets, configLoaded, externalChangesBusy]);
 
   useEffect(() => {
@@ -579,12 +598,24 @@ export function App() {
 
   useEffect(() => {
     if (!configLoaded || !activeProject) return;
-    void refreshProjectSyncStatus(activeProject.id, { autoRun: isAutomaticSyncMode(activeProject.syncMode), silent: true });
-    const interval = window.setInterval(() => {
+    projectSyncLastCheckRef.current = 0;
+    const check = () => {
+      const now = Date.now();
+      const remotePaused = Boolean(projectSyncStatus?.remotePaused);
+      const minInterval = remotePaused ? 5 * 60_000 : 45_000;
+      if (now - projectSyncLastCheckRef.current < minInterval) return;
+      projectSyncLastCheckRef.current = now;
       void refreshProjectSyncStatus(activeProject.id, { autoRun: isAutomaticSyncMode(activeProject.syncMode), silent: true });
+    };
+    const startupTimeout = window.setTimeout(check, 1800);
+    const interval = window.setInterval(() => {
+      check();
     }, 45000);
-    return () => window.clearInterval(interval);
-  }, [activeProject?.id, activeProject?.syncMode, activeDocumentId, authStatus.isAuthenticated, configLoaded, documentSessions]);
+    return () => {
+      window.clearTimeout(startupTimeout);
+      window.clearInterval(interval);
+    };
+  }, [activeProject?.id, activeProject?.syncMode, authStatus.isAuthenticated, configLoaded, projectSyncStatus?.remotePaused]);
 
   useEffect(() => {
     if (!configLoaded || !activeProject) {
@@ -955,7 +986,7 @@ export function App() {
   }
 
   function getOpenDocumentSyncState(): OpenDocumentSyncState[] {
-    return Object.entries(documentSessions)
+    return Object.entries(documentSessionsRef.current)
       .filter(([, session]) => session.document)
       .map(([documentId, session]) => ({
         documentId,

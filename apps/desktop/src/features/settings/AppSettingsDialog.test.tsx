@@ -169,6 +169,62 @@ describe("AppSettingsDialog", () => {
     expect(screen.queryByText(/backend|fastapi|python/i)).not.toBeInTheDocument();
   });
 
+  it("shows Git and GitHub diagnostics as a separate local runtime service", () => {
+    render(
+      <AppSettingsDialog
+        {...baseProps}
+        runtimeServicesStatus={{
+          checkedAt: "2026-06-05T17:30:00.000Z",
+          services: [
+            {
+              id: "local-runtime",
+              name: "Runtime local Rust",
+              status: "running",
+              statusLabel: "Operativo",
+              description: "La aplicación usa comandos Tauri y persistencia local Rust.",
+              endpoint: "tauri://local-api/health",
+              expectedVersion: "2.0.4",
+              version: "2.0.4",
+              expectedProfile: "desktop",
+              profile: "desktop",
+              expectedAppDataDir: "C:\\Users\\user\\AppData\\Roaming\\ai.knownext.desktop",
+              appDataDir: "C:\\Users\\user\\AppData\\Roaming\\ai.knownext.desktop",
+              managedBy: "tauri",
+              instanceId: "tauri-rust-local",
+              startedAt: "2026-06-05T17:00:00.000Z",
+              lastError: null,
+            },
+            {
+              id: "git-runtime",
+              name: "Git local y GitHub",
+              status: "running",
+              statusLabel: "Local activo · GitHub pausado",
+              description: "El historial local puede usarse sin terminales visibles; GitHub queda pausado hasta conectar la cuenta.",
+              endpoint: "tauri://local-api/api/runtime/git",
+              expectedVersion: "git",
+              version: "git version 2.45.0.windows.1",
+              expectedProfile: "desktop",
+              profile: "unauthenticated",
+              expectedAppDataDir: "C:\\KnowNext-PROJECTS\\LKS Next",
+              appDataDir: null,
+              managedBy: "local-git+github",
+              instanceId: "knownext-lks",
+              startedAt: "2026-06-05T17:30:00.000Z",
+              lastError: "GitHub remoto pausado: sin cuenta GitHub conectada. El trabajo local sigue disponible.",
+            },
+          ],
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: /sistema y diagnóstico/i }));
+
+    expect(screen.getByText("Runtime local Rust")).toBeInTheDocument();
+    expect(screen.getByText("Git local y GitHub")).toBeInTheDocument();
+    expect(screen.getByText("Local activo · GitHub pausado")).toBeInTheDocument();
+    expect(screen.getByText(/sin terminales visibles/i)).toBeInTheDocument();
+  });
+
   it("copies the runtime diagnostic and shows feedback", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {

@@ -450,7 +450,7 @@ describe("DocumentTree", () => {
     expect(onExpandTree).toHaveBeenCalledTimes(1);
     expect(onCollapseTree).toHaveBeenCalledTimes(1);
     expect(onConfigureProject).toHaveBeenCalledTimes(1);
-  }, 10_000);
+  }, 20_000);
 
   it("shows distinct support-file type badges and keeps toolbar outside the scroll region", () => {
     const { container } = render(

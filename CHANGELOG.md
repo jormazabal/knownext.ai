@@ -2,6 +2,17 @@
 
 All KnowNext.ai releases use one monolithic application version for the frontend, Tauri shell, Rust runtime, Windows updater, and Android updater.
 
+## 2.0.4 - 2026-06-05
+
+- Centralized Rust Git execution behind a local helper that runs Git non-interactively and hides subprocess windows on Windows, preventing terminal windows from opening during internal history and sync checks.
+- Added non-interactive Git environment controls so Git/GitHub operations do not prompt through Git Credential Manager while KnowNext.ai is running as a graphical app.
+- Reduced startup and background sync aggressiveness: external-change scans now run on a slower cadence and focus events, and remote-paused GitHub projects back off instead of repeatedly polling.
+- Kept `auto-github` projects local-first when GitHub is unavailable: documents remain editable, Git local remains available, and GitHub is represented as a paused status instead of a repeated interruption.
+- Added Git/GitHub diagnostics to the settings runtime panel, including active project, Git availability, local history state, origin status and remote access state.
+- Added a Rust/Tauri AI document-creation contract: when the user asks AI to create a Markdown document, the runtime can materialize the document locally and open it through the normal project tree flow.
+- Persisted user prompts as conversation events so document-level AI requests appear in the IA tab alongside assistant responses and document operations.
+- Added Rust and frontend coverage for Git diagnostics, AI document creation, conversation persistence and the expanded settings runtime service view.
+
 ## 2.0.3 - 2026-06-05
 
 - Added runtime cleanup for stale public GitHub auth state when the private GitHub credential is missing, so the UI cannot show a connected account that cannot actually authenticate sync.

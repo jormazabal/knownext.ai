@@ -231,7 +231,9 @@ fn build_response_request(payload: &Value, prompt: &str, context_sources: &Value
         "Devuelve siempre un JSON sin markdown externo ni bloques de codigo. ",
         "Contrato de salida: {\"action\":\"answer\",\"answer\":\"texto\"} para consultas; ",
         "{\"action\":\"replace_document\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"markdown\":\"documento markdown completo\"} para cambios de contenido del documento activo. ",
+        "{\"action\":\"create_document\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"name\":\"nombre.md\",\"markdown\":\"documento markdown completo\"} para crear un documento Markdown nuevo cuando el usuario lo pida. ",
         "No afirmes que has modificado archivos: propone el cambio con action replace_document y el runtime lo validara contra permisos. ",
+        "No afirmes que has creado archivos: propone el cambio con action create_document y el runtime lo validara contra permisos. ",
         "No uses action replace_document si no hay documento activo o si la peticion no requiere modificar contenido."
         ),
         reasoning_guidance,
@@ -406,6 +408,23 @@ fn structured_interaction_response(
         ));
     }
 
+    if action == "create_document" {
+        return Some(create_document_response(
+            project_id,
+            payload,
+            document_id,
+            interaction_id,
+            event_id,
+            created_at,
+            &decision,
+            answer,
+            execution_mode,
+            reasoning_depth,
+            mode,
+            context_sources,
+        ));
+    }
+
     if action != "replace_document" {
         return Some(permission_blocked_response(
             project_id,
@@ -521,6 +540,115 @@ fn structured_interaction_response(
         "contextSources": null,
         "expiredContextSourceIds": []
     }))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_document_response(
+    project_id: &str,
+    payload: &Value,
+    document_id: Option<&str>,
+    interaction_id: &str,
+    event_id: &str,
+    created_at: &str,
+    decision: &Value,
+    answer: &str,
+    execution_mode: &str,
+    reasoning_depth: &str,
+    mode: &str,
+    context_sources: &Value,
+) -> Value {
+    if !payload.pointer("/runtimePermissions/createDocuments").and_then(Value::as_bool).unwrap_or(false) {
+        return permission_blocked_response(
+            project_id,
+            document_id,
+            interaction_id,
+            event_id,
+            created_at,
+            "La IA ha preparado un documento nuevo, pero el permiso de creación de documentos está desactivado en Ajustes > IA.",
+            execution_mode,
+            reasoning_depth,
+            mode,
+        );
+    }
+
+    let Some(markdown) = decision.get("markdown").and_then(Value::as_str).filter(|value| !value.trim().is_empty()) else {
+        return permission_blocked_response(
+            project_id,
+            document_id,
+            interaction_id,
+            event_id,
+            created_at,
+            "La IA propuso crear un documento, pero no devolvió un Markdown completo y validable.",
+            execution_mode,
+            reasoning_depth,
+            mode,
+        );
+    };
+    let raw_name = decision
+        .get("name")
+        .or_else(|| decision.get("title"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("documento-ia.md");
+    let name = normalize_markdown_file_name(raw_name);
+    let summary = decision
+        .get("summary")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(answer);
+    let public_context_sources = public_context_sources(context_sources);
+    let assistant_event = json!({
+        "id": event_id,
+        "projectId": project_id,
+        "type": "document_created",
+        "role": "assistant",
+        "content": answer,
+        "createdAt": created_at,
+        "documentId": document_id,
+        "path": null,
+        "paths": [],
+        "summary": summary,
+        "sourcesUsed": public_context_sources,
+    });
+    json!({
+        "interactionId": interaction_id,
+        "status": "completed",
+        "display": "bubble",
+        "uiPlacement": if mode == "project" { "conversation_tab" } else { "document_bubble" },
+        "interactionType": "project_operation",
+        "confidence": "medium",
+        "executionMode": execution_mode,
+        "reasoningDepth": reasoning_depth,
+        "executionScope": "direct_action",
+        "routeToAiTab": mode == "project",
+        "needsUserClarification": false,
+        "pendingIntent": null,
+        "pendingIntentStatus": null,
+        "answer": answer,
+        "conversationEvents": [assistant_event],
+        "operations": [{
+            "type": "document_created",
+            "status": "ready",
+            "message": summary,
+            "documentId": null,
+            "nodeId": null,
+            "path": null,
+            "paths": [],
+            "summary": summary,
+            "task": null,
+            "confirmationId": null,
+            "name": name,
+            "markdown": markdown
+        }],
+        "updatedDocument": null,
+        "generatedImages": [],
+        "task": null,
+        "tree": null,
+        "affectedDocuments": [],
+        "requiresConfirmation": null,
+        "contextSources": null,
+        "expiredContextSourceIds": []
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -656,6 +784,32 @@ fn extract_fenced_json(text: &str) -> Option<&str> {
     let content = &after_start[content_start..];
     let end = content.find("```")?;
     Some(content[..end].trim())
+}
+
+fn normalize_markdown_file_name(raw: &str) -> String {
+    let mut name = raw
+        .trim()
+        .replace('\\', "/")
+        .rsplit('/')
+        .next()
+        .unwrap_or("documento-ia.md")
+        .chars()
+        .map(|character| match character {
+            '<' | '>' | ':' | '"' | '|' | '?' | '*' => '-',
+            character if character.is_control() => '-',
+            character => character,
+        })
+        .collect::<String>()
+        .trim()
+        .trim_matches('.')
+        .to_string();
+    if name.is_empty() {
+        name = "documento-ia.md".to_string();
+    }
+    if !name.to_ascii_lowercase().ends_with(".md") {
+        name.push_str(".md");
+    }
+    name
 }
 
 fn openai_client(openai_key: &str) -> Client {
@@ -823,6 +977,32 @@ mod tests {
         assert_eq!(response["operations"][0]["type"], "document_modified");
         assert_eq!(response["updatedDocument"]["documentId"], "project::doc.md");
         assert_eq!(response["updatedDocument"]["markdown"], "# Revisado\n\nContenido final.");
+        assert!(response["conversationEvents"][0]["sourcesUsed"][0]["text"].is_null());
+    }
+
+    #[test]
+    fn structured_document_creation_returns_validated_project_operation() {
+        let response = structured_interaction_response(
+            "project",
+            &json!({ "runtimePermissions": { "createDocuments": true } }),
+            Some("project::active.md"),
+            "interaction",
+            "event",
+            "2026-06-04T00:00:00Z",
+            r##"{"action":"create_document","answer":"He preparado el documento nuevo.","summary":"Documento nuevo preparado","name":"Plan: IA","markdown":"# Plan IA\n\nContenido final."}"##,
+            "reasoning",
+            "medium",
+            "document",
+            &json!([{ "id": "source", "text": "internal", "name": "Fuente" }]),
+        ).unwrap();
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["interactionType"], "project_operation");
+        assert_eq!(response["operations"][0]["type"], "document_created");
+        assert_eq!(response["operations"][0]["status"], "ready");
+        assert_eq!(response["operations"][0]["name"], "Plan- IA.md");
+        assert_eq!(response["operations"][0]["markdown"], "# Plan IA\n\nContenido final.");
+        assert_eq!(response["conversationEvents"][0]["type"], "document_created");
         assert!(response["conversationEvents"][0]["sourcesUsed"][0]["text"].is_null());
     }
 

@@ -48,7 +48,7 @@ KnowNext.ai is a compact local-first workspace for Markdown documentation. Users
 ## Settings And Diagnostics
 
 - The Services section shows the local Rust runtime, app version, profile, app data directory, health state, and latest diagnostic error.
-- 2.0.3 has no external executable, process restart, API port, or runtime endpoint setting.
+- 2.0.4 has no external executable, process restart, API port, or runtime endpoint setting.
 - Diagnostic trace logging can be enabled by the user and must avoid secrets, prompt bodies, credentials, and full document content.
 
 ## Data Policy
@@ -68,7 +68,7 @@ KnowNext.ai is a compact local-first workspace for Markdown documentation. Users
 - Do not add an external plus button next to the project selector.
 - Tree item actions appear through hover/context menus, not permanent action icons.
 
-## Current 2.0.3 Limitations
+## Current 2.0.4 Limitations
 
 - AI provider execution depends on locally stored OpenAI credentials and still needs end-to-end validation with real keys before claiming provider acceptance.
 - AI image generation is intentionally unavailable in settings until a runtime-backed local asset-generation contract exists.

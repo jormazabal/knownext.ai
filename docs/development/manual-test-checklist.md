@@ -1,14 +1,14 @@
 # Manual Test Checklist
 
-Use this checklist before publishing a KnowNext.ai release. For 2.0.3, run critical acceptance on packaged Windows and Android builds. Do not publish if a critical item fails.
+Use this checklist before publishing a KnowNext.ai release. For 2.0.4, run critical acceptance on packaged Windows and Android builds. Do not publish if a critical item fails.
 
 Use `docs/development/functional-validation-matrix.md` to record which areas are proven by automated tests, which areas have been manually validated, and which areas remain blocked by credentials, signing keys, or device access.
 
 ## Build Under Test
 
-- Version: `2.0.3`
-- Windows artifact: primary installer `KnowNext.ai_2.0.3_x64_en-US.msi`; secondary NSIS asset `KnowNext.ai_2.0.3_x64-setup.exe`
-- Android artifact: `KnowNext.ai-android-arm64-v2.0.3.apk`
+- Version: `2.0.4`
+- Windows artifact: primary installer `KnowNext.ai_2.0.4_x64_en-US.msi`; secondary NSIS asset `KnowNext.ai_2.0.4_x64-setup.exe`
+- Android artifact: `KnowNext.ai-android-arm64-v2.0.4.apk`
 - Runtime: local Tauri/Rust, no external product service or workstation service dependency.
 
 ## Automated Gate
@@ -33,6 +33,7 @@ Use `docs/development/functional-validation-matrix.md` to record which areas are
   - The validation window must be a native Tauri window, not the Vite page in a browser tab.
 - Install or update the packaged Windows app.
 - Open the app and confirm startup resolves to an empty workspace or the user's preserved real workspace, not sample data.
+- On a Git/GitHub project, confirm startup does not repeatedly open and close terminal windows while history and sync status are checked.
 - Create a project from the project selector.
 - Create a folder and Markdown document from tree menus.
 - Open multiple tabs, switch tabs, close tabs, and confirm the active document stays stable.
@@ -54,9 +55,10 @@ Use `docs/development/functional-validation-matrix.md` to record which areas are
 - Export a document to MD, PDF, and DOCX.
 - Use the AI panel on the active document. Mocked responses are acceptable only when clearly routed through the local runtime contract.
 - Open settings, confirm Services shows `Runtime local`, `Contrato local`, `tauri://local-api/health`, no port control, no restart action, and no external executable.
+- Open settings > System diagnostics and confirm the Git/GitHub service reports the active project, Git availability, local history state, origin/remote state, and GitHub paused state when unauthenticated.
 - Configure an OpenAI key, connect GitHub, then close only the GitHub session; confirm the OpenAI key remains configured. Reconnect GitHub, update the OpenAI key, and confirm GitHub remains connected.
 - Open a GitHub-synced project without a GitHub account or without repository access. Confirm editing, saving, and local history continue; the document footer shows `Sin acceso a GitHub`; automatic remote sync pauses without repeated save/sync error prompts.
-- If a previous 2.0.1 install shows an internal development GitHub placeholder account or a public GitHub account without a private credential, update to 2.0.3 and confirm it is cleared to `Sin cuenta GitHub`; attempting GitHub login must start the real GitHub device flow in the installed app. If a temporary fallback such as `GitHub remoto no configurado` appears, close and reopen or use `Reintentar login` and confirm the app attempts the device flow again instead of staying stuck in the fallback. If the account is disconnected or lacks permissions, the UI must show GitHub as paused while local history remains usable.
+- If a previous install shows an internal development GitHub placeholder account or a public GitHub account without a private credential, update to 2.0.4 and confirm it is cleared to `Sin cuenta GitHub`; attempting GitHub login must start the real GitHub device flow in the installed app. If a temporary fallback such as `GitHub remoto no configurado` appears, close and reopen or use `Reintentar login` and confirm the app attempts the device flow again instead of staying stuck in the fallback. If the account is disconnected or lacks permissions, the UI must show GitHub as paused while local history remains usable.
 - Enable diagnostics, trigger a visible error, and confirm trace/log access works.
 - Check for updates and confirm the updater uses the signed Windows manifest.
 - Resize the window across compact and normal widths without overlapping core controls.
@@ -80,18 +82,18 @@ Use `docs/development/functional-validation-matrix.md` to record which areas are
 ## Release Publication Gate
 
 - GitHub release draft contains Windows NSIS, Windows MSI, both `.sig` files, `latest.json`, Android APK, and `android-latest.json`.
-- `latest.json` resolves to `2.0.3` and points `windows-x86_64.url` to the MSI artifact.
-- `android-latest.json` resolves to `2.0.3` and points to `KnowNext.ai-android-arm64-v2.0.3.apk`.
+- `latest.json` resolves to `2.0.4` and points `windows-x86_64.url` to the MSI artifact.
+- `android-latest.json` resolves to `2.0.4` and points to `KnowNext.ai-android-arm64-v2.0.4.apk`.
 - README Windows MSI and Android download URLs return HTTP 200.
-- A previous Windows install updates to 2.0.3 without deleting app data.
-- An Android install updates to 2.0.3 while preserving app data and still works offline.
+- A previous Windows install updates to 2.0.4 without deleting app data.
+- An Android install updates to 2.0.4 while preserving app data and still works offline.
 
-## Known 2.0.3 Limitations To Record If Still Present
+## Known 2.0.4 Limitations To Record If Still Present
 
 - GitHub synchronization must use the Rust Git service; if credentials or permissions are missing, the UI must pause remote sync while local history remains usable.
 - AI provider execution requires locally stored OpenAI credentials and must be validated with a real key before claiming provider acceptance.
-- AI image generation is not an accepted 2.0.3 capability until Rust/Tauri can create local image assets and insert references through a validated contract; settings must continue to show it as unavailable.
-- Automatic semantic RAG/vector store and agentic web research are not accepted 2.0.3 capabilities until the Rust/Tauri runtime uses them in AI interactions; settings must continue to show them as unavailable while explicit prompt context remains usable.
+- AI image generation is not an accepted 2.0.4 capability until Rust/Tauri can create local image assets and insert references through a validated contract; settings must continue to show it as unavailable.
+- Automatic semantic RAG/vector store and agentic web research are not accepted 2.0.4 capabilities until the Rust/Tauri runtime uses them in AI interactions; settings must continue to show them as unavailable while explicit prompt context remains usable.
 - Some document previews may be best-effort depending on Rust conversion support.
 
-Any limitation here must be repeated in `docs/releases/2.0.3.md` before publication.
+Any limitation here must be repeated in `docs/releases/2.0.4.md` before publication.
