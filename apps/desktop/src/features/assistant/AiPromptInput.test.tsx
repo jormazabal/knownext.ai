@@ -246,6 +246,15 @@ describe("AiPromptInput", () => {
     expect(screen.getByLabelText("Enviar")).toBeDisabled();
 
     await userEvent.type(prompt, "@req");
+    expect(await screen.findByText("Referenciar archivo")).toBeInTheDocument();
+    expect(await screen.findByText("requisitos-funcionales.md")).toBeInTheDocument();
+    expect(screen.getByText("docs")).toBeInTheDocument();
+    expect(screen.queryByText("docs/requisitos-funcionales.md")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByLabelText("Cerrar selector de archivos"));
+    expect(screen.queryByText("Referenciar archivo")).not.toBeInTheDocument();
+
+    await userEvent.clear(prompt);
+    await userEvent.type(prompt, "@req");
     await userEvent.click(await screen.findByText("requisitos-funcionales.md"));
 
     expect(onAddProjectDocumentContext).toHaveBeenCalledWith("doc-functional");

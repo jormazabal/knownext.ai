@@ -185,6 +185,16 @@ export function AiPromptInput({
   }, [contextMenuOpen, sourcesOpen]);
 
   useEffect(() => {
+    function handleTreeContextDrag(event: Event) {
+      const detail = (event as CustomEvent<{ active?: boolean; over?: boolean }>).detail;
+      setDragActive(Boolean(detail?.active && detail.over));
+    }
+
+    window.addEventListener("knownext:tree-context-drag", handleTreeContextDrag);
+    return () => window.removeEventListener("knownext:tree-context-drag", handleTreeContextDrag);
+  }, []);
+
+  useEffect(() => {
     if (!compactOptionsOpen) return;
 
     function handleKeyDown(event: KeyboardEvent) {
@@ -671,6 +681,7 @@ export function AiPromptInput({
               results={referenceResults}
               selectedIndex={referenceIndex}
               onSelect={(result) => void addReference(result)}
+              onClose={() => setReferenceQuery(null)}
             />
           ) : null}
           {compactPrompt ? null : (
@@ -1320,41 +1331,59 @@ function ReferencePicker({
   results,
   selectedIndex,
   onSelect,
+  onClose,
 }: {
   results: AiContextSearchResult[];
   selectedIndex: number;
   onSelect: (result: AiContextSearchResult) => void;
+  onClose: () => void;
 }) {
   return (
-    <div className="absolute bottom-full left-10 z-40 mb-2 w-[min(360px,calc(100%-80px))] rounded-[16px] border border-line bg-white p-1.5 text-[11px] text-ink-primary shadow-menu">
-      <p className="flex items-center gap-1.5 px-2 pb-1 pt-0.5 text-[10px] text-ink-secondary">
-        <Search size={11} />
-        Referenciar archivo
-      </p>
+    <div className="absolute bottom-full left-10 z-40 mb-2 flex max-h-[min(360px,calc(100dvh-180px))] w-[min(420px,calc(100%-80px))] flex-col overflow-hidden rounded-[16px] border border-line bg-white p-1.5 text-[11px] text-ink-primary shadow-menu">
+      <div className="flex shrink-0 items-center justify-between gap-2 px-2 pb-1 pt-0.5 text-[10px] text-ink-secondary">
+        <p className="flex min-w-0 items-center gap-1.5">
+          <Search size={11} />
+          <span>Referenciar archivo</span>
+        </p>
+        <button type="button" className="grid h-6 w-6 place-items-center rounded-md hover:bg-brand-hover hover:text-brand-orange" aria-label="Cerrar selector de archivos" onClick={onClose}>
+          <X size={12} />
+        </button>
+      </div>
       {results.length === 0 ? (
         <p className="px-2 py-2 text-[11px] text-ink-secondary">No hay documentos que coincidan.</p>
       ) : (
-        results.map((result, index) => (
-          <button
-            key={result.documentId}
-            type="button"
-            className={[
-              "flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left",
-              index === selectedIndex ? "bg-brand-hover text-brand-orange" : "hover:bg-brand-hover",
-            ].join(" ")}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => onSelect(result)}
-          >
-            {result.kind === "image" ? <Image size={13} className="shrink-0" /> : result.kind === "external_file" ? <File size={13} className="shrink-0" /> : <FileText size={13} className="shrink-0" />}
-            <span className="min-w-0">
-              <span className="block truncate text-[11px] font-semibold">{result.name}</span>
-              <span className="block truncate text-[10px] text-ink-secondary">{result.path}</span>
-            </span>
-          </button>
-        ))
+        <div className="min-h-0 overflow-y-auto pr-1">
+          {results.map((result, index) => (
+            <button
+              key={result.documentId}
+              type="button"
+              className={[
+                "flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left",
+                index === selectedIndex ? "bg-brand-hover text-brand-orange" : "hover:bg-brand-hover",
+              ].join(" ")}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => onSelect(result)}
+            >
+              {result.kind === "image" ? <Image size={14} className="mt-3 shrink-0" /> : result.kind === "external_file" ? <File size={14} className="mt-3 shrink-0" /> : <FileText size={14} className="mt-3 shrink-0" />}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[10px] text-ink-secondary">{pathWithoutFileName(result.path, result.name) || "Proyecto"}</span>
+                <span className="mt-0.5 block truncate text-[12px] font-semibold text-ink-primary">{result.name}</span>
+              </span>
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );
+}
+
+function pathWithoutFileName(path: string, name: string) {
+  const normalized = path.replace(/\\/g, "/");
+  if (!normalized) return "";
+  if (normalized.endsWith(`/${name}`)) return normalized.slice(0, -name.length - 1);
+  if (normalized === name) return "";
+  const index = normalized.lastIndexOf("/");
+  return index >= 0 ? normalized.slice(0, index) : "";
 }
 
 function ActiveSourcesPopover({

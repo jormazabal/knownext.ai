@@ -84,13 +84,13 @@ export const defaultAiConfig: AiConfig = {
     createFolders: false,
     createDocuments: true,
     deleteDocumentsAndFolders: false,
-    generateImages: false,
-    createImageAssets: false,
-    insertImagesIntoDocuments: false,
-    useDocumentContextForImageGeneration: false,
+    generateImages: true,
+    createImageAssets: true,
+    insertImagesIntoDocuments: true,
+    useDocumentContextForImageGeneration: true,
   },
   rag: {
-    enabled: false,
+    enabled: true,
     vectorStoreId: null,
     lastIndexedAt: null,
     status: "not-indexed",
@@ -106,8 +106,8 @@ export const defaultAiConfig: AiConfig = {
     storeVisualDescriptions: true,
   },
   imageGeneration: {
-    enabled: false,
-    model: "gpt-image-1.5",
+    enabled: true,
+    model: "gpt-image-2",
     size: "auto",
     quality: "auto",
     outputFormat: "png",
@@ -168,14 +168,14 @@ export async function updateAppConfig(payload: AppConfigUpdate): Promise<AppConf
 }
 
 export async function getAiConfig(): Promise<AiConfigStatus> {
-  return requestJson<AiConfigStatus>("/api/config/ai");
+  return normalizeAiStatus(await requestJson<AiConfigStatus>("/api/config/ai"));
 }
 
 export async function updateAiConfig(payload: AiConfig): Promise<AiConfigStatus> {
-  return requestJson<AiConfigStatus>("/api/config/ai", {
+  return normalizeAiStatus(await requestJson<AiConfigStatus>("/api/config/ai", {
     method: "PUT",
     body: JSON.stringify(payload),
-  });
+  }));
 }
 
 export async function getExportTemplate(): Promise<ExportTemplateConfig> {
@@ -384,17 +384,17 @@ function normalizeAi(ai: AiConfig | undefined): AiConfig | undefined {
       createFolders: Boolean(ai.permissions?.createFolders),
       createDocuments: ai.permissions?.createDocuments !== false,
       deleteDocumentsAndFolders: Boolean(ai.permissions?.deleteDocumentsAndFolders),
-      generateImages: false,
-      createImageAssets: false,
-      insertImagesIntoDocuments: false,
-      useDocumentContextForImageGeneration: false,
+      generateImages: ai.permissions?.generateImages !== false,
+      createImageAssets: ai.permissions?.createImageAssets !== false,
+      insertImagesIntoDocuments: ai.permissions?.insertImagesIntoDocuments !== false,
+      useDocumentContextForImageGeneration: ai.permissions?.useDocumentContextForImageGeneration !== false,
     },
     rag: {
-      enabled: false,
-      vectorStoreId: null,
-      lastIndexedAt: null,
-      status: "not-indexed",
-      error: null,
+      enabled: ai.rag?.enabled !== false,
+      vectorStoreId: typeof ai.rag?.vectorStoreId === "string" && ai.rag.vectorStoreId.trim() ? ai.rag.vectorStoreId : null,
+      lastIndexedAt: typeof ai.rag?.lastIndexedAt === "string" && ai.rag.lastIndexedAt.trim() ? ai.rag.lastIndexedAt : null,
+      status: normalizeRagStatus(ai.rag?.status),
+      error: typeof ai.rag?.error === "string" && ai.rag.error.trim() ? ai.rag.error : null,
     },
     vision: {
       enabled: ai.vision?.enabled !== false,
@@ -420,10 +420,11 @@ function normalizeAi(ai: AiConfig | undefined): AiConfig | undefined {
 }
 
 function normalizeImageGeneration(imageGeneration: AiConfig["imageGeneration"] | undefined): AiConfig["imageGeneration"] {
+  const model = normalizeImageGenerationModel(imageGeneration?.model);
   return {
-    enabled: false,
-    model: normalizeImageGenerationModel(imageGeneration?.model),
-    size: ["auto", "1024x1024", "1536x1024", "1024x1536"].includes(String(imageGeneration?.size)) ? imageGeneration!.size : defaultAiConfig.imageGeneration.size,
+    enabled: imageGeneration?.enabled !== false,
+    model,
+    size: normalizeImageGenerationSizeForModel(model, imageGeneration?.size),
     quality: ["auto", "low", "medium", "high"].includes(String(imageGeneration?.quality)) ? imageGeneration!.quality : defaultAiConfig.imageGeneration.quality,
     outputFormat: ["png", "webp", "jpeg"].includes(String(imageGeneration?.outputFormat)) ? imageGeneration!.outputFormat : defaultAiConfig.imageGeneration.outputFormat,
     defaultFolder: normalizeImageGenerationFolder(imageGeneration?.defaultFolder),
@@ -435,11 +436,38 @@ function normalizeImageGeneration(imageGeneration: AiConfig["imageGeneration"] |
   };
 }
 
+function normalizeAiStatus(ai: AiConfigStatus | undefined): AiConfigStatus {
+  const normalizedAi = normalizeAi(ai) ?? defaultAiConfig;
+  return {
+    ...normalizedAi,
+    openaiKeyConfigured: Boolean(ai?.openaiKeyConfigured),
+    openaiKeyPreview: typeof ai?.openaiKeyPreview === "string" && ai.openaiKeyPreview.trim()
+      ? ai.openaiKeyPreview
+      : null,
+  };
+}
+
+function normalizeRagStatus(status: unknown): AiConfig["rag"]["status"] {
+  if (status === "ready") return "updated";
+  return ["not-indexed", "indexing", "updated", "error"].includes(String(status))
+    ? status as AiConfig["rag"]["status"]
+    : defaultAiConfig.rag.status;
+}
+
 function normalizeImageGenerationModel(model: unknown): AiImageGenerationModelId {
-  if (String(model) === "gpt-image-2") return "gpt-image-1.5";
-  return ["gpt-image-1.5", "gpt-image-1", "gpt-image-1-mini"].includes(String(model))
+  return ["gpt-image-2", "gpt-image-1.5", "gpt-image-1", "gpt-image-1-mini"].includes(String(model))
     ? model as AiImageGenerationModelId
     : defaultAiConfig.imageGeneration.model;
+}
+
+function normalizeImageGenerationSizeForModel(model: AiImageGenerationModelId, size: unknown): AiConfig["imageGeneration"]["size"] {
+  const normalized = ["auto", "1024x1024", "1536x1024", "1024x1536", "2048x2048", "2048x1152", "3840x2160", "2160x3840"].includes(String(size))
+    ? size as AiConfig["imageGeneration"]["size"]
+    : defaultAiConfig.imageGeneration.size;
+  if (model === "gpt-image-2" || ["auto", "1024x1024", "1536x1024", "1024x1536"].includes(normalized)) {
+    return normalized;
+  }
+  return "auto";
 }
 
 function normalizeImageGenerationFolder(folder: unknown): AiConfig["imageGeneration"]["defaultFolder"] {

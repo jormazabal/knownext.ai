@@ -252,6 +252,117 @@ describe("DocumentTree", () => {
     expect(onOpenDocument).not.toHaveBeenCalled();
   });
 
+  it("moves a folder with the desktop mouse drag fallback", () => {
+    const onMoveNode = vi.fn();
+    const folderNodes: DocumentTreeNode[] = [
+      {
+        id: "folder-source",
+        name: "Origen",
+        type: "folder",
+        open: true,
+        children: [{ id: "doc-child", name: "child.md", type: "document" }],
+      },
+      {
+        id: "folder-target",
+        name: "Destino",
+        type: "folder",
+        open: true,
+        children: [],
+      },
+    ];
+
+    render(
+      <DocumentTree
+        nodes={folderNodes}
+        activeDocumentId=""
+        onOpenDocument={vi.fn()}
+        onActivateTreeNode={vi.fn()}
+        onSelectTreeNode={vi.fn()}
+        onCreateFolder={vi.fn()}
+        onCreateDocument={vi.fn()}
+        onExpandTree={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onConfigureProject={vi.fn()}
+        onRenameNode={vi.fn()}
+        onToggleNode={vi.fn()}
+        onContextAction={vi.fn()}
+        onMoveNode={onMoveNode}
+      />,
+    );
+
+    const sourceRow = screen.getByText("Origen").closest(".tree-row") as HTMLElement;
+    const targetRow = screen.getByText("Destino").closest(".tree-row") as HTMLElement;
+    const originalElementsFromPoint = document.elementsFromPoint;
+    Object.defineProperty(document, "elementsFromPoint", {
+      configurable: true,
+      value: vi.fn(() => [targetRow]),
+    });
+
+    try {
+      fireEvent.mouseDown(sourceRow, { button: 0, clientX: 80, clientY: 80 });
+      fireEvent.mouseMove(window, { clientX: 130, clientY: 110 });
+      fireEvent.mouseUp(window, { clientX: 130, clientY: 110 });
+    } finally {
+      Object.defineProperty(document, "elementsFromPoint", {
+        configurable: true,
+        value: originalElementsFromPoint,
+      });
+    }
+
+    expect(onMoveNode).toHaveBeenCalledWith(folderNodes[0], "folder-target");
+  });
+
+  it("adds a dragged document to the prompt context with the desktop mouse drag fallback", () => {
+    const onMoveNode = vi.fn();
+    const onAddNodeContext = vi.fn();
+    const documentNode = nodes[0].children![0];
+    const promptTarget = document.createElement("div");
+    promptTarget.className = "knownext-ai-prompt";
+    document.body.appendChild(promptTarget);
+
+    render(
+      <DocumentTree
+        nodes={nodes}
+        activeDocumentId=""
+        onOpenDocument={vi.fn()}
+        onActivateTreeNode={vi.fn()}
+        onSelectTreeNode={vi.fn()}
+        onCreateFolder={vi.fn()}
+        onCreateDocument={vi.fn()}
+        onExpandTree={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onConfigureProject={vi.fn()}
+        onRenameNode={vi.fn()}
+        onToggleNode={vi.fn()}
+        onContextAction={vi.fn()}
+        onMoveNode={onMoveNode}
+        onAddNodeContext={onAddNodeContext}
+      />,
+    );
+
+    const documentRow = screen.getByText("requisitos-funcionales.md").closest(".tree-row") as HTMLElement;
+    const originalElementsFromPoint = document.elementsFromPoint;
+    Object.defineProperty(document, "elementsFromPoint", {
+      configurable: true,
+      value: vi.fn(() => [promptTarget]),
+    });
+
+    try {
+      fireEvent.mouseDown(documentRow, { button: 0, clientX: 80, clientY: 80 });
+      fireEvent.mouseMove(window, { clientX: 700, clientY: 860 });
+      fireEvent.mouseUp(window, { clientX: 700, clientY: 860 });
+    } finally {
+      Object.defineProperty(document, "elementsFromPoint", {
+        configurable: true,
+        value: originalElementsFromPoint,
+      });
+      promptTarget.remove();
+    }
+
+    expect(onAddNodeContext).toHaveBeenCalledWith(documentNode.id);
+    expect(onMoveNode).not.toHaveBeenCalled();
+  });
+
   it("moves a folder by dragging it onto another folder", () => {
     const onMoveNode = vi.fn();
     const folderNodes: DocumentTreeNode[] = [

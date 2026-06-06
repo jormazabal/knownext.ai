@@ -155,6 +155,7 @@ type DesktopLayoutProps = {
   onSelectTreeNode: (nodeId: string, type: DocumentTreeNode["type"], name: string) => void;
   onSelectTab: (documentId: string) => void;
   onCloseTab: (documentId: string) => void;
+  onCloseTabs: (documentIds: string[]) => void;
   onReorderDocumentTabs: (draggedTabId: string, targetTabId: string, placement: "before" | "after") => void;
   onTreeContextAction: (action: DocumentTreeAction, node: DocumentTreeNode) => void;
   onExportDocument: (documentId: string, format: ExportFormat) => void | Promise<void>;
@@ -487,6 +488,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 onToggleNode={props.onToggleNode}
                 onContextAction={props.onTreeContextAction}
                 onMoveNode={props.onMoveTreeNode}
+                onAddNodeContext={props.onAddProjectDocumentContext}
                 changeBadges={externalChangeBadges}
                 projectStatus={projectTreeStatus}
               />
@@ -561,6 +563,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             onOpenNavigation={() => setNavigationOpen(true)}
             onSelectTab={props.onSelectTab}
             onCloseTab={props.onCloseTab}
+            onCloseTabs={props.onCloseTabs}
             onReorderDocumentTabs={props.onReorderDocumentTabs}
           />
               {hasReleaseNotes || hasAiConversation || hasOpenImage || hasOpenReferenceDocument ? null : (
@@ -587,7 +590,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             <section className={["relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", hasOpenTab ? "bg-white" : "bg-panel"].join(" ")}>
               {hasOpenTab ? (
                 <>
-                  <div className={hasAiConversation || hasOpenImage || hasOpenReferenceDocument ? "mb-[54px] min-h-0 flex-1 overflow-hidden" : "mb-[54px] min-h-0 flex-1 overflow-y-auto px-8 pb-6 pt-4"}>
+                  <div className={hasAiConversation || hasOpenImage || hasOpenReferenceDocument ? "min-h-0 flex-1 overflow-hidden pb-[54px]" : "min-h-0 flex-1 overflow-y-auto px-8 pb-[118px] pt-4"}>
                     <div className={hasAiConversation || hasOpenImage || hasOpenReferenceDocument ? "h-full min-h-0 w-full" : "mx-auto max-w-[900px]"}>
                       {hasReleaseNotes ? (
                         <ReleaseNotesViewer markdown={props.releaseNotesMarkdown} />
@@ -752,24 +755,6 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                   onClose={props.onCloseAiBubble}
                   onOpenConversation={props.onOpenAiConversation}
                 />
-              ) : null}
-              {hasOpenDocument && !props.historyOpen && !activeHistoryPreview ? (
-                <button
-                  className={[
-                    "absolute right-0 top-16 z-30 hidden h-28 w-9 -translate-y-0 items-center justify-center border border-r-0 border-line bg-white text-ink-secondary shadow-subtle transition lg:flex",
-                    props.historyEnabled ? "hover:bg-brand-hover hover:text-brand-orange" : "cursor-not-allowed opacity-50",
-                  ].join(" ")}
-                  data-tooltip={props.historyEnabled ? "Abrir historial de versiones" : getHistoryDisabledReason(props.activeProject, props.versioningStatus)}
-                  data-tooltip-placement="left"
-                  aria-label="Abrir historial de versiones"
-                  disabled={!props.historyEnabled}
-                  onClick={props.historyEnabled ? props.onToggleHistory : undefined}
-                >
-                  <span className="flex -rotate-90 items-center gap-1.5 whitespace-nowrap text-[11px] font-semibold">
-                    <History size={14} />
-                    Historial
-                  </span>
-                </button>
               ) : null}
               {imageInsertOpen && props.activeProject && hasOpenDocument ? (
                 <InsertImageDialog
@@ -1417,6 +1402,9 @@ function materializeProjectImageReferences(markdown: string, projectId: string, 
     const image = images.find((node) => node.path === resolvedPath);
     const titlePart = parsed.title ? ` "${parsed.title}"` : "";
     if (!image) {
+      if (isImagePath(resolvedPath)) {
+        return `![${alt}](${getProjectImageContentUrl(projectId, projectScopedNodeId(projectId, resolvedPath))}${titlePart})`;
+      }
       const safeBody = `${formatMarkdownImageTarget(parsed.target)}${titlePart}`;
       return safeBody !== body.trim() ? `![${alt}](${safeBody})` : fullMatch;
     }
@@ -1425,17 +1413,17 @@ function materializeProjectImageReferences(markdown: string, projectId: string, 
 }
 
 function restoreProjectImageReferences(markdown: string, projectId: string, documentPath: string, tree: DocumentTreeNode[]) {
-  if (!projectId || !documentPath || !markdown.includes("/assets/")) return markdown;
+  if (!projectId || !documentPath || (!markdown.includes("/assets/") && !markdown.includes("knownext-asset://"))) return markdown;
   const images = collectImages(tree);
-  if (images.length === 0) return markdown;
   const byContentUrl = new Map(images.map((image) => [getProjectImageContentUrl(projectId, image.id), image]));
 
   return markdown.replace(markdownImageReferencePattern, (fullMatch, alt: string, body: string) => {
     const parsed = splitMarkdownImageTarget(body);
     if (!parsed) return fullMatch;
     const image = byContentUrl.get(parsed.target);
-    if (!image?.path) return fullMatch;
-    const relativeTarget = relativeMarkdownTarget(image.path, documentPath);
+    const fallbackPath = image?.path ?? pathFromProjectImageContentUrl(projectId, parsed.target);
+    if (!fallbackPath) return fullMatch;
+    const relativeTarget = relativeMarkdownTarget(fallbackPath, documentPath);
     const titlePart = parsed.title ? ` "${parsed.title}"` : "";
     return `![${alt}](${formatMarkdownImageTarget(relativeTarget)}${titlePart})`;
   });
@@ -1455,7 +1443,27 @@ function splitMarkdownImageTarget(body: string): { target: string; title: string
 }
 
 function isExternalImageTarget(target: string) {
-  return /^(https?:|data:|mailto:|#)/i.test(target);
+  return /^(https?:|data:|knownext-asset:|mailto:|#)/i.test(target);
+}
+
+function isImagePath(path: string) {
+  return /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(path);
+}
+
+function projectScopedNodeId(projectId: string, path: string) {
+  return `${projectId}::${normalizePathParts(path.split("/"))}`;
+}
+
+function pathFromProjectImageContentUrl(projectId: string, target: string) {
+  const prefix = `knownext-asset://${encodeURIComponent(projectId)}/`;
+  if (!target.startsWith(prefix)) return null;
+  try {
+    const assetId = decodeURIComponent(target.slice(prefix.length));
+    const scopedPrefix = `${projectId}::`;
+    return assetId.startsWith(scopedPrefix) ? assetId.slice(scopedPrefix.length) : null;
+  } catch {
+    return null;
+  }
 }
 
 function resolveMarkdownAssetPath(documentPath: string, target: string) {

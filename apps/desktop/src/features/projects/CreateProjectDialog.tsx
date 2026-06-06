@@ -1606,6 +1606,24 @@ function ConnectedGithubPanel({
         </div>
         <StatusBadge label={projectSyncStatus?.label ?? syncModeLabel(syncMode)} tone={hasRemoteIssue || projectSyncStatus?.hasConflicts ? "danger" : projectSyncStatus?.pendingPull || projectSyncStatus?.pendingPush ? "warning" : "ok"} />
       </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div className="rounded-md border border-line bg-white px-3 py-2">
+          <div className="text-[10px] font-semibold text-ink-secondary">Historial local</div>
+          <div className="mt-1 text-[11px] font-semibold text-ink-primary">
+            {projectSyncStatus?.localState === "pending-push" ? "Cambios pendientes" : "Operativo"}
+          </div>
+          <p className="mt-1 text-[10px] leading-4 text-ink-secondary">Puedes seguir editando y guardando versiones aunque GitHub esté pausado.</p>
+        </div>
+        <div className="rounded-md border border-line bg-white px-3 py-2">
+          <div className="text-[10px] font-semibold text-ink-secondary">Acceso GitHub</div>
+          <div className="mt-1 text-[11px] font-semibold text-ink-primary">
+            {hasRemoteIssue ? "Pausado" : projectSyncStatus?.pendingPull || projectSyncStatus?.pendingPush ? "Pendiente" : "Conectado"}
+          </div>
+          <p className="mt-1 text-[10px] leading-4 text-ink-secondary">
+            {hasRemoteIssue ? "Recupera acceso para subir o traer cambios remotos." : "La sincronización remota está disponible según el modo elegido."}
+          </p>
+        </div>
+      </div>
       {credentialIssue ? (
         <div className="rounded-md border border-red-100 bg-red-50 px-3 py-2">
           <div className="flex items-start gap-2">

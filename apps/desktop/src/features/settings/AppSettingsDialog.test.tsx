@@ -19,6 +19,9 @@ const baseProps = {
   aiIndexStatus: null,
   traceLogStatus: null,
   runtimeServicesRefreshing: false,
+  saveState: "idle" as const,
+  saveMessage: null,
+  configPersistenceAvailable: true,
   onClose: vi.fn(),
   onAppearanceChange: vi.fn(),
   onDiagnosticsChange: vi.fn(),
@@ -67,8 +70,12 @@ describe("AppSettingsDialog", () => {
 
     expect(screen.getByRole("heading", { name: /resumen de configuración/i })).toBeInTheDocument();
     expect(screen.getByText("Modelos de IA utilizados")).toBeInTheDocument();
-    expect(screen.getByText("Imágenes (visión)")).toBeInTheDocument();
+    expect(screen.getAllByText("Imágenes (generación)").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Imágenes (visión)").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("gpt-image-2").length).toBeGreaterThan(0);
+    expect(screen.getByText("Sin cambios pendientes")).toBeInTheDocument();
     expect(screen.queryByText("Imágenes (generación y visión)")).not.toBeInTheDocument();
+    expect(screen.queryByText("Vector store")).not.toBeInTheDocument();
     expect(screen.queryByText("¿Necesitas ayuda?")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /copiar resumen/i })).not.toBeInTheDocument();
     expect(screen.queryByText("Coste por 1M tokens")).not.toBeInTheDocument();
@@ -77,13 +84,28 @@ describe("AppSettingsDialog", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: /sistema y diagnóstico/i }));
 
-    expect(screen.getByRole("heading", { name: /runtime local/i })).toBeInTheDocument();
-    expect(screen.getByText("Runtime local Rust")).toBeInTheDocument();
-    expect(screen.getByText("Operativo")).toBeInTheDocument();
-    expect(screen.getByText("2.0.2")).toBeInTheDocument();
-    expect(screen.getAllByText("Contrato local").length).toBeGreaterThan(0);
+    expect(screen.getByRole("heading", { name: /estado de la aplicación/i })).toBeInTheDocument();
+    expect(screen.getByText("Aplicación local")).toBeInTheDocument();
+    expect(screen.getAllByText("Operativo").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("2.0.2").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Contrato local")).not.toBeInTheDocument();
+    expect(screen.queryByText("tauri://local-api/health")).not.toBeInTheDocument();
+    expect(screen.queryByText("Runtime local Rust")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /reiniciar runtime/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/puerto/i)).not.toBeInTheDocument();
+  });
+
+  it("shows settings persistence state in the dialog header", () => {
+    render(
+      <AppSettingsDialog
+        {...baseProps}
+        saveState="error"
+        saveMessage="No se pudo guardar IA"
+        runtimeServicesStatus={null}
+      />,
+    );
+
+    expect(screen.getByText("No se pudo guardar IA")).toBeInTheDocument();
   });
 
   it("allows checking local runtime status without external runtime controls", () => {
@@ -219,7 +241,7 @@ describe("AppSettingsDialog", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: /sistema y diagnóstico/i }));
 
-    expect(screen.getByText("Runtime local Rust")).toBeInTheDocument();
+    expect(screen.getByText("Aplicación local")).toBeInTheDocument();
     expect(screen.getByText("Git local y GitHub")).toBeInTheDocument();
     expect(screen.getByText("Local activo · GitHub pausado")).toBeInTheDocument();
     expect(screen.getByText(/sin terminales visibles/i)).toBeInTheDocument();
@@ -301,12 +323,30 @@ describe("AppSettingsDialog", () => {
 
   it("shows AI model choices and saves the selected model", () => {
     const onAiChange = vi.fn();
+    const onRebuildAiIndex = vi.fn();
+    const onDeleteAiIndex = vi.fn();
 
     render(
       <AppSettingsDialog
         {...baseProps}
         runtimeServicesStatus={null}
         onAiChange={onAiChange}
+        aiIndexStatus={{
+          projectId: "project-1",
+          enabled: true,
+          status: "updated",
+          vectorStoreId: "local-rag:project-1",
+          lastIndexedAt: "2026-06-06T10:00:00.000Z",
+          error: null,
+          documentCount: 3,
+          indexedDocumentCount: 3,
+          pendingDocumentCount: 0,
+          failedDocumentCount: 0,
+          deletedDocumentCount: 0,
+          localExactReady: true,
+        }}
+        onRebuildAiIndex={onRebuildAiIndex}
+        onDeleteAiIndex={onDeleteAiIndex}
       />,
     );
 
@@ -315,6 +355,11 @@ describe("AppSettingsDialog", () => {
     expect(screen.getByText("Elige el equilibrio entre inteligencia, velocidad y coste para las respuestas documentales.")).toBeInTheDocument();
     expect(screen.getByText("Proveedor de IA")).toBeInTheDocument();
     expect(screen.getByText("Contexto documental (RAG)")).toBeInTheDocument();
+    expect(screen.getByText("local-rag:project-1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /reconstruir índice/i }));
+    fireEvent.click(screen.getByRole("button", { name: /limpiar índice/i }));
+    expect(onRebuildAiIndex).toHaveBeenCalledTimes(1);
+    expect(onDeleteAiIndex).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: /gpt-5.4-mini/i })).toHaveAttribute("aria-expanded", "false");
 
     fireEvent.click(screen.getByRole("button", { name: /gpt-5.4-mini/i }));
@@ -355,7 +400,7 @@ describe("AppSettingsDialog", () => {
     expect(screen.getByText("4. Tareas agénticas")).toBeInTheDocument();
   });
 
-  it("shows image generation as unavailable until the Rust runtime contract exists", () => {
+  it("shows configurable image generation backed by the Rust runtime contract", () => {
     const onAiChange = vi.fn();
 
     render(
@@ -368,10 +413,30 @@ describe("AppSettingsDialog", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "Capacidades" }));
 
-    expect(screen.getAllByText(/Generación de imágenes no disponible/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/contrato Rust\/Tauri validado/i).length).toBeGreaterThan(0);
-    expect(screen.queryByLabelText(/carpeta por defecto/i)).not.toBeInTheDocument();
-    expect(onAiChange).not.toHaveBeenCalled();
+    expect(screen.getByText("Generación de imágenes")).toBeInTheDocument();
+    expect(screen.getByText("Modelo imagen")).toBeInTheDocument();
+    const imageModelButton = screen.getByRole("button", { name: "Modelo imagen" });
+    expect(screen.getByText("gpt-image-2")).toBeInTheDocument();
+    expect(screen.getByText("$0.006-$0.211")).toBeInTheDocument();
+    expect(screen.getByText("por imagen 1K")).toBeInTheDocument();
+    expect(screen.queryByText("Calculadora")).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "2048 x 2048" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "3840 x 2160" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Carpeta destino")).toBeInTheDocument();
+    fireEvent.click(imageModelButton);
+    expect(screen.getByText(/calidad anterior/i)).toBeInTheDocument();
+    expect(screen.getByText("$0.009-$0.133")).toBeInTheDocument();
+    const previousImageModelOption = screen.getAllByRole("option", { name: /gpt-image-1.5/i }).find((option) => option.tagName === "BUTTON");
+    expect(previousImageModelOption).toBeTruthy();
+    fireEvent.click(previousImageModelOption!);
+    expect(onAiChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      imageGeneration: expect.objectContaining({ model: "gpt-image-1.5" }),
+    }));
+    expect(screen.queryByRole("option", { name: "3840 x 2160" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Formato"), { target: { value: "webp" } });
+    expect(onAiChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      imageGeneration: expect.objectContaining({ outputFormat: "webp" }),
+    }));
   });
 
   it("updates transcription defaults from the capabilities panel", () => {
@@ -481,22 +546,28 @@ describe("AppSettingsDialog", () => {
     ]);
 
     fireEvent.change(fontSelect, { target: { value: "Calibri" } });
-    fireEvent.change(screen.getByLabelText("Formato Titulo 1"), { target: { value: "bold_underline" } });
-    fireEvent.change(screen.getByLabelText("Interlineado"), { target: { value: "1.5" } });
-    expect(onExportTemplateChange).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
-    fireEvent.click(screen.getByRole("button", { name: "Restablecer plantilla" }));
-
-    expect(onExportTemplateChange).toHaveBeenCalledWith(expect.objectContaining({
+    expect(onExportTemplateChange).toHaveBeenLastCalledWith(expect.objectContaining({
       normal: expect.objectContaining({ fontFamily: "Calibri" }),
+    }));
+
+    fireEvent.change(screen.getByLabelText("Formato Titulo 1"), { target: { value: "bold_underline" } });
+    expect(onExportTemplateChange).toHaveBeenLastCalledWith(expect.objectContaining({
       headings: expect.objectContaining({
         h1: expect.objectContaining({ fontFamily: "Arial", textFormat: "bold_underline" }),
         h6: expect.objectContaining({ fontSizePt: 11 }),
       }),
     }));
-    expect(onExportTemplateChange).toHaveBeenCalledWith(expect.objectContaining({
+
+    fireEvent.change(screen.getByLabelText("Interlineado"), { target: { value: "1.5" } });
+    expect(onExportTemplateChange).toHaveBeenLastCalledWith(expect.objectContaining({
       paragraph: expect.objectContaining({ lineSpacing: 1.5 }),
     }));
+    expect(screen.queryByRole("button", { name: "Guardar cambios" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancelar" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Restablecer plantilla" }));
+
+    expect(onExportTemplateChange).toHaveBeenCalledTimes(3);
     expect(onResetExportTemplate).toHaveBeenCalledTimes(1);
   });
 
@@ -547,7 +618,7 @@ describe("AppSettingsDialog", () => {
     });
   });
 
-  it("shows agentic and web research as unavailable instead of actionable controls", () => {
+  it("configures local guided agentic tasks while keeping web research unavailable", () => {
     const onAiChange = vi.fn();
 
     render(
@@ -561,10 +632,18 @@ describe("AppSettingsDialog", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Capacidades" }));
 
     expect(screen.getByText("4. Tareas agénticas")).toBeInTheDocument();
-    expect(screen.getByText(/Tareas agénticas no disponibles/i)).toBeInTheDocument();
-    expect(screen.getByText(/no realiza investigación web ni flujos autónomos/i)).toBeInTheDocument();
-    expect(screen.queryByLabelText("Investigación web")).not.toBeInTheDocument();
-    expect(onAiChange).not.toHaveBeenCalled();
+    expect(screen.getAllByText("Control desde el prompt").length).toBeGreaterThan(0);
+    expect(screen.getByText("Investigación web")).toBeInTheDocument();
+    expect(screen.getByText(/No disponible hasta que la app pueda investigar en web/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Pasos"), { target: { value: "8" } });
+
+    expect(onAiChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      agentic: expect.objectContaining({
+        maxSteps: 8,
+        webResearchEnabled: false,
+      }),
+    }));
   });
 
   it("applies AI permission presets and individual permission changes", () => {
@@ -587,10 +666,10 @@ describe("AppSettingsDialog", () => {
         createFolders: true,
         createDocuments: true,
         deleteDocumentsAndFolders: true,
-        generateImages: false,
-        createImageAssets: false,
-        insertImagesIntoDocuments: false,
-        useDocumentContextForImageGeneration: false,
+        generateImages: true,
+        createImageAssets: true,
+        insertImagesIntoDocuments: true,
+        useDocumentContextForImageGeneration: true,
       },
     }));
 

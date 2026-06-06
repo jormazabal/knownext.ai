@@ -9,6 +9,7 @@ import type { TraceLogStatus } from "../../lib/runtime/logging";
 import type { RuntimeServicesStatus } from "../../lib/runtime/services";
 
 type AppSettingsSection = "summary" | "interface" | "export" | "ai" | "capabilities" | "system";
+export type AppSettingsSaveState = "idle" | "saving" | "saved" | "error" | "local-only";
 
 const exportFontOptions: Array<[string, string]> = [
   ["Arial", "Arial"],
@@ -32,6 +33,9 @@ type AppSettingsDialogProps = {
   traceLogStatus: TraceLogStatus | null;
   runtimeServicesStatus: RuntimeServicesStatus | null;
   runtimeServicesRefreshing: boolean;
+  saveState: AppSettingsSaveState;
+  saveMessage?: string | null;
+  configPersistenceAvailable: boolean;
   onClose: () => void;
   onAppearanceChange: (appearance: Partial<AppearanceConfig>) => void;
   onDiagnosticsChange: (diagnostics: Partial<DiagnosticsConfig>) => void;
@@ -49,7 +53,9 @@ type AppSettingsDialogProps = {
 
 const aiModelIds: AiModelId[] = ["gpt-5.4-mini", "gpt-5.4", "gpt-5.5", "gpt-5.4-nano"];
 const aiVisionModelIds: AiVisionModelId[] = ["gpt-5.4-mini", "gpt-5.4", "gpt-5.5"];
-const aiImageGenerationModelIds: AiImageGenerationModelId[] = ["gpt-image-1.5", "gpt-image-1-mini", "gpt-image-1"];
+const aiImageGenerationModelIds: AiImageGenerationModelId[] = ["gpt-image-2", "gpt-image-1.5", "gpt-image-1-mini", "gpt-image-1"];
+const baseImageGenerationSizeOptions: AiConfigStatus["imageGeneration"]["size"][] = ["auto", "1024x1024", "1536x1024", "1024x1536"];
+const gptImage2SizeOptions: AiConfigStatus["imageGeneration"]["size"][] = [...baseImageGenerationSizeOptions, "2048x2048", "2048x1152", "3840x2160", "2160x3840"];
 const transcriptionLanguages: AiTranscriptionLanguage[] = ["auto", "es", "en", "fr", "de", "it", "pt", "ca", "eu", "gl"];
 
 const aiModelMeter: Record<AiModelId, { intelligence: number; cost: number }> = {
@@ -73,6 +79,20 @@ const aiModelTagTone: Record<AiModelId, AiModelSelectorTone> = {
   "gpt-5.4-nano": "economy",
 };
 
+const aiImageGenerationModelMeter: Record<AiImageGenerationModelId, { quality: number; cost: number }> = {
+  "gpt-image-2": { quality: 6, cost: 5 },
+  "gpt-image-1.5": { quality: 5, cost: 3 },
+  "gpt-image-1-mini": { quality: 3, cost: 1 },
+  "gpt-image-1": { quality: 4, cost: 5 },
+};
+
+const aiImageGenerationModelTagTone: Record<AiImageGenerationModelId, AiModelSelectorTone> = {
+  "gpt-image-2": "recommended",
+  "gpt-image-1.5": "advanced",
+  "gpt-image-1-mini": "economy",
+  "gpt-image-1": "neutral",
+};
+
 type PermissionModeId = "conservative" | "assisted" | "productive" | "custom";
 
 const permissionModePresets: Record<Exclude<PermissionModeId, "custom">, AiConfigStatus["permissions"]> = {
@@ -91,20 +111,20 @@ const permissionModePresets: Record<Exclude<PermissionModeId, "custom">, AiConfi
     createFolders: false,
     createDocuments: true,
     deleteDocumentsAndFolders: false,
-    generateImages: false,
-    createImageAssets: false,
-    insertImagesIntoDocuments: false,
-    useDocumentContextForImageGeneration: false,
+    generateImages: true,
+    createImageAssets: true,
+    insertImagesIntoDocuments: true,
+    useDocumentContextForImageGeneration: true,
   },
   productive: {
     editDocuments: true,
     createFolders: true,
     createDocuments: true,
     deleteDocumentsAndFolders: true,
-    generateImages: false,
-    createImageAssets: false,
-    insertImagesIntoDocuments: false,
-    useDocumentContextForImageGeneration: false,
+    generateImages: true,
+    createImageAssets: true,
+    insertImagesIntoDocuments: true,
+    useDocumentContextForImageGeneration: true,
   },
 };
 
@@ -119,6 +139,9 @@ export function AppSettingsDialog({
   traceLogStatus,
   runtimeServicesStatus,
   runtimeServicesRefreshing,
+  saveState,
+  saveMessage,
+  configPersistenceAvailable,
   onClose,
   onAppearanceChange,
   onDiagnosticsChange,
@@ -158,11 +181,13 @@ export function AppSettingsDialog({
           <div className="min-w-0">
             <h2 id="app-settings-title" className="text-[15px] font-semibold text-ink-primary">{text.title}</h2>
             <p className="mt-1 text-[11px] text-ink-secondary">{text.subtitle}</p>
+            <SettingsSaveStatus state={saveState} message={saveMessage} persistenceAvailable={configPersistenceAvailable} text={text} />
           </div>
           <button
             className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
             data-tooltip={text.close}
             aria-label={text.closeSettings}
+            type="button"
             onClick={onClose}
           >
             <X size={16} />
@@ -192,6 +217,7 @@ export function AppSettingsDialog({
                   aria-controls={`app-settings-panel-${section.id}`}
                   data-tooltip={section.description}
                   data-tooltip-placement="bottom"
+                  type="button"
                   onClick={() => setActiveSection(section.id)}
                 >
                   <section.icon size={14} className={["shrink-0", activeSection === section.id ? "text-brand-orange" : "text-ink-secondary"].join(" ")} />
@@ -261,6 +287,47 @@ export function AppSettingsDialog({
   );
 }
 
+function SettingsSaveStatus({
+  state,
+  message,
+  persistenceAvailable,
+  text,
+}: {
+  state: AppSettingsSaveState;
+  message?: string | null;
+  persistenceAvailable: boolean;
+  text: SettingsCopy;
+}) {
+  const effectiveState = persistenceAvailable ? state : "local-only";
+  const label = effectiveState === "saving"
+    ? text.settingsSaving
+    : effectiveState === "saved"
+      ? text.settingsSaved
+      : effectiveState === "error"
+        ? text.settingsSaveFailed
+        : effectiveState === "local-only"
+          ? text.settingsLocalOnly
+          : text.settingsIdle;
+  const toneClass = effectiveState === "saved"
+    ? "border-emerald-100 bg-emerald-50 text-emerald-700"
+    : effectiveState === "error"
+      ? "border-red-100 bg-red-50 text-red-700"
+      : effectiveState === "saving"
+        ? "border-orange-100 bg-brand-hover text-brand-orange"
+        : "border-line bg-panel text-ink-secondary";
+
+  return (
+    <p
+      className={["mt-2 inline-flex max-w-full items-center gap-1.5 rounded border px-2 py-1 text-[10px] font-semibold", toneClass].join(" ")}
+      title={message ?? undefined}
+      aria-live="polite"
+    >
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />
+      <span className="truncate">{message ?? label}</span>
+    </p>
+  );
+}
+
 function SummarySettings({
   appearance,
   diagnostics,
@@ -283,8 +350,15 @@ function SummarySettings({
   const model = text.aiModels[settingsAi.model];
   const modelMeter = aiModelMeter[settingsAi.model];
   const modelPrice = aiModelPriceParts[settingsAi.model];
+  const imageGenerationModel = text.imageGenerationModels[settingsAi.imageGeneration.model];
+  const imageGenerationMeter = aiImageGenerationModelMeter[settingsAi.imageGeneration.model];
+  const visionModel = text.aiModels[settingsAi.vision.model];
+  const visionMeter = aiModelMeter[settingsAi.vision.model];
+  const visionPrice = aiModelPriceParts[settingsAi.vision.model];
+  const permissionMode = getPermissionMode(settingsAi.permissions);
   const accentPalette = accentPalettes.find((palette) => palette.id === appearance.primaryColor) ?? accentPalettes[0];
   const documentCount = aiIndexStatus?.documentCount ?? 0;
+  const ragStatus = aiIndexStatus?.localExactReady ? text.ragExactReady : describeIndexStatus(aiIndexStatus?.status ?? settingsAi.rag.status);
 
   return (
     <div className="space-y-5">
@@ -312,14 +386,13 @@ function SummarySettings({
           <div className="overflow-hidden rounded-md border border-line">
             <SummaryRow icon={<Sun size={13} />} label={text.themeHeading} value={describeThemeMode(appearance.themeMode, text)} />
             <SummaryRow icon={<Languages size={13} />} label={text.languageLabel} value={describeLanguage(appearance.language)} />
+            <SummaryRow icon={<Gauge size={13} />} label={text.zoomLabel} value={`${appearance.zoomPercent}%`} />
             <SummaryRow
               icon={<Paintbrush size={13} />}
               label={text.primaryColorHeading}
               value={accentPalette.label ?? text.primaryColorDefault}
               valuePrefix={<ColorDot color={accentPalette.projectColor} />}
             />
-            <SummaryRow icon={<Gauge size={13} />} label={text.zoomLabel} value={`${appearance.zoomPercent}%`} />
-            <SummaryRow icon={<Underline size={13} />} label={text.underlineToggleLabel} value={appearance.markdownExtendedUnderlineEnabled ? text.enabled : text.disabled} />
           </div>
         </SummaryCard>
 
@@ -344,7 +417,7 @@ function SummarySettings({
             />
             <SummaryRow
               icon={<Brain size={13} />}
-              label={text.summaryModelLabel}
+              label={text.aiModelHeading}
               value={(
                 <span className="inline-flex min-w-0 items-center gap-2">
                   <span className="truncate">{settingsAi.model}</span>
@@ -352,20 +425,17 @@ function SummarySettings({
                 </span>
               )}
             />
-            <SummaryRow icon={<Gauge size={13} />} label={text.summaryCapabilityMetric} value={<SummaryMeter value={modelMeter.intelligence} />} />
             <SummaryRow
-              icon={<Activity size={13} />}
-              label={text.summaryCostMetric}
+              icon={<FolderOpen size={13} />}
+              label={text.ragContextHeading}
               value={(
-                <span className="inline-flex min-w-0 items-center gap-3">
-                  <span className="shrink-0">{modelPrice.input} / {modelPrice.output}</span>
-                  <SummaryMeter value={modelMeter.cost} color="green" />
+                <span className="inline-flex min-w-0 items-center gap-2">
+                  <span className="truncate">{settingsAi.rag.enabled ? text.enabled : text.disabled}</span>
+                  <span className="shrink-0 text-ink-secondary">{documentCount ? `${documentCount} ${text.summaryDocumentsShort}` : text.summaryNone}</span>
                 </span>
               )}
             />
-            <SummaryRow icon={<FolderOpen size={13} />} label={text.ragDocuments} value={documentCount ? String(documentCount) : text.summaryNone} />
-            <SummaryRow icon={<Eye size={13} />} label={text.summarySearch} value={aiIndexStatus?.localExactReady ? text.ragExactReady : describeIndexStatus(aiIndexStatus?.status ?? settingsAi.rag.status)} />
-            <SummaryRow icon={<Server size={13} />} label={text.summaryVectorStore} value={text.unavailableValue} />
+            <SummaryRow icon={<Eye size={13} />} label={text.summarySearch} value={ragStatus} />
           </div>
         </SummaryCard>
 
@@ -378,10 +448,11 @@ function SummarySettings({
           onAction={() => onSelectSection("capabilities")}
         >
           <div className="overflow-hidden rounded-md border border-line">
-            <SummaryRow icon={<ImageIcon size={13} />} label={text.summaryImages} value={settingsAi.vision.model} valueTone="brand" />
+            <SummaryRow icon={<ImageIcon size={13} />} label={text.summaryImageGenerationAi} value={settingsAi.imageGeneration.enabled ? settingsAi.imageGeneration.model : text.disabled} valueTone={settingsAi.imageGeneration.enabled ? "brand" : "neutral"} />
+            <SummaryRow icon={<Eye size={13} />} label={text.summaryVisionAi} value={settingsAi.vision.enabled ? settingsAi.vision.model : text.disabled} valueTone={settingsAi.vision.enabled ? "brand" : "neutral"} />
             <SummaryRow icon={<Mic size={13} />} label={text.transcriptionHeading} value={settingsAi.transcription.model} valueTone="brand" />
-            <SummaryRow icon={<ShieldCheck size={13} />} label={text.aiPermissionsHeading} value={text.summaryProductive} valueTone="brand" />
-            <SummaryRow icon={<Gauge size={13} />} label={text.agenticHeading} value={text.unavailableValue} valueTone="neutral" />
+            <SummaryRow icon={<ShieldCheck size={13} />} label={text.aiPermissionsHeading} value={describePermissionMode(permissionMode, text)} valueTone="brand" />
+            <SummaryRow icon={<Gauge size={13} />} label={text.agenticHeading} value={describeAgenticDepth(settingsAi.agentic.depth, text)} valueTone="brand" />
           </div>
         </SummaryCard>
 
@@ -395,10 +466,9 @@ function SummarySettings({
         >
           <div className="overflow-hidden rounded-md border border-line">
             <SummaryRow icon={<Server size={13} />} label={text.versionLabel} value={runtimeService?.version ?? text.unavailableValue} />
-            <SummaryRow icon={<Settings size={13} />} label={text.profileLabel} value={runtimeService?.profile ?? text.unavailableValue} />
-            <SummaryRow icon={<Server size={13} />} label={text.localContractLabel} value={runtimeService?.endpoint ?? text.unavailableValue} />
+            <SummaryRow icon={<Settings size={13} />} label={text.profileLabel} value={describeRuntimeProfile(runtimeService?.profile, text)} />
+            <SummaryRow icon={<Server size={13} />} label={text.servicesSummary} value={runtimeService?.statusLabel ?? text.servicesPending} success={runtimeService?.status === "running"} />
             <SummaryRow icon={<ListChecks size={13} />} label={text.traceToggleLabel} value={diagnostics.traceLoggingEnabled ? text.enabled : text.disabled} />
-            <SummaryRow icon={<Check size={13} />} label={text.servicesNav} value={runtimeService?.statusLabel ?? text.servicesPending} success={runtimeService?.status === "running"} />
           </div>
         </SummaryCard>
       </div>
@@ -409,9 +479,10 @@ function SummarySettings({
           <p className="mt-1 text-[11px] text-ink-secondary">{text.summaryModelsDescription}</p>
         </div>
         <div className="overflow-hidden rounded-md border border-line">
-          <SummaryModelRow label={text.summaryMainAi} description={text.aiModelHeading} modelId={settingsAi.model} capability={modelMeter.intelligence} cost={modelMeter.cost} price={`${modelPrice.input} / ${modelPrice.output}`} tag={model.recommended ? text.recommendedModel : null} capabilityLabel={text.summaryCapabilityMetric} costLabel={text.summaryCostMetric} />
-          <SummaryModelRow label={text.summaryImageAi} description={text.visionHeading} modelId={settingsAi.vision.model} capability={3} cost={2} price={text.summaryImagePricing} tag={text.recommendedModel} capabilityLabel={text.summaryCapabilityMetric} costLabel={text.summaryCostMetric} />
-          <SummaryModelRow label={text.summaryAudioAi} description={text.transcriptionHeading} modelId={settingsAi.transcription.model} capability={2} cost={1} price={text.summaryAudioPricing} tag={text.summaryEconomy} capabilityLabel={text.summaryCapabilityMetric} costLabel={text.summaryCostMetric} />
+          <SummaryModelRow label={text.summaryMainAi} description={text.aiModelHeading} modelId={settingsAi.model} capability={modelMeter.intelligence} cost={modelMeter.cost} price={`${modelPrice.input} / ${modelPrice.output}`} tag={model.recommended ? text.recommendedModel : null} capabilityLabel={text.summaryCapabilityMetric} costLabel={text.summaryCostMetric} priceUnit={text.summaryTokenPriceUnit} />
+          <SummaryModelRow label={text.summaryImageGenerationAi} description={text.imageGenerationModelHeading} modelId={settingsAi.imageGeneration.model} capability={imageGenerationMeter.quality} cost={imageGenerationMeter.cost} price={imageGenerationModel.price} tag={imageGenerationModel.recommended ? imageGenerationModel.tag : null} capabilityLabel={text.summaryCapabilityMetric} costLabel={text.summaryCostMetric} priceUnit={text.imageGenerationPricePer1kImage} />
+          <SummaryModelRow label={text.summaryVisionAi} description={text.visionHeading} modelId={settingsAi.vision.model} capability={visionMeter.intelligence} cost={visionMeter.cost} price={`${visionPrice.input} / ${visionPrice.output}`} tag={visionModel.recommended ? text.recommendedModel : null} capabilityLabel={text.summaryCapabilityMetric} costLabel={text.summaryCostMetric} priceUnit={text.summaryTokenPriceUnit} />
+          <SummaryModelRow label={text.summaryAudioAi} description={text.transcriptionHeading} modelId={settingsAi.transcription.model} capability={2} cost={1} price={text.summaryAudioPricing} tag={text.summaryEconomy} capabilityLabel={text.summaryCapabilityMetric} costLabel={text.summaryCostMetric} priceUnit={text.summaryTokenPriceUnit} />
         </div>
       </section>
 
@@ -434,6 +505,7 @@ function CapabilitiesSettings({
   const localAiRef = useRef<AiConfigStatus>(normalizeAiStatus(ai));
   const settingsAi = localAi;
   const visionModelOptions = buildVisionModelOptions(text);
+  const imageGenerationModelOptions = buildImageGenerationModelOptions(text);
 
   useEffect(() => {
     const normalizedAi = normalizeAiStatus(ai);
@@ -470,6 +542,20 @@ function CapabilitiesSettings({
     });
   }
 
+  function updateImageGeneration(nextImageGeneration: Partial<AiConfigStatus["imageGeneration"]>) {
+    const currentAi = localAiRef.current;
+    const nextModel = nextImageGeneration.model ?? currentAi.imageGeneration.model;
+    const nextSize = nextImageGeneration.size ?? currentAi.imageGeneration.size;
+    commitAi({
+      ...currentAi,
+      imageGeneration: {
+        ...currentAi.imageGeneration,
+        ...nextImageGeneration,
+        size: normalizeImageGenerationSizeForModel(nextModel, nextSize),
+      },
+    });
+  }
+
   function updatePermissions(nextPermissions: Partial<AiConfigStatus["permissions"]>) {
     const currentAi = localAiRef.current;
     commitAi({
@@ -477,6 +563,18 @@ function CapabilitiesSettings({
       permissions: {
         ...currentAi.permissions,
         ...nextPermissions,
+      },
+    });
+  }
+
+  function updateAgentic(nextAgentic: Partial<AiConfigStatus["agentic"]>) {
+    const currentAi = localAiRef.current;
+    commitAi({
+      ...currentAi,
+      agentic: {
+        ...currentAi.agentic,
+        ...nextAgentic,
+        webResearchEnabled: false,
       },
     });
   }
@@ -511,12 +609,63 @@ function CapabilitiesSettings({
 
       <CapabilitySection icon={<ImageIcon size={22} />} title={text.capabilityImagesTitle} description={text.capabilityImagesDescription}>
         <div className="grid gap-4 xl:grid-cols-2">
-          <CapabilityUnavailablePanel
+          <CapabilityPanel
             icon={<ImageIcon size={15} />}
             title={text.capabilityGenerateImagesTitle}
-            description={text.imageGenerationUnavailableDescription}
-            badge={text.unavailableValue}
-          />
+            description={text.imageGenerationAvailableDescription}
+            enabled={settingsAi.imageGeneration.enabled}
+            onToggle={() => updateImageGeneration({ enabled: !settingsAi.imageGeneration.enabled })}
+          >
+            <div className="grid gap-3">
+              <CapabilityField label={text.imageGenerationModelHeading}>
+                <AiModelSelector
+                  value={settingsAi.imageGeneration.model}
+                  options={imageGenerationModelOptions}
+                  onChange={(model) => updateImageGeneration({ model })}
+                  title={text.imageGenerationModelSelectorTitle}
+                  recommendedOnlyLabel={text.aiModelRecommendedOnly}
+                  guideLabel={text.aiModelGuide}
+                  guideDescription={text.imageGenerationModelGuideDescription}
+                />
+              </CapabilityField>
+              <div className="grid gap-3 md:grid-cols-3">
+                <CapabilitySelect label={text.imageGenerationSizeHeading} value={settingsAi.imageGeneration.size} onChange={(value) => updateImageGeneration({ size: value as AiConfigStatus["imageGeneration"]["size"] })}>
+                  {imageGenerationSizeOptions(settingsAi.imageGeneration.model).map((size) => (
+                    <option key={size} value={size}>{formatImageGenerationSize(size, text)}</option>
+                  ))}
+                </CapabilitySelect>
+                <CapabilitySelect label={text.imageGenerationQualityHeading} value={settingsAi.imageGeneration.quality} onChange={(value) => updateImageGeneration({ quality: value as AiConfigStatus["imageGeneration"]["quality"] })}>
+                  <option value="auto">{text.imageGenerationAuto}</option>
+                  <option value="low">{text.imageGenerationQualityLow}</option>
+                  <option value="medium">{text.imageGenerationQualityMedium}</option>
+                  <option value="high">{text.imageGenerationQualityHigh}</option>
+                </CapabilitySelect>
+                <CapabilitySelect label={text.imageGenerationFormatHeading} value={settingsAi.imageGeneration.outputFormat} onChange={(value) => updateImageGeneration({ outputFormat: value as AiConfigStatus["imageGeneration"]["outputFormat"] })}>
+                  <option value="png">PNG</option>
+                  <option value="webp">WebP</option>
+                  <option value="jpeg">JPEG</option>
+                </CapabilitySelect>
+              </div>
+              <CapabilitySelect label={text.imageGenerationFolderHeading} value={settingsAi.imageGeneration.defaultFolder} help={settingsAi.imageGeneration.defaultFolder === "custom_folder" ? settingsAi.imageGeneration.customFolderPath : undefined} onChange={(value) => updateImageGeneration({ defaultFolder: value as AiConfigStatus["imageGeneration"]["defaultFolder"] })}>
+                <option value="document_folder">{text.imageGenerationFolderDocument}</option>
+                <option value="generated_assets">{text.imageGenerationFolderGenerated}</option>
+                <option value="custom_folder">{text.imageGenerationFolderCustom}</option>
+              </CapabilitySelect>
+              {settingsAi.imageGeneration.defaultFolder === "custom_folder" ? (
+                <CapabilityField label={text.imageGenerationCustomFolderHeading}>
+                  <input
+                    className="h-9 w-full rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary outline-none focus:border-brand-orange"
+                    value={settingsAi.imageGeneration.customFolderPath}
+                    onChange={(event) => updateImageGeneration({ customFolderPath: event.target.value })}
+                  />
+                </CapabilityField>
+              ) : null}
+              <div className="divide-y divide-line border-t border-line pt-2">
+                <CapabilityToggleRow icon={<FileText size={14} />} label={text.imageGenerationInsertHeading} description={text.imageGenerationInsertDescription} enabled={settingsAi.permissions.insertImagesIntoDocuments} onToggle={() => updatePermissions({ insertImagesIntoDocuments: !settingsAi.permissions.insertImagesIntoDocuments })} />
+                <CapabilityToggleRow icon={<Brain size={14} />} label={text.imageGenerationDocumentContextHeading} description={text.imageGenerationDocumentContextDescription} enabled={settingsAi.permissions.useDocumentContextForImageGeneration} onToggle={() => updatePermissions({ useDocumentContextForImageGeneration: !settingsAi.permissions.useDocumentContextForImageGeneration })} />
+              </div>
+            </div>
+          </CapabilityPanel>
 
           <CapabilityPanel
             icon={<Eye size={15} />}
@@ -530,7 +679,6 @@ function CapabilitiesSettings({
                 value={settingsAi.vision.model}
                 options={visionModelOptions}
                 onChange={(model) => updateVision({ model })}
-                variant="compact"
                 title={text.aiModelSelectorTitle}
                 recommendedOnlyLabel={text.aiModelRecommendedOnly}
                 guideLabel={text.aiModelGuide}
@@ -595,34 +743,66 @@ function CapabilitiesSettings({
       </CapabilitySection>
 
       <CapabilitySection icon={<ShieldCheck size={22} />} title={text.capabilityPermissionsTitle} description={text.capabilityPermissionsDescription}>
-        <div className="grid gap-3 md:grid-cols-4">
-          <PermissionModeCard selected={permissionMode === "conservative"} icon={<ShieldCheck size={20} />} title={text.permissionModeConservative} description={text.permissionModeConservativeDescription} onSelect={() => applyPermissionMode("conservative")} />
-          <PermissionModeCard selected={permissionMode === "assisted"} icon={<Brain size={20} />} title={text.permissionModeAssisted} description={text.permissionModeAssistedDescription} onSelect={() => applyPermissionMode("assisted")} />
-          <PermissionModeCard selected={permissionMode === "productive"} icon={<Activity size={20} />} title={text.permissionModeProductive} description={text.permissionModeProductiveDescription} onSelect={() => applyPermissionMode("productive")} />
-          <PermissionModeCard selected={permissionMode === "custom"} icon={<Settings size={20} />} title={text.permissionModeCustom} description={text.permissionModeCustomDescription} />
-        </div>
-        <div className="mt-4 grid gap-3 lg:grid-cols-2">
-          <div className="overflow-hidden rounded-md border border-line">
-            <CapabilityPermissionRow icon={<ImageIcon size={14} />} label={text.editDocuments} description={text.editDocumentsDescription} enabled={settingsAi.permissions.editDocuments} onToggle={() => updatePermissions({ editDocuments: !settingsAi.permissions.editDocuments })} />
-            <CapabilityPermissionRow icon={<FolderOpen size={14} />} label={text.createFolders} description={text.createFoldersDescription} enabled={settingsAi.permissions.createFolders} onToggle={() => updatePermissions({ createFolders: !settingsAi.permissions.createFolders })} />
-            <CapabilityPermissionRow icon={<FileIcon />} label={text.createDocuments} description={text.createDocumentsDescription} enabled={settingsAi.permissions.createDocuments} onToggle={() => updatePermissions({ createDocuments: !settingsAi.permissions.createDocuments })} />
-            <CapabilityPermissionRow icon={<Trash2 size={14} />} label={text.deleteDocuments} description={text.deleteDocumentsDescription} enabled={settingsAi.permissions.deleteDocumentsAndFolders} onToggle={() => updatePermissions({ deleteDocumentsAndFolders: !settingsAi.permissions.deleteDocumentsAndFolders })} />
+        <div className="overflow-hidden rounded-md border border-line bg-white">
+          <div className="grid border-b border-line md:grid-cols-4">
+            <PermissionModeSegment selected={permissionMode === "conservative"} title={text.permissionModeConservative} description={text.permissionModeConservativeDescription} onSelect={() => applyPermissionMode("conservative")} />
+            <PermissionModeSegment selected={permissionMode === "assisted"} title={text.permissionModeAssisted} description={text.permissionModeAssistedDescription} onSelect={() => applyPermissionMode("assisted")} />
+            <PermissionModeSegment selected={permissionMode === "productive"} title={text.permissionModeProductive} description={text.permissionModeProductiveDescription} onSelect={() => applyPermissionMode("productive")} />
+            <PermissionModeSegment selected={permissionMode === "custom"} title={text.permissionModeCustom} description={text.permissionModeCustomDescription} />
           </div>
-          <div className="rounded-md border border-orange-100 bg-brand-hover px-3 py-3">
-            <p className="text-[11px] font-semibold text-ink-primary">{text.imageGenerationUnavailableTitle}</p>
-            <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{text.imageGenerationUnavailableDescription}</p>
+          <div className="grid md:grid-cols-2">
+            <div className="divide-y divide-line md:border-r md:border-line">
+              <CompactPermissionSwitch icon={<ImageIcon size={14} />} label={text.editDocuments} description={text.editDocumentsDescription} enabled={settingsAi.permissions.editDocuments} onToggle={() => updatePermissions({ editDocuments: !settingsAi.permissions.editDocuments })} />
+              <CompactPermissionSwitch icon={<FolderOpen size={14} />} label={text.createFolders} description={text.createFoldersDescription} enabled={settingsAi.permissions.createFolders} onToggle={() => updatePermissions({ createFolders: !settingsAi.permissions.createFolders })} />
+              <CompactPermissionSwitch icon={<FileIcon />} label={text.createDocuments} description={text.createDocumentsDescription} enabled={settingsAi.permissions.createDocuments} onToggle={() => updatePermissions({ createDocuments: !settingsAi.permissions.createDocuments })} />
+              <CompactPermissionSwitch icon={<Trash2 size={14} />} label={text.deleteDocuments} description={text.deleteDocumentsDescription} enabled={settingsAi.permissions.deleteDocumentsAndFolders} onToggle={() => updatePermissions({ deleteDocumentsAndFolders: !settingsAi.permissions.deleteDocumentsAndFolders })} />
+            </div>
+            <div className="divide-y divide-line bg-brand-hover/35">
+              <div className="flex h-9 items-center justify-between px-3">
+                <p className="text-[11px] font-semibold text-ink-primary">{text.imageGenerationPermissionsTitle}</p>
+                <StatusPill label="" value={settingsAi.permissions.generateImages && settingsAi.permissions.createImageAssets ? text.enabled : text.disabled} tone={settingsAi.permissions.generateImages && settingsAi.permissions.createImageAssets ? "success" : "neutral"} />
+              </div>
+              <CompactPermissionSwitch icon={<ImageIcon size={14} />} label={text.permissionGenerateImages} description={text.permissionGenerateImagesDescription} enabled={settingsAi.permissions.generateImages} onToggle={() => updatePermissions({ generateImages: !settingsAi.permissions.generateImages })} />
+              <CompactPermissionSwitch icon={<FolderOpen size={14} />} label={text.permissionCreateImageAssets} description={text.permissionCreateImageAssetsDescription} enabled={settingsAi.permissions.createImageAssets} onToggle={() => updatePermissions({ createImageAssets: !settingsAi.permissions.createImageAssets })} />
+            </div>
           </div>
         </div>
-        <p className="mt-3 rounded-md border border-orange-100 bg-brand-hover px-3 py-2 text-[11px] font-semibold text-brand-orange">{text.permissionScopeNotice}</p>
+        <p className="mt-2 text-[10px] leading-4 text-ink-secondary">{text.permissionScopeNotice}</p>
       </CapabilitySection>
 
       <CapabilitySection icon={<Gauge size={22} />} title={text.capabilityAgenticTitle} description={text.capabilityAgenticDescription}>
-        <CapabilityUnavailablePanel
-          icon={<Gauge size={15} />}
-          title={text.agenticUnavailableTitle}
-          description={text.agenticUnavailableDescription}
-          badge={text.unavailableValue}
-        />
+        <div className="overflow-hidden rounded-md border border-line bg-white">
+          <div className="grid gap-3 border-b border-line px-3 py-3 lg:grid-cols-[minmax(190px,0.8fr)_minmax(220px,1fr)_repeat(4,minmax(86px,0.55fr))]">
+            <CompactSelect label={text.agenticModeHint} value={settingsAi.agentic.depth} onChange={(value) => updateAgentic({ depth: value as AiConfigStatus["agentic"]["depth"] })}>
+                <option value="quick">Rápido</option>
+                <option value="guided">Guiado</option>
+                <option value="deep">Profundo guiado</option>
+                <option value="bounded_autonomous">Autónomo acotado</option>
+            </CompactSelect>
+            <CompactPermissionSwitch
+                icon={<ShieldCheck size={14} />}
+                label={text.agenticConfirmHeading}
+                description={text.agenticConfirmDescription}
+                enabled={settingsAi.agentic.confirmBeforeApplying}
+                onToggle={() => updateAgentic({ confirmBeforeApplying: !settingsAi.agentic.confirmBeforeApplying })}
+                compact
+            />
+            <LimitField label={text.agenticMaxSteps} value={settingsAi.agentic.maxSteps} min={1} max={12} step={1} onChange={(value) => updateAgentic({ maxSteps: value })} />
+            <LimitField label={text.agenticMaxDocuments} value={settingsAi.agentic.maxDocuments} min={1} max={30} step={1} onChange={(value) => updateAgentic({ maxDocuments: value })} />
+            <LimitField label={text.agenticMaxSources} value={settingsAi.agentic.maxSources} min={1} max={20} step={1} onChange={(value) => updateAgentic({ maxSources: value })} />
+            <LimitField label={text.agenticMaxCost} value={settingsAi.agentic.maxEstimatedCostEur} min={0.1} max={25} step={0.1} onChange={(value) => updateAgentic({ maxEstimatedCostEur: value })} />
+          </div>
+          <div className="grid gap-3 px-3 py-2 md:grid-cols-[minmax(0,1fr)_minmax(240px,0.8fr)]">
+            <p className="text-[10px] leading-4 text-ink-secondary">{text.agenticLimitsImpact}</p>
+            <div className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-panel px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold text-ink-primary">{text.agenticWebResearchHeading}</p>
+                <p className="mt-0.5 truncate text-[10px] text-ink-secondary">{text.agenticWebResearchDescription}</p>
+              </div>
+              <ServiceStatusBadge value={text.unavailableValue} tone="warning" />
+            </div>
+          </div>
+        </div>
       </CapabilitySection>
     </div>
   );
@@ -663,6 +843,20 @@ function CapabilitySection({
 function getPermissionMode(permissions: AiConfigStatus["permissions"]): PermissionModeId {
   const mode = (Object.keys(permissionModePresets) as Array<Exclude<PermissionModeId, "custom">>).find((presetMode) => permissionsMatch(permissions, permissionModePresets[presetMode]));
   return mode ?? "custom";
+}
+
+function describePermissionMode(mode: PermissionModeId, text: SettingsCopy) {
+  if (mode === "conservative") return text.permissionModeConservative;
+  if (mode === "assisted") return text.permissionModeAssisted;
+  if (mode === "productive") return text.permissionModeProductive;
+  return text.permissionModeCustom;
+}
+
+function describeAgenticDepth(depth: AiConfigStatus["agentic"]["depth"], text: SettingsCopy) {
+  if (depth === "quick") return text.agenticDepthQuick;
+  if (depth === "guided") return text.agenticDepthGuided;
+  if (depth === "deep") return text.agenticDepthDeep;
+  return text.agenticDepthBoundedAutonomous;
 }
 
 function permissionsMatch(left: AiConfigStatus["permissions"], right: AiConfigStatus["permissions"]) {
@@ -822,30 +1016,64 @@ function CapabilityToggleRow({
   );
 }
 
-function PermissionModeCard({ icon, title, description, selected, onSelect }: { icon: ReactNode; title: string; description: string; selected?: boolean; onSelect?: () => void }) {
+function PermissionModeSegment({ title, description, selected, onSelect }: { title: string; description: string; selected?: boolean; onSelect?: () => void }) {
   return (
     <button
       type="button"
-      className={["relative rounded-md border px-4 py-4 text-left transition", selected ? "border-brand-orange bg-brand-hover" : "border-line bg-white hover:border-orange-200 hover:bg-panel", onSelect ? "" : "cursor-default"].join(" ")}
+      className={[
+        "flex min-h-[74px] min-w-0 items-start justify-between gap-3 border-b border-line px-3 py-3 text-left transition last:border-b-0 md:border-b-0 md:border-r md:last:border-r-0",
+        selected ? "bg-brand-hover text-brand-orange" : "bg-white text-ink-primary hover:bg-panel",
+        onSelect ? "" : "cursor-default",
+      ].join(" ")}
       disabled={!onSelect}
       onClick={onSelect}
     >
-      {selected ? <span className="absolute right-3 top-3 grid h-5 w-5 place-items-center rounded-full bg-brand-orange text-white"><Check size={13} strokeWidth={3} /></span> : null}
-      <span className={selected ? "text-brand-orange" : "text-ink-secondary"}>{icon}</span>
-      <p className={["mt-3 text-[12px] font-semibold", selected ? "text-brand-orange" : "text-ink-primary"].join(" ")}>{title}</p>
-      <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{description}</p>
+      <span className="min-w-0">
+        <span className={["block text-[11px] font-semibold", selected ? "text-brand-orange" : "text-ink-primary"].join(" ")}>{title}</span>
+        <span className="mt-1 block text-[10px] leading-4 text-ink-secondary">{description}</span>
+      </span>
+      {selected ? <Check size={15} className="mt-0.5 shrink-0 text-brand-orange" strokeWidth={3} /> : null}
     </button>
   );
 }
 
-function CapabilityPermissionRow({ icon, label, description, enabled, onToggle }: { icon: ReactNode; label: string; description: string; enabled: boolean; onToggle: () => void }) {
+function CompactSelect({ label, value, onChange, children }: { label: string; value: string; onChange: (value: string) => void; children: ReactNode }) {
   return (
-    <div className="flex min-w-0 items-center justify-between gap-3 border-b border-line px-3 py-3 last:border-b-0">
-      <div className="flex min-w-0 items-start gap-3">
+    <label className="block min-w-0">
+      <span className="block text-[9px] font-semibold uppercase text-ink-secondary">{label}</span>
+      <select
+        className="mt-1 h-8 w-full rounded-md border border-line bg-white px-2 text-[11px] font-semibold text-ink-primary outline-none focus:border-brand-orange"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {children}
+      </select>
+    </label>
+  );
+}
+
+function CompactPermissionSwitch({
+  icon,
+  label,
+  description,
+  enabled,
+  onToggle,
+  compact,
+}: {
+  icon: ReactNode;
+  label: string;
+  description: string;
+  enabled: boolean;
+  onToggle: () => void;
+  compact?: boolean;
+}) {
+  return (
+    <div className={["flex min-w-0 items-center justify-between gap-3 px-3", compact ? "py-1" : "py-2.5"].join(" ")}>
+      <div className="flex min-w-0 items-start gap-2">
         <span className="mt-0.5 shrink-0 text-ink-secondary">{icon}</span>
         <div className="min-w-0">
           <p className="text-[11px] font-semibold text-ink-primary">{label}</p>
-          <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{description}</p>
+          <p className={["mt-0.5 text-[10px] text-ink-secondary", compact ? "truncate" : "leading-4"].join(" ")}>{description}</p>
         </div>
       </div>
       <Switch enabled={enabled} label={label} onToggle={onToggle} />
@@ -896,6 +1124,29 @@ function buildVisionModelOptions(text: SettingsCopy): Array<AiModelSelectorOptio
         label: model.recommended ? text.recommendedModel : model.name,
         tone: aiModelTagTone[modelId],
       },
+    };
+  });
+}
+
+function buildImageGenerationModelOptions(text: SettingsCopy): Array<AiModelSelectorOption<AiImageGenerationModelId>> {
+  return aiImageGenerationModelIds.map((modelId) => {
+    const model = text.imageGenerationModels[modelId];
+    const meter = aiImageGenerationModelMeter[modelId];
+    return {
+      id: modelId,
+      name: model.name,
+      description: model.description,
+      capability: meter.quality,
+      cost: meter.cost,
+      inputPrice: model.price,
+      outputPrice: "",
+      priceUnit: text.imageGenerationPricePer1kImage,
+      recommended: model.recommended,
+      tag: {
+        label: model.tag,
+        tone: aiImageGenerationModelTagTone[modelId],
+      },
+      icon: <ImageIcon size={16} />,
     };
   });
 }
@@ -981,7 +1232,7 @@ function SummaryCapability({ icon, title, description, value, tone }: { icon: Re
   );
 }
 
-function SummaryModelRow({ label, description, modelId, capability, cost, price, tag, capabilityLabel, costLabel }: { label: string; description: string; modelId: string; capability: number; cost: number; price: string; tag?: string | null; capabilityLabel: string; costLabel: string }) {
+function SummaryModelRow({ label, description, modelId, capability, cost, price, tag, capabilityLabel, costLabel, priceUnit }: { label: string; description: string; modelId: string; capability: number; cost: number; price: string; tag?: string | null; capabilityLabel: string; costLabel: string; priceUnit: string }) {
   return (
     <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(120px,0.8fr)_minmax(90px,0.7fr)_minmax(90px,0.7fr)_auto] items-center gap-3 border-b border-line px-3 py-3 last:border-b-0">
       <div className="min-w-0">
@@ -996,7 +1247,7 @@ function SummaryModelRow({ label, description, modelId, capability, cost, price,
       <SummaryMetric label={costLabel} value={cost} color="green" />
       <div className="text-right">
         <p className="text-[11px] font-semibold text-ink-primary">{price}</p>
-        <p className="mt-1 text-[10px] text-ink-secondary">por 1M tokens</p>
+        <p className="mt-1 text-[10px] text-ink-secondary">{priceUnit}</p>
       </div>
     </div>
   );
@@ -1055,6 +1306,7 @@ function normalizeAiStatus(ai: Partial<AiConfigStatus> | null | undefined): AiCo
   const agentic = ai?.agentic as Partial<AiConfigStatus["agentic"]> | undefined;
   const transcription = ai?.transcription as Partial<AiConfigStatus["transcription"]> | undefined;
 
+  const imageGenerationModel = normalizeImageGenerationModel(imageGeneration?.model);
   return {
     provider: "openai",
     model: normalizeAiModel(ai?.model),
@@ -1063,17 +1315,17 @@ function normalizeAiStatus(ai: Partial<AiConfigStatus> | null | undefined): AiCo
       createFolders: permissions?.createFolders ?? defaultAiConfig.permissions.createFolders,
       createDocuments: permissions?.createDocuments ?? defaultAiConfig.permissions.createDocuments,
       deleteDocumentsAndFolders: permissions?.deleteDocumentsAndFolders ?? defaultAiConfig.permissions.deleteDocumentsAndFolders,
-      generateImages: false,
-      createImageAssets: false,
-      insertImagesIntoDocuments: false,
-      useDocumentContextForImageGeneration: false,
+      generateImages: permissions?.generateImages ?? defaultAiConfig.permissions.generateImages,
+      createImageAssets: permissions?.createImageAssets ?? defaultAiConfig.permissions.createImageAssets,
+      insertImagesIntoDocuments: permissions?.insertImagesIntoDocuments ?? defaultAiConfig.permissions.insertImagesIntoDocuments,
+      useDocumentContextForImageGeneration: permissions?.useDocumentContextForImageGeneration ?? defaultAiConfig.permissions.useDocumentContextForImageGeneration,
     },
     rag: {
-      enabled: false,
-      vectorStoreId: null,
-      lastIndexedAt: null,
-      status: "not-indexed",
-      error: null,
+      enabled: rag?.enabled ?? defaultAiConfig.rag.enabled,
+      vectorStoreId: typeof rag?.vectorStoreId === "string" && rag.vectorStoreId.trim() ? rag.vectorStoreId : null,
+      lastIndexedAt: typeof rag?.lastIndexedAt === "string" && rag.lastIndexedAt.trim() ? rag.lastIndexedAt : null,
+      status: normalizeRagStatus(rag?.status),
+      error: typeof rag?.error === "string" && rag.error.trim() ? rag.error : null,
     },
     vision: {
       enabled: vision?.enabled ?? defaultAiConfig.vision.enabled,
@@ -1085,9 +1337,9 @@ function normalizeAiStatus(ai: Partial<AiConfigStatus> | null | undefined): AiCo
       storeVisualDescriptions: vision?.storeVisualDescriptions ?? defaultAiConfig.vision.storeVisualDescriptions,
     },
     imageGeneration: {
-      enabled: false,
-      model: normalizeImageGenerationModel(imageGeneration?.model),
-      size: normalizeImageGenerationSize(imageGeneration?.size),
+      enabled: imageGeneration?.enabled ?? defaultAiConfig.imageGeneration.enabled,
+      model: imageGenerationModel,
+      size: normalizeImageGenerationSizeForModel(imageGenerationModel, imageGeneration?.size),
       quality: normalizeImageGenerationQuality(imageGeneration?.quality),
       outputFormat: normalizeImageGenerationFormat(imageGeneration?.outputFormat),
       defaultFolder: normalizeImageGenerationFolder(imageGeneration?.defaultFolder),
@@ -1168,14 +1420,26 @@ function normalizeLegacyAiModel(model: unknown): AiModelId | null {
 }
 
 function normalizeImageGenerationModel(model: unknown): AiImageGenerationModelId {
-  if (String(model) === "gpt-image-2") return "gpt-image-1.5";
   return aiImageGenerationModelIds.includes(model as AiImageGenerationModelId) ? model as AiImageGenerationModelId : defaultAiConfig.imageGeneration.model;
 }
 
 function normalizeImageGenerationSize(size: unknown): AiConfigStatus["imageGeneration"]["size"] {
-  return ["auto", "1024x1024", "1536x1024", "1024x1536"].includes(String(size))
+  return gptImage2SizeOptions.includes(size as AiConfigStatus["imageGeneration"]["size"])
     ? size as AiConfigStatus["imageGeneration"]["size"]
     : defaultAiConfig.imageGeneration.size;
+}
+
+function normalizeImageGenerationSizeForModel(model: AiImageGenerationModelId, size: unknown): AiConfigStatus["imageGeneration"]["size"] {
+  const normalized = normalizeImageGenerationSize(size);
+  return imageGenerationSizeOptions(model).includes(normalized) ? normalized : "auto";
+}
+
+function imageGenerationSizeOptions(model: AiImageGenerationModelId): AiConfigStatus["imageGeneration"]["size"][] {
+  return model === "gpt-image-2" ? gptImage2SizeOptions : baseImageGenerationSizeOptions;
+}
+
+function formatImageGenerationSize(size: AiConfigStatus["imageGeneration"]["size"], text: SettingsCopy): string {
+  return size === "auto" ? text.imageGenerationAuto : size.replace("x", " x ");
 }
 
 function normalizeImageGenerationQuality(quality: unknown): AiConfigStatus["imageGeneration"]["quality"] {
@@ -1321,6 +1585,17 @@ function AiDocumentalSettings({
     });
   }
 
+  function updateRag(nextRag: Partial<AiConfigStatus["rag"]>) {
+    const currentAi = localAiRef.current;
+    commitAi({
+      ...currentAi,
+      rag: {
+        ...currentAi.rag,
+        ...nextRag,
+      },
+    });
+  }
+
   function saveApiKey() {
     const nextKey = apiKey.trim();
     if (!nextKey) return;
@@ -1450,17 +1725,17 @@ function AiDocumentalSettings({
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h4 className="text-[15px] font-semibold text-ink-primary">{text.ragContextHeading}</h4>
-            <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.ragUnavailableDescription}</p>
+            <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.ragAvailableDescription}</p>
           </div>
-          <span className="rounded border border-orange-200 bg-brand-hover px-2 py-1 text-[10px] font-semibold text-brand-orange">{text.unavailableValue}</span>
+          <Switch enabled={settingsAi.rag.enabled} label={text.ragContextHeading} onToggle={() => updateRag({ enabled: !settingsAi.rag.enabled })} />
         </div>
 
         <div className="mt-4 overflow-hidden rounded-md border border-line bg-white">
           <div className="grid gap-0 md:grid-cols-[minmax(0,1.25fr)_minmax(240px,0.75fr)]">
             <div className="grid gap-0 sm:grid-cols-2 lg:grid-cols-4">
-              <RagMetric label={text.ragStatus} value={text.unavailableValue} tone="neutral" />
+              <RagMetric label={text.ragStatus} value={describeIndexStatus(aiIndexStatus?.status ?? settingsAi.rag.status)} tone={aiIndexStatus?.status === "updated" ? "success" : aiIndexStatus?.status === "error" ? "warning" : "neutral"} />
               <RagMetric label={text.ragDocuments} value={documentCount ? String(documentCount) : text.summaryNone} />
-              <RagMetric label={text.summaryVectorStore} value={text.unavailableValue} />
+              <RagMetric label={text.summaryVectorStore} value={aiIndexStatus?.vectorStoreId ?? settingsAi.rag.vectorStoreId ?? text.summaryNone} />
               <RagMetric label={text.ragExactReady} value={aiIndexStatus?.localExactReady ? text.enabled : text.disabled} tone={aiIndexStatus?.localExactReady ? "success" : "neutral"} />
             </div>
             <div className="border-t border-line bg-panel px-4 py-3 md:border-l md:border-t-0">
@@ -1471,10 +1746,29 @@ function AiDocumentalSettings({
             <div className="min-w-0">
               <p className="text-[10px] font-semibold text-ink-secondary">{text.lastStatusLabel}</p>
               <p className={["mt-1 text-[11px] leading-5", aiIndexStatus?.error ? "text-red-700" : "text-ink-secondary"].join(" ")}>
-                {text.ragUnavailableTitle}
+                {aiIndexStatus?.error ?? aiIndexStatus?.lastIndexedAt ?? settingsAi.rag.lastIndexedAt ?? text.ragNotIndexedMessage}
               </p>
             </div>
-            <p className="max-w-sm text-[11px] leading-5 text-ink-secondary">{text.ragExplicitContextNotice}</p>
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                className="inline-flex h-8 items-center gap-2 rounded-md border border-brand-orange bg-white px-3 text-[11px] font-semibold text-brand-orange hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!settingsAi.rag.enabled}
+                onClick={onRebuildAiIndex}
+              >
+                <RefreshCw size={13} />
+                {text.rebuildAiIndex}
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary hover:bg-panel disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!aiIndexStatus?.indexedDocumentCount}
+                onClick={onDeleteAiIndex}
+              >
+                <Trash2 size={13} />
+                {text.deleteAiIndex}
+              </button>
+            </div>
           </div>
         </div>
         {failedCount > 0 ? <p className="mt-2 text-[10px] leading-4 text-red-700">{text.ragFailed}: {failedCount}</p> : null}
@@ -1504,101 +1798,106 @@ function SystemSettings({
 }) {
   const services = runtimeServicesStatus?.services ?? [];
   const runtimeService = services.find((service) => service.id === "local-runtime") ?? services[0] ?? null;
+  const logFolder = traceLogStatus?.folderPath ?? text.preparingLogFolder;
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
+
+  useEffect(() => {
+    setCopyStatus("idle");
+  }, [runtimeService]);
+
+  async function handleCopyDiagnostic() {
+    if (!runtimeService) return;
+    const copied = await copyText(buildServiceDiagnostic(runtimeService));
+    setCopyStatus(copied ? "copied" : "failed");
+    window.setTimeout(() => setCopyStatus("idle"), 1800);
+  }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <SettingsSectionIntro icon={<Settings size={24} />} title={text.systemNav} description={text.systemDescription} />
 
-      <SettingsPanel>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h4 className="text-[15px] font-semibold text-ink-primary">{text.servicesHeading}</h4>
+      <section className="overflow-hidden rounded-md border border-line bg-white">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h4 className="text-[14px] font-semibold text-ink-primary">{text.servicesHeading}</h4>
+              {runtimeService ? (
+                <ServiceStatusBadge
+                  value={runtimeService.statusLabel}
+                  tone={runtimeService.status === "running" ? "success" : runtimeService.status === "degraded" ? "warning" : "danger"}
+                />
+              ) : null}
+            </div>
             <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.servicesDescription}</p>
+            {runtimeServicesStatus?.checkedAt ? (
+              <p className="mt-1 text-[10px] text-ink-secondary">{text.lastChecked}: {formatDateTime(runtimeServicesStatus.checkedAt)}</p>
+            ) : null}
           </div>
-          <button
-            className="inline-flex h-9 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={refreshing}
-            onClick={onRefresh}
-          >
-            <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
-            {text.refreshServices}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={refreshing}
+              onClick={onRefresh}
+            >
+              <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
+              {text.refreshServices}
+            </button>
+            <button
+              className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={!runtimeService}
+              onClick={() => void handleCopyDiagnostic()}
+            >
+              <Copy size={14} />
+              {copyStatus === "copied" ? text.copyDiagnosticCopied : copyStatus === "failed" ? text.copyDiagnosticFailed : text.copyDiagnostic}
+            </button>
+          </div>
+        </header>
+
+        <div className="grid border-b border-line sm:grid-cols-3">
+          <SystemStatusMetric label={text.versionLabel} value={runtimeService?.version ?? text.unavailableValue} success={runtimeService?.version === runtimeService?.expectedVersion} />
+          <SystemStatusMetric label={text.profileLabel} value={describeRuntimeProfile(runtimeService?.profile, text)} success={Boolean(runtimeService?.profile)} />
+          <SystemStatusMetric label={text.servicesSummary} value={runtimeService?.statusLabel ?? text.servicesPending} success={runtimeService?.status === "running"} />
         </div>
-        {runtimeServicesStatus?.checkedAt ? (
-          <p className="mt-2 text-[10px] text-ink-secondary">{text.lastChecked}: {formatDateTime(runtimeServicesStatus.checkedAt)}</p>
-        ) : null}
 
         {services.length > 0 ? (
-          <div className="mt-4 space-y-3">
-            {services.map((service) => (
-              <SystemServiceCard
-                key={service.id}
-                service={service}
-                text={text}
-                refreshing={refreshing}
-                onRefresh={onRefresh}
-              />
-            ))}
+          <div className="divide-y divide-line">
+            {services.map((service) => <SystemServiceCard key={service.id} service={service} text={text} />)}
           </div>
         ) : (
-          <div className="mt-4 rounded-md border border-line bg-panel px-4 py-3 text-[11px] text-ink-secondary">{text.servicesPending}</div>
+          <div className="px-4 py-3 text-[11px] text-ink-secondary">{text.servicesPending}</div>
         )}
-      </SettingsPanel>
 
-      <SettingsPanel>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h4 className="text-[15px] font-semibold text-ink-primary">{text.storageHeading}</h4>
-            <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.storageDescription}</p>
+        <div className="grid gap-0 border-t border-line md:grid-cols-2">
+          <div className="min-w-0 border-b border-line px-4 py-3 md:border-b-0 md:border-r">
+            <div className="flex items-center gap-2">
+              <FolderOpen size={14} className="shrink-0 text-ink-secondary" />
+              <p className="text-[11px] font-semibold text-ink-primary">{text.storageHeading}</p>
+            </div>
+            <p className="mt-1 truncate font-mono text-[10px] text-ink-secondary">{runtimeService?.appDataDir ?? text.unavailableValue}</p>
+          </div>
+          <div className="min-w-0 px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <ListChecks size={14} className="shrink-0 text-ink-secondary" />
+                <p className="text-[11px] font-semibold text-ink-primary">{text.diagnosticsHeading}</p>
+                <StatusPill label="" value={diagnostics.traceLoggingEnabled ? text.enabled : text.disabled} tone={diagnostics.traceLoggingEnabled ? "success" : "neutral"} />
+              </div>
+              <Switch enabled={diagnostics.traceLoggingEnabled} label={text.traceToggleAria} onToggle={() => onDiagnosticsChange({ traceLoggingEnabled: !diagnostics.traceLoggingEnabled })} />
+            </div>
+            <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-2">
+              <p className="min-w-0 truncate font-mono text-[10px] text-ink-secondary">{logFolder}</p>
+              <button
+                className="inline-flex h-7 shrink-0 items-center gap-2 rounded-md border border-line bg-white px-2.5 text-[10px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={!traceLogStatus?.folderPath}
+                onClick={onOpenTraceLogFolder}
+              >
+                <FolderOpen size={13} />
+                {text.openLogFolder}
+              </button>
+            </div>
           </div>
         </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <SystemInfoRow icon={<FolderOpen size={14} />} label={text.appDataDirLabel} value={runtimeService?.appDataDir ?? text.unavailableValue} mono />
-          <SystemInfoRow icon={<FolderOpen size={14} />} label={text.expectedAppDataDirLabel} value={runtimeService?.expectedAppDataDir || text.unavailableValue} mono />
-          <SystemInfoRow icon={<Server size={14} />} label={text.localContractLabel} value={runtimeService?.endpoint ?? text.unavailableValue} mono />
-          <SystemInfoRow icon={<Activity size={14} />} label={text.profileLabel} value={runtimeService?.profile ?? text.unavailableValue} />
-        </div>
-      </SettingsPanel>
-
-      <SettingsPanel>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h4 className="text-[15px] font-semibold text-ink-primary">{text.diagnosticsHeading}</h4>
-            <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.diagnosticsDescription}</p>
-          </div>
-          <Switch enabled={diagnostics.traceLoggingEnabled} label={text.traceToggleAria} onToggle={() => onDiagnosticsChange({ traceLoggingEnabled: !diagnostics.traceLoggingEnabled })} />
-        </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <CompactToggle
-            icon={<ListChecks size={14} />}
-            label={text.traceToggleLabel}
-            description={text.traceToggleDescription}
-            enabled={diagnostics.traceLoggingEnabled}
-            onToggle={() => onDiagnosticsChange({ traceLoggingEnabled: !diagnostics.traceLoggingEnabled })}
-          />
-          <SystemInfoRow icon={<FolderOpen size={14} />} label={text.logFolderLabel} value={traceLogStatus?.folderPath ?? text.preparingLogFolder} mono />
-        </div>
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-orange-100 bg-brand-hover px-3 py-2">
-          <p className="text-[11px] leading-5 text-ink-secondary">{text.logsSensitiveNotice}</p>
-          <button
-            className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={!traceLogStatus?.folderPath}
-            onClick={onOpenTraceLogFolder}
-          >
-            <FolderOpen size={14} />
-            {text.openLogFolder}
-          </button>
-        </div>
-      </SettingsPanel>
-
-      <SettingsPanel>
-        <h4 className="text-[15px] font-semibold text-ink-primary">{text.diagnosticToolsHeading}</h4>
-        <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{text.diagnosticToolsDescription}</p>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <DiagnosticAction icon={<RefreshCw size={16} />} title={text.refreshServicesTool} description={text.refreshServicesDescription} onClick={onRefresh} disabled={refreshing} />
-          <DiagnosticAction icon={<Copy size={16} />} title={text.copyDiagnosticTool} description={text.copyDiagnosticDescription} onClick={() => runtimeService ? void copyText(buildServiceDiagnostic(runtimeService)) : undefined} disabled={!runtimeService} />
-        </div>
-      </SettingsPanel>
+      </section>
     </div>
   );
 }
@@ -1629,97 +1928,63 @@ function RagMetric({ label, value, tone = "neutral" }: { label: string; value: s
   );
 }
 
+function SystemStatusMetric({ label, value, success }: { label: string; value: string; success?: boolean }) {
+  return (
+    <div className="border-b border-line px-4 py-3 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0">
+      <p className="text-[10px] font-semibold text-ink-secondary">{label}</p>
+      <p className={["mt-1 truncate text-[13px] font-semibold", success ? "text-emerald-700" : "text-ink-primary"].join(" ")}>{value}</p>
+    </div>
+  );
+}
+
 function SystemServiceCard({
   service,
   text,
-  refreshing,
-  onRefresh,
 }: {
   service: RuntimeServicesStatus["services"][number];
   text: SettingsCopy;
-  refreshing: boolean;
-  onRefresh: () => void;
 }) {
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
-  const diagnostic = buildServiceDiagnostic(service);
   const stateTone = service.status === "running" ? "success" : service.status === "degraded" ? "warning" : "danger";
 
-  useEffect(() => {
-    setCopyStatus("idle");
-  }, [service]);
-
-  async function handleCopyDiagnostic() {
-    const copied = await copyText(diagnostic);
-    setCopyStatus(copied ? "copied" : "failed");
-    window.setTimeout(() => setCopyStatus("idle"), 1800);
-  }
-
   return (
-    <div className="mt-4 overflow-hidden rounded-md border border-line bg-white">
-      <div className="grid items-center gap-3 border-b border-line px-4 py-3 md:grid-cols-[minmax(0,1fr)_auto_auto]">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-[12px] font-semibold text-ink-primary">{service.name}</p>
-            <ServiceStatusBadge value={service.statusLabel} tone={stateTone} />
-          </div>
-          <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{service.description}</p>
+    <article className="px-4 py-3">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-[12px] font-semibold text-ink-primary">{describeServiceName(service, text)}</p>
+          <ServiceStatusBadge value={service.statusLabel} tone={stateTone} />
         </div>
-        <p className="text-[10px] text-ink-secondary">{service.startedAt ? `${text.startedAtLabel}: ${formatDateTime(service.startedAt)}` : ""}</p>
-        <button
-          className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={refreshing}
-          onClick={onRefresh}
-        >
-          <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
-          {text.checkConnection}
-        </button>
-        <button
-          className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary hover:bg-panel"
-          onClick={() => setAdvancedOpen((isOpen) => !isOpen)}
-        >
-          {text.viewDetails}
-          <ChevronDown size={14} className={advancedOpen ? "rotate-180 transition" : "transition"} />
-        </button>
-      </div>
-
-      <div className="grid gap-0 sm:grid-cols-2 lg:grid-cols-4">
-        <RagMetric label={text.versionLabel} value={service.version ?? text.unavailableValue} tone={service.version === service.expectedVersion ? "success" : "warning"} />
-        <RagMetric label={text.profileLabel} value={service.profile ?? text.unavailableValue} tone={service.profile === service.expectedProfile ? "success" : "warning"} />
-        <RagMetric label={text.localContractLabel} value={service.endpoint} />
-        <RagMetric label={text.managedByLabel} value={service.managedBy ?? text.unavailableValue} />
+        <p className="mt-1 text-[11px] leading-5 text-ink-secondary">{describeServiceDescription(service, text)}</p>
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-ink-secondary">
+          <span>{text.versionLabel}: <strong className={service.version === service.expectedVersion ? "text-emerald-700" : "text-ink-primary"}>{service.version ?? text.unavailableValue}</strong></span>
+          <span>{text.profileLabel}: <strong className="text-ink-primary">{describeRuntimeProfile(service.profile, text)}</strong></span>
+          {service.startedAt ? <span>{text.startedAtLabel}: {formatDateTime(service.startedAt)}</span> : null}
+        </div>
       </div>
 
       {service.lastError ? (
-        <div className="border-t border-line bg-red-50 px-4 py-3">
+        <div className="mt-3 rounded-md border border-red-100 bg-red-50 px-3 py-2">
           <p className="text-[10px] font-semibold text-red-700">{text.lastErrorLabel}</p>
           <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-[10px] leading-4 text-red-700">{service.lastError}</pre>
         </div>
       ) : null}
-
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line px-4 py-3">
-        <button
-          className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange"
-          onClick={() => void handleCopyDiagnostic()}
-        >
-          <Copy size={14} />
-          {copyStatus === "copied" ? text.copyDiagnosticCopied : copyStatus === "failed" ? text.copyDiagnosticFailed : text.copyDiagnostic}
-        </button>
-        <p className="text-[10px] text-ink-secondary">{text.localRuntimeIntegratedNote}</p>
-      </div>
-
-      {advancedOpen ? (
-        <div className="border-t border-line bg-panel px-4 py-3">
-          <div className="grid gap-3 md:grid-cols-2">
-            <SystemInfoRow icon={<Server size={14} />} label={text.expectedVersionLabel} value={service.expectedVersion} />
-            <SystemInfoRow icon={<Activity size={14} />} label={text.expectedProfileLabel} value={service.expectedProfile} />
-            <SystemInfoRow icon={<Server size={14} />} label={text.localContractLabel} value={service.endpoint} mono />
-            {service.instanceId ? <SystemInfoRow icon={<Settings size={14} />} label={text.instanceLabel} value={service.instanceId} mono /> : null}
-          </div>
-        </div>
-      ) : null}
-    </div>
+    </article>
   );
+}
+
+function describeServiceName(service: RuntimeServicesStatus["services"][number], text: SettingsCopy) {
+  return service.id === "local-runtime" ? text.localAppServiceName : service.name;
+}
+
+function describeServiceDescription(service: RuntimeServicesStatus["services"][number], text: SettingsCopy) {
+  return service.id === "local-runtime" ? text.localAppServiceDescription : service.description;
+}
+
+function describeRuntimeProfile(profile: string | null | undefined, text: SettingsCopy) {
+  if (!profile) return text.unavailableValue;
+  if (profile === "desktop") return text.desktopProfile;
+  if (profile === "android") return text.androidProfile;
+  if (profile === "unauthenticated") return text.unauthenticatedProfile;
+  return profile;
 }
 
 function ServiceStatusBadge({ value, tone }: { value: string; tone: "success" | "warning" | "danger" }) {
@@ -1746,26 +2011,6 @@ function SystemInfoRow({ icon, label, value, mono }: { icon: ReactNode; label: s
         <p className={["mt-1 break-all text-[11px] font-semibold text-ink-primary", mono ? "font-mono" : ""].join(" ")}>{value}</p>
       </div>
     </div>
-  );
-}
-
-function DiagnosticAction({ icon, title, description, onClick, disabled, danger }: { icon: ReactNode; title: string; description: string; onClick: () => void; disabled?: boolean; danger?: boolean }) {
-  return (
-    <button
-      type="button"
-      className={[
-        "flex min-h-[72px] items-start gap-3 rounded-md border bg-white px-3 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-50",
-        danger ? "border-red-200 hover:bg-red-50" : "border-line hover:border-orange-200 hover:bg-brand-hover",
-      ].join(" ")}
-      disabled={disabled}
-      onClick={onClick}
-    >
-      <span className={["mt-0.5 shrink-0", danger ? "text-red-600" : "text-ink-secondary"].join(" ")}>{icon}</span>
-      <span className="min-w-0">
-        <span className={["block text-[11px] font-semibold", danger ? "text-red-600" : "text-ink-primary"].join(" ")}>{title}</span>
-        <span className="mt-1 block text-[10px] leading-4 text-ink-secondary">{description}</span>
-      </span>
-    </button>
   );
 }
 
@@ -1991,13 +2236,23 @@ function ExportSettings({
 }) {
   const headingLevels = ["h1", "h2", "h3", "h4", "h5", "h6"] as const;
   const [draft, setDraft] = useState<ExportTemplateConfig>(() => cloneExportTemplate(template));
+  const draftRef = useRef<ExportTemplateConfig>(draft);
 
   useEffect(() => {
-    setDraft(cloneExportTemplate(template));
+    const nextDraft = cloneExportTemplate(template);
+    draftRef.current = nextDraft;
+    setDraft(nextDraft);
   }, [template]);
 
+  function commitDraft(nextDraft: ExportTemplateConfig) {
+    draftRef.current = nextDraft;
+    setDraft(nextDraft);
+    onExportTemplateChange(exportTemplateUpdateFromConfig(nextDraft));
+  }
+
   function updateHeading(level: typeof headingLevels[number], patch: Partial<ExportTemplateConfig["headings"][typeof level]>) {
-    setDraft((current) => ({
+    const current = draftRef.current;
+    commitDraft({
       ...current,
       headings: {
         ...current.headings,
@@ -2006,39 +2261,38 @@ function ExportSettings({
           ...patch,
         },
       },
-    }));
+    });
   }
 
   function updateNormal(patch: Partial<ExportTemplateConfig["normal"]>) {
-    setDraft((current) => ({ ...current, normal: { ...current.normal, ...patch } }));
+    const current = draftRef.current;
+    commitDraft({ ...current, normal: { ...current.normal, ...patch } });
   }
 
   function updatePage(patch: Partial<ExportTemplateConfig["page"]>) {
-    setDraft((current) => ({ ...current, page: { ...current.page, ...patch } }));
+    const current = draftRef.current;
+    commitDraft({ ...current, page: { ...current.page, ...patch } });
   }
 
   function updateMargins(patch: Partial<ExportTemplateConfig["page"]["margins"]>) {
-    setDraft((current) => ({ ...current, page: { ...current.page, margins: { ...current.page.margins, ...patch } } }));
+    const current = draftRef.current;
+    commitDraft({ ...current, page: { ...current.page, margins: { ...current.page.margins, ...patch } } });
   }
 
   function updateParagraph(patch: Partial<ExportTemplateConfig["paragraph"]>) {
-    setDraft((current) => ({ ...current, paragraph: { ...current.paragraph, ...patch } }));
+    const current = draftRef.current;
+    commitDraft({ ...current, paragraph: { ...current.paragraph, ...patch } });
   }
 
   function updateDocument(patch: Partial<ExportTemplateConfig["document"]>) {
-    setDraft((current) => ({ ...current, document: { ...current.document, ...patch } }));
-  }
-
-  function saveDraft() {
-    onExportTemplateChange(exportTemplateUpdateFromConfig(draft));
+    const current = draftRef.current;
+    commitDraft({ ...current, document: { ...current.document, ...patch } });
   }
 
   function headingLabel(level: typeof headingLevels[number]) {
     const headingNumber = Number(level.slice(1));
     return text.exportHeadingLevelName.replace("{level}", String(headingNumber));
   }
-
-  const dirty = JSON.stringify(exportTemplateUpdateFromConfig(draft)) !== JSON.stringify(exportTemplateUpdateFromConfig(template));
 
   return (
     <div className="space-y-5">
@@ -2184,30 +2438,11 @@ function ExportSettings({
         </ExportPanel>
       </div>
 
-      <div className="flex flex-col gap-3 border-t border-line pt-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="border-t border-line pt-4">
         <p className="flex min-w-0 items-start gap-2 text-[11px] leading-5 text-ink-secondary">
           <Info size={14} className="mt-0.5 shrink-0" />
           <span>{text.exportSettingsNote}</span>
         </p>
-        <div className="flex shrink-0 items-center justify-end gap-3">
-          <button
-            className="inline-flex h-10 min-w-[110px] items-center justify-center rounded-md border border-line bg-white px-4 text-[12px] font-semibold text-ink-secondary hover:bg-panel disabled:cursor-not-allowed disabled:opacity-60"
-            type="button"
-            disabled={!dirty}
-            onClick={() => setDraft(cloneExportTemplate(template))}
-          >
-            {text.exportCancel}
-          </button>
-          <button
-            className="inline-flex h-10 min-w-[150px] items-center justify-center gap-2 rounded-md bg-brand-orange px-5 text-[12px] font-semibold text-white shadow-sm hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
-            type="button"
-            disabled={!dirty}
-            onClick={saveDraft}
-          >
-            <Check size={15} />
-            {text.exportSaveChanges}
-          </button>
-        </div>
       </div>
     </div>
   );
@@ -3043,6 +3278,7 @@ function Switch({ label, enabled, onToggle }: { label: string; enabled: boolean;
       role="switch"
       aria-checked={enabled}
       aria-label={label}
+      type="button"
       onClick={onToggle}
     >
       <span
@@ -3077,6 +3313,11 @@ const settingsCopy = {
   es: {
     title: "Configuración de la app",
     subtitle: "Ajustes locales de interfaz y diagnóstico.",
+    settingsIdle: "Sin cambios pendientes",
+    settingsSaving: "Guardando configuración",
+    settingsSaved: "Configuración guardada",
+    settingsSaveFailed: "No se pudo guardar la configuración",
+    settingsLocalOnly: "Solo preferencias locales",
     close: "Cerrar",
     closeSettings: "Cerrar configuración",
     sectionsLabel: "Apartados de configuración",
@@ -3091,39 +3332,35 @@ const settingsCopy = {
     systemNav: "Sistema y diagnóstico",
     systemNavDescription: "Servicios locales y trazas",
     servicesNav: "Servicios",
-    servicesNavDescription: "Runtime local y salud",
+    servicesNavDescription: "Estado local",
     appearanceNav: "Apariencia",
     appearanceNavDescription: "Idioma y escala visual",
     aiNav: "IA documental",
     aiNavDescription: "OpenAI y contexto documental",
     diagnosticsNav: "Trazas",
     diagnosticsNavDescription: "Registro local de errores",
-    servicesHeading: "Runtime local",
-    servicesDescription: "Revisa la salud del runtime Rust integrado que gestiona archivos, historial, IA y diagnósticos locales.",
+    servicesHeading: "Estado de la aplicación",
+    servicesDescription: "Comprueba que archivos, historial, IA y diagnósticos locales funcionan correctamente en este dispositivo.",
     servicesSummary: "Supervisión local",
-    servicesPending: "Consultando estado del runtime local",
+    servicesPending: "Consultando estado local",
     lastChecked: "Última comprobación",
     refreshServices: "Comprobar",
-    localContractLabel: "Contrato local",
-    localRuntimeIntegratedNote: "Runtime integrado en Tauri; no hay servicio externo ni proceso auxiliar.",
     profileLabel: "Perfil activo",
-    expectedProfileLabel: "Perfil esperado",
-    managedByLabel: "Gestionado por",
-    instanceLabel: "Instancia",
     startedAtLabel: "Arrancado",
     versionLabel: "Versión activa",
-    expectedVersionLabel: "Versión esperada",
-    appDataDirLabel: "Datos usados por el runtime",
-    expectedAppDataDirLabel: "Datos esperados por la app",
+    appDataDirLabel: "Datos locales",
     lastErrorLabel: "Último problema detectado",
     copyDiagnostic: "Copiar diagnóstico",
     copyDiagnosticCopied: "Diagnóstico copiado",
     copyDiagnosticFailed: "No se pudo copiar",
-    copyDiagnosticTool: "Informe del sistema",
-    copyDiagnosticDescription: "Copia un resumen técnico del runtime local.",
     checkConnection: "Probar conexión",
-    viewDetails: "Ver detalles",
+    availableValue: "Disponible",
     unavailableValue: "No disponible",
+    localAppServiceName: "Aplicación local",
+    localAppServiceDescription: "Gestiona archivos, historial, IA y diagnósticos en este dispositivo.",
+    desktopProfile: "Windows",
+    androidProfile: "Android",
+    unauthenticatedProfile: "Sin cuenta conectada",
     yes: "Sí",
     no: "No",
     appearanceHeading: "Apariencia",
@@ -3192,8 +3429,6 @@ const settingsCopy = {
     exportTemplateFileDescription: "La plantilla basica se guarda como JSON editable por fuera de la app.",
     exportResetTemplate: "Restablecer plantilla",
     exportSettingsNote: "Estos ajustes se aplican unicamente a las exportaciones realizadas desde esta instalacion.",
-    exportCancel: "Cancelar",
-    exportSaveChanges: "Guardar cambios",
     languageLabel: "Idioma",
     languageDescription: "Selecciona el idioma para la interfaz.",
     zoomLabel: "Zoom de la interfaz",
@@ -3250,10 +3485,67 @@ const settingsCopy = {
     visionStoreHeading: "Guardar descripciones visuales",
     visionStoreDescription: "Conserva metadatos locales para reutilizar contexto sin volver a analizar cada imagen.",
     reindexImages: "Reindexar imágenes",
-    imageGenerationUnavailableTitle: "Generación de imágenes no disponible",
-    imageGenerationUnavailableDescription: "La app mantiene imágenes importadas, previews y contexto visual, pero no ofrece generación de imágenes hasta que exista un contrato Rust/Tauri validado que cree assets locales.",
+    imageGenerationUnavailableTitle: "Generación de imágenes",
+    imageGenerationUnavailableDescription: "La app genera imágenes con OpenAI, las guarda en el proyecto y puede insertarlas en documentos cuando los permisos lo permiten.",
+    imageGenerationAvailableDescription: "Genera imágenes con OpenAI, guárdalas en el proyecto e insértalas en el documento cuando esté permitido.",
+    imageGenerationModelHeading: "Modelo imagen",
+    imageGenerationModelSelectorTitle: "Elige el modelo de imagen según calidad, coste y compatibilidad.",
+    imageGenerationModelGuideDescription: "Los importes son rangos orientativos por imagen 1K; tamaños 2K/4K y calidad alta elevan el coste. gpt-image-2 prioriza calidad, no coste mínimo.",
+    imageGenerationPricePerImage: "por imagen",
+    imageGenerationPricePer1kImage: "por imagen 1K",
+    imageGenerationSizeHeading: "Tamaño",
+    imageGenerationQualityHeading: "Calidad",
+    imageGenerationFormatHeading: "Formato",
+    imageGenerationFolderHeading: "Carpeta destino",
+    imageGenerationCustomFolderHeading: "Ruta personalizada",
+    imageGenerationAuto: "Automático",
+    imageGenerationQualityLow: "Baja",
+    imageGenerationQualityMedium: "Media",
+    imageGenerationQualityHigh: "Alta",
+    imageGenerationFolderDocument: "Carpeta del documento",
+    imageGenerationFolderGenerated: "assets/generated",
+    imageGenerationFolderCustom: "Personalizada",
+    imageGenerationInsertHeading: "Insertar en documento",
+    imageGenerationInsertDescription: "Permite añadir la imagen generada como referencia Markdown en el documento activo.",
+    imageGenerationDocumentContextHeading: "Usar contexto documental",
+    imageGenerationDocumentContextDescription: "Permite que la petición visual use el documento activo y fuentes adjuntas como contexto.",
+    imageGenerationModels: {
+      "gpt-image-2": {
+        name: "Máxima calidad",
+        description: "Modelo actual para generación y edición, con tamaños flexibles y coste superior en alta calidad o 2K/4K.",
+        price: "$0.006-$0.211",
+        tag: "Recomendado",
+        recommended: true,
+      },
+      "gpt-image-1.5": {
+        name: "Calidad anterior",
+        description: "Modelo previo con buen seguimiento de instrucciones y coste por imagen publicado.",
+        price: "$0.009-$0.133",
+        tag: "Avanzado",
+        recommended: false,
+      },
+      "gpt-image-1-mini": {
+        name: "Coste bajo",
+        description: "Variante eficiente para borradores visuales, ideas rápidas y menor coste operativo.",
+        price: "$0.005-$0.036",
+        tag: "Económico",
+        recommended: false,
+      },
+      "gpt-image-1": {
+        name: "Compatibilidad",
+        description: "Modelo anterior mantenido para compatibilidad con configuraciones existentes.",
+        price: "$0.011-$0.167",
+        tag: "Legacy",
+        recommended: false,
+      },
+    },
+    imageGenerationPermissionsTitle: "Permisos de imagen",
+    permissionGenerateImages: "Generar imágenes",
+    permissionGenerateImagesDescription: "Permite que la IA genere imágenes con el proveedor configurado.",
+    permissionCreateImageAssets: "Crear assets de imagen",
+    permissionCreateImageAssetsDescription: "Autoriza guardar imágenes generadas dentro del proyecto local.",
     transcriptionHeading: "Audio y transcripción",
-    transcriptionDescription: "Controla el dictado usado por el micrófono del prompt. React captura el audio y el runtime local Rust lo transcribe antes de insertarlo en el prompt o el documento.",
+    transcriptionDescription: "Controla el dictado usado por el micrófono del prompt y dónde se insertará el texto transcrito.",
     transcriptionModelHeading: "Modelo",
     transcriptionDefaultTarget: "Destino por defecto",
     transcriptionDefaultLanguage: "Idioma por defecto",
@@ -3312,18 +3604,18 @@ const settingsCopy = {
     editDocuments: "Editar documentos",
     createFolders: "Crear y mover carpetas",
     createDocuments: "Crear, duplicar y mover documentos",
-    generateImages: "Generación de imágenes no disponible",
+    generateImages: "Generar imágenes",
     createImageAssets: "Crear archivos de imagen",
     insertImagesIntoDocuments: "Insertar imágenes en documentos",
     useDocumentContextForImages: "Usar contexto documental en imágenes",
     deleteDocuments: "Eliminar documentos y carpetas",
     agenticHeading: "Tareas agénticas",
-    agenticDescription: "Modo reservado para flujos de varios pasos cuando el runtime pueda planificar, ejecutar y confirmar acciones de forma estructurada.",
+    agenticDescription: "Modo reservado para flujos de varios pasos con planificación, ejecución y confirmación estructurada.",
     agenticUnavailableTitle: "Tareas agénticas no disponibles",
-    agenticUnavailableDescription: "La IA documental responde sobre el documento activo y el contexto añadido al prompt, pero no realiza investigación web ni flujos autónomos de varios pasos hasta que el runtime Rust/Tauri tenga ese contrato validado.",
+    agenticUnavailableDescription: "La IA documental responde sobre el documento activo y el contexto añadido al prompt, pero la investigación web y los flujos autónomos de varios pasos aún no están disponibles.",
     agenticModeHint: "Control desde el prompt",
     webResearchHeading: "Investigación web",
-    webResearchDescription: "No se ofrece hasta que exista un servicio runtime validado para consultar fuentes externas, citar resultados y auditar coste.",
+    webResearchDescription: "No disponible hasta que la app pueda consultar fuentes externas con citas, trazabilidad y control de coste.",
     agenticConfirmHeading: "Confirmar antes de aplicar",
     agenticConfirmDescription: "Las tareas pueden preparar cambios, pero no crear ni modificar documentos sin un checkpoint visible.",
     agenticMaxSteps: "Pasos",
@@ -3331,12 +3623,16 @@ const settingsCopy = {
     agenticMaxSources: "Fuentes",
     agenticMaxCost: "Coste máx.",
     ragHeading: "Indexar documentación del proyecto",
-    ragDescription: "Contexto explícito desde el prompt. El índice semántico automático todavía no está disponible.",
-    ragUnavailableTitle: "Índice semántico automático no disponible",
-    ragUnavailableDescription: "Puedes añadir documentos, imágenes y adjuntos como contexto explícito desde el prompt. La indexación semántica automática y el vector store no se ofrecen hasta que el runtime los use realmente en las interacciones IA.",
+    ragDescription: "Índice local automático usado para añadir contexto documental a las respuestas IA.",
+    ragUnavailableTitle: "Índice local pendiente",
+    ragUnavailableDescription: "Puedes añadir documentos, imágenes y adjuntos como contexto explícito desde el prompt.",
+    ragAvailableDescription: "Construye un índice local de documentos y adjuntos de texto para seleccionar fragmentos relevantes como contexto IA.",
     ragExplicitContextNotice: "Para trabajar con más contexto, adjunta archivos desde el prompt o arrástralos desde el árbol del proyecto.",
     ragContextHeading: "Contexto documental (RAG)",
-    ragContextHelp: "La búsqueda exacta local y el contexto seleccionado manualmente siguen disponibles; no se envía contenido a OpenAI para crear un índice automático.",
+    ragContextHelp: "El índice se guarda localmente y se reconstruye desde los archivos del proyecto. No crea un vector store remoto.",
+    ragNotIndexedMessage: "Índice pendiente de reconstrucción.",
+    rebuildAiIndex: "Reconstruir índice",
+    deleteAiIndex: "Limpiar índice",
     ragStatus: "Estado",
     ragDocuments: "Documentos disponibles",
     ragFailed: "fallidos",
@@ -3358,10 +3654,6 @@ const settingsCopy = {
     storageHeading: "Datos locales y almacenamiento",
     storageDescription: "Ubicaciones que usa la aplicación para guardar datos locales, configuración e índices.",
     logsSensitiveNotice: "Los logs pueden contener información sensible. Úsalos solo para diagnóstico.",
-    diagnosticToolsHeading: "Herramientas de diagnóstico",
-    diagnosticToolsDescription: "Acciones disponibles para comprobar el estado local y preparar información para soporte.",
-    refreshServicesTool: "Actualizar estado",
-    refreshServicesDescription: "Vuelve a consultar el estado del runtime local.",
     summaryHeading: "Resumen de configuración",
     summaryDescription: "Revisa los ajustes actuales de tu aplicación. Puedes cambiar cualquier configuración desde su sección correspondiente.",
     summaryInterfaceDescription: "Apariencia general y comportamiento de la aplicación.",
@@ -3376,6 +3668,7 @@ const settingsCopy = {
     summarySearch: "Búsqueda",
     summaryVectorStore: "Vector store",
     summaryNone: "Ninguno",
+    summaryDocumentsShort: "docs",
     summaryImages: "Imágenes",
     summaryImagesDescription: "Entender imágenes importadas",
     summaryAudioDescription: "Transcribir audio a texto",
@@ -3383,12 +3676,13 @@ const settingsCopy = {
     summaryAgenticDescription: "Investigación y ejecución de tareas",
     summaryProductive: "Productivo",
     summaryModelsHeading: "Modelos de IA utilizados",
-    summaryModelsDescription: "Resumen de todos los modelos seleccionados en la aplicación.",
+    summaryModelsDescription: "Modelos seleccionados por función, con capacidad, coste y unidad de precio.",
     summaryMainAi: "IA principal (respuestas)",
-    summaryImageAi: "Imágenes (visión)",
+    summaryImageGenerationAi: "Imágenes (generación)",
+    summaryVisionAi: "Imágenes (visión)",
     summaryAudioAi: "Audio y transcripción",
-    summaryImagePricing: "$0.75 / $4.50",
     summaryAudioPricing: "$0.006 / $0.018",
+    summaryTokenPriceUnit: "por 1M tokens",
     summaryEconomy: "Económico",
     summaryHelpHeading: "¿Necesitas ayuda?",
     summaryHelpDescription: "Consulta la guía rápida para entender cómo funciona cada sección.",
@@ -3431,15 +3725,17 @@ const settingsCopy = {
     createFoldersDescription: "Puede crear, duplicar y mover carpetas.",
     createDocumentsDescription: "Puede crear y organizar documentos del proyecto.",
     deleteDocumentsDescription: "Puede eliminar documentos y carpetas.",
-    generateImagesDescription: "Permiso reservado; no está disponible hasta que exista contrato Rust/Tauri validado.",
+    generateImagesDescription: "Permite generar imágenes mediante el proveedor configurado.",
     createImageAssetsDescription: "Puede guardar imágenes como archivos en el proyecto.",
     insertImagesIntoDocumentsDescription: "Puede añadir imágenes dentro de documentos.",
     useDocumentContextForImagesDescription: "Permiso reservado para generación de imágenes; la visión usa contexto explícito del prompt.",
     permissionScopeNotice: "Estos permisos se aplican a la IA en todas las tareas que realice dentro del proyecto.",
+    agenticDepthQuick: "Rápido",
+    agenticDepthGuided: "Guiado",
+    agenticDepthDeep: "Profundo guiado",
+    agenticDepthBoundedAutonomous: "Autónomo acotado",
     agenticWebResearchHeading: "Investigación web",
-    agenticWebResearchDescription: "No disponible hasta que el runtime local implemente investigación web con fuentes y trazabilidad.",
-    agenticLimitsHeading: "Límites de ejecución",
-    agenticLimitsDescription: "Limita el alcance máximo de cada tarea antes de que la IA siga investigando o aplicando cambios.",
+    agenticWebResearchDescription: "No disponible hasta que la app pueda investigar en web con fuentes y trazabilidad.",
     agenticLimitsImpact: "Pasos controla cuántas iteraciones puede hacer; documentos limita cuántos archivos del proyecto puede revisar; fuentes limita referencias externas o añadidas; coste máx. corta la tarea si la estimación supera ese importe.",
     capabilitiesPlaceholderDescription: "Esta sección agrupa las capacidades avanzadas de IA. Por ahora mantiene una vista de resumen; los controles detallados siguen disponibles en IA documental.",
     capabilitiesEditInAi: "Configurar en IA documental",
@@ -3447,6 +3743,11 @@ const settingsCopy = {
   en: {
     title: "App settings",
     subtitle: "Local interface and diagnostics settings.",
+    settingsIdle: "No pending changes",
+    settingsSaving: "Saving settings",
+    settingsSaved: "Settings saved",
+    settingsSaveFailed: "Settings could not be saved",
+    settingsLocalOnly: "Local preferences only",
     close: "Close",
     closeSettings: "Close settings",
     sectionsLabel: "Settings sections",
@@ -3461,39 +3762,35 @@ const settingsCopy = {
     systemNav: "System and diagnostics",
     systemNavDescription: "Local services and traces",
     servicesNav: "Services",
-    servicesNavDescription: "Local runtime health",
+    servicesNavDescription: "Local status",
     appearanceNav: "Appearance",
     appearanceNavDescription: "Language and visual scale",
     aiNav: "Documentation AI",
     aiNavDescription: "OpenAI and document context",
     diagnosticsNav: "Traces",
     diagnosticsNavDescription: "Local error logging",
-    servicesHeading: "Local runtime",
-    servicesDescription: "Check the integrated Rust runtime that manages local files, history, AI, and diagnostics.",
+    servicesHeading: "Application status",
+    servicesDescription: "Check that local files, history, AI, and diagnostics are working correctly on this device.",
     servicesSummary: "Local supervision",
-    servicesPending: "Checking local runtime status",
+    servicesPending: "Checking local status",
     lastChecked: "Last checked",
     refreshServices: "Check",
-    localContractLabel: "Local contract",
-    localRuntimeIntegratedNote: "Runtime integrated in Tauri; there is no external service or auxiliary process.",
     profileLabel: "Active profile",
-    expectedProfileLabel: "Expected profile",
-    managedByLabel: "Managed by",
-    instanceLabel: "Instance",
     startedAtLabel: "Started",
     versionLabel: "Active version",
-    expectedVersionLabel: "Expected version",
-    appDataDirLabel: "Data used by runtime",
-    expectedAppDataDirLabel: "Data expected by app",
+    appDataDirLabel: "Local data",
     lastErrorLabel: "Last detected problem",
     copyDiagnostic: "Copy diagnostic",
     copyDiagnosticCopied: "Diagnostic copied",
     copyDiagnosticFailed: "Could not copy",
-    copyDiagnosticTool: "System report",
-    copyDiagnosticDescription: "Copies a technical summary of the local runtime.",
     checkConnection: "Test connection",
-    viewDetails: "View details",
+    availableValue: "Available",
     unavailableValue: "Unavailable",
+    localAppServiceName: "Local application",
+    localAppServiceDescription: "Manages files, history, AI, and diagnostics on this device.",
+    desktopProfile: "Windows",
+    androidProfile: "Android",
+    unauthenticatedProfile: "No connected account",
     yes: "Yes",
     no: "No",
     appearanceHeading: "Appearance",
@@ -3562,8 +3859,6 @@ const settingsCopy = {
     exportTemplateFileDescription: "The basic template is saved as JSON and can be edited outside the app.",
     exportResetTemplate: "Reset template",
     exportSettingsNote: "These settings apply only to exports made from this installation.",
-    exportCancel: "Cancel",
-    exportSaveChanges: "Save changes",
     languageLabel: "Language",
     languageDescription: "Select the interface language.",
     zoomLabel: "Interface zoom",
@@ -3620,10 +3915,67 @@ const settingsCopy = {
     visionStoreHeading: "Store visual descriptions",
     visionStoreDescription: "Keep local metadata to reuse context without analyzing each image again.",
     reindexImages: "Reindex images",
-    imageGenerationUnavailableTitle: "Image generation unavailable",
-    imageGenerationUnavailableDescription: "The app keeps imported images, previews, and visual context, but image generation is not offered until a validated Rust/Tauri contract can create local assets.",
+    imageGenerationUnavailableTitle: "Image generation",
+    imageGenerationUnavailableDescription: "The app generates images with OpenAI, saves them in the project, and can insert them into documents when permissions allow it.",
+    imageGenerationAvailableDescription: "Generate images with OpenAI, save them in the project, and insert them into documents when allowed.",
+    imageGenerationModelHeading: "Image model",
+    imageGenerationModelSelectorTitle: "Choose the image model by quality, cost, and compatibility.",
+    imageGenerationModelGuideDescription: "Prices are indicative ranges per 1K image; 2K/4K sizes and high quality increase cost. gpt-image-2 prioritizes quality, not minimum cost.",
+    imageGenerationPricePerImage: "per image",
+    imageGenerationPricePer1kImage: "per 1K image",
+    imageGenerationSizeHeading: "Size",
+    imageGenerationQualityHeading: "Quality",
+    imageGenerationFormatHeading: "Format",
+    imageGenerationFolderHeading: "Destination folder",
+    imageGenerationCustomFolderHeading: "Custom path",
+    imageGenerationAuto: "Automatic",
+    imageGenerationQualityLow: "Low",
+    imageGenerationQualityMedium: "Medium",
+    imageGenerationQualityHigh: "High",
+    imageGenerationFolderDocument: "Document folder",
+    imageGenerationFolderGenerated: "assets/generated",
+    imageGenerationFolderCustom: "Custom",
+    imageGenerationInsertHeading: "Insert into document",
+    imageGenerationInsertDescription: "Allows the generated image to be inserted as a Markdown reference in the active document.",
+    imageGenerationDocumentContextHeading: "Use document context",
+    imageGenerationDocumentContextDescription: "Allows the visual request to use the active document and attached sources as context.",
+    imageGenerationModels: {
+      "gpt-image-2": {
+        name: "Highest quality",
+        description: "Current model for generation and editing, with flexible sizes and higher cost at high quality or 2K/4K.",
+        price: "$0.006-$0.211",
+        tag: "Recommended",
+        recommended: true,
+      },
+      "gpt-image-1.5": {
+        name: "Previous quality",
+        description: "Previous model with strong instruction following and published per-image cost.",
+        price: "$0.009-$0.133",
+        tag: "Advanced",
+        recommended: false,
+      },
+      "gpt-image-1-mini": {
+        name: "Low cost",
+        description: "Efficient variant for visual drafts, fast ideas, and lower operating cost.",
+        price: "$0.005-$0.036",
+        tag: "Economy",
+        recommended: false,
+      },
+      "gpt-image-1": {
+        name: "Compatibility",
+        description: "Previous model kept for compatibility with existing configurations.",
+        price: "$0.011-$0.167",
+        tag: "Legacy",
+        recommended: false,
+      },
+    },
+    imageGenerationPermissionsTitle: "Image permissions",
+    permissionGenerateImages: "Generate images",
+    permissionGenerateImagesDescription: "Allows the AI to generate images with the configured provider.",
+    permissionCreateImageAssets: "Create image assets",
+    permissionCreateImageAssetsDescription: "Authorizes saving generated images inside the local project.",
     transcriptionHeading: "Audio and transcription",
-    transcriptionDescription: "Controls dictation from the prompt microphone. React captures audio and the local Rust runtime transcribes it before inserting it into the prompt or document.",
+    transcriptionDescription: "Controls dictation from the prompt microphone and where the transcribed text will be inserted.",
     transcriptionModelHeading: "Model",
     transcriptionDefaultTarget: "Default target",
     transcriptionDefaultLanguage: "Default language",
@@ -3682,18 +4034,18 @@ const settingsCopy = {
     editDocuments: "Edit documents",
     createFolders: "Create and move folders",
     createDocuments: "Create, duplicate, and move documents",
-    generateImages: "Image generation unavailable",
+    generateImages: "Generate images",
     createImageAssets: "Create image files",
     insertImagesIntoDocuments: "Insert images in documents",
     useDocumentContextForImages: "Use document context for images",
     deleteDocuments: "Delete documents and folders",
     agenticHeading: "Agentic tasks",
-    agenticDescription: "Reserved for multi-step flows once the runtime can plan, execute, and confirm structured actions.",
+    agenticDescription: "Reserved for multi-step flows with structured planning, execution, and confirmation.",
     agenticUnavailableTitle: "Agentic tasks unavailable",
-    agenticUnavailableDescription: "Documentation AI can answer about the active document and explicitly attached prompt context, but it does not run web research or autonomous multi-step flows until the Rust/Tauri runtime contract is validated.",
+    agenticUnavailableDescription: "Documentation AI can answer about the active document and explicitly attached prompt context, but web research and autonomous multi-step flows are not available yet.",
     agenticModeHint: "Controlled from prompt",
     webResearchHeading: "Web research",
-    webResearchDescription: "Not offered until a validated runtime service can consult external sources, cite results, and audit cost.",
+    webResearchDescription: "Unavailable until the app can consult external sources with citations, traceability, and cost control.",
     agenticConfirmHeading: "Confirm before applying",
     agenticConfirmDescription: "Tasks can prepare changes, but cannot create or modify documents without a visible checkpoint.",
     agenticMaxSteps: "Steps",
@@ -3701,12 +4053,16 @@ const settingsCopy = {
     agenticMaxSources: "Sources",
     agenticMaxCost: "Max cost",
     ragHeading: "Index project documentation",
-    ragDescription: "Explicit prompt context. Automatic semantic indexing is not available yet.",
-    ragUnavailableTitle: "Automatic semantic index unavailable",
-    ragUnavailableDescription: "You can add documents, images, and attachments as explicit context from the prompt. Automatic semantic indexing and vector stores are not offered until the runtime actually uses them in AI interactions.",
+    ragDescription: "Automatic local index used to add document context to AI answers.",
+    ragUnavailableTitle: "Local index pending",
+    ragUnavailableDescription: "You can add documents, images, and attachments as explicit context from the prompt.",
+    ragAvailableDescription: "Builds a local index of documents and text attachments to select relevant fragments as AI context.",
     ragExplicitContextNotice: "To work with more context, attach files from the prompt or drag them from the project tree.",
     ragContextHeading: "Document context (RAG)",
-    ragContextHelp: "Local exact search and manually selected context remain available; content is not sent to OpenAI to create an automatic index.",
+    ragContextHelp: "The index is stored locally and rebuilt from project files. It does not create a remote vector store.",
+    ragNotIndexedMessage: "Index rebuild pending.",
+    rebuildAiIndex: "Rebuild index",
+    deleteAiIndex: "Clear index",
     ragStatus: "Status",
     ragDocuments: "Available documents",
     ragFailed: "failed",
@@ -3728,10 +4084,6 @@ const settingsCopy = {
     storageHeading: "Local data and storage",
     storageDescription: "Locations used by the application to store local data, configuration, and indexes.",
     logsSensitiveNotice: "Logs may contain sensitive information. Use them only for diagnostics.",
-    diagnosticToolsHeading: "Diagnostic tools",
-    diagnosticToolsDescription: "Available actions to check local status and prepare support information.",
-    refreshServicesTool: "Refresh status",
-    refreshServicesDescription: "Checks the local runtime status again.",
     summaryHeading: "Configuration summary",
     summaryDescription: "Review the current app settings. You can change any setting from its corresponding section.",
     summaryInterfaceDescription: "General appearance and application behavior.",
@@ -3746,6 +4098,7 @@ const settingsCopy = {
     summarySearch: "Search",
     summaryVectorStore: "Vector store",
     summaryNone: "None",
+    summaryDocumentsShort: "docs",
     summaryImages: "Images",
     summaryImagesDescription: "Understand imported images",
     summaryAudioDescription: "Transcribe audio to text",
@@ -3753,12 +4106,13 @@ const settingsCopy = {
     summaryAgenticDescription: "Research and task execution",
     summaryProductive: "Productive",
     summaryModelsHeading: "AI models in use",
-    summaryModelsDescription: "Summary of all selected models in the application.",
+    summaryModelsDescription: "Selected models by function, with capability, cost, and price unit.",
     summaryMainAi: "Main AI (responses)",
-    summaryImageAi: "Images (vision)",
+    summaryImageGenerationAi: "Images (generation)",
+    summaryVisionAi: "Images (vision)",
     summaryAudioAi: "Audio and transcription",
-    summaryImagePricing: "$0.75 / $4.50",
     summaryAudioPricing: "$0.006 / $0.018",
+    summaryTokenPriceUnit: "per 1M tokens",
     summaryEconomy: "Economy",
     summaryHelpHeading: "Need help?",
     summaryHelpDescription: "Open the quick guide to understand how each section works.",
@@ -3801,15 +4155,17 @@ const settingsCopy = {
     createFoldersDescription: "Can create, duplicate, and move folders.",
     createDocumentsDescription: "Can create and organize project documents.",
     deleteDocumentsDescription: "Can delete documents and folders.",
-    generateImagesDescription: "Reserved permission; unavailable until a validated Rust/Tauri contract exists.",
+    generateImagesDescription: "Allows images to be generated with the configured provider.",
     createImageAssetsDescription: "Can save images as project files.",
     insertImagesIntoDocumentsDescription: "Can add images inside documents.",
     useDocumentContextForImagesDescription: "Reserved for image generation; vision uses explicit prompt context.",
     permissionScopeNotice: "These permissions apply to AI across every task it performs inside the project.",
+    agenticDepthQuick: "Quick",
+    agenticDepthGuided: "Guided",
+    agenticDepthDeep: "Deep guided",
+    agenticDepthBoundedAutonomous: "Bounded autonomous",
     agenticWebResearchHeading: "Web research",
-    agenticWebResearchDescription: "Unavailable until the local runtime implements web research with sources and traceability.",
-    agenticLimitsHeading: "Execution limits",
-    agenticLimitsDescription: "Limits the maximum scope of each task before the AI continues researching or applying changes.",
+    agenticWebResearchDescription: "Unavailable until the app can research the web with sources and traceability.",
     agenticLimitsImpact: "Steps controls how many iterations it may run; documents limits how many project files it may inspect; sources limits external or attached references; max cost stops the task if the estimate exceeds that amount.",
     capabilitiesPlaceholderDescription: "This section groups advanced AI capabilities. For now it keeps a summary view; detailed controls remain available in Documentation AI.",
     capabilitiesEditInAi: "Configure in Documentation AI",

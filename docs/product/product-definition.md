@@ -19,7 +19,7 @@ KnowNext.ai is a compact local-first workspace for Markdown documentation. Users
 - Maintain user notes outside the project document tree.
 - Show history/version state through product language without exposing branch names in the UI.
 - Import images and supported support files.
-- Work with imported images as project assets; generated images are not a current accepted capability until Rust/Tauri can create local assets through a validated contract.
+- Work with imported and AI-generated images as local project assets.
 - Preview PDF, DOCX, and XLSX reference files when the Rust document services can extract or render them.
 - Export Markdown documents to MD, PDF, and DOCX.
 - Show runtime diagnostics and update status from the local Tauri/Rust runtime.
@@ -34,8 +34,9 @@ KnowNext.ai is a compact local-first workspace for Markdown documentation. Users
 - Do not implement AI intent with user-text heuristics, regexes, language-specific phrase lists, or keyword matching.
 - Mock AI responses are acceptable only as replaceable local runtime behavior while provider integration and privacy policy are finalized.
 - OpenAI is the first supported provider when real execution is enabled. Credentials must be stored locally through runtime services and never exposed back to React after save.
-- AI image generation controls must remain unavailable until the Rust/Tauri runtime can generate, store, reference, and permission-check local image assets end to end.
-- Automatic semantic RAG/vector-store indexing and agentic web research controls must remain unavailable until Rust/Tauri uses them in AI interactions with validated source, cost, and permission contracts.
+- AI image generation is Rust/Tauri mediated: the LLM may propose a structured image operation, and the runtime validates permissions, calls the provider, writes the generated asset locally, and inserts Markdown references when configured.
+- RAG uses a local project index rebuilt from Markdown and supported text attachments. The runtime retrieves relevant local chunks for AI interactions; it must not create a remote vector store as part of the local-first workflow.
+- Agentic web research controls must remain unavailable until Rust/Tauri uses them in AI interactions with validated source, cost, and permission contracts.
 
 ## Git And GitHub
 
@@ -68,10 +69,10 @@ KnowNext.ai is a compact local-first workspace for Markdown documentation. Users
 - Do not add an external plus button next to the project selector.
 - Tree item actions appear through hover/context menus, not permanent action icons.
 
-## Current 2.0.4 Limitations
+## Current Limitations
 
 - AI provider execution depends on locally stored OpenAI credentials and still needs end-to-end validation with real keys before claiming provider acceptance.
-- AI image generation is intentionally unavailable in settings until a runtime-backed local asset-generation contract exists.
-- Automatic semantic RAG/vector-store indexing and agentic web research are intentionally unavailable in settings; explicit prompt context remains the accepted context workflow.
+- AI image generation and local RAG are implemented through the Rust/Tauri runtime and still require hands-on validation with a real OpenAI key before release acceptance.
+- Agentic web research remains unavailable.
 - Document previews and exports are Rust-managed and best-effort for formats that require complex conversion.
 - Any remaining service double must be centralized, routed through the runtime boundary, and documented in release notes.

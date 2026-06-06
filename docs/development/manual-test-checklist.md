@@ -37,23 +37,29 @@ Use `docs/development/functional-validation-matrix.md` to record which areas are
 - Create a project from the project selector.
 - Create a folder and Markdown document from tree menus.
 - Open multiple tabs, switch tabs, close tabs, and confirm the active document stays stable.
+- Use the tab context menu actions `Cerrar`, `Cerrar otras pestañas` and `Cerrar todas las pestañas`; with dirty tabs, confirm the confirmation dialog advances one document at a time and no tab is skipped.
 - Drag document tabs to reorder them; confirm the order persists while switching tabs and reopening the app.
 - Edit in Milkdown, save, close, reopen, and confirm Markdown content persists.
+- Apply `Cita` from the Markdown toolbar to selected text, then apply it again and confirm the blockquote style is removed.
 - Edit a document without saving, force an orphaned draft by removing the backing Markdown file from disk, then open `Borradores recuperables`; confirm the draft is listed, can recreate the file, and disappears after restore or discard.
 - Create and save user notes.
 - In a disposable validation project or copied workspace, drag documents, folders, images, and attachments in the tree to move them between folders and to the project root; confirm the resulting filesystem paths, open tabs, and image/document references stay consistent.
 - Open the history/protection drawer and confirm version state is shown without product branch names.
 - Add a Markdown file and a `.env` file directly in the project folder outside the app; scan external changes and confirm the Markdown can be imported into local history while the private file remains omitted.
 - Import or attach an image and confirm it renders in the document/reference viewer when supported.
+- Import a single Markdown/PDF/DOCX/XLSX file and confirm the imported file opens immediately as the active editable document or supported preview.
 - Insert an imported image into a Markdown document, then move the image, move the document, and move their containing folders; confirm Markdown image references are recalculated and remain valid.
 - Reindex project images from settings and confirm the result reports the real number of project images and indexed images.
-- Open AI/capabilities settings and confirm image generation is marked unavailable rather than exposing model, folder, or insertion controls until a Rust/Tauri asset-generation contract exists.
-- Open AI/capabilities settings and confirm automatic semantic RAG/vector store and agentic web research are marked unavailable; the app must still allow explicit document/image/attachment context from the prompt.
+- Open AI/capabilities settings and confirm image generation exposes `gpt-image-2`, model, size, quality, format, destination folder, document insertion, document-context and asset-permission controls.
+- Open AI/documental settings and confirm RAG exposes local index status, document counts, local index ID, `Reconstruir índice` and `Limpiar índice`; rebuild the index and confirm the document count updates.
 - In the document prompt, add context from a project document, then use `Adjuntar archivo` to select an external Markdown/PDF/Office/image file through the native picker. Confirm both sources appear as chips, `Fuentes` shows the correct count, preview works, and each source can be removed without affecting project files.
+- Type `@` in the prompt and confirm the reference picker has a bounded height with scroll, can be closed, shows the folder path above and the filename below, and does not repeat the filename in the path.
 - Drag a project document/image/attachment from the tree onto the prompt input and confirm it is added as IA context without uploading a duplicate external file.
 - Open PDF/DOCX/XLSX reference previews where supported and confirm failures are visible and non-destructive; for XLSX, verify the sheet selector lists real workbook sheets and the grid shows actual cell values.
 - Export a document to MD, PDF, and DOCX.
-- Use the AI panel on the active document. Mocked responses are acceptable only when clearly routed through the local runtime contract.
+- Use the AI panel on the active document. With an OpenAI key configured, ask a question that requires context from another indexed project document and confirm the answer cites/uses that context. Then ask for a generated image and confirm a local image asset is created, appears in the tree/viewer, and is inserted into the document when insertion is enabled.
+- Ask the AI to create a new document with document-creation permission enabled and confirm the request is visible in the IA tab conversation and the created document opens as the active tab.
+- Open settings > Capacidades and confirm local guided agentic controls are configurable for depth, confirmation, max steps, documents, sources and cost, while web research remains marked unavailable.
 - Open settings, confirm Services shows `Runtime local`, `Contrato local`, `tauri://local-api/health`, no port control, no restart action, and no external executable.
 - Open settings > System diagnostics and confirm the Git/GitHub service reports the active project, Git availability, local history state, origin/remote state, and GitHub paused state when unauthenticated.
 - Configure an OpenAI key, connect GitHub, then close only the GitHub session; confirm the OpenAI key remains configured. Reconnect GitHub, update the OpenAI key, and confirm GitHub remains connected.
@@ -92,8 +98,8 @@ Use `docs/development/functional-validation-matrix.md` to record which areas are
 
 - GitHub synchronization must use the Rust Git service; if credentials or permissions are missing, the UI must pause remote sync while local history remains usable.
 - AI provider execution requires locally stored OpenAI credentials and must be validated with a real key before claiming provider acceptance.
-- AI image generation is not an accepted 2.0.4 capability until Rust/Tauri can create local image assets and insert references through a validated contract; settings must continue to show it as unavailable.
-- Automatic semantic RAG/vector store and agentic web research are not accepted 2.0.4 capabilities until the Rust/Tauri runtime uses them in AI interactions; settings must continue to show them as unavailable while explicit prompt context remains usable.
+- AI image generation and local RAG require real-provider hands-on validation before release acceptance; do not claim acceptance if generated assets, Markdown insertion, or indexed-document retrieval fail.
+- Agentic local guided configuration is accepted for 2.0.4; agentic web research and unrestricted autonomous multi-step flows are not accepted capabilities and must remain unavailable.
 - Some document previews may be best-effort depending on Rust conversion support.
 
 Any limitation here must be repeated in `docs/releases/2.0.4.md` before publication.

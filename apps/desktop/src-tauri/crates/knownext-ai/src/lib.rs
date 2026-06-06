@@ -1,3 +1,4 @@
+use base64::Engine;
 use reqwest::blocking::{multipart, Client};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT};
 use serde_json::{json, Value};
@@ -10,11 +11,24 @@ pub fn answer_interaction(
     openai_key: Option<&str>,
     model: &str,
 ) -> Value {
-    let prompt = payload.get("prompt").and_then(Value::as_str).unwrap_or("").trim();
+    let prompt = payload
+        .get("prompt")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
     let document_id = payload.get("documentId").and_then(Value::as_str);
-    let mode = payload.get("mode").and_then(Value::as_str).unwrap_or("document");
-    let execution_mode = payload.get("executionMode").and_then(Value::as_str).unwrap_or("quick");
-    let reasoning_depth = payload.get("reasoningDepth").and_then(Value::as_str).unwrap_or("light");
+    let mode = payload
+        .get("mode")
+        .and_then(Value::as_str)
+        .unwrap_or("document");
+    let execution_mode = payload
+        .get("executionMode")
+        .and_then(Value::as_str)
+        .unwrap_or("quick");
+    let reasoning_depth = payload
+        .get("reasoningDepth")
+        .and_then(Value::as_str)
+        .unwrap_or("light");
     let event_id = knownext_core::compact_id("ai-event");
     let interaction_id = knownext_core::compact_id("ai");
     let created_at = knownext_core::now_iso();
@@ -54,18 +68,54 @@ pub fn answer_interaction(
         .send();
 
     let provider_text = match response {
-        Ok(response) if response.status().is_success() => {
-            match response.json::<Value>() {
-                Ok(value) => extract_response_text(&value).unwrap_or_else(|| "La IA respondió sin texto utilizable.".to_string()),
-                Err(error) => return provider_error_response(project_id, document_id, &interaction_id, &event_id, &created_at, &format!("No se pudo leer la respuesta de OpenAI: {error}"), execution_mode, reasoning_depth, mode),
+        Ok(response) if response.status().is_success() => match response.json::<Value>() {
+            Ok(value) => extract_response_text(&value)
+                .unwrap_or_else(|| "La IA respondió sin texto utilizable.".to_string()),
+            Err(error) => {
+                return provider_error_response(
+                    project_id,
+                    document_id,
+                    &interaction_id,
+                    &event_id,
+                    &created_at,
+                    &format!("No se pudo leer la respuesta de OpenAI: {error}"),
+                    execution_mode,
+                    reasoning_depth,
+                    mode,
+                )
             }
-        }
+        },
         Ok(response) => {
             let status = response.status();
             let detail = response.text().unwrap_or_default();
-            return provider_error_response(project_id, document_id, &interaction_id, &event_id, &created_at, &format!("OpenAI devolvió {status}: {}", summarize_error_detail(&detail)), execution_mode, reasoning_depth, mode);
+            return provider_error_response(
+                project_id,
+                document_id,
+                &interaction_id,
+                &event_id,
+                &created_at,
+                &format!(
+                    "OpenAI devolvió {status}: {}",
+                    summarize_error_detail(&detail)
+                ),
+                execution_mode,
+                reasoning_depth,
+                mode,
+            );
         }
-        Err(error) => return provider_error_response(project_id, document_id, &interaction_id, &event_id, &created_at, &format!("No se pudo conectar con OpenAI: {error}"), execution_mode, reasoning_depth, mode),
+        Err(error) => {
+            return provider_error_response(
+                project_id,
+                document_id,
+                &interaction_id,
+                &event_id,
+                &created_at,
+                &format!("No se pudo conectar con OpenAI: {error}"),
+                execution_mode,
+                reasoning_depth,
+                mode,
+            )
+        }
     };
 
     if let Some(response) = structured_interaction_response(
@@ -155,7 +205,11 @@ fn prompt_payload(prompt: &str, active_markdown: &str, document_id: Option<&str>
     })
 }
 
-pub fn transcribe_audio(openai_key: Option<&str>, language: Option<&str>, wav_bytes: Vec<u8>) -> Value {
+pub fn transcribe_audio(
+    openai_key: Option<&str>,
+    language: Option<&str>,
+    wav_bytes: Vec<u8>,
+) -> Value {
     let Some(openai_key) = openai_key.filter(|value| !value.trim().is_empty()) else {
         return json!({
             "status": "error",
@@ -177,7 +231,13 @@ pub fn transcribe_audio(openai_key: Option<&str>, language: Option<&str>, wav_by
     let mut form = multipart::Form::new()
         .text("model", "gpt-4o-mini-transcribe")
         .text("response_format", "json")
-        .part("file", multipart::Part::bytes(wav_bytes).file_name("knownext-dictation.wav").mime_str("audio/wav").unwrap_or_else(|_| multipart::Part::bytes(Vec::new())));
+        .part(
+            "file",
+            multipart::Part::bytes(wav_bytes)
+                .file_name("knownext-dictation.wav")
+                .mime_str("audio/wav")
+                .unwrap_or_else(|_| multipart::Part::bytes(Vec::new())),
+        );
     if let Some(language) = language.filter(|value| *value != "auto" && !value.is_empty()) {
         form = form.text("language", language.to_string());
     }
@@ -212,11 +272,164 @@ pub fn transcribe_audio(openai_key: Option<&str>, language: Option<&str>, wav_by
     }
 }
 
-fn build_response_request(payload: &Value, prompt: &str, context_sources: &Value, model: &str) -> Value {
-    let active_markdown = payload.get("activeMarkdown").and_then(Value::as_str).unwrap_or("");
-    let selection = payload.get("selectionFocus").filter(|value| !value.is_null()).cloned().unwrap_or(Value::Null);
-    let permissions = payload.get("runtimePermissions").cloned().unwrap_or_else(|| json!({}));
-    let execution_mode = normalize_execution_mode(payload.get("executionMode").and_then(Value::as_str));
+pub fn generate_image(openai_key: Option<&str>, config: &Value, prompt: &str) -> Value {
+    let prompt = prompt.trim();
+    let Some(openai_key) = openai_key.filter(|value| !value.trim().is_empty()) else {
+        return json!({
+            "status": "error",
+            "error": "provider_unavailable",
+            "message": "Configura una API key de OpenAI en Ajustes > IA para generar imágenes."
+        });
+    };
+    if prompt.is_empty() {
+        return json!({
+            "status": "error",
+            "error": "empty_prompt",
+            "message": "La generación de imagen necesita un prompt validable."
+        });
+    }
+
+    let model = normalize_image_model(config.get("model").and_then(Value::as_str).unwrap_or("gpt-image-2"));
+    let mut request = json!({
+        "model": model,
+        "prompt": prompt,
+        "n": config.get("maxImagesPerPrompt").and_then(Value::as_u64).unwrap_or(1).clamp(1, 4),
+        "size": normalize_image_size_for_model(model, config.get("size").and_then(Value::as_str).unwrap_or("auto")),
+        "quality": normalize_image_quality(config.get("quality").and_then(Value::as_str).unwrap_or("auto")),
+        "output_format": normalize_image_format(config.get("outputFormat").and_then(Value::as_str).unwrap_or("png"))
+    });
+    if request["size"].as_str() == Some("auto") {
+        request.as_object_mut().map(|object| object.remove("size"));
+    }
+    if request["quality"].as_str() == Some("auto") {
+        request
+            .as_object_mut()
+            .map(|object| object.remove("quality"));
+    }
+
+    let response = openai_client(openai_key)
+        .post("https://api.openai.com/v1/images/generations")
+        .json(&request)
+        .send();
+
+    match response {
+        Ok(response) if response.status().is_success() => {
+            let body = response.json::<Value>().unwrap_or_else(|_| json!({}));
+            let Some(item) = body
+                .get("data")
+                .and_then(Value::as_array)
+                .and_then(|items| items.first())
+            else {
+                return json!({
+                    "status": "error",
+                    "error": "provider_error",
+                    "message": "OpenAI no devolvió datos de imagen."
+                });
+            };
+            if let Some(data_base64) = item
+                .get("b64_json")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+            {
+                return json!({
+                    "status": "completed",
+                    "mimeType": mime_for_image_format(request["output_format"].as_str().unwrap_or("png")),
+                    "dataBase64": data_base64,
+                    "revisedPrompt": item.get("revised_prompt").and_then(Value::as_str),
+                    "model": request["model"].as_str().unwrap_or("gpt-image-2"),
+                    "size": request.get("size").and_then(Value::as_str).unwrap_or("auto"),
+                    "quality": request.get("quality").and_then(Value::as_str).unwrap_or("auto"),
+                    "format": request["output_format"].as_str().unwrap_or("png")
+                });
+            }
+            if let Some(url) = item
+                .get("url")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+            {
+                return match openai_client(openai_key).get(url).send() {
+                    Ok(image_response) if image_response.status().is_success() => {
+                        let mime = image_response
+                            .headers()
+                            .get("content-type")
+                            .and_then(|value| value.to_str().ok())
+                            .unwrap_or_else(|| {
+                                mime_for_image_format(
+                                    request["output_format"].as_str().unwrap_or("png"),
+                                )
+                            })
+                            .to_string();
+                        let bytes = image_response
+                            .bytes()
+                            .map(|bytes| bytes.to_vec())
+                            .unwrap_or_default();
+                        json!({
+                            "status": "completed",
+                            "mimeType": mime,
+                            "dataBase64": base64::engine::general_purpose::STANDARD.encode(bytes),
+                            "revisedPrompt": item.get("revised_prompt").and_then(Value::as_str),
+                            "model": request["model"].as_str().unwrap_or("gpt-image-2"),
+                            "size": request.get("size").and_then(Value::as_str).unwrap_or("auto"),
+                            "quality": request.get("quality").and_then(Value::as_str).unwrap_or("auto"),
+                            "format": request["output_format"].as_str().unwrap_or("png")
+                        })
+                    }
+                    Ok(image_response) => json!({
+                        "status": "error",
+                        "error": "provider_error",
+                        "message": format!("OpenAI devolvió {} al descargar la imagen.", image_response.status())
+                    }),
+                    Err(error) => json!({
+                        "status": "error",
+                        "error": "provider_error",
+                        "message": format!("No se pudo descargar la imagen generada: {error}")
+                    }),
+                };
+            }
+            json!({
+                "status": "error",
+                "error": "provider_error",
+                "message": "OpenAI no devolvió base64 ni URL para la imagen."
+            })
+        }
+        Ok(response) => {
+            let status = response.status();
+            let detail = response.text().unwrap_or_default();
+            json!({
+                "status": "error",
+                "error": "provider_error",
+                "message": format!("OpenAI devolvió {status}: {}", summarize_error_detail(&detail))
+            })
+        }
+        Err(error) => json!({
+            "status": "error",
+            "error": "provider_error",
+            "message": format!("No se pudo conectar con OpenAI: {error}")
+        }),
+    }
+}
+
+fn build_response_request(
+    payload: &Value,
+    prompt: &str,
+    context_sources: &Value,
+    model: &str,
+) -> Value {
+    let active_markdown = payload
+        .get("activeMarkdown")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let selection = payload
+        .get("selectionFocus")
+        .filter(|value| !value.is_null())
+        .cloned()
+        .unwrap_or(Value::Null);
+    let permissions = payload
+        .get("runtimePermissions")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let execution_mode =
+        normalize_execution_mode(payload.get("executionMode").and_then(Value::as_str));
     let reasoning_depth = if execution_mode == "quick" {
         "light"
     } else {
@@ -232,8 +445,10 @@ fn build_response_request(payload: &Value, prompt: &str, context_sources: &Value
         "Contrato de salida: {\"action\":\"answer\",\"answer\":\"texto\"} para consultas; ",
         "{\"action\":\"replace_document\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"markdown\":\"documento markdown completo\"} para cambios de contenido del documento activo. ",
         "{\"action\":\"create_document\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"name\":\"nombre.md\",\"markdown\":\"documento markdown completo\"} para crear un documento Markdown nuevo cuando el usuario lo pida. ",
+        "{\"action\":\"generate_image\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"prompt\":\"prompt visual detallado\",\"name\":\"nombre.png\",\"altText\":\"texto alternativo\",\"insertIntoDocument\":true} para generar una imagen local como asset del proyecto. ",
         "No afirmes que has modificado archivos: propone el cambio con action replace_document y el runtime lo validara contra permisos. ",
         "No afirmes que has creado archivos: propone el cambio con action create_document y el runtime lo validara contra permisos. ",
+        "No afirmes que has generado imagenes: propone action generate_image y el runtime la creara, guardara e insertara si los permisos lo permiten. ",
         "No uses action replace_document si no hay documento activo o si la peticion no requiere modificar contenido."
         ),
         reasoning_guidance,
@@ -300,7 +515,18 @@ fn provider_unavailable_response(
     reasoning_depth: &str,
     mode: &str,
 ) -> Value {
-    provider_status_response(project_id, document_id, interaction_id, event_id, created_at, message, "provider_unavailable", execution_mode, reasoning_depth, mode)
+    provider_status_response(
+        project_id,
+        document_id,
+        interaction_id,
+        event_id,
+        created_at,
+        message,
+        "provider_unavailable",
+        execution_mode,
+        reasoning_depth,
+        mode,
+    )
 }
 
 fn provider_error_response(
@@ -314,7 +540,18 @@ fn provider_error_response(
     reasoning_depth: &str,
     mode: &str,
 ) -> Value {
-    provider_status_response(project_id, document_id, interaction_id, event_id, created_at, message, "provider_error", execution_mode, reasoning_depth, mode)
+    provider_status_response(
+        project_id,
+        document_id,
+        interaction_id,
+        event_id,
+        created_at,
+        message,
+        "provider_error",
+        execution_mode,
+        reasoning_depth,
+        mode,
+    )
 }
 
 fn provider_status_response(
@@ -385,7 +622,10 @@ fn structured_interaction_response(
     context_sources: &Value,
 ) -> Option<Value> {
     let decision = parse_provider_decision(provider_text)?;
-    let action = decision.get("action").and_then(Value::as_str).unwrap_or("answer");
+    let action = decision
+        .get("action")
+        .and_then(Value::as_str)
+        .unwrap_or("answer");
     let answer = decision
         .get("answer")
         .and_then(Value::as_str)
@@ -410,6 +650,23 @@ fn structured_interaction_response(
 
     if action == "create_document" {
         return Some(create_document_response(
+            project_id,
+            payload,
+            document_id,
+            interaction_id,
+            event_id,
+            created_at,
+            &decision,
+            answer,
+            execution_mode,
+            reasoning_depth,
+            mode,
+            context_sources,
+        ));
+    }
+
+    if action == "generate_image" {
+        return Some(generate_image_response(
             project_id,
             payload,
             document_id,
@@ -453,7 +710,11 @@ fn structured_interaction_response(
         ));
     };
 
-    if !payload.pointer("/runtimePermissions/editDocuments").and_then(Value::as_bool).unwrap_or(false) {
+    if !payload
+        .pointer("/runtimePermissions/editDocuments")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
         return Some(permission_blocked_response(
             project_id,
             Some(document_id),
@@ -467,7 +728,11 @@ fn structured_interaction_response(
         ));
     }
 
-    let Some(markdown) = decision.get("markdown").and_then(Value::as_str).filter(|value| !value.trim().is_empty()) else {
+    let Some(markdown) = decision
+        .get("markdown")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+    else {
         return Some(permission_blocked_response(
             project_id,
             Some(document_id),
@@ -543,6 +808,140 @@ fn structured_interaction_response(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn generate_image_response(
+    project_id: &str,
+    payload: &Value,
+    document_id: Option<&str>,
+    interaction_id: &str,
+    event_id: &str,
+    created_at: &str,
+    decision: &Value,
+    answer: &str,
+    execution_mode: &str,
+    reasoning_depth: &str,
+    mode: &str,
+    context_sources: &Value,
+) -> Value {
+    if !payload
+        .pointer("/runtimePermissions/generateImages")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || !payload
+            .pointer("/runtimePermissions/createImageAssets")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    {
+        return permission_blocked_response(
+            project_id,
+            document_id,
+            interaction_id,
+            event_id,
+            created_at,
+            "La IA ha preparado una imagen, pero la generación de imágenes o la creación de assets está desactivada en Ajustes > IA.",
+            execution_mode,
+            reasoning_depth,
+            mode,
+        );
+    }
+
+    let Some(prompt) = decision
+        .get("prompt")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return permission_blocked_response(
+            project_id,
+            document_id,
+            interaction_id,
+            event_id,
+            created_at,
+            "La IA propuso generar una imagen, pero no devolvió un prompt visual validable.",
+            execution_mode,
+            reasoning_depth,
+            mode,
+        );
+    };
+    let summary = decision
+        .get("summary")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(answer);
+    let name = normalize_image_file_name(
+        decision
+            .get("name")
+            .or_else(|| decision.get("title"))
+            .and_then(Value::as_str)
+            .unwrap_or("imagen-ia.png"),
+        "png",
+    );
+    let alt_text = decision
+        .get("altText")
+        .or_else(|| decision.get("alt"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("Imagen generada por IA");
+    let insert_into_document = decision
+        .get("insertIntoDocument")
+        .and_then(Value::as_bool)
+        .unwrap_or(document_id.is_some());
+    let public_context_sources = public_context_sources(context_sources);
+    let assistant_event = json!({
+        "id": event_id,
+        "projectId": project_id,
+        "type": "image_generated",
+        "role": "assistant",
+        "content": answer,
+        "createdAt": created_at,
+        "documentId": document_id,
+        "path": null,
+        "paths": [],
+        "summary": summary,
+        "sourcesUsed": public_context_sources,
+    });
+    json!({
+        "interactionId": interaction_id,
+        "status": "completed",
+        "display": "bubble",
+        "uiPlacement": if mode == "project" { "conversation_tab" } else { "document_bubble" },
+        "interactionType": "image_generation",
+        "confidence": "medium",
+        "executionMode": execution_mode,
+        "reasoningDepth": reasoning_depth,
+        "executionScope": "direct_action",
+        "routeToAiTab": true,
+        "needsUserClarification": false,
+        "pendingIntent": null,
+        "pendingIntentStatus": null,
+        "answer": answer,
+        "conversationEvents": [assistant_event],
+        "operations": [{
+            "type": "image_generated",
+            "status": "ready",
+            "message": summary,
+            "documentId": document_id,
+            "nodeId": null,
+            "path": null,
+            "paths": [],
+            "summary": summary,
+            "task": null,
+            "confirmationId": null,
+            "name": name,
+            "prompt": prompt,
+            "altText": alt_text,
+            "insertIntoDocument": insert_into_document
+        }],
+        "updatedDocument": null,
+        "generatedImages": [],
+        "task": null,
+        "tree": null,
+        "affectedDocuments": [],
+        "requiresConfirmation": null,
+        "contextSources": null,
+        "expiredContextSourceIds": []
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
 fn create_document_response(
     project_id: &str,
     payload: &Value,
@@ -557,7 +956,11 @@ fn create_document_response(
     mode: &str,
     context_sources: &Value,
 ) -> Value {
-    if !payload.pointer("/runtimePermissions/createDocuments").and_then(Value::as_bool).unwrap_or(false) {
+    if !payload
+        .pointer("/runtimePermissions/createDocuments")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
         return permission_blocked_response(
             project_id,
             document_id,
@@ -571,7 +974,11 @@ fn create_document_response(
         );
     }
 
-    let Some(markdown) = decision.get("markdown").and_then(Value::as_str).filter(|value| !value.trim().is_empty()) else {
+    let Some(markdown) = decision
+        .get("markdown")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+    else {
         return permission_blocked_response(
             project_id,
             document_id,
@@ -773,7 +1180,10 @@ fn parse_provider_decision(text: &str) -> Option<Value> {
     let trimmed = text.trim();
     serde_json::from_str::<Value>(trimmed)
         .ok()
-        .or_else(|| extract_fenced_json(trimmed).and_then(|json_text| serde_json::from_str::<Value>(json_text).ok()))
+        .or_else(|| {
+            extract_fenced_json(trimmed)
+                .and_then(|json_text| serde_json::from_str::<Value>(json_text).ok())
+        })
         .filter(|value| value.is_object() && value.get("action").and_then(Value::as_str).is_some())
 }
 
@@ -812,6 +1222,95 @@ fn normalize_markdown_file_name(raw: &str) -> String {
     name
 }
 
+fn normalize_image_file_name(raw: &str, default_format: &str) -> String {
+    let format = normalize_image_format(default_format);
+    let mut name = raw
+        .trim()
+        .replace('\\', "/")
+        .rsplit('/')
+        .next()
+        .unwrap_or("imagen-ia")
+        .chars()
+        .map(|character| match character {
+            '<' | '>' | ':' | '"' | '|' | '?' | '*' => '-',
+            character if character.is_control() => '-',
+            character => character,
+        })
+        .collect::<String>()
+        .trim()
+        .trim_matches('.')
+        .to_string();
+    if name.is_empty() {
+        name = "imagen-ia".to_string();
+    }
+    let lower = name.to_ascii_lowercase();
+    if !matches!(
+        lower.rsplit('.').next(),
+        Some("png" | "webp" | "jpg" | "jpeg")
+    ) {
+        name.push('.');
+        name.push_str(format);
+    }
+    name
+}
+
+fn normalize_image_model(model: &str) -> &'static str {
+    match model {
+        "gpt-image-2" => "gpt-image-2",
+        "gpt-image-1.5" => "gpt-image-1.5",
+        "gpt-image-1" => "gpt-image-1",
+        "gpt-image-1-mini" => "gpt-image-1-mini",
+        _ => "gpt-image-2",
+    }
+}
+
+fn normalize_image_size(size: &str) -> &'static str {
+    match size {
+        "1024x1024" => "1024x1024",
+        "1536x1024" => "1536x1024",
+        "1024x1536" => "1024x1536",
+        "2048x2048" => "2048x2048",
+        "2048x1152" => "2048x1152",
+        "3840x2160" => "3840x2160",
+        "2160x3840" => "2160x3840",
+        _ => "auto",
+    }
+}
+
+fn normalize_image_size_for_model(model: &str, size: &str) -> &'static str {
+    let normalized = normalize_image_size(size);
+    if model == "gpt-image-2" || matches!(normalized, "auto" | "1024x1024" | "1536x1024" | "1024x1536") {
+        normalized
+    } else {
+        "auto"
+    }
+}
+
+fn normalize_image_quality(quality: &str) -> &'static str {
+    match quality {
+        "low" => "low",
+        "medium" => "medium",
+        "high" => "high",
+        _ => "auto",
+    }
+}
+
+fn normalize_image_format(format: &str) -> &'static str {
+    match format {
+        "webp" => "webp",
+        "jpeg" | "jpg" => "jpeg",
+        _ => "png",
+    }
+}
+
+fn mime_for_image_format(format: &str) -> &'static str {
+    match normalize_image_format(format) {
+        "webp" => "image/webp",
+        "jpeg" => "image/jpeg",
+        _ => "image/png",
+    }
+}
+
 fn openai_client(openai_key: &str) -> Client {
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, HeaderValue::from_static("KnowNext.ai"));
@@ -827,19 +1326,37 @@ fn openai_client(openai_key: &str) -> Client {
 }
 
 fn extract_response_text(value: &Value) -> Option<String> {
-    if let Some(text) = value.get("output_text").and_then(Value::as_str).filter(|text| !text.trim().is_empty()) {
+    if let Some(text) = value
+        .get("output_text")
+        .and_then(Value::as_str)
+        .filter(|text| !text.trim().is_empty())
+    {
         return Some(text.trim().to_string());
     }
     let mut chunks = Vec::new();
-    for output in value.get("output").and_then(Value::as_array).into_iter().flatten() {
-        for content in output.get("content").and_then(Value::as_array).into_iter().flatten() {
+    for output in value
+        .get("output")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        for content in output
+            .get("content")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
             if let Some(text) = content.get("text").and_then(Value::as_str) {
                 chunks.push(text);
             }
         }
     }
     let text = chunks.join("\n").trim().to_string();
-    if text.is_empty() { None } else { Some(text) }
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
 }
 
 fn normalize_text_model(model: &str) -> &'static str {
@@ -862,7 +1379,12 @@ fn summarize_error_detail(detail: &str) -> String {
     }
     serde_json::from_str::<Value>(detail)
         .ok()
-        .and_then(|value| value.pointer("/error/message").and_then(Value::as_str).map(str::to_string))
+        .and_then(|value| {
+            value
+                .pointer("/error/message")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
         .unwrap_or_else(|| detail.chars().take(500).collect())
 }
 
@@ -870,7 +1392,13 @@ fn public_context_sources(context_sources: &Value) -> Value {
     let Some(sources) = context_sources.as_array() else {
         return json!([]);
     };
-    Value::Array(sources.iter().cloned().map(strip_internal_source_text).collect())
+    Value::Array(
+        sources
+            .iter()
+            .cloned()
+            .map(strip_internal_source_text)
+            .collect(),
+    )
 }
 
 fn strip_internal_source_text(mut source: Value) -> Value {
@@ -898,7 +1426,8 @@ mod tests {
             "light",
             "document",
             &json!([]),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(response["status"], "completed");
         assert_eq!(response["interactionType"], "chat");
@@ -920,8 +1449,14 @@ mod tests {
             "gpt-5.4-mini",
         );
         assert_eq!(quick["max_output_tokens"], 1400);
-        assert!(quick["input"][0]["content"].as_str().unwrap().contains("Modo rapido"));
-        assert!(quick["input"][1]["content"].as_str().unwrap().contains("quick (light)"));
+        assert!(quick["input"][0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Modo rapido"));
+        assert!(quick["input"][1]["content"]
+            .as_str()
+            .unwrap()
+            .contains("quick (light)"));
 
         let reasoning = build_response_request(
             &json!({
@@ -976,7 +1511,10 @@ mod tests {
         assert_eq!(response["interactionType"], "document_edit");
         assert_eq!(response["operations"][0]["type"], "document_modified");
         assert_eq!(response["updatedDocument"]["documentId"], "project::doc.md");
-        assert_eq!(response["updatedDocument"]["markdown"], "# Revisado\n\nContenido final.");
+        assert_eq!(
+            response["updatedDocument"]["markdown"],
+            "# Revisado\n\nContenido final."
+        );
         assert!(response["conversationEvents"][0]["sourcesUsed"][0]["text"].is_null());
     }
 
@@ -1001,9 +1539,58 @@ mod tests {
         assert_eq!(response["operations"][0]["type"], "document_created");
         assert_eq!(response["operations"][0]["status"], "ready");
         assert_eq!(response["operations"][0]["name"], "Plan- IA.md");
-        assert_eq!(response["operations"][0]["markdown"], "# Plan IA\n\nContenido final.");
-        assert_eq!(response["conversationEvents"][0]["type"], "document_created");
+        assert_eq!(
+            response["operations"][0]["markdown"],
+            "# Plan IA\n\nContenido final."
+        );
+        assert_eq!(
+            response["conversationEvents"][0]["type"],
+            "document_created"
+        );
         assert!(response["conversationEvents"][0]["sourcesUsed"][0]["text"].is_null());
+    }
+
+    #[test]
+    fn structured_image_generation_returns_runtime_validated_operation() {
+        let response = structured_interaction_response(
+            "project",
+            &json!({ "runtimePermissions": { "generateImages": true, "createImageAssets": true, "insertImagesIntoDocuments": true } }),
+            Some("project::doc.md"),
+            "interaction",
+            "event",
+            "2026-06-04T00:00:00Z",
+            r##"{"action":"generate_image","answer":"He preparado la imagen.","summary":"Imagen preparada","prompt":"Ilustración técnica de un flujo local-first","name":"flujo-local","altText":"Flujo local-first","insertIntoDocument":true}"##,
+            "quick",
+            "light",
+            "document",
+            &json!([{ "id": "source", "text": "internal", "name": "Fuente" }]),
+        )
+        .unwrap();
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["interactionType"], "image_generation");
+        assert_eq!(response["operations"][0]["type"], "image_generated");
+        assert_eq!(response["operations"][0]["status"], "ready");
+        assert_eq!(response["operations"][0]["name"], "flujo-local.png");
+        assert_eq!(
+            response["operations"][0]["prompt"],
+            "Ilustración técnica de un flujo local-first"
+        );
+        assert_eq!(response["operations"][0]["insertIntoDocument"], true);
+        assert_eq!(response["conversationEvents"][0]["type"], "image_generated");
+        assert!(response["conversationEvents"][0]["sourcesUsed"][0]["text"].is_null());
+    }
+
+    #[test]
+    fn gpt_image_2_is_the_supported_default_image_generation_model() {
+        assert_eq!(normalize_image_model("gpt-image-2"), "gpt-image-2");
+        assert_eq!(normalize_image_model("unknown-image-model"), "gpt-image-2");
+        assert_eq!(normalize_image_size("2048x2048"), "2048x2048");
+        assert_eq!(normalize_image_size("2048x1152"), "2048x1152");
+        assert_eq!(normalize_image_size("3840x2160"), "3840x2160");
+        assert_eq!(normalize_image_size("2160x3840"), "2160x3840");
+        assert_eq!(normalize_image_size_for_model("gpt-image-2", "3840x2160"), "3840x2160");
+        assert_eq!(normalize_image_size_for_model("gpt-image-1.5", "3840x2160"), "auto");
     }
 
     #[test]
@@ -1046,7 +1633,10 @@ mod tests {
         assert_eq!(response["status"], "blocked");
         assert_eq!(response["operations"][0]["type"], "permission_blocked");
         assert!(response["updatedDocument"].is_null());
-        assert!(response["answer"].as_str().unwrap().contains("no hay un documento activo"));
+        assert!(response["answer"]
+            .as_str()
+            .unwrap()
+            .contains("no hay un documento activo"));
     }
 
     #[test]
@@ -1063,11 +1653,15 @@ mod tests {
             "deep",
             "document",
             &json!([]),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(response["status"], "blocked");
         assert_eq!(response["operations"][0]["type"], "permission_blocked");
         assert!(response["updatedDocument"].is_null());
-        assert!(response["answer"].as_str().unwrap().contains("todavía no puede aplicar"));
+        assert!(response["answer"]
+            .as_str()
+            .unwrap()
+            .contains("todavía no puede aplicar"));
     }
 }

@@ -3,6 +3,7 @@ import { commandsCtx, editorViewCtx, parserCtx } from "@milkdown/kit/core";
 import type { EditorState } from "@milkdown/kit/prose/state";
 import type { PluginKey } from "@milkdown/kit/prose/state";
 import { redoDepth, undoDepth } from "@milkdown/kit/prose/history";
+import { lift } from "@milkdown/kit/prose/commands";
 import {
   createCodeBlockCommand,
   insertHrCommand,
@@ -78,7 +79,7 @@ export function createMarkdownEditorController(editor: Editor, selectionFocusPlu
           case "image":
             return applyImage(ctx, options?.image);
           case "quote":
-            return commands.call(wrapInBlockquoteCommand.key);
+            return toggleBlockquote(ctx);
           case "horizontal-rule":
             return commands.call(insertHrCommand.key);
           case "undo":
@@ -269,6 +270,14 @@ function clearFormatting(ctx: EditorCommandContext) {
   }
 
   return paragraphApplied;
+}
+
+function toggleBlockquote(ctx: EditorCommandContext) {
+  const view = ctx.get(editorViewCtx);
+  if (findBlockState(view.state).blockquote) {
+    return lift(view.state, view.dispatch, view);
+  }
+  return ctx.get(commandsCtx).call(wrapInBlockquoteCommand.key);
 }
 
 function applyLink(ctx: EditorCommandContext) {
