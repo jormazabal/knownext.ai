@@ -21,15 +21,23 @@ pub fn write_docx(path: &Path, markdown: &str) -> Result<(), String> {
     let file = std::fs::File::create(path).map_err(|error| error.to_string())?;
     let mut zip = zip::ZipWriter::new(file);
     let options = zip::write::SimpleFileOptions::default();
-    zip.start_file("[Content_Types].xml", options).map_err(|error| error.to_string())?;
+    zip.start_file("[Content_Types].xml", options)
+        .map_err(|error| error.to_string())?;
     zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#).map_err(|error| error.to_string())?;
-    zip.start_file("_rels/.rels", options).map_err(|error| error.to_string())?;
+    zip.start_file("_rels/.rels", options)
+        .map_err(|error| error.to_string())?;
     zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Target="word/document.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"/></Relationships>"#).map_err(|error| error.to_string())?;
-    zip.start_file("word/document.xml", options).map_err(|error| error.to_string())?;
+    zip.start_file("word/document.xml", options)
+        .map_err(|error| error.to_string())?;
     let body = markdown
         .lines()
         .filter(|line| !line.trim().is_empty())
-        .map(|line| format!("<w:p><w:r><w:t>{}</w:t></w:r></w:p>", xml_escape(line.trim_matches('#').trim())))
+        .map(|line| {
+            format!(
+                "<w:p><w:r><w:t>{}</w:t></w:r></w:p>",
+                xml_escape(line.trim_matches('#').trim())
+            )
+        })
         .collect::<Vec<_>>()
         .join("");
     zip.write_all(format!(r#"<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>{}</w:body></w:document>"#, body).as_bytes()).map_err(|error| error.to_string())?;
@@ -41,22 +49,34 @@ pub fn write_xlsx(path: &Path, sheet_name: &str, rows: &[Vec<String>]) -> Result
     let file = std::fs::File::create(path).map_err(|error| error.to_string())?;
     let mut zip = zip::ZipWriter::new(file);
     let options = zip::write::SimpleFileOptions::default();
-    zip.start_file("[Content_Types].xml", options).map_err(|error| error.to_string())?;
+    zip.start_file("[Content_Types].xml", options)
+        .map_err(|error| error.to_string())?;
     zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>"#).map_err(|error| error.to_string())?;
-    zip.start_file("_rels/.rels", options).map_err(|error| error.to_string())?;
+    zip.start_file("_rels/.rels", options)
+        .map_err(|error| error.to_string())?;
     zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Target="xl/workbook.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"/></Relationships>"#).map_err(|error| error.to_string())?;
-    zip.start_file("xl/_rels/workbook.xml.rels", options).map_err(|error| error.to_string())?;
+    zip.start_file("xl/_rels/workbook.xml.rels", options)
+        .map_err(|error| error.to_string())?;
     zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Target="worksheets/sheet1.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"/></Relationships>"#).map_err(|error| error.to_string())?;
-    zip.start_file("xl/workbook.xml", options).map_err(|error| error.to_string())?;
+    zip.start_file("xl/workbook.xml", options)
+        .map_err(|error| error.to_string())?;
     zip.write_all(format!(r#"<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="{}" sheetId="1" r:id="rId1"/></sheets></workbook>"#, xml_escape(sheet_name)).as_bytes()).map_err(|error| error.to_string())?;
-    zip.start_file("xl/worksheets/sheet1.xml", options).map_err(|error| error.to_string())?;
+    zip.start_file("xl/worksheets/sheet1.xml", options)
+        .map_err(|error| error.to_string())?;
     let mut sheet_data = String::new();
     for (row_index, row) in rows.iter().enumerate() {
         let row_number = row_index + 1;
         sheet_data.push_str(&format!(r#"<row r="{row_number}">"#));
         for (column_index, value) in row.iter().enumerate() {
-            let address = format!("{}{}", spreadsheet_column_name(column_index + 1), row_number);
-            sheet_data.push_str(&format!(r#"<c r="{address}" t="inlineStr"><is><t>{}</t></is></c>"#, xml_escape(value)));
+            let address = format!(
+                "{}{}",
+                spreadsheet_column_name(column_index + 1),
+                row_number
+            );
+            sheet_data.push_str(&format!(
+                r#"<c r="{address}" t="inlineStr"><is><t>{}</t></is></c>"#,
+                xml_escape(value)
+            ));
         }
         sheet_data.push_str("</row>");
     }
@@ -66,7 +86,13 @@ pub fn write_xlsx(path: &Path, sheet_name: &str, rows: &[Vec<String>]) -> Result
 }
 
 pub fn extract_plain_text(path: &Path) -> String {
-    match path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
+    match path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "md" | "txt" => std::fs::read_to_string(path).unwrap_or_default(),
         "docx" | "xlsx" => extract_zip_xml_text(path),
         _ => String::new(),
@@ -74,25 +100,42 @@ pub fn extract_plain_text(path: &Path) -> String {
 }
 
 pub fn xlsx_sheet_summaries(path: &Path) -> Vec<Value> {
-    let Some(package) = XlsxPackage::open(path) else { return Vec::new() };
-    package.sheets.iter().map(|sheet| {
-        let (row_count, column_count) = package.sheet_dimensions(&sheet.path);
-        json!({
-            "id": sheet.id,
-            "name": sheet.name,
-            "rowCount": row_count,
-            "columnCount": column_count,
-            "hidden": sheet.hidden
+    let Some(package) = XlsxPackage::open(path) else {
+        return Vec::new();
+    };
+    package
+        .sheets
+        .iter()
+        .map(|sheet| {
+            let (row_count, column_count) = package.sheet_dimensions(&sheet.path);
+            json!({
+                "id": sheet.id,
+                "name": sheet.name,
+                "rowCount": row_count,
+                "columnCount": column_count,
+                "hidden": sheet.hidden
+            })
         })
-    }).collect()
+        .collect()
 }
 
 pub fn xlsx_sheet(path: &Path, sheet_id: &str) -> Option<Value> {
     let package = XlsxPackage::open(path)?;
-    let sheet = package.sheets.iter().find(|sheet| sheet.id == sheet_id || sheet.name == sheet_id)?;
+    let sheet = package
+        .sheets
+        .iter()
+        .find(|sheet| sheet.id == sheet_id || sheet.name == sheet_id)?;
     let cells = package.sheet_cells(&sheet.path);
-    let row_count = cells.iter().filter_map(|cell| cell.get("row").and_then(Value::as_u64)).max().unwrap_or(0);
-    let column_count = cells.iter().filter_map(|cell| cell.get("column").and_then(Value::as_u64)).max().unwrap_or(0);
+    let row_count = cells
+        .iter()
+        .filter_map(|cell| cell.get("row").and_then(Value::as_u64))
+        .max()
+        .unwrap_or(0);
+    let column_count = cells
+        .iter()
+        .filter_map(|cell| cell.get("column").and_then(Value::as_u64))
+        .max()
+        .unwrap_or(0);
     Some(json!({
         "sheetId": sheet.id,
         "name": sheet.name,
@@ -124,7 +167,11 @@ impl XlsxPackage {
         let mut xml = BTreeMap::new();
         for index in 0..archive.len() {
             let mut entry = archive.by_index(index).ok()?;
-            let name = entry.name().replace('\\', "/").trim_start_matches('/').to_string();
+            let name = entry
+                .name()
+                .replace('\\', "/")
+                .trim_start_matches('/')
+                .to_string();
             if !(name.ends_with(".xml") || name.ends_with(".rels")) {
                 continue;
             }
@@ -135,24 +182,52 @@ impl XlsxPackage {
         }
         let relationships = workbook_relationships(xml.get("xl/_rels/workbook.xml.rels")?);
         let sheets = workbook_sheets(xml.get("xl/workbook.xml")?, &relationships);
-        let shared_strings = xml.get("xl/sharedStrings.xml").map(|text| shared_strings(text)).unwrap_or_default();
-        Some(Self { xml, sheets, shared_strings })
+        let shared_strings = xml
+            .get("xl/sharedStrings.xml")
+            .map(|text| shared_strings(text))
+            .unwrap_or_default();
+        Some(Self {
+            xml,
+            sheets,
+            shared_strings,
+        })
     }
 
     fn sheet_dimensions(&self, sheet_path: &str) -> (u64, u64) {
         let cells = self.sheet_cells(sheet_path);
-        let row_count = cells.iter().filter_map(|cell| cell.get("row").and_then(Value::as_u64)).max().unwrap_or(0);
-        let column_count = cells.iter().filter_map(|cell| cell.get("column").and_then(Value::as_u64)).max().unwrap_or(0);
+        let row_count = cells
+            .iter()
+            .filter_map(|cell| cell.get("row").and_then(Value::as_u64))
+            .max()
+            .unwrap_or(0);
+        let column_count = cells
+            .iter()
+            .filter_map(|cell| cell.get("column").and_then(Value::as_u64))
+            .max()
+            .unwrap_or(0);
         (row_count, column_count)
     }
 
     fn sheet_cells(&self, sheet_path: &str) -> Vec<Value> {
-        let Some(xml) = self.xml.get(sheet_path) else { return Vec::new() };
-        let Ok(document) = roxmltree::Document::parse(xml) else { return Vec::new() };
+        let Some(xml) = self.xml.get(sheet_path) else {
+            return Vec::new();
+        };
+        let Ok(document) = roxmltree::Document::parse(xml) else {
+            return Vec::new();
+        };
         let mut cells = Vec::new();
-        for node in document.descendants().filter(|node| node.is_element() && node.tag_name().name() == "c") {
+        for node in document
+            .descendants()
+            .filter(|node| node.is_element() && node.tag_name().name() == "c")
+        {
             let address = node.attribute("r").unwrap_or("");
-            let row = spreadsheet_row(address).or_else(|| node.parent().and_then(|row| row.attribute("r")).and_then(|value| value.parse::<u64>().ok())).unwrap_or(0);
+            let row = spreadsheet_row(address)
+                .or_else(|| {
+                    node.parent()
+                        .and_then(|row| row.attribute("r"))
+                        .and_then(|value| value.parse::<u64>().ok())
+                })
+                .unwrap_or(0);
             let column = spreadsheet_column(address).unwrap_or(0);
             if row == 0 || column == 0 {
                 continue;
@@ -160,15 +235,28 @@ impl XlsxPackage {
             let raw = first_child_text(node, "v").unwrap_or_default();
             let formula = first_child_text(node, "f");
             let display = match node.attribute("t").unwrap_or("") {
-                "s" => raw.parse::<usize>().ok().and_then(|index| self.shared_strings.get(index).cloned()).unwrap_or_default(),
-                "b" => if raw == "1" { "TRUE".to_string() } else { "FALSE".to_string() },
+                "s" => raw
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|index| self.shared_strings.get(index).cloned())
+                    .unwrap_or_default(),
+                "b" => {
+                    if raw == "1" {
+                        "TRUE".to_string()
+                    } else {
+                        "FALSE".to_string()
+                    }
+                }
                 "inlineStr" => collect_descendant_text(node, "t"),
                 _ => raw.clone(),
             };
             let value = match node.attribute("t").unwrap_or("") {
                 "b" => Value::Bool(raw == "1"),
                 "s" | "inlineStr" | "str" => Value::from(display.clone()),
-                _ => raw.parse::<f64>().map(Value::from).unwrap_or_else(|_| Value::from(display.clone())),
+                _ => raw
+                    .parse::<f64>()
+                    .map(Value::from)
+                    .unwrap_or_else(|_| Value::from(display.clone())),
             };
             cells.push(json!({
                 "row": row,
@@ -184,11 +272,20 @@ impl XlsxPackage {
 }
 
 fn workbook_relationships(xml: &str) -> BTreeMap<String, String> {
-    let Ok(document) = roxmltree::Document::parse(xml) else { return BTreeMap::new() };
+    let Ok(document) = roxmltree::Document::parse(xml) else {
+        return BTreeMap::new();
+    };
     let mut relationships = BTreeMap::new();
-    for node in document.descendants().filter(|node| node.is_element() && node.tag_name().name() == "Relationship") {
-        let Some(id) = node.attribute("Id") else { continue };
-        let Some(target) = node.attribute("Target") else { continue };
+    for node in document
+        .descendants()
+        .filter(|node| node.is_element() && node.tag_name().name() == "Relationship")
+    {
+        let Some(id) = node.attribute("Id") else {
+            continue;
+        };
+        let Some(target) = node.attribute("Target") else {
+            continue;
+        };
         let path = if target.starts_with('/') {
             target.trim_start_matches('/').to_string()
         } else {
@@ -200,14 +297,25 @@ fn workbook_relationships(xml: &str) -> BTreeMap<String, String> {
 }
 
 fn workbook_sheets(xml: &str, relationships: &BTreeMap<String, String>) -> Vec<XlsxSheet> {
-    let Ok(document) = roxmltree::Document::parse(xml) else { return Vec::new() };
-    document.descendants()
+    let Ok(document) = roxmltree::Document::parse(xml) else {
+        return Vec::new();
+    };
+    document
+        .descendants()
         .filter(|node| node.is_element() && node.tag_name().name() == "sheet")
         .enumerate()
         .filter_map(|(index, node)| {
             let name = node.attribute("name").unwrap_or("Hoja").to_string();
-            let sheet_id = node.attribute("sheetId").map(str::to_string).unwrap_or_else(|| (index + 1).to_string());
-            let relationship_id = node.attribute(("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "id")).or_else(|| node.attribute("r:id"))?;
+            let sheet_id = node
+                .attribute("sheetId")
+                .map(str::to_string)
+                .unwrap_or_else(|| (index + 1).to_string());
+            let relationship_id = node
+                .attribute((
+                    "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+                    "id",
+                ))
+                .or_else(|| node.attribute("r:id"))?;
             let path = relationships.get(relationship_id)?.to_string();
             let state = node.attribute("state").unwrap_or("");
             Some(XlsxSheet {
@@ -221,8 +329,11 @@ fn workbook_sheets(xml: &str, relationships: &BTreeMap<String, String>) -> Vec<X
 }
 
 fn shared_strings(xml: &str) -> Vec<String> {
-    let Ok(document) = roxmltree::Document::parse(xml) else { return Vec::new() };
-    document.descendants()
+    let Ok(document) = roxmltree::Document::parse(xml) else {
+        return Vec::new();
+    };
+    document
+        .descendants()
         .filter(|node| node.is_element() && node.tag_name().name() == "si")
         .map(|node| collect_descendant_text(node, "t"))
         .collect()
@@ -259,12 +370,18 @@ fn normalize_zip_path(path: &str) -> String {
 }
 
 fn spreadsheet_row(address: &str) -> Option<u64> {
-    let digits = address.chars().filter(|ch| ch.is_ascii_digit()).collect::<String>();
+    let digits = address
+        .chars()
+        .filter(|ch| ch.is_ascii_digit())
+        .collect::<String>();
     digits.parse::<u64>().ok()
 }
 
 fn spreadsheet_column(address: &str) -> Option<u64> {
-    let letters = address.chars().take_while(|ch| ch.is_ascii_alphabetic()).collect::<String>();
+    let letters = address
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphabetic())
+        .collect::<String>();
     if letters.is_empty() {
         return None;
     }
@@ -286,11 +403,17 @@ fn spreadsheet_column_name(mut column: usize) -> String {
 }
 
 fn extract_zip_xml_text(path: &Path) -> String {
-    let Ok(file) = std::fs::File::open(path) else { return String::new() };
-    let Ok(mut archive) = zip::ZipArchive::new(file) else { return String::new() };
+    let Ok(file) = std::fs::File::open(path) else {
+        return String::new();
+    };
+    let Ok(mut archive) = zip::ZipArchive::new(file) else {
+        return String::new();
+    };
     let mut output = String::new();
     for index in 0..archive.len() {
-        let Ok(mut entry) = archive.by_index(index) else { continue };
+        let Ok(mut entry) = archive.by_index(index) else {
+            continue;
+        };
         if !entry.name().ends_with(".xml") {
             continue;
         }

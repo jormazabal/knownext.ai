@@ -2,6 +2,15 @@
 
 All KnowNext.ai releases use one monolithic application version for the frontend, Tauri shell, Rust runtime, Windows updater, and Android updater.
 
+## 2.0.5 - 2026-06-06
+
+- Implemented local RAG indexing through the Rust/Tauri runtime: project documents and supported text attachments can be indexed locally, status/rebuild/delete contracts are real, and AI interactions automatically receive relevant indexed chunks alongside explicit prompt context.
+- Implemented AI image generation as a runtime-mediated local asset workflow: structured AI image operations are permission-checked, generated through OpenAI, saved inside the project, reindexed as image assets, and inserted as Markdown references when configured.
+- Added official `gpt-image-2` support for image generation, including the new default model selection and higher-resolution size options documented by OpenAI.
+- Updated AI settings so RAG and image generation expose real controls instead of unavailable placeholders, while agentic web research remains unavailable.
+- Refined the app settings experience: the summary now separates image generation from vision models, diagnostics are more compact and product-oriented, capabilities and agentic controls are denser, and export template changes autosave without a manual save button.
+- Fixed several workspace regressions: batch tab closing now handles dirty documents in sequence, imported single files open immediately when supported, generated image references render through the local asset scheme, the quote toolbar action toggles on/off, the `@` context picker is bounded and closeable, drag operations show a translucent preview, saves create local history versions, and app settings expose local guided agentic limits while keeping web research unavailable.
+
 ## 2.0.4 - 2026-06-05
 
 - Centralized Rust Git execution behind a local helper that runs Git non-interactively and hides subprocess windows on Windows, preventing terminal windows from opening during internal history and sync checks.

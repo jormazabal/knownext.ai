@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AiModelSelector } from "./AiModelSelector";
 import type { AiModelSelectorOption } from "./AiModelSelector";
@@ -39,7 +39,7 @@ describe("AiModelSelector", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
-  it("supports compact model picking without losing guide access", () => {
+  it("uses one enriched layout with model description, metrics, price and guide access", () => {
     const onChange = vi.fn();
     const onOpenGuide = vi.fn();
 
@@ -49,21 +49,21 @@ describe("AiModelSelector", () => {
         options={modelOptions}
         onChange={onChange}
         onOpenGuide={onOpenGuide}
-        variant="compact"
       />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: /cheap/ }));
-    const listbox = screen.getByRole("listbox");
-    fireEvent.click(within(listbox).getByRole("option", { name: /balanced/ }));
 
-    expect(onChange).toHaveBeenCalledWith("balanced");
-    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /cheap/ })).toHaveTextContent("Económico");
+    expect(screen.getAllByText("Capacidad").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Coste").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("$0.15 / $0.60").length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("button", { name: /cheap/ }));
     fireEvent.click(screen.getByRole("button", { name: /Ver guía de modelos/ }));
-
     expect(onOpenGuide).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("option", { name: /balanced/ }));
+    expect(onChange).toHaveBeenCalledWith("balanced");
   });
 });
 

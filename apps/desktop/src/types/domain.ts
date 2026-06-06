@@ -393,12 +393,12 @@ export type AiVisionConfig = {
   storeVisualDescriptions: boolean;
 };
 
-export type AiImageGenerationModelId = "gpt-image-1.5" | "gpt-image-1" | "gpt-image-1-mini";
+export type AiImageGenerationModelId = "gpt-image-2" | "gpt-image-1.5" | "gpt-image-1" | "gpt-image-1-mini";
 
 export type AiImageGenerationConfig = {
   enabled: boolean;
   model: AiImageGenerationModelId;
-  size: "auto" | "1024x1024" | "1536x1024" | "1024x1536";
+  size: "auto" | "1024x1024" | "1536x1024" | "1024x1536" | "2048x2048" | "2048x1152" | "3840x2160" | "2160x3840";
   quality: "auto" | "low" | "medium" | "high";
   outputFormat: "png" | "webp" | "jpeg";
   defaultFolder: "document_folder" | "generated_assets" | "custom_folder";

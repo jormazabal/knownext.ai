@@ -16,7 +16,10 @@ pub fn compact_id(prefix: &str) -> String {
 }
 
 pub fn word_count(markdown: &str) -> usize {
-    markdown.split_whitespace().filter(|word| !word.trim().is_empty()).count()
+    markdown
+        .split_whitespace()
+        .filter(|word| !word.trim().is_empty())
+        .count()
 }
 
 pub fn percent_decode(value: &str) -> String {
@@ -31,7 +34,11 @@ pub fn percent_decode(value: &str) -> String {
                 continue;
             }
         }
-        output.push(if bytes[index] == b'+' { b' ' } else { bytes[index] });
+        output.push(if bytes[index] == b'+' {
+            b' '
+        } else {
+            bytes[index]
+        });
         index += 1;
     }
     String::from_utf8_lossy(&output).to_string()

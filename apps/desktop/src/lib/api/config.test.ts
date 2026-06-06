@@ -5,8 +5,10 @@ import {
   defaultAppearanceConfig,
   defaultExportTemplateConfig,
   getAppConfig,
+  getAiConfig,
   getExportTemplate,
   readLocalAppPreferences,
+  updateAiConfig,
   writeLocalAppPreferences,
 } from "./config";
 import type { AiConfig, AppConfig, ExportTemplateConfig } from "../../types/domain";
@@ -134,20 +136,87 @@ describe("app configuration contracts", () => {
     });
     expect(preferences.diagnostics).toEqual({ traceLoggingEnabled: true });
     expect(preferences.ai?.model).toBe("gpt-5.4");
-    expect(preferences.ai?.permissions.generateImages).toBe(false);
-    expect(preferences.ai?.permissions.createImageAssets).toBe(false);
-    expect(preferences.ai?.permissions.insertImagesIntoDocuments).toBe(false);
-    expect(preferences.ai?.permissions.useDocumentContextForImageGeneration).toBe(false);
-    expect(preferences.ai?.rag.enabled).toBe(false);
-    expect(preferences.ai?.rag.vectorStoreId).toBeNull();
-    expect(preferences.ai?.rag.status).toBe("not-indexed");
-    expect(preferences.ai?.imageGeneration.enabled).toBe(false);
+    expect(preferences.ai?.permissions.generateImages).toBe(true);
+    expect(preferences.ai?.permissions.createImageAssets).toBe(true);
+    expect(preferences.ai?.permissions.insertImagesIntoDocuments).toBe(true);
+    expect(preferences.ai?.permissions.useDocumentContextForImageGeneration).toBe(true);
+    expect(preferences.ai?.rag.enabled).toBe(true);
+    expect(preferences.ai?.rag.vectorStoreId).toBe("vs_legacy");
+    expect(preferences.ai?.rag.status).toBe("updated");
+    expect(preferences.ai?.imageGeneration.enabled).toBe(true);
     expect(preferences.ai?.imageGeneration.customFolderPath).toBe(defaultAiConfig.imageGeneration.customFolderPath);
     expect(preferences.ai?.imageGeneration.maxImagesPerPrompt).toBe(4);
     expect(preferences.ai?.agentic.depth).toBe("bounded_autonomous");
     expect(preferences.ai?.agentic.webResearchEnabled).toBe(false);
     expect(preferences.ai?.agentic.maxSteps).toBe(12);
     expect(preferences.ai?.agentic.maxEstimatedCostEur).toBe(0.1);
+  });
+
+  it("normalizes AI config status returned by the Rust runtime", async () => {
+    vi.mocked(requestJson).mockResolvedValue({
+      ...minimalLegacyAiConfig({
+        model: "gpt-5" as never,
+        imageGeneration: {
+          ...defaultAiConfig.imageGeneration,
+          model: "gpt-image-2" as never,
+          size: "3840x2160",
+          customFolderPath: "../bad",
+        },
+        rag: {
+          ...defaultAiConfig.rag,
+          status: "ready" as never,
+        },
+      }),
+      openaiKeyConfigured: 1,
+      openaiKeyPreview: "sk-...abcd",
+    });
+
+    const ai = await getAiConfig();
+
+    expect(ai.model).toBe("gpt-5.4");
+    expect(ai.imageGeneration.model).toBe("gpt-image-2");
+    expect(ai.imageGeneration.size).toBe("3840x2160");
+    expect(ai.imageGeneration.customFolderPath).toBe(defaultAiConfig.imageGeneration.customFolderPath);
+    expect(ai.rag.status).toBe("updated");
+    expect(ai.openaiKeyConfigured).toBe(true);
+    expect(ai.openaiKeyPreview).toBe("sk-...abcd");
+  });
+
+  it("downgrades gpt-image-2-only sizes when an older image model is configured", async () => {
+    vi.mocked(requestJson).mockResolvedValue(minimalLegacyAiConfig({
+      imageGeneration: {
+        ...defaultAiConfig.imageGeneration,
+        model: "gpt-image-1.5",
+        size: "3840x2160",
+      },
+    }));
+
+    const ai = await getAiConfig();
+
+    expect(ai.imageGeneration.model).toBe("gpt-image-1.5");
+    expect(ai.imageGeneration.size).toBe("auto");
+  });
+
+  it("normalizes AI config status after updates", async () => {
+    vi.mocked(requestJson).mockResolvedValue({
+      ...minimalLegacyAiConfig({
+        vision: {
+          ...defaultAiConfig.vision,
+          model: "gpt-5-nano" as never,
+        },
+      }),
+      openaiKeyConfigured: false,
+      openaiKeyPreview: "",
+    });
+
+    const ai = await updateAiConfig(defaultAiConfig);
+
+    expect(requestJson).toHaveBeenCalledWith("/api/config/ai", {
+      method: "PUT",
+      body: JSON.stringify(defaultAiConfig),
+    });
+    expect(ai.vision.model).toBe(defaultAiConfig.vision.model);
+    expect(ai.openaiKeyPreview).toBeNull();
   });
 
   it("normalizes export templates returned by the Rust runtime", async () => {

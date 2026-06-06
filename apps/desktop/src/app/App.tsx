@@ -14,7 +14,7 @@ import {
 import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
 import { GithubLoginDialog, type GithubLoginState } from "../features/projects/GithubLoginDialog";
 import { UpdateAvailableDialog, type UpdateDialogState } from "../features/projects/UpdateAvailableDialog";
-import { AppSettingsDialog } from "../features/settings/AppSettingsDialog";
+import { AppSettingsDialog, type AppSettingsSaveState } from "../features/settings/AppSettingsDialog";
 import { BrandMark } from "../components/brand/BrandMark";
 import { CountdownCloseButton } from "../components/ui/CountdownCloseButton";
 import { GlobalTooltip } from "../components/ui/GlobalTooltip";
@@ -239,6 +239,7 @@ export function App() {
   const [diagnosticsConfig, setDiagnosticsConfig] = useState<DiagnosticsConfig>(defaultDiagnosticsConfig);
   const [exportTemplateConfig, setExportTemplateConfig] = useState<ExportTemplateConfig>(defaultExportTemplateConfig);
   const [exportTemplatePath, setExportTemplatePath] = useState("");
+  const exportTemplateSaveSequence = useRef(0);
   const [aiConfig, setAiConfig] = useState<AiConfigStatus>({ ...defaultAiConfig, openaiKeyConfigured: false, openaiKeyPreview: null });
   const aiConfigSaveSequence = useRef(0);
   const [aiConversationEvents, setAiConversationEvents] = useState<AiConversationEvent[]>([]);
@@ -266,11 +267,15 @@ export function App() {
   const [lastSeenReleaseNotesVersion, setLastSeenReleaseNotesVersion] = useState<string | null>(null);
   const [configLoaded, setConfigLoaded] = useState(false);
   const [configPersistenceAvailable, setConfigPersistenceAvailable] = useState(true);
+  const [appSettingsSaveState, setAppSettingsSaveState] = useState<AppSettingsSaveState>("idle");
+  const [appSettingsSaveMessage, setAppSettingsSaveMessage] = useState<string | null>(null);
+  const appSettingsSaveSequence = useRef(0);
   const [notice, setNotice] = useState<AppNotice | null>(null);
   const [startupRetrySequence, setStartupRetrySequence] = useState(0);
   const [localRuntimeRecoveryOpen, setLocalRuntimeRecoveryOpen] = useState(false);
   const [localRuntimeRecoveryError, setLocalRuntimeRecoveryError] = useState<string | null>(null);
   const [closeDocumentId, setCloseDocumentId] = useState<string | null>(null);
+  const [pendingCloseDocumentIds, setPendingCloseDocumentIds] = useState<string[]>([]);
   const [orphanDrafts, setOrphanDrafts] = useState<OrphanDraft[]>([]);
   const [recoverableDraftsOpen, setRecoverableDraftsOpen] = useState(false);
   const [appSettingsOpen, setAppSettingsOpen] = useState(false);
@@ -458,10 +463,18 @@ export function App() {
       writeLocalAppPreferences({
         appearance: appearanceConfig,
         diagnostics: diagnosticsConfig,
-        ai: aiConfig,
       });
 
-      if (!configPersistenceAvailable) return;
+      if (!configPersistenceAvailable) {
+        setAppSettingsSaveState("local-only");
+        setAppSettingsSaveMessage("Preferencias guardadas localmente. El runtime no está disponible para persistencia completa.");
+        return;
+      }
+
+      const saveSequence = appSettingsSaveSequence.current + 1;
+      appSettingsSaveSequence.current = saveSequence;
+      setAppSettingsSaveState("saving");
+      setAppSettingsSaveMessage(null);
 
       void updateAppConfig({
         layout: layoutConfig,
@@ -473,19 +486,28 @@ export function App() {
         lastSeenReleaseNotesVersion,
         openUtilityTabs,
         activeUtilityTab,
-      }).catch((error) => {
-        showError(error, "No se pudo guardar la configuración de la aplicación.", {
-          source: "app.configPersistence",
-          suppressApiConnectionNotice: true,
+      })
+        .then(() => {
+          if (appSettingsSaveSequence.current !== saveSequence) return;
+          setAppSettingsSaveState("saved");
+          setAppSettingsSaveMessage("Configuración guardada.");
+        })
+        .catch((error) => {
+          if (appSettingsSaveSequence.current === saveSequence) {
+            setAppSettingsSaveState("error");
+            setAppSettingsSaveMessage(getApiErrorMessage(error, "No se pudo guardar la configuración de la aplicación."));
+          }
+          showError(error, "No se pudo guardar la configuración de la aplicación.", {
+            source: "app.configPersistence",
+            suppressApiConnectionNotice: true,
+          });
         });
-      });
     }, 350);
 
     return () => window.clearTimeout(timeout);
   }, [
     activeUtilityTab,
     appearanceConfig,
-    aiConfig,
     configLoaded,
     configPersistenceAvailable,
     diagnosticsConfig,
@@ -496,6 +518,11 @@ export function App() {
     tabsByProject,
     treeOpenPathsByProject,
   ]);
+
+  useEffect(() => {
+    if (!configLoaded) return;
+    writeLocalAppPreferences({ ai: aiConfig });
+  }, [aiConfig, configLoaded]);
 
   useEffect(() => {
     document.documentElement.lang = appearanceConfig.language;
@@ -1130,6 +1157,38 @@ export function App() {
     closeTabNow(documentId);
   }
 
+  function handleCloseTabs(tabIds: string[]) {
+    const uniqueTabIds = Array.from(new Set(tabIds));
+    const dirtyDocumentIdsToConfirm: string[] = [];
+    uniqueTabIds.forEach((tabId) => {
+      if (tabId === NOTES_WORKSPACE_TAB_ID) return;
+
+      if (tabId === RELEASE_NOTES_WORKSPACE_TAB_ID || imageTabs.some((tab) => tab.id === tabId) || referenceDocumentTabs.some((tab) => tab.id === tabId)) {
+        handleCloseTab(tabId);
+        return;
+      }
+
+      if (documentSessions[tabId]?.isDirty) {
+        dirtyDocumentIdsToConfirm.push(tabId);
+        return;
+      }
+      closeTabNow(tabId);
+    });
+    if (dirtyDocumentIdsToConfirm.length > 0) {
+      const [firstDocumentId, ...remainingDocumentIds] = dirtyDocumentIdsToConfirm;
+      setPendingCloseDocumentIds(remainingDocumentIds);
+      setCloseDocumentId(firstDocumentId);
+    }
+  }
+
+  function showNextPendingCloseDialog() {
+    setPendingCloseDocumentIds((currentIds) => {
+      const [nextDocumentId, ...remainingDocumentIds] = currentIds;
+      setCloseDocumentId(nextDocumentId ?? null);
+      return remainingDocumentIds;
+    });
+  }
+
   function handleReorderDocumentTabs(draggedTabId: string, targetTabId: string, placement: "before" | "after") {
     setWorkspaceTabOrder((currentOrder) => {
       const visibleTabIds = orderedScrollableWorkspaceTabs.map((tab) => tab.id);
@@ -1139,22 +1198,24 @@ export function App() {
   }
 
   function closeTabNow(documentId: string) {
-    const nextTabs = tabs.filter((tab) => tab.id !== documentId);
-    setTabs(nextTabs);
+    setTabs((currentTabs) => {
+      const nextTabs = currentTabs.filter((tab) => tab.id !== documentId);
+      if (documentId === activeDocumentId && activeUtilityTab === null) {
+        const nextActiveDocumentId = nextTabs[0]?.id ?? "";
+        setActiveDocumentId(nextActiveDocumentId);
+        if (nextActiveDocumentId) {
+          revealTreeNode(nextActiveDocumentId);
+        } else {
+          setActiveTreeNodeId("");
+        }
+      }
+      return nextTabs;
+    });
     setPendingEditorOperations((currentOperations) => currentOperations.filter((operation) => operation.documentId !== documentId));
     setDocumentSessions((currentSessions) => {
       const { [documentId]: _closedSession, ...nextSessions } = currentSessions;
       return nextSessions;
     });
-    if (documentId === activeDocumentId && activeUtilityTab === null) {
-      const nextActiveDocumentId = nextTabs[0]?.id ?? "";
-      setActiveDocumentId(nextActiveDocumentId);
-      if (nextActiveDocumentId) {
-        revealTreeNode(nextActiveDocumentId);
-      } else {
-        setActiveTreeNodeId("");
-      }
-    }
   }
 
   function handleSelectTab(tabId: string) {
@@ -1669,6 +1730,19 @@ export function App() {
           return updateSession(currentSessions, documentId, { saveState: "idle" });
         });
       }, 1400);
+      if (versioningStatus?.enabled) {
+        try {
+          await createProjectVersion(saved.projectId, documentId, `Actualiza ${saved.name}`);
+        } catch (error) {
+          if (!isNoVersionChangesError(error)) {
+            void recordTraceLog({
+              source: "app.versioning.afterSave",
+              message: "No se pudo crear la versión local tras guardar el documento.",
+              detail: describeError(error),
+            });
+          }
+        }
+      }
       await refreshProjectCapabilityState(saved.projectId);
       await refreshProjectSyncStatus(saved.projectId, { autoRun: isAutomaticSyncMode(activeProject?.syncMode), silent: true });
       try {
@@ -2491,6 +2565,10 @@ export function App() {
   }
 
   function handleExportTemplateChange(nextExportTemplate: ExportTemplateUpdate) {
+    const saveSequence = exportTemplateSaveSequence.current + 1;
+    exportTemplateSaveSequence.current = saveSequence;
+    setAppSettingsSaveState("saving");
+    setAppSettingsSaveMessage(null);
     setExportTemplateConfig((currentTemplate) => {
       const updatedTemplate: ExportTemplateConfig = {
         ...currentTemplate,
@@ -2506,17 +2584,41 @@ export function App() {
         headingFontFamily: nextExportTemplate.headingFontFamily ?? currentTemplate.headingFontFamily,
       };
       void updateExportTemplate(nextExportTemplate)
-        .then(setExportTemplateConfig)
-        .catch((error) => showError(error, "No se pudo guardar la plantilla de exportación.", { source: "app.exportTemplate" }));
+        .then((savedTemplate) => {
+          if (exportTemplateSaveSequence.current !== saveSequence) return;
+          setExportTemplateConfig(savedTemplate);
+          setAppSettingsSaveState("saved");
+          setAppSettingsSaveMessage("Configuración de exportación guardada.");
+        })
+        .catch((error) => {
+          if (exportTemplateSaveSequence.current === saveSequence) {
+            setAppSettingsSaveState("error");
+            setAppSettingsSaveMessage(getApiErrorMessage(error, "No se pudo guardar la plantilla de exportación."));
+          }
+          showError(error, "No se pudo guardar la plantilla de exportación.", { source: "app.exportTemplate" });
+        });
       return updatedTemplate;
     });
   }
 
   async function handleResetExportTemplate() {
+    const saveSequence = exportTemplateSaveSequence.current + 1;
+    exportTemplateSaveSequence.current = saveSequence;
+    setAppSettingsSaveState("saving");
+    setAppSettingsSaveMessage(null);
     try {
-      setExportTemplateConfig(await resetExportTemplate());
-      setExportTemplatePath(await getExportTemplatePath());
+      const resetTemplate = await resetExportTemplate();
+      const resetTemplatePath = await getExportTemplatePath();
+      if (exportTemplateSaveSequence.current !== saveSequence) return;
+      setExportTemplateConfig(resetTemplate);
+      setExportTemplatePath(resetTemplatePath);
+      setAppSettingsSaveState("saved");
+      setAppSettingsSaveMessage("Plantilla de exportación restablecida.");
     } catch (error) {
+      if (exportTemplateSaveSequence.current === saveSequence) {
+        setAppSettingsSaveState("error");
+        setAppSettingsSaveMessage(getApiErrorMessage(error, "No se pudo restablecer la plantilla de exportación."));
+      }
       showError(error, "No se pudo restablecer la plantilla de exportación.", { source: "app.exportTemplate.reset" });
     }
   }
@@ -2570,9 +2672,13 @@ export function App() {
   }
 
   function handleAiConfigChange(nextAiConfig: AiConfigStatus) {
+    const previousAiConfig = aiConfig;
     const saveSequence = aiConfigSaveSequence.current + 1;
     aiConfigSaveSequence.current = saveSequence;
     setAiConfig(nextAiConfig);
+    writeLocalAppPreferences({ ai: nextAiConfig });
+    setAppSettingsSaveState("saving");
+    setAppSettingsSaveMessage(null);
     void updateAiConfig({
       provider: nextAiConfig.provider,
       model: nextAiConfig.model,
@@ -2584,9 +2690,21 @@ export function App() {
       transcription: nextAiConfig.transcription,
     })
       .then((savedAiConfig) => {
-        if (aiConfigSaveSequence.current === saveSequence) setAiConfig(savedAiConfig);
+        if (aiConfigSaveSequence.current !== saveSequence) return;
+        setAiConfig(savedAiConfig);
+        writeLocalAppPreferences({ ai: savedAiConfig });
+        setAppSettingsSaveState("saved");
+        setAppSettingsSaveMessage("Configuración de IA guardada.");
       })
-      .catch((error) => showError(error, "No se pudo guardar la configuración de IA.", { source: "app.aiConfig" }));
+      .catch((error) => {
+        if (aiConfigSaveSequence.current === saveSequence) {
+          setAiConfig(previousAiConfig);
+          writeLocalAppPreferences({ ai: previousAiConfig });
+          setAppSettingsSaveState("error");
+          setAppSettingsSaveMessage(getApiErrorMessage(error, "No se pudo guardar la configuración de IA."));
+        }
+        showError(error, "No se pudo guardar la configuración de IA.", { source: "app.aiConfig" });
+      });
   }
 
   function handleAiTranscriptionChange(transcription: Partial<AiConfigStatus["transcription"]>) {
@@ -2956,11 +3074,16 @@ export function App() {
         }
         if (result.node?.type === "attachment") {
           setActiveTreeNodeId(result.node.id);
-          setNotice({
-            title: "Archivo importado",
-            message: "Se gestionará en el proyecto sin abrir un visualizador interno.",
-            tone: "info",
-          });
+          const importedPath = result.node.path ?? result.node.name;
+          if (isReferenceDocumentPath(importedPath)) {
+            handleOpenReferenceDocument(result.node.id, result.node.name, importedPath);
+          } else {
+            setNotice({
+              title: "Archivo importado",
+              message: "Se gestionará en el proyecto sin abrir un visualizador interno.",
+              tone: "info",
+            });
+          }
         }
       } catch (error) {
         showError(error, "No se pudo importar el archivo.");
@@ -3249,6 +3372,7 @@ export function App() {
         onSelectTreeNode={handleSelectTreeNode}
         onSelectTab={handleSelectTab}
         onCloseTab={handleCloseTab}
+        onCloseTabs={handleCloseTabs}
         onReorderDocumentTabs={handleReorderDocumentTabs}
         onTreeContextAction={handleTreeContextAction}
         onExportDocument={handleExportDocument}
@@ -3292,6 +3416,9 @@ export function App() {
         traceLogStatus={traceLogStatus}
         runtimeServicesStatus={runtimeServicesStatus}
         runtimeServicesRefreshing={runtimeServicesRefreshing}
+        saveState={appSettingsSaveState}
+        saveMessage={appSettingsSaveMessage}
+        configPersistenceAvailable={configPersistenceAvailable}
         onClose={() => setAppSettingsOpen(false)}
         onAppearanceChange={handleAppearanceConfigChange}
         onDiagnosticsChange={handleDiagnosticsConfigChange}
@@ -3389,13 +3516,19 @@ export function App() {
       <CloseDirtyDocumentDialog
         open={closeDocumentId !== null}
         documentName={closeDocumentId ? tabs.find((tab) => tab.id === closeDocumentId)?.name ?? "documento" : ""}
-        onCancel={() => setCloseDocumentId(null)}
+        onCancel={() => {
+          setCloseDocumentId(null);
+          setPendingCloseDocumentIds([]);
+        }}
         onDiscard={() => {
           if (!closeDocumentId) return;
           const documentId = closeDocumentId;
           setCloseDocumentId(null);
           void discardDocumentDraft(documentId)
-            .then(() => closeTabNow(documentId))
+            .then(() => {
+              closeTabNow(documentId);
+              showNextPendingCloseDialog();
+            })
             .catch((error) => showError(error, "No se pudo descartar el borrador interno."));
         }}
         onSave={() => {
@@ -3403,7 +3536,10 @@ export function App() {
           const documentId = closeDocumentId;
           void handleSave(documentId).then((saved) => {
             setCloseDocumentId(null);
-            if (saved) closeTabNow(documentId);
+            if (saved) {
+              closeTabNow(documentId);
+              showNextPendingCloseDialog();
+            }
           });
         }}
       />

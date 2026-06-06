@@ -56,6 +56,7 @@ type DocumentTreeProps = {
   onToggleNode: (nodeId: string) => void;
   onContextAction: (action: DocumentTreeAction, node: DocumentTreeNode) => void;
   onMoveNode: (node: DocumentTreeNode, targetFolderId: string | null) => void | Promise<void>;
+  onAddNodeContext?: (nodeId: string) => void | Promise<void>;
   changeBadges?: Record<string, string>;
   projectStatus?: ProjectTreeStatus | null;
 };
@@ -116,6 +117,7 @@ export function DocumentTree({
   onToggleNode,
   onContextAction,
   onMoveNode,
+  onAddNodeContext,
   changeBadges = {},
   projectStatus = null,
 }: DocumentTreeProps) {
@@ -128,11 +130,13 @@ export function DocumentTree({
     y: number;
   } | null>(null);
   const [draggedNode, setDraggedNode] = useState<DocumentTreeNode | null>(null);
+  const [dragPreview, setDragPreview] = useState<{ label: string; x: number; y: number } | null>(null);
   const draggedNodeRef = useRef<DocumentTreeNode | null>(null);
   const [dropTarget, setDropTarget] = useState<TreeDropTarget | null>(null);
   const rootDropRef = useRef<HTMLDivElement | null>(null);
   const mouseDragRef = useRef<{ node: DocumentTreeNode; startX: number; startY: number; dragging: boolean } | null>(null);
   const mouseDropTargetRef = useRef<TreeMouseDropTarget | null>(null);
+  const mouseContextDropRef = useRef(false);
   const suppressNextNodeClickRef = useRef(false);
   const [filter, setFilter] = useState<ExtendedTreeFilter>("all");
   const [showFileExtensions, setShowFileExtensions] = useState(true);
@@ -196,6 +200,24 @@ export function DocumentTree({
     setDraggedNode(node);
     event.dataTransfer.effectAllowed = node.type === "folder" ? "move" : "copyMove";
     setDocumentTreeDragData(event.dataTransfer, node);
+    const ghost = document.createElement("div");
+    ghost.textContent = node.name;
+    ghost.style.position = "fixed";
+    ghost.style.top = "-1000px";
+    ghost.style.left = "-1000px";
+    ghost.style.maxWidth = "260px";
+    ghost.style.padding = "6px 10px";
+    ghost.style.border = "1px solid #FED7AA";
+    ghost.style.borderRadius = "6px";
+    ghost.style.background = "rgba(255,255,255,0.82)";
+    ghost.style.color = "#111827";
+    ghost.style.font = "600 11px system-ui, sans-serif";
+    ghost.style.boxShadow = "0 12px 30px rgba(17,24,39,0.16)";
+    if (typeof event.dataTransfer.setDragImage === "function") {
+      document.body.appendChild(ghost);
+      event.dataTransfer.setDragImage(ghost, 12, 12);
+      ghost.remove();
+    }
   }
 
   function finishDrag() {
@@ -204,8 +226,11 @@ export function DocumentTree({
     draggedNodeRef.current = null;
     mouseDragRef.current = null;
     mouseDropTargetRef.current = null;
+    mouseContextDropRef.current = false;
     clearDocumentTreeDragData();
+    dispatchPromptContextDrag(false);
     setDraggedNode(null);
+    setDragPreview(null);
     setDropTarget(null);
   }
 
@@ -291,11 +316,20 @@ export function DocumentTree({
       setOpenMenu(null);
       setDraggedNode(drag.node);
     }
+    setDragPreview({ label: drag.node.name, x: event.clientX, y: event.clientY });
 
-    const target = findMouseDropTarget(event.clientX, event.clientY, drag.node);
-    mouseDropTargetRef.current = target;
-    setDropTarget(target ? { id: target.id, valid: target.valid, label: target.label } : null);
-    maybeAutoExpandDropTarget(target);
+    const overPrompt = canDropNodeIntoPrompt(drag.node) && isOverPromptInput(event.clientX, event.clientY);
+    mouseContextDropRef.current = overPrompt;
+    dispatchPromptContextDrag(true, overPrompt);
+    if (overPrompt) {
+      mouseDropTargetRef.current = null;
+      setDropTarget(null);
+    } else {
+      const target = findMouseDropTarget(event.clientX, event.clientY, drag.node);
+      mouseDropTargetRef.current = target;
+      setDropTarget(target ? { id: target.id, valid: target.valid, label: target.label } : null);
+      maybeAutoExpandDropTarget(target);
+    }
     event.preventDefault();
   }
 
@@ -303,12 +337,27 @@ export function DocumentTree({
     window.removeEventListener("mousemove", handleMouseDragMove);
     const drag = mouseDragRef.current;
     if (!drag) return;
+    const overPrompt = drag.dragging && canDropNodeIntoPrompt(drag.node) && (isOverPromptInput(event.clientX, event.clientY) || mouseContextDropRef.current);
+    if (overPrompt) {
+      suppressNextNodeClickRef.current = true;
+      void onAddNodeContext?.(drag.node.id);
+      finishDrag();
+      return;
+    }
     const target = drag.dragging ? findMouseDropTarget(event.clientX, event.clientY, drag.node) ?? mouseDropTargetRef.current : null;
     if (drag.dragging) suppressNextNodeClickRef.current = true;
     if (target?.valid && target.targetFolderId !== undefined) {
       void onMoveNode(drag.node, target.targetFolderId);
     }
     finishDrag();
+  }
+
+  function canDropNodeIntoPrompt(node: DocumentTreeNode) {
+    return node.type !== "folder" && Boolean(onAddNodeContext);
+  }
+
+  function isOverPromptInput(clientX: number, clientY: number) {
+    return getElementAtPoint(clientX, clientY).some((element) => Boolean(element.closest(".knownext-ai-prompt")));
   }
 
   function findMouseDropTarget(clientX: number, clientY: number, activeDraggedNode: DocumentTreeNode): TreeMouseDropTarget | null {
@@ -465,6 +514,15 @@ export function DocumentTree({
           onDrop={handleRootDrop}
         >
           Soltar en la raíz del proyecto
+        </div>
+      ) : null}
+      {dragPreview ? (
+        <div
+          className="pointer-events-none fixed z-[130] max-w-[260px] -translate-y-1/2 rounded-md border border-orange-200 bg-white/85 px-3 py-1.5 text-[11px] font-semibold text-ink-primary shadow-menu backdrop-blur"
+          style={{ left: dragPreview.x + 12, top: dragPreview.y }}
+          aria-hidden="true"
+        >
+          <span className="block truncate">{dragPreview.label}</span>
         </div>
       ) : null}
       {openMenu
@@ -1202,6 +1260,12 @@ function getElementAtPoint(clientX: number, clientY: number): Element[] {
   if (typeof document.elementsFromPoint === "function") return document.elementsFromPoint(clientX, clientY);
   const element = document.elementFromPoint?.(clientX, clientY);
   return element ? [element] : [];
+}
+
+function dispatchPromptContextDrag(active: boolean, over = false) {
+  window.dispatchEvent(new CustomEvent("knownext:tree-context-drag", {
+    detail: { active, over },
+  }));
 }
 
 function getNodeDropTargetFolderId(

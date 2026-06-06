@@ -12,11 +12,12 @@ type DocumentTabsProps = {
   onOpenNavigation?: () => void;
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
+  onCloseTabs?: (tabIds: string[]) => void;
   onReorderDocumentTabs?: (draggedTabId: string, targetTabId: string, placement: "before" | "after") => void;
   rightSlot?: ReactNode;
 };
 
-export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirtyDocumentIds, onOpenNavigation, onSelectTab, onCloseTab, onReorderDocumentTabs, rightSlot }: DocumentTabsProps) {
+export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirtyDocumentIds, onOpenNavigation, onSelectTab, onCloseTab, onCloseTabs, onReorderDocumentTabs, rightSlot }: DocumentTabsProps) {
   const dirtyIds = new Set(dirtyDocumentIds);
   const fixedTabs = tabs.filter((tab) => isFixedUtilityTab(tab));
   const scrollableTabs = tabs.filter((tab) => !isFixedUtilityTab(tab));
@@ -27,6 +28,7 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
   const [tabListOpen, setTabListOpen] = useState(false);
   const [tabContextMenu, setTabContextMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
   const [draggedDocumentTabId, setDraggedDocumentTabId] = useState<string | null>(null);
+  const [dragPreview, setDragPreview] = useState<{ label: string; x: number; y: number } | null>(null);
   const draggedDocumentTabIdRef = useRef<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ tabId: string; placement: "before" | "after" } | null>(null);
   const pointerDragRef = useRef<{ tabId: string; startX: number; startY: number; dragging: boolean } | null>(null);
@@ -119,6 +121,10 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
 
   function closeTabs(tabIds: string[]) {
     setTabContextMenu(null);
+    if (onCloseTabs) {
+      onCloseTabs(tabIds);
+      return;
+    }
     tabIds.forEach((tabId) => onCloseTab(tabId));
   }
 
@@ -157,6 +163,8 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
       drag.dragging = true;
       setDraggedDocumentTabId(drag.tabId);
     }
+    const tab = tabs.find((item) => item.id === drag.tabId);
+    if (tab) setDragPreview({ label: tab.name, x: clientX, y: clientY });
     const target = findDocumentDropTarget(clientX, clientY, drag.tabId);
     setDropTarget(target);
   }
@@ -179,6 +187,7 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
     if (drag.dragging) suppressNextTabClickRef.current = true;
     draggedDocumentTabIdRef.current = null;
     setDraggedDocumentTabId(null);
+    setDragPreview(null);
     setDropTarget(null);
     if (target && onReorderDocumentTabs) onReorderDocumentTabs(drag.tabId, target.tabId, target.placement);
   }
@@ -186,11 +195,14 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
   function startNativeDocumentTabDrag(tabId: string) {
     draggedDocumentTabIdRef.current = tabId;
     setDraggedDocumentTabId(tabId);
+    const tab = tabs.find((item) => item.id === tabId);
+    if (tab) setDragPreview({ label: tab.name, x: 0, y: 0 });
   }
 
   function endNativeDocumentTabDrag() {
     draggedDocumentTabIdRef.current = null;
     setDraggedDocumentTabId(null);
+    setDragPreview(null);
     setDropTarget(null);
   }
 
@@ -355,6 +367,15 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
           onCloseOthers={() => closeTabs(otherCloseableTabIds)}
           onCloseAll={() => closeTabs(closeableTabs.map((tab) => tab.id))}
         />
+      ) : null}
+      {dragPreview && dragPreview.x > 0 && dragPreview.y > 0 ? (
+        <div
+          className="pointer-events-none fixed z-[130] max-w-[240px] -translate-y-1/2 rounded-md border border-orange-200 bg-white/85 px-3 py-1.5 text-[11px] font-semibold text-ink-primary shadow-menu backdrop-blur"
+          style={{ left: dragPreview.x + 12, top: dragPreview.y }}
+          aria-hidden="true"
+        >
+          <span className="block truncate">{dragPreview.label}</span>
+        </div>
       ) : null}
     </div>
   );
@@ -598,7 +619,7 @@ function WorkspaceTabButton({
   return (
     <button
       aria-label={tab.name}
-      draggable={false}
+      draggable={draggable}
       data-reorderable={draggable ? "true" : undefined}
       data-tab-id={fixed ? undefined : tab.id}
       data-tooltip={fixed ? tab.name : undefined}
@@ -635,6 +656,24 @@ function WorkspaceTabButton({
         event.dataTransfer.effectAllowed = "move";
         event.dataTransfer.setData("application/x-knownext-document-tab", tab.id);
         event.dataTransfer.setData("text/plain", tab.id);
+        const ghost = document.createElement("div");
+        ghost.textContent = tab.name;
+        ghost.style.position = "fixed";
+        ghost.style.top = "-1000px";
+        ghost.style.left = "-1000px";
+        ghost.style.maxWidth = "240px";
+        ghost.style.padding = "6px 10px";
+        ghost.style.border = "1px solid #FED7AA";
+        ghost.style.borderRadius = "6px";
+        ghost.style.background = "rgba(255,255,255,0.82)";
+        ghost.style.color = "#111827";
+        ghost.style.font = "600 11px system-ui, sans-serif";
+        ghost.style.boxShadow = "0 12px 30px rgba(17,24,39,0.16)";
+        if (typeof event.dataTransfer.setDragImage === "function") {
+          document.body.appendChild(ghost);
+          event.dataTransfer.setDragImage(ghost, 12, 12);
+          ghost.remove();
+        }
         onDocumentDragStart?.(tab.id);
       }}
       onDragEnd={() => onDocumentDragEnd?.()}

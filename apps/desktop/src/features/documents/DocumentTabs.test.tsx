@@ -160,6 +160,31 @@ describe("DocumentTabs", () => {
     expect(onCloseTab).toHaveBeenNthCalledWith(2, "ref-budget");
   });
 
+  it("uses the batch close handler for closing all tabs when available", async () => {
+    const onCloseTab = vi.fn();
+    const onCloseTabs = vi.fn();
+
+    render(
+      <DocumentTabs
+        tabs={[
+          ...tabs,
+          { kind: "reference-document", id: "ref-budget", name: "Presupuesto.xlsx", path: "Presupuesto.xlsx", format: "xlsx", readonly: true },
+        ]}
+        activeTabId="doc-a"
+        dirtyDocumentIds={[]}
+        onSelectTab={vi.fn()}
+        onCloseTab={onCloseTab}
+        onCloseTabs={onCloseTabs}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByLabelText("Esquemas.md"), { clientX: 80, clientY: 24 });
+    await userEvent.click(screen.getByRole("menuitem", { name: "Cerrar todas las pestañas" }));
+
+    expect(onCloseTabs).toHaveBeenCalledWith(["doc-a", "doc-b", "ref-budget"]);
+    expect(onCloseTab).not.toHaveBeenCalled();
+  });
+
   it("does not show the secondary-button tab menu for fixed utility tabs", () => {
     render(
       <DocumentTabs
@@ -216,10 +241,10 @@ describe("DocumentTabs", () => {
 
       expect(screen.getByLabelText("IA")).toHaveAttribute("draggable", "false");
       expect(screen.getByLabelText("Notas")).toHaveAttribute("draggable", "false");
-      expect(screen.getByLabelText("Acta.md")).toHaveAttribute("draggable", "false");
+      expect(screen.getByLabelText("Acta.md")).toHaveAttribute("draggable", "true");
       expect(screen.getByLabelText("Acta.md")).toHaveAttribute("data-reorderable", "true");
       expect(screen.getByLabelText("Acta.md")).toHaveClass("cursor-default");
-      expect(screen.getByLabelText("Notas de release")).toHaveAttribute("draggable", "false");
+      expect(screen.getByLabelText("Notas de release")).toHaveAttribute("draggable", "true");
       expect(screen.getByLabelText("Notas de release")).toHaveAttribute("data-reorderable", "true");
 
       fireEvent.dragStart(screen.getByLabelText("Esquemas.md"), { dataTransfer });
@@ -504,6 +529,7 @@ function createDataTransfer() {
     setData: vi.fn((type: string, value: string) => {
       data.set(type, value);
     }),
+    setDragImage: vi.fn(),
   } as unknown as DataTransfer;
 }
 
