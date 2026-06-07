@@ -1,5 +1,6 @@
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
+#[cfg(not(target_os = "android"))]
 use printpdf::{
     BuiltinFont, Mm, Op, PdfDocument, PdfFontHandle, PdfPage, PdfSaveOptions, Point, Pt, RawImage,
     TextItem, XObjectTransform,
@@ -20,11 +21,16 @@ pub fn minimal_pdf(title: &str, markdown: &str) -> Vec<u8> {
 }
 
 pub fn minimal_pdf_with_diagrams(title: &str, markdown: &str, diagram_assets: &[DiagramAsset]) -> Vec<u8> {
-    if !diagram_assets.is_empty() {
-        if let Some(bytes) = print_pdf_with_diagrams(title, markdown, diagram_assets) {
-            return bytes;
+    #[cfg(not(target_os = "android"))]
+    {
+        if !diagram_assets.is_empty() {
+            if let Some(bytes) = print_pdf_with_diagrams(title, markdown, diagram_assets) {
+                return bytes;
+            }
         }
     }
+    #[cfg(target_os = "android")]
+    let _ = diagram_assets;
 
     let text = markdown
         .lines()
@@ -194,6 +200,7 @@ fn docx_image_paragraph(index: usize) -> String {
     )
 }
 
+#[cfg(not(target_os = "android"))]
 fn print_pdf_with_diagrams(title: &str, markdown: &str, diagram_assets: &[DiagramAsset]) -> Option<Vec<u8>> {
     let mut doc = PdfDocument::new(title);
     let mut pages = Vec::new();
@@ -268,6 +275,7 @@ fn print_pdf_with_diagrams(title: &str, markdown: &str, diagram_assets: &[Diagra
     Some(doc.with_pages(pages).save(&PdfSaveOptions::default(), &mut Vec::new()))
 }
 
+#[cfg(not(target_os = "android"))]
 fn start_pdf_text(ops: &mut Vec<Op>, y: f32, size: f32) {
     ops.push(Op::StartTextSection);
     ops.push(Op::SetTextCursor {
@@ -280,6 +288,7 @@ fn start_pdf_text(ops: &mut Vec<Op>, y: f32, size: f32) {
     ops.push(Op::SetLineHeight { lh: Pt(size + 4.0) });
 }
 
+#[cfg(not(target_os = "android"))]
 fn end_pdf_page(pages: &mut Vec<PdfPage>, ops: &mut Vec<Op>) {
     if ops.is_empty() {
         return;
