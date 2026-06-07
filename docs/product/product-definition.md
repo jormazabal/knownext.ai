@@ -20,6 +20,8 @@ KnowNext.ai is a compact local-first workspace for Markdown documentation. Users
 - Show history/version state through product language without exposing branch names in the UI.
 - Import images and supported support files.
 - Work with imported and AI-generated images as local project assets.
+- Create, insert, edit, validate, render, and export Mermaid diagrams as first-class Markdown document content.
+- Configure Mermaid visual capability by profile: maximum compatibility, local visual enrichment, or controlled experimental use. The default product stance is local visual enrichment with bundled Lucide icons, project-local images only, no CDN dependency, validation before insertion, and PDF/DOCX export as rendered images.
 - Preview PDF, DOCX, and XLSX reference files when the Rust document services can extract or render them.
 - Export Markdown documents to MD, PDF, and DOCX.
 - Show runtime diagnostics and update status from the local Tauri/Rust runtime.
@@ -31,7 +33,9 @@ KnowNext.ai is a compact local-first workspace for Markdown documentation. Users
 - Prompt execution supports a quick direct mode and a reasoning direct mode. Reasoning mode may increase provider guidance and response budget, but it is not agentic and must not imply web access.
 - React captures user intent and displays results; Rust/Tauri services own provider credentials, request construction, permissions, context indexing, and deterministic execution.
 - Intent resolution must be structured: runtime state + LLM decision + validated operation.
-- Document edits use structured AI edit proposals as the runtime contract, but the normal user experience is Canvas-like: safe validated operations are applied directly in the document without an approval dialog. Proposals can target the active selection, cursor, block, whole document, or project scope, and contain deterministic operations such as selected-text replacement, cursor insertion, anchored Markdown patches, image insertion, or explicit full-document replacement. Project-scope proposals do not require an active document when every operation identifies its target document.
+- Document edits use structured AI edit proposals as the runtime contract, but the normal user experience is Canvas-like: safe validated operations are applied directly in the document without an approval dialog. Proposals can target the active selection, cursor, block, whole document, or project scope, and contain deterministic operations such as selected-text replacement, cursor insertion, anchored Markdown patches, image insertion, Mermaid diagram insertion, or explicit full-document replacement. Project-scope proposals do not require an active document when every operation identifies its target document.
+- The AI must understand the editor can produce prose, lists, tables, local/project images and Mermaid diagrams. It should choose diagrams for processes, architectures, sequences, dependencies, states, journeys, org charts, conceptual maps and lightweight data visuals when that improves the document.
+- AI diagram generation must respect the active diagram profile. In compatible mode it uses stable Mermaid without icons, images or beta syntax. In local visual mode it may use bundled `lucide:*` icons and stable visual syntax. In controlled experimental mode it may use beta Mermaid types only when they materially improve the document and remain editable.
 - Multi-section and multi-document concept changes must be represented as small anchored patches, not as a single oversized rewritten document. The app applies operations whose target can be validated; ambiguous or stale anchors remain reviewable instead of being applied silently.
 - Image requests while editing a document must be proactive. If the user asks to include, add, insert, create, or support content with an image, the AI should choose an appropriate image concept and document placement instead of asking for location clarification. A selected text range can be used as visual context without forcing the image to be inserted next to that selection; the structured operation must carry placement metadata such as cursor, selection, heading, paragraph anchor, or document end.
 - OpenAI output is not treated as unlimited. Model context windows and runtime `max_output_tokens` still apply, so document editing must prefer compact structured operations, anchored replacements, cursor insertions, image operations, and project-scoped patch lists instead of depending on full-document regeneration.
@@ -39,6 +43,7 @@ KnowNext.ai is a compact local-first workspace for Markdown documentation. Users
 - Mock AI responses are acceptable only as replaceable local runtime behavior while provider integration and privacy policy are finalized.
 - OpenAI is the first supported provider when real execution is enabled. Credentials must be stored locally through runtime services and never exposed back to React after save.
 - AI image generation is Rust/Tauri mediated: the LLM may propose a structured image operation, and the runtime validates permissions, calls the provider, writes the generated asset locally, and inserts Markdown references when configured.
+- AI Mermaid diagram generation is Rust/Tauri mediated through structured edit operations. The runtime stores the diagram as portable Markdown fences with KnowNext metadata so it remains editable, visually renderable and exportable. The AI must not invent icon packs, remote icon URLs or external image dependencies.
 - RAG uses a local project index rebuilt from Markdown and supported text attachments. The runtime retrieves relevant local chunks for AI interactions; it must not create a remote vector store as part of the local-first workflow.
 - Agentic web research controls must remain unavailable until Rust/Tauri uses them in AI interactions with validated source, cost, and permission contracts.
 
@@ -53,7 +58,7 @@ KnowNext.ai is a compact local-first workspace for Markdown documentation. Users
 ## Settings And Diagnostics
 
 - The Services section shows the local Rust runtime, app version, profile, app data directory, health state, and latest diagnostic error.
-- 2.0.4 has no external executable, process restart, API port, or runtime endpoint setting.
+- 2.2.0 has no external executable, process restart, API port, or runtime endpoint setting.
 - Diagnostic trace logging can be enabled by the user and must avoid secrets, prompt bodies, credentials, and full document content.
 
 ## Data Policy

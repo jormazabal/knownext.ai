@@ -134,6 +134,15 @@ export const defaultAiConfig: AiConfig = {
     defaultLanguage: "auto",
     favoriteLanguages: ["es", "en"],
   },
+  diagrams: {
+    enabled: true,
+    visualProfile: "visual_local",
+    iconSet: "lucide",
+    imagePolicy: "project_assets",
+    betaPolicy: "ask",
+    defaultWidth: "wide",
+    aiGenerationMode: "visual",
+  },
 };
 
 export const defaultProjectTabsConfig: ProjectTabsConfig = {
@@ -416,6 +425,40 @@ function normalizeAi(ai: AiConfig | undefined): AiConfig | undefined {
       maxSources: clampNumber(ai.agentic?.maxSources, 1, 20, defaultAiConfig.agentic.maxSources),
     },
     transcription: normalizeTranscription(ai.transcription),
+    diagrams: normalizeDiagramConfig(ai.diagrams),
+  };
+}
+
+function normalizeDiagramConfig(diagrams: AiConfig["diagrams"] | undefined): AiConfig["diagrams"] {
+  const visualProfile = ["compatible", "visual_local", "advanced"].includes(String(diagrams?.visualProfile))
+    ? diagrams!.visualProfile
+    : defaultAiConfig.diagrams.visualProfile;
+  return {
+    enabled: diagrams?.enabled !== false,
+    visualProfile,
+    iconSet: visualProfile === "compatible"
+      ? "none"
+      : ["none", "lucide"].includes(String(diagrams?.iconSet))
+      ? diagrams!.iconSet
+      : defaultAiConfig.diagrams.iconSet,
+    imagePolicy: visualProfile === "compatible"
+      ? "disabled"
+      : ["disabled", "project_assets", "external_confirm"].includes(String(diagrams?.imagePolicy))
+      ? diagrams!.imagePolicy
+      : defaultAiConfig.diagrams.imagePolicy,
+    betaPolicy: visualProfile !== "advanced" && diagrams?.betaPolicy === "enabled"
+      ? "ask"
+      : ["disabled", "ask", "enabled"].includes(String(diagrams?.betaPolicy))
+      ? diagrams!.betaPolicy
+      : visualProfile === "advanced" ? "ask" : defaultAiConfig.diagrams.betaPolicy,
+    defaultWidth: ["compact", "auto", "wide", "full"].includes(String(diagrams?.defaultWidth))
+      ? diagrams!.defaultWidth
+      : defaultAiConfig.diagrams.defaultWidth,
+    aiGenerationMode: visualProfile === "compatible"
+      ? "safe"
+      : ["safe", "visual"].includes(String(diagrams?.aiGenerationMode))
+      ? diagrams!.aiGenerationMode
+      : defaultAiConfig.diagrams.aiGenerationMode,
   };
 }
 

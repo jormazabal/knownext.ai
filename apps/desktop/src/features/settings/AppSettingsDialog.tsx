@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Activity, ArrowRight, Brain, Check, ChevronDown, Copy, Download, Eye, FileText, FolderOpen, Gauge, Globe2, Grid2X2, Image as ImageIcon, Info, KeyRound, Languages, ListChecks, Mic, Monitor, Moon, Paintbrush, RefreshCw, RotateCcw, Server, Settings, ShieldCheck, Sun, Trash2, Type as TypeIcon, Underline, Wrench, X } from "lucide-react";
+import { Activity, ArrowRight, Brain, Check, ChevronDown, Copy, Download, Eye, FileText, FolderOpen, Gauge, Globe2, Grid2X2, Image as ImageIcon, Info, KeyRound, Languages, ListChecks, Mic, Monitor, Moon, Paintbrush, RefreshCw, RotateCcw, Server, Settings, ShieldCheck, Sparkles, Sun, Trash2, Type as TypeIcon, Underline, Workflow, Wrench, X } from "lucide-react";
 import { AiModelSelector, type AiModelSelectorOption, type AiModelSelectorTone } from "../../components/ai/AiModelSelector";
 import { defaultAiConfig } from "../../lib/api/config";
 import { accentPalettes } from "../../lib/theme/appearance";
@@ -556,6 +556,17 @@ function CapabilitiesSettings({
     });
   }
 
+  function updateDiagrams(nextDiagrams: Partial<AiConfigStatus["diagrams"]>) {
+    const currentAi = localAiRef.current;
+    commitAi({
+      ...currentAi,
+      diagrams: {
+        ...currentAi.diagrams,
+        ...nextDiagrams,
+      },
+    });
+  }
+
   function updatePermissions(nextPermissions: Partial<AiConfigStatus["permissions"]>) {
     const currentAi = localAiRef.current;
     commitAi({
@@ -606,6 +617,72 @@ function CapabilitiesSettings({
           <p className="mt-2 text-[12px] leading-5 text-ink-secondary">{text.capabilitiesDescription}</p>
         </div>
       </section>
+
+      <CapabilitySection icon={<Workflow size={22} />} title={text.capabilityDiagramsTitle} description={text.capabilityDiagramsDescription}>
+        <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+          <CapabilityPanel
+            icon={<Workflow size={15} />}
+            title={text.capabilityDiagramsEditorTitle}
+            description={text.capabilityDiagramsEditorDescription}
+            enabled={settingsAi.diagrams.enabled}
+            onToggle={() => updateDiagrams({ enabled: !settingsAi.diagrams.enabled })}
+          >
+            <div className="grid gap-3">
+              <CapabilitySelect label={text.diagramProfileHeading} value={settingsAi.diagrams.visualProfile} onChange={(value) => {
+                if (value === "compatible") {
+                  updateDiagrams({ visualProfile: "compatible", iconSet: "none", imagePolicy: "disabled", aiGenerationMode: "safe" });
+                } else if (value === "advanced") {
+                  updateDiagrams({ visualProfile: "advanced", iconSet: "lucide", betaPolicy: "ask", aiGenerationMode: "visual" });
+                } else {
+                  updateDiagrams({ visualProfile: "visual_local", iconSet: "lucide", imagePolicy: "project_assets", betaPolicy: "ask", aiGenerationMode: "visual" });
+                }
+              }}>
+                <option value="compatible">{text.diagramProfileCompatible}</option>
+                <option value="visual_local">{text.diagramProfileVisualLocal}</option>
+                <option value="advanced">{text.diagramProfileAdvanced}</option>
+              </CapabilitySelect>
+              <div className="grid gap-3 md:grid-cols-2">
+                <CapabilitySelect label={text.diagramIconSetHeading} value={settingsAi.diagrams.iconSet} onChange={(value) => updateDiagrams({ iconSet: value as AiConfigStatus["diagrams"]["iconSet"] })}>
+                  <option value="none">{text.disabled}</option>
+                  <option value="lucide">Lucide local</option>
+                </CapabilitySelect>
+                <CapabilitySelect label={text.diagramDefaultWidthHeading} value={settingsAi.diagrams.defaultWidth} onChange={(value) => updateDiagrams({ defaultWidth: value as AiConfigStatus["diagrams"]["defaultWidth"] })}>
+                  <option value="compact">S</option>
+                  <option value="auto">M</option>
+                  <option value="wide">L</option>
+                  <option value="full">XL</option>
+                </CapabilitySelect>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <CapabilitySelect label={text.diagramImagePolicyHeading} value={settingsAi.diagrams.imagePolicy} onChange={(value) => updateDiagrams({ imagePolicy: value as AiConfigStatus["diagrams"]["imagePolicy"] })}>
+                  <option value="disabled">{text.diagramImagesDisabled}</option>
+                  <option value="project_assets">{text.diagramImagesProject}</option>
+                  <option value="external_confirm">{text.diagramImagesExternalConfirm}</option>
+                </CapabilitySelect>
+                <CapabilitySelect label={text.diagramBetaPolicyHeading} value={settingsAi.diagrams.betaPolicy} onChange={(value) => updateDiagrams({ betaPolicy: value as AiConfigStatus["diagrams"]["betaPolicy"] })}>
+                  <option value="disabled">{text.diagramBetaDisabled}</option>
+                  <option value="ask">{text.diagramBetaAsk}</option>
+                  <option value="enabled">{text.diagramBetaEnabled}</option>
+                </CapabilitySelect>
+              </div>
+            </div>
+          </CapabilityPanel>
+
+          <CapabilityPanel
+            icon={<Sparkles size={15} />}
+            title={text.capabilityDiagramsAiTitle}
+            description={text.capabilityDiagramsAiDescription}
+            enabled={settingsAi.diagrams.aiGenerationMode === "visual"}
+            onToggle={() => updateDiagrams({ aiGenerationMode: settingsAi.diagrams.aiGenerationMode === "visual" ? "safe" : "visual" })}
+          >
+            <div className="grid gap-2">
+              <CapabilitySummaryRow label={text.diagramAiModeHeading} value={settingsAi.diagrams.aiGenerationMode === "visual" ? text.diagramAiModeVisual : text.diagramAiModeSafe} />
+              <CapabilitySummaryRow label={text.diagramExportGuaranteeHeading} value={text.diagramExportGuaranteeValue} />
+              <CapabilitySummaryRow label={text.diagramLocalFirstHeading} value={text.diagramLocalFirstValue} />
+            </div>
+          </CapabilityPanel>
+        </div>
+      </CapabilitySection>
 
       <CapabilitySection icon={<ImageIcon size={22} />} title={text.capabilityImagesTitle} description={text.capabilityImagesDescription}>
         <div className="grid gap-4 xl:grid-cols-2">
@@ -925,6 +1002,15 @@ function CapabilitySelect({ label, value, help, onChange, children }: { label: s
         {children}
       </select>
     </CapabilityField>
+  );
+}
+
+function CapabilitySummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md border border-line bg-white px-3 py-2">
+      <span className="text-[10px] font-semibold text-ink-secondary">{label}</span>
+      <span className="min-w-0 truncate text-right text-[11px] font-semibold text-ink-primary">{value}</span>
+    </div>
   );
 }
 
@@ -1305,6 +1391,7 @@ function normalizeAiStatus(ai: Partial<AiConfigStatus> | null | undefined): AiCo
   const imageGeneration = ai?.imageGeneration as Partial<AiConfigStatus["imageGeneration"]> | undefined;
   const agentic = ai?.agentic as Partial<AiConfigStatus["agentic"]> | undefined;
   const transcription = ai?.transcription as Partial<AiConfigStatus["transcription"]> | undefined;
+  const diagrams = ai?.diagrams as Partial<AiConfigStatus["diagrams"]> | undefined;
 
   const imageGenerationModel = normalizeImageGenerationModel(imageGeneration?.model);
   return {
@@ -1359,8 +1446,42 @@ function normalizeAiStatus(ai: Partial<AiConfigStatus> | null | undefined): AiCo
       maxSources: clampSettingsNumber(agentic?.maxSources, 1, 20, defaultAiConfig.agentic.maxSources),
     },
     transcription: normalizeTranscription(transcription),
+    diagrams: normalizeDiagramSettings(diagrams),
     openaiKeyConfigured: Boolean(ai?.openaiKeyConfigured),
     openaiKeyPreview: ai?.openaiKeyPreview ?? null,
+  };
+}
+
+function normalizeDiagramSettings(diagrams: Partial<AiConfigStatus["diagrams"]> | undefined): AiConfigStatus["diagrams"] {
+  const visualProfile = ["compatible", "visual_local", "advanced"].includes(String(diagrams?.visualProfile))
+    ? diagrams!.visualProfile!
+    : defaultAiConfig.diagrams.visualProfile;
+  return {
+    enabled: diagrams?.enabled ?? defaultAiConfig.diagrams.enabled,
+    visualProfile,
+    iconSet: visualProfile === "compatible"
+      ? "none"
+      : ["none", "lucide"].includes(String(diagrams?.iconSet))
+      ? diagrams!.iconSet!
+      : defaultAiConfig.diagrams.iconSet,
+    imagePolicy: visualProfile === "compatible"
+      ? "disabled"
+      : ["disabled", "project_assets", "external_confirm"].includes(String(diagrams?.imagePolicy))
+      ? diagrams!.imagePolicy!
+      : defaultAiConfig.diagrams.imagePolicy,
+    betaPolicy: visualProfile !== "advanced" && diagrams?.betaPolicy === "enabled"
+      ? "ask"
+      : ["disabled", "ask", "enabled"].includes(String(diagrams?.betaPolicy))
+      ? diagrams!.betaPolicy!
+      : defaultAiConfig.diagrams.betaPolicy,
+    defaultWidth: ["compact", "auto", "wide", "full"].includes(String(diagrams?.defaultWidth))
+      ? diagrams!.defaultWidth!
+      : defaultAiConfig.diagrams.defaultWidth,
+    aiGenerationMode: visualProfile === "compatible"
+      ? "safe"
+      : ["safe", "visual"].includes(String(diagrams?.aiGenerationMode))
+      ? diagrams!.aiGenerationMode!
+      : defaultAiConfig.diagrams.aiGenerationMode,
   };
 }
 
@@ -3692,16 +3813,43 @@ const settingsCopy = {
     goToCapabilities: "Ir a Capacidades",
     goToSystem: "Ir a Sistema y diagnóstico",
     capabilitiesDescription: "Activa y configura las funciones avanzadas que la IA puede utilizar.",
-    capabilityImagesTitle: "1. Imágenes",
+    capabilityDiagramsTitle: "1. Diagramas",
+    capabilityDiagramsDescription: "Creación, edición, visualización profesional y exportación de diagramas Mermaid.",
+    capabilityDiagramsEditorTitle: "Editor de diagramas",
+    capabilityDiagramsEditorDescription: "Controla el nivel visual permitido para diagramas insertados manualmente o generados por IA.",
+    capabilityDiagramsAiTitle: "Generación IA de diagramas",
+    capabilityDiagramsAiDescription: "Permite que la IA elija diagramas cuando ayuden más que texto, tablas o imágenes.",
+    diagramProfileHeading: "Perfil Mermaid",
+    diagramProfileCompatible: "Máxima compatibilidad",
+    diagramProfileVisualLocal: "Visual local",
+    diagramProfileAdvanced: "Experimental controlado",
+    diagramIconSetHeading: "Iconos",
+    diagramDefaultWidthHeading: "Anchura por defecto",
+    diagramImagePolicyHeading: "Imágenes internas",
+    diagramImagesDisabled: "Desactivadas",
+    diagramImagesProject: "Solo assets del proyecto",
+    diagramImagesExternalConfirm: "Externas con confirmación",
+    diagramBetaPolicyHeading: "Tipos beta",
+    diagramBetaDisabled: "Bloqueados",
+    diagramBetaAsk: "Avisar y validar",
+    diagramBetaEnabled: "Permitidos",
+    diagramAiModeHeading: "Modo IA",
+    diagramAiModeVisual: "Visual enriquecido",
+    diagramAiModeSafe: "Compatible",
+    diagramExportGuaranteeHeading: "Exportación",
+    diagramExportGuaranteeValue: "PDF y DOCX como imagen",
+    diagramLocalFirstHeading: "Local-first",
+    diagramLocalFirstValue: "Sin CDN por defecto",
+    capabilityImagesTitle: "2. Imágenes",
     capabilityImagesDescription: "Comprensión de imágenes para trabajar con contenido visual importado al proyecto.",
     capabilityGenerateImagesTitle: "Generación de imágenes",
     capabilityUnderstandImagesTitle: "Entender imágenes (visión)",
     capabilityUnderstandImagesDescription: "Analiza imágenes del proyecto y puede usarlas como contexto.",
-    capabilityAudioTitle: "2. Audio y transcripción",
+    capabilityAudioTitle: "3. Audio y transcripción",
     capabilityAudioDescription: "Convierte voz en texto para usarla como prompt o incorporarla a documentos.",
-    capabilityPermissionsTitle: "3. Acciones permitidas",
+    capabilityPermissionsTitle: "4. Acciones permitidas",
     capabilityPermissionsDescription: "Define hasta qué punto la IA puede modificar y gestionar el contenido del proyecto.",
-    capabilityAgenticTitle: "4. Tareas agénticas",
+    capabilityAgenticTitle: "5. Tareas agénticas",
     capabilityAgenticDescription: "Estado de las capacidades de planificación, investigación web y ejecución autónoma.",
     qualityLow: "Baja",
     qualityMedium: "Media",
@@ -4122,16 +4270,43 @@ const settingsCopy = {
     goToCapabilities: "Go to Capabilities",
     goToSystem: "Go to System and diagnostics",
     capabilitiesDescription: "Enable and configure the advanced functions the AI can use.",
-    capabilityImagesTitle: "1. Images",
+    capabilityDiagramsTitle: "1. Diagrams",
+    capabilityDiagramsDescription: "Mermaid diagram creation, editing, professional visualization, and export.",
+    capabilityDiagramsEditorTitle: "Diagram editor",
+    capabilityDiagramsEditorDescription: "Controls the visual level allowed for manually inserted or AI-generated diagrams.",
+    capabilityDiagramsAiTitle: "AI diagram generation",
+    capabilityDiagramsAiDescription: "Allows AI to choose diagrams when they explain better than text, tables, or images.",
+    diagramProfileHeading: "Mermaid profile",
+    diagramProfileCompatible: "Maximum compatibility",
+    diagramProfileVisualLocal: "Local visual",
+    diagramProfileAdvanced: "Controlled experimental",
+    diagramIconSetHeading: "Icons",
+    diagramDefaultWidthHeading: "Default width",
+    diagramImagePolicyHeading: "Internal images",
+    diagramImagesDisabled: "Disabled",
+    diagramImagesProject: "Project assets only",
+    diagramImagesExternalConfirm: "External with confirmation",
+    diagramBetaPolicyHeading: "Beta types",
+    diagramBetaDisabled: "Blocked",
+    diagramBetaAsk: "Warn and validate",
+    diagramBetaEnabled: "Allowed",
+    diagramAiModeHeading: "AI mode",
+    diagramAiModeVisual: "Rich visual",
+    diagramAiModeSafe: "Compatible",
+    diagramExportGuaranteeHeading: "Export",
+    diagramExportGuaranteeValue: "PDF and DOCX as image",
+    diagramLocalFirstHeading: "Local-first",
+    diagramLocalFirstValue: "No CDN by default",
+    capabilityImagesTitle: "2. Images",
     capabilityImagesDescription: "Image understanding for working with visual content imported into the project.",
     capabilityGenerateImagesTitle: "Image generation",
     capabilityUnderstandImagesTitle: "Understand images (vision)",
     capabilityUnderstandImagesDescription: "Analyze project images and use them as context.",
-    capabilityAudioTitle: "2. Audio and transcription",
+    capabilityAudioTitle: "3. Audio and transcription",
     capabilityAudioDescription: "Convert voice into text to use as a prompt or add to documents.",
-    capabilityPermissionsTitle: "3. Allowed actions",
+    capabilityPermissionsTitle: "4. Allowed actions",
     capabilityPermissionsDescription: "Define how far the AI can modify and manage project content.",
-    capabilityAgenticTitle: "4. Agentic tasks",
+    capabilityAgenticTitle: "5. Agentic tasks",
     capabilityAgenticDescription: "Status of planning, web research, and autonomous execution capabilities.",
     qualityLow: "Low",
     qualityMedium: "Medium",

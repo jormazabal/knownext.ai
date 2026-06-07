@@ -2,6 +2,17 @@
 
 All KnowNext.ai releases use one monolithic application version for the frontend, Tauri shell, Rust runtime, Windows updater, and Android updater.
 
+## 2.2.0 - 2026-06-07
+
+- Added Mermaid diagrams as first-class editable Markdown content: users can insert, validate, preview, edit, delete and render diagrams visually inside the document instead of seeing raw code as the primary experience.
+- Added a professional diagram editor with a guided diagram-type selector, searchable examples, numbered Mermaid code editor, independent live preview column, validation diagnostics, width/caption controls and contextual information for profiles, beta syntax and local icons.
+- Expanded the Mermaid catalog with product, technical, data and experimental diagram examples so users can learn from templates and start from valid Mermaid code.
+- Integrated diagram generation into the AI structured edit flow so the assistant can choose prose, tables, images or Mermaid diagrams when creating document content.
+- Added AI diagram capability configuration for compatible, local visual and advanced profiles, including local Lucide icon use, beta-policy handling and project-local image constraints.
+- Added Mermaid rendering support in the visual editor, read-only viewer and export pipeline so PDF/DOCX exports embed rendered diagram images rather than raw Mermaid code.
+- Added Rust/Tauri document export support for rendering Mermaid blocks through generated diagram assets and carrying KnowNext metadata for editable captions and widths.
+- Expanded automated coverage for Mermaid rendering, diagram insertion/editing UI, settings normalization and the AI `insert_diagram` contract.
+
 ## 2.1.0 - 2026-06-07
 
 - Reworked AI document editing into a direct Canvas-style workflow: structured edit proposals are validated and applied automatically when safe, including selected text, cursor placement, whole-document updates, tables, generated images and multi-section document changes.

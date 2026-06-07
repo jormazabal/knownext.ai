@@ -19,6 +19,7 @@ export type MarkdownEditorAction =
   | "code-block"
   | "link"
   | "image"
+  | "diagram"
   | "quote"
   | "horizontal-rule"
   | "undo"
@@ -32,6 +33,8 @@ export type MarkdownEditorController = {
   insertMarkdownAt: (position: number, markdown: string, options?: MarkdownEditorReplaceOptions) => boolean;
   replaceImageAt: (position: number, markdown: string, options?: MarkdownEditorReplaceOptions) => boolean;
   deleteImageAt: (position: number, options?: MarkdownEditorReplaceOptions) => boolean;
+  replaceDiagramAt: (position: number, nodeSize: number, markdown: string, options?: MarkdownEditorReplaceOptions) => boolean;
+  deleteDiagramAt: (position: number, nodeSize: number, options?: MarkdownEditorReplaceOptions) => boolean;
   setCursorAtClientPoint: (clientX: number, clientY: number, options?: MarkdownEditorReplaceOptions) => boolean;
   insertText: (text: string, options?: MarkdownEditorInsertTextOptions) => boolean;
   setTransientTextPreview: (text: string) => boolean;
@@ -50,6 +53,9 @@ export type MarkdownEditorActionOptions = {
   image?: {
     src: string;
     alt: string;
+  };
+  diagram?: {
+    markdown: string;
   };
 };
 
@@ -79,6 +85,14 @@ export type MarkdownEditorImageEditTarget = {
   src: string;
   alt: string;
   title?: string | null;
+};
+
+export type MarkdownEditorDiagramEditTarget = {
+  position: number;
+  nodeSize: number;
+  code: string;
+  caption?: string | null;
+  width?: "compact" | "auto" | "wide" | "full" | null;
 };
 
 export type MarkdownEditorFormatState = Partial<Record<MarkdownEditorAction, boolean>>;

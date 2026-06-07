@@ -1,14 +1,14 @@
 # Manual Test Checklist
 
-Use this checklist before publishing a KnowNext.ai release. For 2.0.4, run critical acceptance on packaged Windows and Android builds. Do not publish if a critical item fails.
+Use this checklist before publishing a KnowNext.ai release. For 2.2.0, run critical acceptance on packaged Windows and Android builds. Do not publish if a critical item fails.
 
 Use `docs/development/functional-validation-matrix.md` to record which areas are proven by automated tests, which areas have been manually validated, and which areas remain blocked by credentials, signing keys, or device access.
 
 ## Build Under Test
 
-- Version: `2.0.4`
-- Windows artifact: primary installer `KnowNext.ai_2.0.4_x64_en-US.msi`; secondary NSIS asset `KnowNext.ai_2.0.4_x64-setup.exe`
-- Android artifact: `KnowNext.ai-android-arm64-v2.0.4.apk`
+- Version: `2.2.0`
+- Windows artifact: primary installer `KnowNext.ai_2.2.0_x64_en-US.msi`; secondary NSIS asset `KnowNext.ai_2.2.0_x64-setup.exe`
+- Android artifact: `KnowNext.ai-android-arm64-v2.2.0.apk`
 - Runtime: local Tauri/Rust, no external product service or workstation service dependency.
 
 ## Automated Gate
@@ -50,6 +50,9 @@ Use `docs/development/functional-validation-matrix.md` to record which areas are
 - Import a single Markdown/PDF/DOCX/XLSX file and confirm the imported file opens immediately as the active editable document or supported preview.
 - Insert an imported image into a Markdown document, then move the image, move the document, and move their containing folders; confirm Markdown image references are recalculated and remain valid.
 - Hover an image in a Markdown document, click the bottom-center edit icon, then confirm the edit dialog can change the alt text, replace the image through project/upload/URL modes, and delete the image from the document.
+- Insert a Mermaid diagram from the Markdown toolbar, use the example catalog, validate it in the dialog, confirm it renders visually in the document, hover it and use `Editar` to reopen the dialog with the original code, then update and delete it.
+- In Settings > Capabilities, switch Mermaid profiles between maximum compatibility, local visual and controlled experimental. Confirm compatible mode blocks icon/image enriched diagrams, local visual mode allows bundled `lucide:*` icons, and beta examples show a warning or are blocked according to the beta policy.
+- Export a document containing at least one Mermaid diagram to PDF and DOCX; confirm the exported files embed the rendered diagram image, not raw Mermaid code.
 - Reindex project images from settings and confirm the result reports the real number of project images and indexed images.
 - Open AI/capabilities settings and confirm image generation exposes `gpt-image-2`, model, size, quality, format, destination folder, document insertion, document-context and asset-permission controls.
 - Open AI/documental settings and confirm RAG exposes local index status, document counts, local index ID, `Reconstruir índice` and `Limpiar índice`; rebuild the index and confirm the document count updates.
@@ -64,13 +67,14 @@ Use `docs/development/functional-validation-matrix.md` to record which areas are
 - Place the cursor without selecting text, ask IA to insert content at that point, confirm the prompt chip says cursor context, and verify the insertion lands directly at the cursor.
 - Ask IA to update one concept across several sections or documents. Confirm safe anchored operations apply directly, changed documents open as dirty tabs when needed, and only ambiguous/stale operations remain blocked for review in the IA surface.
 - Ask IA to insert an existing project image into the active document and verify the Markdown image reference is inserted directly, renders, and points to the local project asset.
+- Ask IA to add a process, architecture or sequence diagram to the active document; confirm the IA returns an editable Mermaid diagram aligned with the active profile, it renders visually, and PDF/DOCX export embeds it.
 - Ask the AI to create a new document with document-creation permission enabled and confirm the request is visible in the IA tab conversation and the created document opens as the active tab.
 - Open settings > Capacidades and confirm local guided agentic controls are configurable for depth, confirmation, max steps, documents, sources and cost, while web research remains marked unavailable.
 - Open settings, confirm Services shows `Runtime local`, `Contrato local`, `tauri://local-api/health`, no port control, no restart action, and no external executable.
 - Open settings > System diagnostics and confirm the Git/GitHub service reports the active project, Git availability, local history state, origin/remote state, and GitHub paused state when unauthenticated.
 - Configure an OpenAI key, connect GitHub, then close only the GitHub session; confirm the OpenAI key remains configured. Reconnect GitHub, update the OpenAI key, and confirm GitHub remains connected.
 - Open a GitHub-synced project without a GitHub account or without repository access. Confirm editing, saving, and local history continue; the document footer shows `Sin acceso a GitHub`; automatic remote sync pauses without repeated save/sync error prompts.
-- If a previous install shows an internal development GitHub placeholder account or a public GitHub account without a private credential, update to 2.0.4 and confirm it is cleared to `Sin cuenta GitHub`; attempting GitHub login must start the real GitHub device flow in the installed app. If a temporary fallback such as `GitHub remoto no configurado` appears, close and reopen or use `Reintentar login` and confirm the app attempts the device flow again instead of staying stuck in the fallback. If the account is disconnected or lacks permissions, the UI must show GitHub as paused while local history remains usable.
+- If a previous install shows an internal development GitHub placeholder account or a public GitHub account without a private credential, update to 2.2.0 and confirm it is cleared to `Sin cuenta GitHub`; attempting GitHub login must start the real GitHub device flow in the installed app. If a temporary fallback such as `GitHub remoto no configurado` appears, close and reopen or use `Reintentar login` and confirm the app attempts the device flow again instead of staying stuck in the fallback. If the account is disconnected or lacks permissions, the UI must show GitHub as paused while local history remains usable.
 - Enable diagnostics, trigger a visible error, and confirm trace/log access works.
 - Check for updates and confirm the updater uses the signed Windows manifest.
 - Resize the window across compact and normal widths without overlapping core controls.
@@ -94,18 +98,18 @@ Use `docs/development/functional-validation-matrix.md` to record which areas are
 ## Release Publication Gate
 
 - GitHub release draft contains Windows NSIS, Windows MSI, both `.sig` files, `latest.json`, Android APK, and `android-latest.json`.
-- `latest.json` resolves to `2.0.4` and points `windows-x86_64.url` to the MSI artifact.
-- `android-latest.json` resolves to `2.0.4` and points to `KnowNext.ai-android-arm64-v2.0.4.apk`.
+- `latest.json` resolves to `2.2.0` and points `windows-x86_64.url` to the MSI artifact.
+- `android-latest.json` resolves to `2.2.0` and points to `KnowNext.ai-android-arm64-v2.2.0.apk`.
 - README Windows MSI and Android download URLs return HTTP 200.
-- A previous Windows install updates to 2.0.4 without deleting app data.
-- An Android install updates to 2.0.4 while preserving app data and still works offline.
+- A previous Windows install updates to 2.2.0 without deleting app data.
+- An Android install updates to 2.2.0 while preserving app data and still works offline.
 
-## Known 2.0.4 Limitations To Record If Still Present
+## Known 2.2.0 Limitations To Record If Still Present
 
 - GitHub synchronization must use the Rust Git service; if credentials or permissions are missing, the UI must pause remote sync while local history remains usable.
 - AI provider execution requires locally stored OpenAI credentials and must be validated with a real key before claiming provider acceptance.
 - AI image generation and local RAG require real-provider hands-on validation before release acceptance; do not claim acceptance if generated assets, Markdown insertion, or indexed-document retrieval fail.
-- Agentic local guided configuration is accepted for 2.0.4; agentic web research and unrestricted autonomous multi-step flows are not accepted capabilities and must remain unavailable.
+- Agentic local guided configuration is accepted for 2.2.0; agentic web research and unrestricted autonomous multi-step flows are not accepted capabilities and must remain unavailable.
 - Some document previews may be best-effort depending on Rust conversion support.
 
-Any limitation here must be repeated in `docs/releases/2.0.4.md` before publication.
+Any limitation here must be repeated in `docs/releases/2.2.0.md` before publication.

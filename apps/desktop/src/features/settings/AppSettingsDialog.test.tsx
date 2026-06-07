@@ -396,8 +396,9 @@ describe("AppSettingsDialog", () => {
     expect(screen.getByText("Contexto documental (RAG)")).toBeInTheDocument();
     expect(screen.getByText("Modelo de respuesta")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Capacidades" }));
-    expect(screen.getByText("1. Imágenes")).toBeInTheDocument();
-    expect(screen.getByText("4. Tareas agénticas")).toBeInTheDocument();
+    expect(screen.getByText("1. Diagramas")).toBeInTheDocument();
+    expect(screen.getByText("2. Imágenes")).toBeInTheDocument();
+    expect(screen.getByText("5. Tareas agénticas")).toBeInTheDocument();
   });
 
   it("shows configurable image generation backed by the Rust runtime contract", () => {
@@ -631,7 +632,7 @@ describe("AppSettingsDialog", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "Capacidades" }));
 
-    expect(screen.getByText("4. Tareas agénticas")).toBeInTheDocument();
+    expect(screen.getByText("5. Tareas agénticas")).toBeInTheDocument();
     expect(screen.getAllByText("Control desde el prompt").length).toBeGreaterThan(0);
     expect(screen.getByText("Investigación web")).toBeInTheDocument();
     expect(screen.getByText(/No disponible hasta que la app pueda investigar en web/i)).toBeInTheDocument();

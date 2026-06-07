@@ -1259,6 +1259,198 @@ input[type="range"]::-moz-range-thumb {
   display: none !important;
 }
 
+.knownext-mermaid-diagram {
+  position: relative;
+  margin: 18px auto 20px;
+  overflow: hidden;
+  border: 1px solid rgb(var(--app-border));
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgb(var(--app-surface)) 0%, rgb(var(--app-panel)) 100%);
+  box-shadow: 0 10px 28px rgb(17 24 39 / 0.07);
+}
+
+.knownext-mermaid-diagram-compact {
+  max-width: 560px;
+}
+
+.knownext-mermaid-diagram-auto,
+.knownext-mermaid-diagram-wide {
+  max-width: min(100%, 860px);
+}
+
+.knownext-mermaid-diagram-full {
+  max-width: 100%;
+}
+
+.knownext-mermaid-diagram-selected {
+  border-color: rgb(var(--accent) / 0.65);
+  box-shadow: 0 0 0 2px rgb(var(--accent) / 0.12), 0 14px 34px rgb(17 24 39 / 0.09);
+}
+
+.knownext-mermaid-diagram-header {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid rgb(var(--app-border));
+  background: rgb(var(--app-surface) / 0.92);
+  padding: 6px 8px 6px 12px;
+}
+
+.knownext-mermaid-diagram-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid rgb(var(--accent) / 0.22);
+  background: rgb(var(--accent-soft));
+  padding: 0 8px;
+  color: rgb(var(--accent));
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.knownext-mermaid-diagram-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0;
+  transform: translateY(-1px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.knownext-mermaid-diagram:hover .knownext-mermaid-diagram-actions,
+.knownext-mermaid-diagram:focus-within .knownext-mermaid-diagram-actions,
+.knownext-mermaid-diagram-selected .knownext-mermaid-diagram-actions {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.knownext-mermaid-diagram-edit {
+  height: 24px;
+  border: 1px solid rgb(var(--app-border));
+  border-radius: 6px;
+  background: rgb(var(--app-surface));
+  padding: 0 9px;
+  color: rgb(var(--app-text));
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.knownext-mermaid-diagram-edit:hover,
+.knownext-mermaid-diagram-edit:focus-visible {
+  border-color: rgb(var(--accent) / 0.4);
+  background: rgb(var(--accent-soft));
+  color: rgb(var(--accent));
+  outline: none;
+}
+
+.knownext-mermaid-diagram-viewport {
+  display: grid;
+  min-height: 220px;
+  place-items: center;
+  overflow: auto;
+  padding: 24px;
+}
+
+.knownext-mermaid-diagram-viewport svg,
+.knownext-mermaid-dialog-preview svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.knownext-mermaid-diagram-loading {
+  color: rgb(var(--app-muted));
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.knownext-mermaid-diagram-error {
+  min-height: 120px;
+  padding: 18px;
+  place-items: center;
+  border-top: 1px solid rgb(var(--accent) / 0.18);
+  background: rgb(var(--accent-soft));
+  color: rgb(var(--accent-strong));
+  text-align: center;
+}
+
+.knownext-mermaid-diagram-error p {
+  margin: 0;
+  max-width: 680px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.knownext-mermaid-diagram-caption {
+  margin: -8px 18px 16px !important;
+  color: rgb(var(--app-muted)) !important;
+  text-align: center;
+  font-size: 11px !important;
+  line-height: 1.5 !important;
+}
+
+.knownext-mermaid-dialog-preview {
+  width: 100%;
+}
+
+.knownext-mermaid-code-editor {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  height: calc(100% - 42px);
+  min-height: 360px;
+  overflow: hidden;
+  border: 1px solid rgb(var(--app-border));
+  border-radius: 8px;
+  background: #111827;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
+}
+
+.knownext-mermaid-code-gutter {
+  overflow: hidden;
+  padding: 12px 10px 12px 0;
+  border-right: 1px solid rgb(255 255 255 / 0.08);
+  background: #0b1220;
+  color: #94a3b8;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: right;
+  user-select: none;
+}
+
+.knownext-mermaid-code-gutter div {
+  height: 20px;
+}
+
+.knownext-mermaid-code-textarea {
+  width: 100%;
+  height: 100%;
+  min-height: 360px;
+  resize: none;
+  overflow: auto;
+  border: 0;
+  background: #111827;
+  color: #f8fafc;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+  outline: none;
+  padding: 12px 14px;
+  tab-size: 2;
+  white-space: pre;
+}
+
+.knownext-mermaid-code-textarea:focus {
+  box-shadow: inset 0 0 0 1px rgb(var(--accent));
+}
+
 .knownext-image-edit-overlay {
   position: fixed;
   z-index: 90;

@@ -1,7 +1,7 @@
 # Functional validation matrix
 
-Date: 2026-06-06
-Version under validation: 2.0.4
+Date: 2026-06-07
+Version under validation: 2.2.0
 
 This matrix separates proven behavior from behavior that still needs a real interactive environment. Passing automated tests is not considered enough for release approval when the item explicitly requires a native Windows session, Android device, GitHub account, OpenAI provider, signing keys, or updater verification.
 
@@ -9,6 +9,7 @@ This matrix separates proven behavior from behavior that still needs a real inte
 
 | Area | Evidence | Status |
 | --- | --- | --- |
+| 2026-06-07 Mermaid diagram feature pass | `pnpm --filter @knownext/desktop test -- mermaidDiagrams InsertDiagramDialog config AppSettingsDialog` passed after adding Mermaid rendering, catalog validation, settings normalization and the diagram dialog. `pnpm --filter @knownext/desktop test -- InsertDiagramDialog` passed again after redesigning the dialog into a three-column editor with independent preview and a secondary information modal. `pnpm --filter @knownext/desktop build` passed after the final dialog changes. Focused Rust checks passed for `knownext-storage notes_and_config_persist_as_local_json` and `knownext-ai structured_diagram_insert_returns_reviewable_mermaid_proposal`. | Passed |
 | Release gate aggregate | `pnpm release:check`, rerun 2026-06-05 after the 2.0.4 version bump, silent Git execution, GitHub-paused local-first sync backoff, AI document-creation contract, AI conversation persistence, runtime diagnostics, prompt/context routing, Markdown import boundary fixes and expanded frontend/Rust coverage. The gate completed successfully: version check, TypeScript build, bundle clean check, 57 frontend test files / 224 tests, 8 `knownext-ai` Rust tests, 24 `knownext-storage` Rust tests and `cargo check`. | Passed |
 | TypeScript production build | `pnpm --filter @knownext/desktop build`, rerun 2026-06-05 after the auxiliary AI route ID-encoding fix and Markdown project-import boundary fix, then rerun after adding nested Markdown import API coverage | Passed |
 | Client bundle without backend legacy | `node scripts/check-client-bundle-clean.mjs`, rerun 2026-06-05 after the auxiliary AI route ID-encoding fix and nested Markdown import API coverage | Passed |
@@ -80,6 +81,7 @@ This matrix separates proven behavior from behavior that still needs a real inte
 | Tree visibility filters and name search | `DocumentTree.test.tsx`, `documentNameSearch.test.ts`; Markdown, image and attachment filters are covered and the active document is made visible when a filter would otherwise hide it | Covered |
 | Document tabs, dirty marker, overflow and drag reorder | `DocumentTabs.test.tsx` | Covered |
 | Markdown toolbar controls, responsive modal and MD/PDF/DOCX export actions | `MarkdownToolbar.test.tsx` | Covered |
+| Mermaid diagram insertion, metadata parsing, example catalog, profile policy validation and dialog UX | `mermaidDiagrams.test.ts`, `InsertDiagramDialog.test.tsx`, `MarkdownToolbar.test.tsx` | Covered |
 | Save status and quiet GitHub-paused footer | `DocumentStatusBar.test.tsx` | Covered |
 | Lateral history panel and version preview | `VersionHistoryPanel.test.tsx` | Covered |
 | External changes drawer and GitHub access-loss state | `ExternalChangesDrawer.test.tsx` | Covered |
@@ -87,6 +89,7 @@ This matrix separates proven behavior from behavior that still needs a real inte
 | PDF paginated preview with PDF.js render path, search and page/zoom controls | `ReferenceDocumentViewer.test.tsx` plus Rust PDF preview test | Covered |
 | XLSX reference preview with sheet switching/search | `ReferenceDocumentViewer.test.tsx` plus Rust XLSX preview test | Covered |
 | Import/export/version storage contracts | `knownext-storage` Rust tests | Covered |
+| PDF/DOCX export with rendered Mermaid diagram assets | `knownext-docs` Rust tests plus `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml` | Covered |
 | Markdown project-file import boundary | Active UI code no longer calls `file.text()` for imported Markdown; `App.tsx` routes imported `.md`/`.markdown` files through `importProjectAttachment`, receives the Rust-classified document node, and opens it from the returned project tree. `projects.test.ts` now also covers importing `imported.md` into nested `docs/guides` via `/attachments?parentId=docs%2Fguides`. `pnpm --filter @knownext/desktop build`, `projects.test.ts`, `DocumentTree.test.tsx` and the full frontend suite passed after the change. | Covered |
 | Local version creation commits document changes to Git so GitHub sync can push clean local history | `creating_project_version_commits_document_changes_to_local_git` in `knownext-storage` | Covered |
 | Image asset import, reindex, usage and reference rewrites on move | `knownext-storage` Rust tests | Covered |
@@ -100,7 +103,7 @@ This matrix separates proven behavior from behavior that still needs a real inte
 | Auxiliary AI prompt and context-source routes encode document-backed IDs | `ai.test.ts` covers document prompt, context source removal, extension, preview and add-to-project routes with IDs like `project::docs/Plan.md`; `ai_context_and_prompt_contracts_are_local_runtime_backed` in `knownext-storage` now also exercises a nested document through encoded local API path segments | Covered |
 | AI image generation local asset contract | `knownext-ai` Rust tests cover structured `generate_image` operations, placement metadata, document-surface routing and official `gpt-image-2` defaults/sizes; `knownext-storage` applies generated-image operations by creating local assets, inserting optional Markdown references at model-chosen cursor/selection/heading/paragraph/end placements, and updating project tree state; frontend materialization resolves generated image references through local `knownext-asset://` URLs and the Tauri runtime serves those URLs from the local project asset content endpoint; `AppSettingsDialog.test.tsx` and `config.test.ts` cover configurable image generation settings and supported defaults | Covered |
 | AI local RAG index contract | `knownext-storage` Rust tests cover RAG status, rebuild, local `local-rag:<project>` index persistence, document/chunk counts and delete; runtime interactions automatically add relevant indexed chunks alongside explicit prompt context. `AppSettingsDialog.test.tsx` covers rebuild/delete settings actions | Covered |
-| AI structured document edit proposal contract and permission block | `knownext-ai` Rust tests cover answer-only responses, validated explicit document replacement, reviewable selection/cursor/image/project edit proposals, project image insertion patches, disabled edit permission, missing active document, unsupported structured actions and quick/reasoning request shaping. `aiEditProposalApplication.test.ts` covers deterministic frontend application and review blocking for missing, ambiguous or stale anchors. | Covered |
+| AI structured document edit proposal contract and permission block | `knownext-ai` Rust tests cover answer-only responses, validated explicit document replacement, reviewable selection/cursor/image/diagram/project edit proposals, project image insertion patches, disabled edit permission, missing active document, unsupported structured actions and quick/reasoning request shaping. `aiEditProposalApplication.test.ts` covers deterministic frontend application and review blocking for missing, ambiguous or stale anchors. | Covered |
 | AI selected-node delete confirmation | `AiDeleteConfirmationDialog.test.tsx` | Covered |
 | Transcription UI target/language selection and menu activation | `AiPromptInput.test.tsx` covers click and pointer activation of `Opciones de transcripción`, target switching between prompt/document and language selection | Covered |
 | Transcription capture lifecycle and Rust transcription request | `useRealtimeTranscription.test.tsx` | Covered |
@@ -108,7 +111,7 @@ This matrix separates proven behavior from behavior that still needs a real inte
 | Runtime service status without external backend | `services.test.ts`, `client.test.ts`, `AppSettingsDialog.test.tsx` | Covered |
 | Runtime helpers and binary/form-data transport | `logging.test.ts`, `folders.test.ts`, `links.test.ts`, `client.test.ts` | Covered |
 | Auxiliary runtime logging and folder-opening API routes | `runtime_logging_and_folder_contracts_are_local_runtime_backed` in `knownext-storage`; `GET/POST /api/runtime/logging` and `POST /api/runtime/open-folder` are backed by local Rust contracts instead of returning unimplemented local API responses | Covered |
-| App settings: AI, transcription default target/language/favorites, permission presets, local guided agentic limits, appearance, export, runtime diagnostics and trace log folder actions | `AppSettingsDialog.test.tsx`, `config.test.ts` | Covered |
+| App settings: AI, diagram visual profiles, transcription default target/language/favorites, permission presets, local guided agentic limits, appearance, export, runtime diagnostics and trace log folder actions | `AppSettingsDialog.test.tsx`, `config.test.ts` | Covered |
 | Release notes startup tab state | `releaseNotesState.test.ts` | Covered |
 | Release notes readonly viewer and empty-state fallback | `ReleaseNotesViewer.test.tsx`, `ReadonlyMarkdownViewer.test.tsx` | Covered |
 | Appearance theme/accent document attributes | `appearance.test.ts`, `AppSettingsDialog.test.tsx` | Covered |

@@ -34,7 +34,7 @@ export function applyAiEditOperationToMarkdown(
     return replaceUniqueExcerpt(currentMarkdown, operation.originalExcerpt, replacement);
   }
 
-  if (operation.action === "insert_at_cursor") {
+  if (operation.action === "insert_at_cursor" || operation.action === "insert_diagram") {
     const insertion = operation.markdown ?? operation.replacementMarkdown;
     if (!insertion) return { applied: false, reason: "missing_replacement" };
     return insertByPlacement(
