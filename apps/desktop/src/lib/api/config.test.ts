@@ -122,6 +122,13 @@ describe("app configuration contracts", () => {
           maxSteps: 99,
           maxEstimatedCostEur: 0,
         },
+        diagrams: {
+          ...defaultAiConfig.diagrams,
+          visualProfile: "compatible",
+          iconSet: "lucide",
+          imagePolicy: "external_confirm",
+          aiGenerationMode: "visual",
+        },
       }),
     });
 
@@ -150,6 +157,10 @@ describe("app configuration contracts", () => {
     expect(preferences.ai?.agentic.webResearchEnabled).toBe(false);
     expect(preferences.ai?.agentic.maxSteps).toBe(12);
     expect(preferences.ai?.agentic.maxEstimatedCostEur).toBe(0.1);
+    expect(preferences.ai?.diagrams.visualProfile).toBe("compatible");
+    expect(preferences.ai?.diagrams.iconSet).toBe("none");
+    expect(preferences.ai?.diagrams.imagePolicy).toBe("disabled");
+    expect(preferences.ai?.diagrams.aiGenerationMode).toBe("safe");
   });
 
   it("normalizes AI config status returned by the Rust runtime", async () => {
@@ -166,6 +177,12 @@ describe("app configuration contracts", () => {
           ...defaultAiConfig.rag,
           status: "ready" as never,
         },
+        diagrams: {
+          ...defaultAiConfig.diagrams,
+          visualProfile: "advanced",
+          betaPolicy: "enabled",
+          imagePolicy: "external_confirm",
+        },
       }),
       openaiKeyConfigured: 1,
       openaiKeyPreview: "sk-...abcd",
@@ -178,6 +195,9 @@ describe("app configuration contracts", () => {
     expect(ai.imageGeneration.size).toBe("3840x2160");
     expect(ai.imageGeneration.customFolderPath).toBe(defaultAiConfig.imageGeneration.customFolderPath);
     expect(ai.rag.status).toBe("updated");
+    expect(ai.diagrams.visualProfile).toBe("advanced");
+    expect(ai.diagrams.betaPolicy).toBe("enabled");
+    expect(ai.diagrams.imagePolicy).toBe("external_confirm");
     expect(ai.openaiKeyConfigured).toBe(true);
     expect(ai.openaiKeyPreview).toBe("sk-...abcd");
   });
@@ -308,6 +328,7 @@ function minimalLegacyAiConfig(overrides: Partial<AiConfig> = {}): AiConfig {
     imageGeneration: { ...defaultAiConfig.imageGeneration, ...overrides.imageGeneration },
     agentic: { ...defaultAiConfig.agentic, ...overrides.agentic },
     transcription: { ...defaultAiConfig.transcription, ...overrides.transcription },
+    diagrams: { ...defaultAiConfig.diagrams, ...overrides.diagrams },
     provider: overrides.provider ?? defaultAiConfig.provider,
     model: overrides.model ?? defaultAiConfig.model,
   };

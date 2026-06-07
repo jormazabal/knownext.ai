@@ -353,6 +353,17 @@ export type ExportDocumentPayload = {
   format: ExportFormat;
   outputPath: string;
   markdown?: string | null;
+  diagramAssets?: ExportDiagramAsset[];
+};
+
+export type ExportDiagramAsset = {
+  id: string;
+  codeHash: string;
+  code: string;
+  caption?: string | null;
+  width?: "compact" | "auto" | "wide" | "full" | null;
+  svg?: string | null;
+  pngDataUrl?: string | null;
 };
 
 export type ExportDocumentResponse = {
@@ -433,6 +444,23 @@ export type AiTranscriptionConfig = {
   favoriteLanguages: AiTranscriptionLanguage[];
 };
 
+export type DiagramVisualProfile = "compatible" | "visual_local" | "advanced";
+export type DiagramIconSet = "none" | "lucide";
+export type DiagramImagePolicy = "disabled" | "project_assets" | "external_confirm";
+export type DiagramBetaPolicy = "disabled" | "ask" | "enabled";
+export type DiagramAiGenerationMode = "safe" | "visual";
+export type DiagramDefaultWidth = "compact" | "auto" | "wide" | "full";
+
+export type AiDiagramConfig = {
+  enabled: boolean;
+  visualProfile: DiagramVisualProfile;
+  iconSet: DiagramIconSet;
+  imagePolicy: DiagramImagePolicy;
+  betaPolicy: DiagramBetaPolicy;
+  defaultWidth: DiagramDefaultWidth;
+  aiGenerationMode: DiagramAiGenerationMode;
+};
+
 export type AiConfig = {
   provider: "openai";
   model: AiModelId;
@@ -442,6 +470,7 @@ export type AiConfig = {
   imageGeneration: AiImageGenerationConfig;
   agentic: AiAgenticConfig;
   transcription: AiTranscriptionConfig;
+  diagrams: AiDiagramConfig;
 };
 
 export type AiConfigStatus = AiConfig & {
@@ -728,6 +757,7 @@ export type AiEditOperationAction =
   | "edit_document"
   | "edit_project"
   | "insert_image"
+  | "insert_diagram"
   | "replace_document";
 export type AiEditOperationPlacementType =
   | "at_cursor"
@@ -791,6 +821,7 @@ export type AiInteractionRequest = {
 export type AiClientContext = {
   lastDocumentId?: string | null;
   lastDocumentPath?: string | null;
+  diagramConfig?: AiDiagramConfig | null;
 };
 
 export type AiIntentActionRequest = {
@@ -977,6 +1008,10 @@ export type AiEditOperation = {
   anchorExcerpt?: string | null;
   imageAssetId?: string | null;
   imageAltText?: string | null;
+  diagramSyntax?: "mermaid" | null;
+  diagramType?: string | null;
+  diagramCode?: string | null;
+  diagramCaption?: string | null;
   placement?: AiEditOperationPlacement | null;
 };
 

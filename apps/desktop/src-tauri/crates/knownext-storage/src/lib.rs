@@ -483,7 +483,9 @@ impl LocalApi {
                     .and_then(Value::as_str)
                     .unwrap_or_else(|| document["markdown"].as_str().unwrap_or(""));
                 let name = document["name"].as_str().unwrap_or("document.md");
-                let (content_type, filename, bytes) = export_bytes(name, markdown, format);
+                let diagram_assets = knownext_docs::diagram_assets_from_json(body.get("diagramAssets"));
+                let (content_type, filename, bytes) =
+                    export_bytes(name, markdown, format, &diagram_assets);
                 Ok(binary(200, content_type, Some(filename), bytes))
             }
             ["api", "projects", project_id, "assets", asset_id, "content"] => {
@@ -1343,17 +1345,19 @@ impl LocalApi {
             .get("markdown")
             .and_then(Value::as_str)
             .unwrap_or_else(|| document["markdown"].as_str().unwrap_or(""));
+        let diagram_assets = knownext_docs::diagram_assets_from_json(payload.get("diagramAssets"));
         match format {
             "md" => std::fs::write(output, markdown).map_err(|error| error.to_string())?,
             "pdf" => std::fs::write(
                 output,
-                knownext_docs::minimal_pdf(
+                knownext_docs::minimal_pdf_with_diagrams(
                     document["name"].as_str().unwrap_or("documento"),
                     markdown,
+                    &diagram_assets,
                 ),
             )
             .map_err(|error| error.to_string())?,
-            "docx" => knownext_docs::write_docx(Path::new(output), markdown)?,
+            "docx" => knownext_docs::write_docx_with_diagrams(Path::new(output), markdown, &diagram_assets)?,
             _ => return Err("Formato no soportado".to_string()),
         }
         Ok(
@@ -4412,7 +4416,12 @@ fn public_version(version: &Value) -> Value {
     json!({ "id": version["id"], "hash": version["hash"], "title": version["title"], "author": version["author"], "authorInitials": version["authorInitials"], "createdAt": version["createdAt"], "relativeTime": version["relativeTime"], "current": version["current"] })
 }
 
-fn export_bytes(name: &str, markdown: &str, format: &str) -> (String, String, Vec<u8>) {
+fn export_bytes(
+    name: &str,
+    markdown: &str,
+    format: &str,
+    diagram_assets: &[knownext_docs::DiagramAsset],
+) -> (String, String, Vec<u8>) {
     match format {
         "md" => (
             "text/markdown;charset=utf-8".to_string(),
@@ -4425,7 +4434,7 @@ fn export_bytes(name: &str, markdown: &str, format: &str) -> (String, String, Ve
                 "{}.docx",
                 knownext_core::compact_id("knownext-export")
             ));
-            let _ = knownext_docs::write_docx(&path, markdown);
+            let _ = knownext_docs::write_docx_with_diagrams(&path, markdown, diagram_assets);
             let bytes = std::fs::read(&path).unwrap_or_default();
             let _ = std::fs::remove_file(path);
             (
@@ -4438,7 +4447,7 @@ fn export_bytes(name: &str, markdown: &str, format: &str) -> (String, String, Ve
         _ => (
             "application/pdf".to_string(),
             export_name(name, "pdf"),
-            knownext_docs::minimal_pdf(name, markdown),
+            knownext_docs::minimal_pdf_with_diagrams(name, markdown, diagram_assets),
         ),
     }
 }
@@ -5637,6 +5646,7 @@ fn normalize_ai_config(ai: &mut Value) {
     }
     ai["provider"] = Value::from("openai");
     normalize_ai_image_generation_config(&mut ai["imageGeneration"]);
+    normalize_ai_diagram_config(&mut ai["diagrams"]);
     ai["rag"]["status"] = Value::from(
         match ai["rag"]["status"].as_str().unwrap_or("not-indexed") {
             "ready" | "updated" => "updated",
@@ -5646,6 +5656,54 @@ fn normalize_ai_config(ai: &mut Value) {
         },
     );
     ai["agentic"]["webResearchEnabled"] = Value::Bool(false);
+}
+
+fn normalize_ai_diagram_config(diagrams: &mut Value) {
+    if !diagrams.is_object() {
+        *diagrams = default_ai_config()["diagrams"].clone();
+    }
+
+    diagrams["enabled"] = Value::Bool(diagrams["enabled"].as_bool().unwrap_or(true));
+    let visual_profile = match diagrams["visualProfile"].as_str().unwrap_or("visual_local") {
+        "compatible" => "compatible",
+        "advanced" => "advanced",
+        _ => "visual_local",
+    };
+    diagrams["visualProfile"] = Value::from(visual_profile);
+
+    let icon_set = match diagrams["iconSet"].as_str().unwrap_or("lucide") {
+        "none" => "none",
+        "lucide" if visual_profile != "compatible" => "lucide",
+        _ if visual_profile == "compatible" => "none",
+        _ => "lucide",
+    };
+    diagrams["iconSet"] = Value::from(icon_set);
+
+    let image_policy = match diagrams["imagePolicy"].as_str().unwrap_or("project_assets") {
+        "disabled" => "disabled",
+        "external_confirm" if visual_profile == "advanced" => "external_confirm",
+        "project_assets" if visual_profile != "compatible" => "project_assets",
+        _ if visual_profile == "compatible" => "disabled",
+        _ => "project_assets",
+    };
+    diagrams["imagePolicy"] = Value::from(image_policy);
+
+    diagrams["betaPolicy"] = Value::from(match diagrams["betaPolicy"].as_str().unwrap_or("ask") {
+        "disabled" => "disabled",
+        "enabled" if visual_profile == "advanced" => "enabled",
+        _ => "ask",
+    });
+    diagrams["defaultWidth"] = Value::from(match diagrams["defaultWidth"].as_str().unwrap_or("wide") {
+        "compact" => "compact",
+        "auto" => "auto",
+        "full" => "full",
+        _ => "wide",
+    });
+    diagrams["aiGenerationMode"] = Value::from(match diagrams["aiGenerationMode"].as_str().unwrap_or("visual") {
+        "safe" => "safe",
+        "visual" if visual_profile != "compatible" => "visual",
+        _ => "safe",
+    });
 }
 
 fn normalize_ai_image_generation_config(image_generation: &mut Value) {
@@ -5712,7 +5770,8 @@ fn default_ai_config() -> Value {
         "vision": { "enabled": true, "model": "gpt-5.4-mini", "imageIndexingEnabled": false, "maxImagesPerPrompt": 4, "maxImageSizeMb": 12, "detail": "auto", "storeVisualDescriptions": true },
         "imageGeneration": { "enabled": true, "model": "gpt-image-2", "size": "auto", "quality": "auto", "outputFormat": "png", "defaultFolder": "document_folder", "customFolderPath": "assets/generated", "maxImagesPerPrompt": 1, "confirmBeforeDocumentInsert": false, "confirmBeforeUsingMultipleSources": true, "storePromptMetadata": true },
         "agentic": { "depth": "guided", "webResearchEnabled": false, "confirmBeforeApplying": true, "maxSteps": 4, "maxDocuments": 6, "maxEstimatedCostEur": 1, "maxSources": 6 },
-        "transcription": { "enabled": true, "model": "gpt-4o-mini-transcribe", "defaultTarget": "prompt", "defaultLanguage": "auto", "favoriteLanguages": ["es", "en"] }
+        "transcription": { "enabled": true, "model": "gpt-4o-mini-transcribe", "defaultTarget": "prompt", "defaultLanguage": "auto", "favoriteLanguages": ["es", "en"] },
+        "diagrams": { "enabled": true, "visualProfile": "visual_local", "iconSet": "lucide", "imagePolicy": "project_assets", "betaPolicy": "ask", "defaultWidth": "wide", "aiGenerationMode": "visual" }
     })
 }
 
@@ -6991,6 +7050,7 @@ mod tests {
                     "ai": {
                         "rag": { "enabled": true, "vectorStoreId": "vs_legacy", "status": "ready" },
                         "imageGeneration": { "enabled": true, "model": "gpt-image-2", "size": "3840x2160" },
+                        "diagrams": { "visualProfile": "compatible", "iconSet": "lucide", "imagePolicy": "external_confirm", "aiGenerationMode": "visual" },
                         "agentic": { "webResearchEnabled": true },
                         "permissions": {
                             "generateImages": true,
@@ -7016,6 +7076,10 @@ mod tests {
             "gpt-image-2"
         );
         assert_eq!(config.body["ai"]["imageGeneration"]["size"], "3840x2160");
+        assert_eq!(config.body["ai"]["diagrams"]["visualProfile"], "compatible");
+        assert_eq!(config.body["ai"]["diagrams"]["iconSet"], "none");
+        assert_eq!(config.body["ai"]["diagrams"]["imagePolicy"], "disabled");
+        assert_eq!(config.body["ai"]["diagrams"]["aiGenerationMode"], "safe");
         assert_eq!(config.body["ai"]["agentic"]["webResearchEnabled"], false);
         assert_eq!(config.body["ai"]["permissions"]["generateImages"], true);
 
@@ -7028,6 +7092,7 @@ mod tests {
                     "model": "gpt-5.4-mini",
                     "rag": { "enabled": true, "vectorStoreId": "vs_legacy", "status": "ready" },
                     "imageGeneration": { "enabled": true, "model": "gpt-image-1.5", "size": "3840x2160" },
+                    "diagrams": { "visualProfile": "advanced", "iconSet": "lucide", "imagePolicy": "external_confirm", "betaPolicy": "enabled" },
                     "agentic": { "webResearchEnabled": true },
                     "permissions": { "generateImages": true }
                 }),
@@ -7039,6 +7104,9 @@ mod tests {
         assert_eq!(ai_status.body["imageGeneration"]["enabled"], true);
         assert_eq!(ai_status.body["imageGeneration"]["model"], "gpt-image-1.5");
         assert_eq!(ai_status.body["imageGeneration"]["size"], "auto");
+        assert_eq!(ai_status.body["diagrams"]["visualProfile"], "advanced");
+        assert_eq!(ai_status.body["diagrams"]["imagePolicy"], "external_confirm");
+        assert_eq!(ai_status.body["diagrams"]["betaPolicy"], "enabled");
         assert_eq!(ai_status.body["agentic"]["webResearchEnabled"], false);
 
         api.write_json(
@@ -7064,6 +7132,8 @@ mod tests {
         assert_eq!(migrated.body["ai"]["permissions"]["editDocuments"], true);
         assert_eq!(migrated.body["ai"]["vision"]["enabled"], true);
         assert_eq!(migrated.body["ai"]["transcription"]["enabled"], true);
+        assert_eq!(migrated.body["ai"]["diagrams"]["enabled"], true);
+        assert_eq!(migrated.body["ai"]["diagrams"]["visualProfile"], "visual_local");
         assert_eq!(migrated.body["ai"]["rag"]["enabled"], true);
         assert_eq!(migrated.body["ai"]["rag"]["vectorStoreId"], "vs_legacy");
         assert_eq!(migrated.body["ai"]["imageGeneration"]["enabled"], true);

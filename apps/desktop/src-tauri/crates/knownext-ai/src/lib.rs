@@ -452,8 +452,9 @@ fn build_response_request(
         normalize_reasoning_depth(payload.get("reasoningDepth").and_then(Value::as_str))
     };
     let reasoning_guidance = reasoning_instruction(execution_mode, reasoning_depth);
+    let diagram_guidance = diagram_instruction(payload);
     let system = format!(
-        "{} {}",
+        "{} {} {}",
         concat!(
         "Eres el asistente documental de KnowNext.ai. Responde en español salvo que el usuario pida otro idioma. ",
         "Usa el documento activo y las fuentes aportadas como contexto. ",
@@ -462,6 +463,7 @@ fn build_response_request(
         "{\"action\":\"replace_selection\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"replacementMarkdown\":\"markdown que sustituye solo la seleccion\"} para reemplazar texto seleccionado. ",
         "{\"action\":\"insert_at_cursor\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"markdown\":\"markdown a insertar en el cursor\"} para insertar contenido en el cursor activo. ",
         "{\"action\":\"insert_image\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"assetId\":\"id del asset\",\"altText\":\"texto alternativo\",\"placement\":{\"type\":\"at_cursor\"}} para insertar una imagen existente del proyecto. ",
+        "{\"action\":\"insert_diagram\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"diagramCode\":\"codigo Mermaid sin fences\",\"diagramCaption\":\"pie opcional\",\"placement\":{\"type\":\"after_heading\",\"headingPath\":[\"titulo\"],\"anchorExcerpt\":null}} para insertar un diagrama Mermaid editable en el documento. ",
         "{\"action\":\"edit_document\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"patches\":[...]} para cambios en varios apartados sin devolver el documento completo. ",
         "{\"action\":\"replace_document\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"markdown\":\"documento markdown completo\"} solo para reescrituras completas explicitas. ",
         "{\"action\":\"create_document\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"name\":\"nombre.md\",\"markdown\":\"documento markdown completo\"} para crear un documento Markdown nuevo cuando el usuario lo pida. ",
@@ -469,6 +471,8 @@ fn build_response_request(
         "No afirmes que has modificado archivos: devuelve una accion estructurada y el runtime la convertira en una propuesta revisable o una operacion validada segun permisos. ",
         "No afirmes que has creado archivos: propone el cambio con action create_document y el runtime lo validara contra permisos. ",
         "No afirmes que has generado imagenes: propone action generate_image y el runtime la creara, guardara e insertara si los permisos lo permiten. ",
+        "KnowNext puede crear contenido con parrafos, listas, tablas Markdown, imagenes y diagramas Mermaid. Elige tablas para comparativas de datos, imagenes para contenido visual ilustrativo y diagramas Mermaid para procesos, arquitecturas, secuencias, estados, dependencias, journeys, organigramas, mapas conceptuales, datos ligeros y vistas tecnicas. ",
+        "Cuando un diagrama ayude a explicar el contenido, usa action insert_diagram o incluye bloques ```mermaid en markdown de create_document/replace_document/insert_at_cursor. En action insert_diagram, diagramCode debe contener Mermaid valido sin fences y sin explicaciones externas. ",
         "Si el usuario pide incluir, anadir, insertar o apoyar el texto con una imagen y hay documento activo, no preguntes ubicacion ni respondas con action answer: usa action generate_image, insertIntoDocument true, altText descriptivo, placement elegido por ti y un prompt visual basado en el texto seleccionado, el cursor o el apartado activo. ",
         "El texto seleccionado puede ser solo contexto: no asumas que la imagen debe ir justo despues de la seleccion. Decide proactivamente donde encaja mejor la imagen. Usa placement con at_cursor, after_selection, after_heading, after_paragraph o document_end segun el documento y la peticion. ",
         "No uses action replace_document si no hay documento activo o si la peticion no requiere modificar contenido. ",
@@ -477,6 +481,7 @@ fn build_response_request(
         "Para cambios sobre un concepto en varios apartados, usa edit_document con parches pequenos."
         ),
         reasoning_guidance,
+        diagram_guidance,
     );
     let user_content = format!(
         "Petición del usuario:\n{prompt}\n\nModo de ejecución:\n{} ({})\n\nPermisos runtime:\n{}\n\nDocumento activo Markdown:\n{active_markdown}\n\nSelección activa:\n{}\n\nFuentes de contexto:\n{}",
@@ -497,6 +502,65 @@ fn build_response_request(
     })
 }
 
+fn diagram_instruction(payload: &Value) -> String {
+    let config = payload
+        .pointer("/clientContext/diagramConfig")
+        .filter(|value| value.is_object());
+    let enabled = config
+        .and_then(|value| value.get("enabled"))
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    if !enabled {
+        return "La capacidad de diagramas esta desactivada: no propongas action insert_diagram ni bloques mermaid.".to_string();
+    }
+
+    let profile = config
+        .and_then(|value| value.get("visualProfile"))
+        .and_then(Value::as_str)
+        .unwrap_or("visual_local");
+    let icon_set = config
+        .and_then(|value| value.get("iconSet"))
+        .and_then(Value::as_str)
+        .unwrap_or("lucide");
+    let image_policy = config
+        .and_then(|value| value.get("imagePolicy"))
+        .and_then(Value::as_str)
+        .unwrap_or("project_assets");
+    let beta_policy = config
+        .and_then(|value| value.get("betaPolicy"))
+        .and_then(Value::as_str)
+        .unwrap_or("ask");
+    let ai_mode = config
+        .and_then(|value| value.get("aiGenerationMode"))
+        .and_then(Value::as_str)
+        .unwrap_or("visual");
+
+    let base = "Tipos Mermaid recomendados por uso: flowchart para procesos y dependencias; sequenceDiagram para interacciones; stateDiagram-v2 para ciclos de vida; classDiagram y erDiagram para modelos; journey para experiencia de usuario; gantt y timeline para planificacion e hitos; mindmap para estructura conceptual; quadrantChart para priorizacion; requirementDiagram para trazabilidad; pie y xychart-beta para datos ligeros; C4Context o architecture-beta para arquitectura cuando el perfil lo permita. ";
+    let visual = if profile == "compatible" || ai_mode == "safe" {
+        "Usa sintaxis Mermaid estable y simple. No uses iconos, imagenes, HTML labels, enlaces externos ni tipos beta. "
+    } else if profile == "advanced" {
+        "Puedes usar Mermaid visual enriquecido y tipos beta si aportan claridad, pero prioriza sintaxis validable y evita efectos decorativos. "
+    } else {
+        "Puedes usar Mermaid visual enriquecido con sintaxis estable; reserva tipos beta para casos donde aporten mucho valor. "
+    };
+    let icons = if icon_set == "lucide" && profile != "compatible" {
+        "Si usas iconos, usa solo IDs locales lucide existentes como lucide:user, lucide:monitor, lucide:file-text, lucide:database, lucide:cloud, lucide:cpu, lucide:shield-check o lucide:sparkles; no inventes packs ni IDs. "
+    } else {
+        "No uses iconos dentro de diagramas. "
+    };
+    let images = match image_policy {
+        "external_confirm" if profile == "advanced" => "Evita imagenes externas salvo que el usuario las pida expresamente; no uses CDN para iconos. ",
+        "project_assets" if profile != "compatible" => "No uses URLs externas en diagramas; si necesitas imagenes, referencia solo assets locales del proyecto cuando existan claramente en el contexto. ",
+        _ => "No uses imagenes dentro de diagramas. ",
+    };
+    let beta = match beta_policy {
+        "enabled" if profile == "advanced" => "Puedes usar tipos beta de Mermaid cuando sean la mejor representacion. ",
+        "ask" if profile != "compatible" => "Evita tipos beta si hay una alternativa estable; si los usas, mantenlos pequenos y facilmente editables. ",
+        _ => "No uses tipos beta de Mermaid. ",
+    };
+    format!("Guia de diagramas activa. {base}{visual}{icons}{images}{beta}")
+}
+
 fn structured_output_format() -> Value {
     let nullable_string = || json!({ "anyOf": [{ "type": "string" }, { "type": "null" }] });
     let nullable_number = || json!({ "anyOf": [{ "type": "integer" }, { "type": "null" }] });
@@ -514,10 +578,10 @@ fn structured_output_format() -> Value {
     let patch_schema = json!({
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "action", "documentId", "summary", "confidence", "from", "to", "position", "markdown", "replacementMarkdown", "headingPath", "originalExcerpt", "anchorExcerpt", "imageAssetId", "imageAltText", "placement"],
+        "required": ["id", "action", "documentId", "summary", "confidence", "from", "to", "position", "markdown", "replacementMarkdown", "headingPath", "originalExcerpt", "anchorExcerpt", "imageAssetId", "imageAltText", "diagramSyntax", "diagramType", "diagramCode", "diagramCaption", "placement"],
         "properties": {
             "id": nullable_string(),
-            "action": { "enum": ["replace_selection", "insert_at_cursor", "edit_block", "edit_document", "edit_project", "insert_image", "replace_document"] },
+            "action": { "enum": ["replace_selection", "insert_at_cursor", "edit_block", "edit_document", "edit_project", "insert_image", "insert_diagram", "replace_document"] },
             "documentId": nullable_string(),
             "summary": nullable_string(),
             "confidence": { "enum": ["high", "medium", "low"] },
@@ -531,6 +595,10 @@ fn structured_output_format() -> Value {
             "anchorExcerpt": nullable_string(),
             "imageAssetId": nullable_string(),
             "imageAltText": nullable_string(),
+            "diagramSyntax": nullable_string(),
+            "diagramType": nullable_string(),
+            "diagramCode": nullable_string(),
+            "diagramCaption": nullable_string(),
             "placement": { "anyOf": [placement_schema.clone(), { "type": "null" }] }
         }
     });
@@ -541,9 +609,9 @@ fn structured_output_format() -> Value {
         "schema": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["action", "answer", "summary", "markdown", "replacementMarkdown", "name", "prompt", "assetId", "altText", "insertIntoDocument", "placement", "patches"],
+            "required": ["action", "answer", "summary", "markdown", "replacementMarkdown", "name", "prompt", "assetId", "altText", "insertIntoDocument", "diagramSyntax", "diagramType", "diagramCode", "diagramCaption", "placement", "patches"],
             "properties": {
-                "action": { "enum": ["answer", "replace_selection", "insert_at_cursor", "edit_document", "edit_project", "replace_document", "create_document", "generate_image", "insert_image"] },
+                "action": { "enum": ["answer", "replace_selection", "insert_at_cursor", "edit_document", "edit_project", "replace_document", "create_document", "generate_image", "insert_image", "insert_diagram"] },
                 "answer": nullable_string(),
                 "summary": nullable_string(),
                 "markdown": nullable_string(),
@@ -553,6 +621,10 @@ fn structured_output_format() -> Value {
                 "assetId": nullable_string(),
                 "altText": nullable_string(),
                 "insertIntoDocument": { "anyOf": [{ "type": "boolean" }, { "type": "null" }] },
+                "diagramSyntax": nullable_string(),
+                "diagramType": nullable_string(),
+                "diagramCode": nullable_string(),
+                "diagramCaption": nullable_string(),
                 "placement": { "anyOf": [placement_schema.clone(), { "type": "null" }] },
                 "patches": { "anyOf": [{ "type": "array", "items": patch_schema }, { "type": "null" }] }
             }
@@ -773,7 +845,7 @@ fn structured_interaction_response(
         ));
     }
 
-    if action == "replace_selection" || action == "insert_at_cursor" || action == "insert_image" || action == "edit_document" || action == "edit_project" {
+    if action == "replace_selection" || action == "insert_at_cursor" || action == "insert_image" || action == "insert_diagram" || action == "edit_document" || action == "edit_project" {
         return Some(edit_proposal_response(
             project_id,
             payload,
@@ -880,6 +952,10 @@ fn structured_interaction_response(
             "anchorExcerpt": null,
             "imageAssetId": null,
             "imageAltText": null,
+            "diagramSyntax": null,
+            "diagramType": null,
+            "diagramCode": null,
+            "diagramCaption": null,
             "placement": null
         });
         return Some(edit_proposal_response_from_operations(
@@ -1169,6 +1245,62 @@ fn edit_proposal_response(
                 "placement": decision.get("placement").cloned().unwrap_or_else(|| json!({ "type": "at_cursor", "headingPath": null, "anchorExcerpt": null }))
             })]
         }
+        "insert_diagram" => {
+            let Some(diagram_code) = decision
+                .get("diagramCode")
+                .or_else(|| decision.get("code"))
+                .or_else(|| decision.get("markdown"))
+                .and_then(Value::as_str)
+                .map(strip_mermaid_fence)
+                .filter(|value| !value.trim().is_empty())
+            else {
+                return permission_blocked_response(
+                    project_id,
+                    active_document_id,
+                    interaction_id,
+                    event_id,
+                    created_at,
+                    "La IA propuso insertar un diagrama, pero no devolvió código Mermaid validable.",
+                    execution_mode,
+                    reasoning_depth,
+                    mode,
+                );
+            };
+            let focus = payload.get("selectionFocus").filter(|value| !value.is_null());
+            let position = focus
+                .and_then(|value| value.get("position").or_else(|| value.get("from")))
+                .and_then(Value::as_i64);
+            let from = focus.and_then(|value| value.get("from")).and_then(Value::as_i64);
+            let to = focus.and_then(|value| value.get("to")).and_then(Value::as_i64);
+            let caption = decision
+                .get("diagramCaption")
+                .or_else(|| decision.get("caption"))
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty());
+            let markdown = mermaid_markdown(&diagram_code, caption);
+            vec![json!({
+                "id": knownext_core::compact_id("ai-op"),
+                "action": "insert_diagram",
+                "documentId": document_id,
+                "summary": summary,
+                "confidence": "medium",
+                "from": from,
+                "to": to,
+                "position": position,
+                "markdown": markdown,
+                "replacementMarkdown": null,
+                "headingPath": focus.and_then(|value| value.get("headingPath")).cloned().unwrap_or(Value::Null),
+                "originalExcerpt": focus.and_then(|value| value.get("text")).cloned().unwrap_or(Value::Null),
+                "anchorExcerpt": focus.and_then(|value| value.get("nearTextBefore")).cloned().unwrap_or(Value::Null),
+                "imageAssetId": null,
+                "imageAltText": null,
+                "diagramSyntax": "mermaid",
+                "diagramType": decision.get("diagramType").cloned().unwrap_or(Value::Null),
+                "diagramCode": diagram_code,
+                "diagramCaption": caption.map(Value::from).unwrap_or(Value::Null),
+                "placement": decision.get("placement").cloned().unwrap_or_else(|| json!({ "type": "at_cursor", "headingPath": null, "anchorExcerpt": null }))
+            })]
+        }
         "edit_document" | "edit_project" => normalize_ai_patches(decision, active_document_id, summary),
         _ => Vec::new(),
     };
@@ -1308,7 +1440,7 @@ fn normalize_ai_patches(decision: &Value, fallback_document_id: Option<&str>, fa
                 .unwrap_or_else(|| patch.get("operation").and_then(Value::as_str).unwrap_or("edit_block"));
             let action = match action {
                 "replace_selection" | "insert_at_cursor" | "edit_block" | "edit_document"
-                | "edit_project" | "insert_image" | "replace_document" => action,
+                | "edit_project" | "insert_image" | "insert_diagram" | "replace_document" => action,
                 _ => "edit_block",
             };
             let document_id = patch
@@ -1336,9 +1468,27 @@ fn normalize_ai_patches(decision: &Value, fallback_document_id: Option<&str>, fa
                 .or_else(|| patch.get("assetId"))
                 .and_then(Value::as_str)
                 .unwrap_or("");
+            let diagram_code = patch
+                .get("diagramCode")
+                .or_else(|| patch.get("code"))
+                .and_then(Value::as_str)
+                .map(strip_mermaid_fence)
+                .unwrap_or_default();
+            let markdown = if action == "insert_diagram" && markdown.trim().is_empty() && !diagram_code.trim().is_empty() {
+                mermaid_markdown(
+                    &diagram_code,
+                    patch.get("diagramCaption")
+                        .or_else(|| patch.get("caption"))
+                        .and_then(Value::as_str)
+                        .filter(|value| !value.trim().is_empty()),
+                )
+            } else {
+                markdown.to_string()
+            };
             if markdown.trim().is_empty()
                 && replacement.trim().is_empty()
                 && !(action == "insert_image" && !image_asset_id.trim().is_empty())
+                && !(action == "insert_diagram" && !diagram_code.trim().is_empty())
             {
                 return None;
             }
@@ -1358,10 +1508,59 @@ fn normalize_ai_patches(decision: &Value, fallback_document_id: Option<&str>, fa
                 "anchorExcerpt": patch.get("anchorExcerpt").cloned().unwrap_or(Value::Null),
                 "imageAssetId": if image_asset_id.trim().is_empty() { Value::Null } else { Value::from(image_asset_id) },
                 "imageAltText": patch.get("imageAltText").or_else(|| patch.get("altText")).cloned().unwrap_or(Value::Null),
+                "diagramSyntax": if action == "insert_diagram" { Value::from("mermaid") } else { Value::Null },
+                "diagramType": patch.get("diagramType").cloned().unwrap_or(Value::Null),
+                "diagramCode": if diagram_code.trim().is_empty() { Value::Null } else { Value::from(diagram_code) },
+                "diagramCaption": patch.get("diagramCaption").or_else(|| patch.get("caption")).cloned().unwrap_or(Value::Null),
                 "placement": patch.get("placement").cloned().unwrap_or(Value::Null)
             }))
         })
         .collect()
+}
+
+fn strip_mermaid_fence(value: &str) -> String {
+    let normalized = value.replace("\r\n", "\n").replace('\r', "\n");
+    let trimmed = normalized.trim();
+    if !trimmed.starts_with("```") {
+        return normalize_ai_mermaid_code(trimmed);
+    }
+
+    let mut lines = trimmed.lines();
+    let Some(first) = lines.next() else {
+        return String::new();
+    };
+    if !first.trim_start().starts_with("```") || !first.to_ascii_lowercase().contains("mermaid") {
+        return trimmed.to_string();
+    }
+
+    let mut body: Vec<&str> = lines.collect();
+    if body.last().map(|line| line.trim_start().starts_with("```")).unwrap_or(false) {
+        body.pop();
+    }
+    normalize_ai_mermaid_code(body.join("\n").trim())
+}
+
+fn mermaid_markdown(code: &str, caption: Option<&str>) -> String {
+    let clean_code = strip_mermaid_fence(code);
+    let metadata = caption
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|caption| json!({ "caption": caption, "width": "wide" }).to_string())
+        .map(|metadata| format!("%% knownext: {metadata}\n"))
+        .unwrap_or_default();
+    format!("```mermaid\n{}{}```\n", metadata, ensure_trailing_newline(clean_code.trim()))
+}
+
+fn normalize_ai_mermaid_code(value: &str) -> String {
+    value.replace("\\n", "<br/>").trim().to_string()
+}
+
+fn ensure_trailing_newline(value: &str) -> String {
+    if value.ends_with('\n') {
+        value.to_string()
+    } else {
+        format!("{value}\n")
+    }
 }
 
 fn document_focus_scope(payload: &Value) -> &str {
@@ -2378,6 +2577,44 @@ mod tests {
             response["editProposal"]["operations"][0]["placement"]["type"],
             "at_cursor"
         );
+    }
+
+    #[test]
+    fn structured_diagram_insert_returns_reviewable_mermaid_proposal() {
+        let response = structured_interaction_response(
+            "project",
+            &json!({
+                "runtimePermissions": { "editDocuments": true },
+                "selectionFocus": {
+                    "focusType": "cursor",
+                    "documentId": "project::doc.md",
+                    "from": 8,
+                    "to": 8,
+                    "position": 8,
+                    "text": "",
+                    "nearTextBefore": "## Arquitectura"
+                }
+            }),
+            Some("project::doc.md"),
+            "interaction",
+            "event",
+            "2026-06-04T00:00:00Z",
+            r##"{"action":"insert_diagram","answer":"He preparado el diagrama.","summary":"Diagrama insertado","diagramType":"flowchart","diagramCode":"flowchart TD\n  A[Entrada] --> B[Proceso]","diagramCaption":"Flujo de arquitectura","placement":{"type":"at_cursor","headingPath":null,"anchorExcerpt":null}}"##,
+            "quick",
+            "light",
+            "document",
+            &json!([]),
+        )
+        .unwrap();
+
+        let operation = &response["editProposal"]["operations"][0];
+        assert_eq!(response["status"], "completed");
+        assert_eq!(operation["action"], "insert_diagram");
+        assert_eq!(operation["diagramSyntax"], "mermaid");
+        assert_eq!(operation["diagramType"], "flowchart");
+        assert!(operation["markdown"].as_str().unwrap().contains("```mermaid"));
+        assert!(operation["markdown"].as_str().unwrap().contains("%% knownext:"));
+        assert!(operation["markdown"].as_str().unwrap().contains("flowchart TD"));
     }
 
     #[test]

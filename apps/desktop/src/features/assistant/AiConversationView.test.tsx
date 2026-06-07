@@ -179,6 +179,15 @@ const config: AiConfigStatus = {
     defaultLanguage: "auto",
     favoriteLanguages: ["es", "en"],
   },
+  diagrams: {
+    enabled: true,
+    visualProfile: "visual_local",
+    iconSet: "lucide",
+    imagePolicy: "project_assets",
+    betaPolicy: "ask",
+    defaultWidth: "wide",
+    aiGenerationMode: "visual",
+  },
   openaiKeyConfigured: true,
   openaiKeyPreview: "sk-...",
 };

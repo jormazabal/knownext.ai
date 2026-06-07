@@ -1,4 +1,5 @@
 import { Crepe } from "@milkdown/crepe";
+import { prosePluginsCtx } from "@milkdown/kit/core";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import type { CSSProperties } from "react";
 import {
@@ -7,6 +8,7 @@ import {
   toggleUnderlineCommand,
   underlineSchema,
 } from "./underlineExtension";
+import { createMermaidDiagramPlugin, createMermaidDiagramViewPlugin } from "./mermaidNodeView";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
 
@@ -49,7 +51,9 @@ function ReadonlyMilkdown({ markdown, zoomPercent }: Pick<ReadonlyMarkdownViewer
 
     crepe.editor.config((ctx) => {
       configureUnderlineMarkdownSerialization(ctx);
+      ctx.update(prosePluginsCtx, (plugins) => [createMermaidDiagramPlugin(), ...plugins]);
     });
+    crepe.editor.use(createMermaidDiagramViewPlugin());
     crepe.editor.use(remarkUnderlineHtmlPlugin).use(underlineSchema).use(toggleUnderlineCommand);
     crepe.setReadonly(true);
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import type { DocumentTreeAction } from "../features/documents/DocumentTree";
 import type { MarkdownEditorExternalOperation, MarkdownEditorSelection } from "../features/editor/editorTypes";
+import { prepareMermaidDiagramAssets } from "../features/editor/mermaidDiagrams";
 import type { AiPromptExecutionOptions } from "../features/assistant/AiPromptInput";
 import { AiDeleteConfirmationDialog } from "../features/assistant/AiDeleteConfirmationDialog";
 import { CreateDocumentDialog } from "../features/documents/CreateDocumentDialog";
@@ -1402,6 +1403,7 @@ export function App() {
         clientContext: {
           lastDocumentId: lastDocumentContextRef.current.id,
           lastDocumentPath: lastDocumentContextRef.current.path,
+          diagramConfig: aiConfig.diagrams,
         },
         executionMode: options?.executionMode ?? "quick",
         reasoningDepth: options?.reasoningDepth ?? "light",
@@ -1547,6 +1549,7 @@ export function App() {
         clientContext: {
           lastDocumentId: lastDocumentContextRef.current.id,
           lastDocumentPath: lastDocumentContextRef.current.path,
+          diagramConfig: aiConfig.diagrams,
         },
         intentAction: { type: action, intentId },
         mode: targetDocumentId ? "document" : "project",
@@ -2939,6 +2942,7 @@ export function App() {
       imageGeneration: nextAiConfig.imageGeneration,
       agentic: nextAiConfig.agentic,
       transcription: nextAiConfig.transcription,
+      diagrams: nextAiConfig.diagrams,
     })
       .then((savedAiConfig) => {
         if (aiConfigSaveSequence.current !== saveSequence) return;
@@ -3152,12 +3156,15 @@ export function App() {
     const documentName = session?.document?.name ?? findNodeById(tree, documentId)?.name ?? "documento.md";
 
     try {
+      const exportMarkdown = await resolveExportMarkdown(documentId, session);
+      const diagramAssets = format === "pdf" || format === "docx" ? await prepareMermaidDiagramAssets(exportMarkdown) : [];
       if (!isTauriRuntime()) {
         const exportTarget = await selectBrowserExportTarget(documentName, format);
         if (!exportTarget) return;
         const blob = await exportDocumentContent(documentId, {
           format,
-          markdown: session?.markdown ?? null,
+          markdown: exportMarkdown,
+          diagramAssets,
         });
         await exportTarget.save(blob);
         setNotice({
@@ -3174,7 +3181,8 @@ export function App() {
       const response = await exportDocument(documentId, {
         format,
         outputPath,
-        markdown: session?.markdown ?? null,
+        markdown: exportMarkdown,
+        diagramAssets,
       });
       setNotice({
         title: "Documento exportado",
@@ -3184,6 +3192,12 @@ export function App() {
     } catch (error) {
       showError(error, "No se pudo exportar el documento.", { source: "app.documentExport" });
     }
+  }
+
+  async function resolveExportMarkdown(documentId: string, session: DocumentSession | undefined) {
+    if (session?.markdown !== undefined) return session.markdown;
+    const record = await getDocument(documentId);
+    return record.markdown;
   }
 
   async function handleDeleteNode(node: DocumentTreeNode) {

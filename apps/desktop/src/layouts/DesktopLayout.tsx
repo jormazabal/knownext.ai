@@ -6,6 +6,7 @@ import { AiResponseBubble } from "../features/assistant/AiResponseBubble";
 import { DocumentStatusBar } from "../features/documents/DocumentStatusBar";
 import { DocumentTabs } from "../features/documents/DocumentTabs";
 import { DocumentTree, type DocumentTreeAction, type ProjectTreeStatus } from "../features/documents/DocumentTree";
+import { InsertDiagramDialog } from "../features/documents/InsertDiagramDialog";
 import { InsertImageDialog } from "../features/documents/InsertImageDialog";
 import { ExternalChangesDrawer } from "../features/externalChanges/ExternalChangesDrawer";
 import { ImageViewer } from "../features/documents/ImageViewer";
@@ -17,6 +18,7 @@ import {
   type MarkdownEditorAction,
   type MarkdownEditorActionOptions,
   type MarkdownEditorController,
+  type MarkdownEditorDiagramEditTarget,
   type MarkdownEditorExternalOperation,
   type MarkdownEditorFormatState,
   type MarkdownEditorHistoryState,
@@ -259,6 +261,10 @@ export function DesktopLayout(props: DesktopLayoutProps) {
       setImageInsertOpen(true);
       return;
     }
+    if (action === "diagram" && !options?.diagram) {
+      setDiagramInsertOpen(true);
+      return;
+    }
 
     activeEditorController.run(action, options);
     setEditorFormatState((currentFormatState) => keepStableFormatState(currentFormatState, activeEditorController.getFormatState()));
@@ -290,6 +296,20 @@ export function DesktopLayout(props: DesktopLayoutProps) {
       refreshActiveEditorState();
     }
     setImageEditTarget(null);
+  }, [activeEditorController, refreshActiveEditorState]);
+
+  const handleReplaceActiveDiagram = useCallback((target: MarkdownEditorDiagramEditTarget, markdown: string) => {
+    if (activeEditorController?.replaceDiagramAt(target.position, target.nodeSize, markdown, { addToHistory: true })) {
+      refreshActiveEditorState();
+    }
+    setDiagramEditTarget(null);
+  }, [activeEditorController, refreshActiveEditorState]);
+
+  const handleDeleteActiveDiagram = useCallback((target: MarkdownEditorDiagramEditTarget) => {
+    if (activeEditorController?.deleteDiagramAt(target.position, target.nodeSize, { addToHistory: true })) {
+      refreshActiveEditorState();
+    }
+    setDiagramEditTarget(null);
   }, [activeEditorController, refreshActiveEditorState]);
 
   const insertProjectImageAtEditorPoint = useCallback(async (assetId: string, clientX: number, clientY: number) => {
@@ -468,6 +488,8 @@ export function DesktopLayout(props: DesktopLayoutProps) {
 
   const [imageInsertOpen, setImageInsertOpen] = useState(false);
   const [imageEditTarget, setImageEditTarget] = useState<MarkdownEditorImageEditTarget | null>(null);
+  const [diagramInsertOpen, setDiagramInsertOpen] = useState(false);
+  const [diagramEditTarget, setDiagramEditTarget] = useState<MarkdownEditorDiagramEditTarget | null>(null);
 
   const externalChangeBadges = useMemo(() => buildExternalChangeBadges(props.externalChangeSet), [props.externalChangeSet]);
   const projectTreeStatus = useMemo(
@@ -787,6 +809,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                                 }}
                                 onSelectionChange={(selection) => props.onDocumentSelectionChange(session.documentId, selection)}
                                 onImageEditRequest={setImageEditTarget}
+                                onDiagramEditRequest={setDiagramEditTarget}
                                 selectionFocus={toMarkdownEditorSelection(props.aiSelectionFocus, session.documentId)}
                                 zoomPercent={markdownZoomPercent}
                               />
@@ -898,6 +921,30 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                   onBuildReference={props.onBuildImageReference}
                   onInsert={(markdown) => handleReplaceActiveImage(imageEditTarget, markdown)}
                   onDelete={() => handleDeleteActiveImage(imageEditTarget)}
+                />
+              ) : null}
+              {diagramInsertOpen && hasOpenDocument ? (
+                <InsertDiagramDialog
+                  diagramConfig={props.aiConfig.diagrams}
+                  onClose={() => setDiagramInsertOpen(false)}
+                  onInsert={(markdown) => {
+                    if (activeEditorController?.insertMarkdown(markdown, { addToHistory: true })) {
+                      refreshActiveEditorState();
+                    }
+                    setDiagramInsertOpen(false);
+                  }}
+                />
+              ) : null}
+              {diagramEditTarget && hasOpenDocument ? (
+                <InsertDiagramDialog
+                  variant="edit"
+                  diagramConfig={props.aiConfig.diagrams}
+                  initialCode={diagramEditTarget.code}
+                  initialCaption={diagramEditTarget.caption}
+                  initialWidth={diagramEditTarget.width}
+                  onClose={() => setDiagramEditTarget(null)}
+                  onInsert={(markdown) => handleReplaceActiveDiagram(diagramEditTarget, markdown)}
+                  onDelete={() => handleDeleteActiveDiagram(diagramEditTarget)}
                 />
               ) : null}
               <ExternalChangesDrawer

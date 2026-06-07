@@ -20,7 +20,8 @@ import {
   toggleUnderlineCommand,
   underlineSchema,
 } from "./underlineExtension";
-import type { MarkdownEditorController, MarkdownEditorFormatState, MarkdownEditorHistoryState, MarkdownEditorImageEditTarget } from "./editorTypes";
+import { createMermaidDiagramPlugin, createMermaidDiagramViewPlugin } from "./mermaidNodeView";
+import type { MarkdownEditorController, MarkdownEditorDiagramEditTarget, MarkdownEditorFormatState, MarkdownEditorHistoryState, MarkdownEditorImageEditTarget } from "./editorTypes";
 import type { MarkdownEditorSelection } from "./editorTypes";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
@@ -34,6 +35,7 @@ type MarkdownEditorProps = {
   onHistoryStateChange: (historyState: MarkdownEditorHistoryState) => void;
   onSelectionChange: (selection: MarkdownEditorSelection | null) => void;
   onImageEditRequest?: (target: MarkdownEditorImageEditTarget) => void;
+  onDiagramEditRequest?: (target: MarkdownEditorDiagramEditTarget) => void;
   selectionFocus?: MarkdownEditorSelection | null;
   zoomPercent: number;
 };
@@ -45,6 +47,7 @@ type MarkdownEditorCallbacks = {
   onHistoryStateChange: (historyState: MarkdownEditorHistoryState) => void;
   onSelectionChange: (selection: MarkdownEditorSelection | null) => void;
   onImageEditRequest?: (target: MarkdownEditorImageEditTarget) => void;
+  onDiagramEditRequest?: (target: MarkdownEditorDiagramEditTarget) => void;
 };
 
 export function MarkdownEditor(props: MarkdownEditorProps) {
@@ -59,7 +62,7 @@ const selectionFocusPluginKey = new PluginKey<SelectionFocusRange | null>("known
 const transientTextPluginKey = new PluginKey<TransientTextPreview | null>("knownext-transient-text-preview");
 const persistentCaretPluginKey = new PluginKey<PersistentCaretState>("knownext-persistent-caret");
 
-function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, onImageEditRequest, selectionFocus, zoomPercent }: MarkdownEditorProps) {
+function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, onImageEditRequest, onDiagramEditRequest, selectionFocus, zoomPercent }: MarkdownEditorProps) {
   const editorShellRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const skipInitialUpdate = useRef(true);
@@ -67,13 +70,13 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
   const lastFormatStateRef = useRef<MarkdownEditorFormatState>({});
   const lastHistoryStateRef = useRef<MarkdownEditorHistoryState>({ canUndo: false, canRedo: false, undoDepth: 0, redoDepth: 0 });
   const lastSelectionRef = useRef<MarkdownEditorSelection | null>(null);
-  const callbacksRef = useRef<MarkdownEditorCallbacks>({ onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, onImageEditRequest });
+  const callbacksRef = useRef<MarkdownEditorCallbacks>({ onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, onImageEditRequest, onDiagramEditRequest });
   const controllerReadyRef = useRef(false);
   const [imageEditOverlay, setImageEditOverlay] = useState<ImageEditOverlayState | null>(null);
 
   useEffect(() => {
-    callbacksRef.current = { onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, onImageEditRequest };
-  }, [onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, onImageEditRequest]);
+    callbacksRef.current = { onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, onImageEditRequest, onDiagramEditRequest };
+  }, [onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, onImageEditRequest, onDiagramEditRequest]);
 
   const { loading, get } = useEditor((root) => {
     const crepe = new Crepe({
@@ -88,9 +91,16 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
 
     crepe.editor.config((ctx) => {
       ctx.update(historyProviderConfig.key, (config) => ({ ...config, depth: 100, newGroupDelay: 500 }));
-      ctx.update(prosePluginsCtx, (plugins) => [...plugins, createSelectionFocusPlugin(), createTransientTextPreviewPlugin(), createPersistentCaretPlugin()]);
+      ctx.update(prosePluginsCtx, (plugins) => [
+        createMermaidDiagramPlugin((target) => callbacksRef.current.onDiagramEditRequest?.(target)),
+        ...plugins,
+        createSelectionFocusPlugin(),
+        createTransientTextPreviewPlugin(),
+        createPersistentCaretPlugin(),
+      ]);
       configureUnderlineMarkdownSerialization(ctx);
     });
+    crepe.editor.use(createMermaidDiagramViewPlugin((target) => callbacksRef.current.onDiagramEditRequest?.(target)));
     crepe.editor.use(remarkUnderlineHtmlPlugin).use(underlineSchema).use(toggleUnderlineCommand);
 
     crepe.on((listener) => {

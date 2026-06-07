@@ -23,6 +23,7 @@ import {
   Table,
   Undo2,
   Underline,
+  Workflow,
   ZoomIn,
   X,
   type LucideIcon,
@@ -74,6 +75,7 @@ const structureTools = [
 const insertionTools = [
   { label: "Enlace", icon: Link, action: "link" },
   { label: "Imagen", icon: Image, action: "image" },
+  { label: "Diagrama", icon: Workflow, action: "diagram" },
 ] satisfies ToolbarAction[];
 
 const markdownZoomOptions = [80, 90, 100, 110, 125, 150];
@@ -88,6 +90,7 @@ type MarkdownToolbarProps = {
   activeActions: MarkdownEditorFormatState;
   editorHistoryState: MarkdownEditorHistoryState;
   imageInsertionEnabled?: boolean;
+  diagramInsertionEnabled?: boolean;
   documentActionsEnabled?: boolean;
   onRunEditorAction: (action: MarkdownEditorAction, options?: MarkdownEditorActionOptions) => void;
   onExportDocument: (format: ExportFormat) => void;
@@ -105,6 +108,7 @@ export function MarkdownToolbar({
   activeActions,
   editorHistoryState,
   imageInsertionEnabled = true,
+  diagramInsertionEnabled = true,
   documentActionsEnabled = true,
   onRunEditorAction,
   onExportDocument,
@@ -229,6 +233,7 @@ export function MarkdownToolbar({
             historyDisabledReason={historyDisabledReason}
             markdownZoomPercent={markdownZoomPercent}
             imageInsertionEnabled={imageInsertionEnabled}
+            diagramInsertionEnabled={diagramInsertionEnabled}
             documentActionsEnabled={documentActionsEnabled}
             visibleSecondaryInlineTools={visibleSecondaryInlineTools}
             onClose={() => setCompactOptionsOpen(false)}
@@ -378,6 +383,15 @@ export function MarkdownToolbar({
               onRun={() => runAction(insertionTools[1].action)}
             />
           ) : null}
+          {diagramInsertionEnabled ? (
+            <ToolbarIconButton
+              tool={insertionTools[2]}
+              active={Boolean(activeActions[insertionTools[2].action])}
+              disabled={!editorReady}
+              onMouseDown={keepEditorSelection}
+              onRun={() => runAction(insertionTools[2].action)}
+            />
+          ) : null}
         </div>
         <div className="relative">
           <ToolbarMenuButton
@@ -409,6 +423,7 @@ export function MarkdownToolbar({
           {openMenu === "insert" ? (
             <ToolbarMenu align="right">
               {imageInsertionEnabled ? <MenuAction action={insertionTools[1]} active={false} onRun={() => runAction("image")} /> : null}
+              {diagramInsertionEnabled ? <MenuAction action={insertionTools[2]} active={false} onRun={() => runAction("diagram")} /> : null}
               <MenuAction action={structureTools[5]} active={false} onRun={() => runAction("horizontal-rule")} />
             </ToolbarMenu>
           ) : null}
@@ -598,6 +613,7 @@ function CompactToolbarOptionsDialog({
   historyDisabledReason,
   markdownZoomPercent,
   imageInsertionEnabled,
+  diagramInsertionEnabled,
   documentActionsEnabled,
   visibleSecondaryInlineTools,
   onClose,
@@ -613,6 +629,7 @@ function CompactToolbarOptionsDialog({
   historyDisabledReason: string;
   markdownZoomPercent: number;
   imageInsertionEnabled: boolean;
+  diagramInsertionEnabled: boolean;
   documentActionsEnabled: boolean;
   visibleSecondaryInlineTools: ToolbarAction[];
   onClose: () => void;
@@ -675,6 +692,14 @@ function CompactToolbarOptionsDialog({
                 active={Boolean(activeActions[insertionTools[1].action])}
                 disabled={!editorReady}
                 onRun={() => onRunAction(insertionTools[1].action)}
+              />
+            ) : null}
+            {diagramInsertionEnabled ? (
+              <CompactToolbarAction
+                action={insertionTools[2]}
+                active={Boolean(activeActions[insertionTools[2].action])}
+                disabled={!editorReady}
+                onRun={() => onRunAction(insertionTools[2].action)}
               />
             ) : null}
             <CompactToolbarTablePicker disabled={!editorReady} onRun={(rows, columns) => onRunAction("table", { table: { rows, columns } })} />

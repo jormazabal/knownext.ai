@@ -79,6 +79,8 @@ export function createMarkdownEditorController(editor: Editor, selectionFocusPlu
             return applyLink(ctx);
           case "image":
             return applyImage(ctx, options?.image);
+          case "diagram":
+            return options?.diagram?.markdown ? insertMarkdownIntoSelection(ctx, options.diagram.markdown) : false;
           case "quote":
             return toggleBlockquote(ctx);
           case "horizontal-rule":
@@ -223,6 +225,29 @@ export function createMarkdownEditorController(editor: Editor, selectionFocusPlu
         return false;
       }
     },
+    replaceDiagramAt(position, nodeSize, markdown, options) {
+      return replaceDocumentRange(editor, position, position + nodeSize, markdown, options);
+    },
+    deleteDiagramAt(position, nodeSize, options) {
+      try {
+        return editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const safeFrom = clampDocumentPosition(position, view.state.doc.content.size);
+          const safeTo = clampDocumentPosition(position + nodeSize, view.state.doc.content.size);
+          if (safeFrom >= safeTo) return false;
+
+          const transaction = view.state.tr
+            .delete(safeFrom, safeTo)
+            .setMeta("addToHistory", options?.addToHistory !== false)
+            .scrollIntoView();
+
+          view.dispatch(transaction);
+          return true;
+        });
+      } catch {
+        return false;
+      }
+    },
     setCursorAtClientPoint(clientX, clientY, options) {
       try {
         return editor.action((ctx) => {
@@ -327,6 +352,31 @@ export function createMarkdownEditorController(editor: Editor, selectionFocusPlu
       }
     },
   };
+}
+
+function replaceDocumentRange(editor: Editor, from: number, to: number, markdown: string, options?: { addToHistory?: boolean }) {
+  try {
+    return editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      const parser = ctx.get(parserCtx);
+      const nextDocument = parser(markdown);
+      const { state } = view;
+      const safeFrom = clampDocumentPosition(from, state.doc.content.size);
+      const safeTo = clampDocumentPosition(to, state.doc.content.size);
+
+      if (safeFrom > safeTo) return false;
+
+      const transaction = state.tr
+        .replaceWith(safeFrom, safeTo, nextDocument.content)
+        .setMeta("addToHistory", options?.addToHistory !== false)
+        .scrollIntoView();
+
+      view.dispatch(transaction);
+      return true;
+    });
+  } catch {
+    return false;
+  }
 }
 
 function clampDocumentPosition(position: number, maxPosition: number) {
@@ -442,6 +492,15 @@ function applyImage(ctx: EditorCommandContext, image?: { src: string; alt: strin
 
   const alt = image?.alt ?? window.prompt("Texto alternativo", "Imagen") ?? "Imagen";
   return ctx.get(commandsCtx).call(insertImageCommand.key, { src, alt });
+}
+
+function insertMarkdownIntoSelection(ctx: EditorCommandContext, markdown: string) {
+  const view = ctx.get(editorViewCtx);
+  const parser = ctx.get(parserCtx);
+  const nextDocument = parser(markdown);
+  const transaction = view.state.tr.replaceSelection(new Slice(nextDocument.content, 0, 0)).scrollIntoView();
+  view.dispatch(transaction);
+  return true;
 }
 
 function findFirstImageNode(doc: ProseMirrorNode): { attrs: Record<string, unknown> } | null {

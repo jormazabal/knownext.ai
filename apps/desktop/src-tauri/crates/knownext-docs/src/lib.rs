@@ -1,9 +1,31 @@
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine;
+use printpdf::{
+    BuiltinFont, Mm, Op, PdfDocument, PdfFontHandle, PdfPage, PdfSaveOptions, Point, Pt, RawImage,
+    TextItem, XObjectTransform,
+};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
+#[derive(Clone, Debug)]
+pub struct DiagramAsset {
+    pub caption: Option<String>,
+    pub png: Vec<u8>,
+}
+
 pub fn minimal_pdf(title: &str, markdown: &str) -> Vec<u8> {
+    minimal_pdf_with_diagrams(title, markdown, &[])
+}
+
+pub fn minimal_pdf_with_diagrams(title: &str, markdown: &str, diagram_assets: &[DiagramAsset]) -> Vec<u8> {
+    if !diagram_assets.is_empty() {
+        if let Some(bytes) = print_pdf_with_diagrams(title, markdown, diagram_assets) {
+            return bytes;
+        }
+    }
+
     let text = markdown
         .lines()
         .find(|line| !line.trim().is_empty())
@@ -18,31 +40,251 @@ pub fn minimal_pdf(title: &str, markdown: &str) -> Vec<u8> {
 }
 
 pub fn write_docx(path: &Path, markdown: &str) -> Result<(), String> {
+    write_docx_with_diagrams(path, markdown, &[])
+}
+
+pub fn write_docx_with_diagrams(path: &Path, markdown: &str, diagram_assets: &[DiagramAsset]) -> Result<(), String> {
     let file = std::fs::File::create(path).map_err(|error| error.to_string())?;
     let mut zip = zip::ZipWriter::new(file);
     let options = zip::write::SimpleFileOptions::default();
     zip.start_file("[Content_Types].xml", options)
         .map_err(|error| error.to_string())?;
-    zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#).map_err(|error| error.to_string())?;
+    zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#).map_err(|error| error.to_string())?;
     zip.start_file("_rels/.rels", options)
         .map_err(|error| error.to_string())?;
     zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Target="word/document.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"/></Relationships>"#).map_err(|error| error.to_string())?;
+    zip.start_file("word/_rels/document.xml.rels", options)
+        .map_err(|error| error.to_string())?;
+    let relationships = diagram_assets
+        .iter()
+        .enumerate()
+        .map(|(index, _)| {
+            format!(
+                r#"<Relationship Id="rIdDiagram{}" Target="media/diagram-{}.png" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"/>"#,
+                index + 1,
+                index + 1
+            )
+        })
+        .collect::<String>();
+    zip.write_all(format!(r#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{relationships}</Relationships>"#).as_bytes()).map_err(|error| error.to_string())?;
+    for (index, asset) in diagram_assets.iter().enumerate() {
+        if asset.png.is_empty() {
+            continue;
+        }
+        zip.start_file(format!("word/media/diagram-{}.png", index + 1), options)
+            .map_err(|error| error.to_string())?;
+        zip.write_all(&asset.png).map_err(|error| error.to_string())?;
+    }
     zip.start_file("word/document.xml", options)
         .map_err(|error| error.to_string())?;
-    let body = markdown
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| {
-            format!(
-                "<w:p><w:r><w:t>{}</w:t></w:r></w:p>",
-                xml_escape(line.trim_matches('#').trim())
-            )
+    let body = document_items(markdown)
+        .into_iter()
+        .map(|item| match item {
+            DocumentItem::Text(text) => {
+                let clean = text.trim_matches('#').trim();
+                if clean.is_empty() {
+                    String::new()
+                } else {
+                    format!("<w:p><w:r><w:t>{}</w:t></w:r></w:p>", xml_escape(clean))
+                }
+            }
+            DocumentItem::Diagram(index) => diagram_assets
+                .get(index)
+                .filter(|asset| !asset.png.is_empty())
+                .map(|asset| {
+                    format!(
+                        "{}{}",
+                        docx_image_paragraph(index + 1),
+                        asset
+                            .caption
+                            .as_ref()
+                            .filter(|caption| !caption.trim().is_empty())
+                            .map(|caption| format!("<w:p><w:r><w:t>{}</w:t></w:r></w:p>", xml_escape(caption.trim())))
+                            .unwrap_or_default()
+                    )
+                })
+                .unwrap_or_else(|| "<w:p><w:r><w:t>[Diagrama Mermaid no renderizado]</w:t></w:r></w:p>".to_string()),
         })
         .collect::<Vec<_>>()
         .join("");
-    zip.write_all(format!(r#"<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>{}</w:body></w:document>"#, body).as_bytes()).map_err(|error| error.to_string())?;
+    zip.write_all(format!(r#"<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>{}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body></w:document>"#, body).as_bytes()).map_err(|error| error.to_string())?;
     zip.finish().map_err(|error| error.to_string())?;
     Ok(())
+}
+
+pub fn diagram_assets_from_json(value: Option<&Value>) -> Vec<DiagramAsset> {
+    value
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let png_data_url = item.get("pngDataUrl").and_then(Value::as_str)?;
+                    let png = decode_png_data_url(png_data_url)?;
+                    Some(DiagramAsset {
+                        caption: item
+                            .get("caption")
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
+                            .filter(|value| !value.trim().is_empty()),
+                        png,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+enum DocumentItem {
+    Text(String),
+    Diagram(usize),
+}
+
+fn document_items(markdown: &str) -> Vec<DocumentItem> {
+    let lines = markdown.replace("\r\n", "\n").replace('\r', "\n");
+    let lines = lines.lines().collect::<Vec<_>>();
+    let mut items = Vec::new();
+    let mut index = 0;
+    let mut diagram_index = 0;
+
+    while index < lines.len() {
+        let line = lines[index];
+        if is_mermaid_fence_start(line) {
+            items.push(DocumentItem::Diagram(diagram_index));
+            diagram_index += 1;
+            index += 1;
+            while index < lines.len() && !is_fence_end(lines[index]) {
+                index += 1;
+            }
+            index += 1;
+            continue;
+        }
+        if !line.trim().is_empty() {
+            items.push(DocumentItem::Text(line.to_string()));
+        }
+        index += 1;
+    }
+
+    items
+}
+
+fn is_mermaid_fence_start(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    (trimmed.starts_with("```") || trimmed.starts_with("~~~"))
+        && trimmed.to_ascii_lowercase().contains("mermaid")
+}
+
+fn is_fence_end(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("```") || trimmed.starts_with("~~~")
+}
+
+fn decode_png_data_url(value: &str) -> Option<Vec<u8>> {
+    let (_, data) = value.split_once(',')?;
+    BASE64_STANDARD.decode(data.trim()).ok()
+}
+
+fn docx_image_paragraph(index: usize) -> String {
+    let rel_id = format!("rIdDiagram{index}");
+    let name = format!("Diagrama {index}");
+    let cx = 5_760_000;
+    let cy = 3_240_000;
+    format!(
+        r#"<w:p><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="{cx}" cy="{cy}"/><wp:docPr id="{index}" name="{name}"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="{index}" name="{name}.png"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="{rel_id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"#
+    )
+}
+
+fn print_pdf_with_diagrams(title: &str, markdown: &str, diagram_assets: &[DiagramAsset]) -> Option<Vec<u8>> {
+    let mut doc = PdfDocument::new(title);
+    let mut pages = Vec::new();
+    let mut ops = Vec::new();
+    let mut y = 792.0_f32;
+    start_pdf_text(&mut ops, y, 12.0);
+
+    for item in document_items(markdown) {
+        match item {
+            DocumentItem::Text(text) => {
+                let clean = text.trim_matches('#').trim();
+                if clean.is_empty() {
+                    continue;
+                }
+                if y < 72.0 {
+                    end_pdf_page(&mut pages, &mut ops);
+                    y = 792.0;
+                    start_pdf_text(&mut ops, y, 12.0);
+                }
+                ops.push(Op::ShowText {
+                    items: vec![TextItem::Text(clean.chars().take(120).collect())],
+                });
+                ops.push(Op::AddLineBreak);
+                y -= 16.0;
+            }
+            DocumentItem::Diagram(index) => {
+                let Some(asset) = diagram_assets.get(index).filter(|asset| !asset.png.is_empty()) else {
+                    continue;
+                };
+                let mut warnings = Vec::new();
+                let image = RawImage::decode_from_bytes(&asset.png, &mut warnings).ok()?;
+                let natural_width_pt = image.width as f32 * 72.0 / 144.0;
+                let natural_height_pt = image.height as f32 * 72.0 / 144.0;
+                let scale = (450.0 / natural_width_pt).min(1.0);
+                let image_height = natural_height_pt * scale;
+                if y - image_height < 88.0 {
+                    end_pdf_page(&mut pages, &mut ops);
+                    y = 792.0;
+                    start_pdf_text(&mut ops, y, 12.0);
+                }
+                ops.push(Op::EndTextSection);
+                let image_id = doc.add_image(&image);
+                ops.push(Op::UseXobject {
+                    id: image_id,
+                    transform: XObjectTransform {
+                        translate_x: Some(Pt(72.0)),
+                        translate_y: Some(Pt(y - image_height)),
+                        scale_x: Some(scale),
+                        scale_y: Some(scale),
+                        dpi: Some(144.0),
+                        ..XObjectTransform::default()
+                    },
+                });
+                y -= image_height + 18.0;
+                start_pdf_text(&mut ops, y, 10.0);
+                if let Some(caption) = asset.caption.as_ref().filter(|caption| !caption.trim().is_empty()) {
+                    ops.push(Op::ShowText {
+                        items: vec![TextItem::Text(caption.trim().chars().take(120).collect())],
+                    });
+                    ops.push(Op::AddLineBreak);
+                    y -= 14.0;
+                }
+                ops.push(Op::EndTextSection);
+                y -= 6.0;
+                start_pdf_text(&mut ops, y, 12.0);
+            }
+        }
+    }
+
+    ops.push(Op::EndTextSection);
+    end_pdf_page(&mut pages, &mut ops);
+    Some(doc.with_pages(pages).save(&PdfSaveOptions::default(), &mut Vec::new()))
+}
+
+fn start_pdf_text(ops: &mut Vec<Op>, y: f32, size: f32) {
+    ops.push(Op::StartTextSection);
+    ops.push(Op::SetTextCursor {
+        pos: Point::new(Mm(25.0), Mm(y * 25.4 / 72.0)),
+    });
+    ops.push(Op::SetFont {
+        font: PdfFontHandle::Builtin(BuiltinFont::Helvetica),
+        size: Pt(size),
+    });
+    ops.push(Op::SetLineHeight { lh: Pt(size + 4.0) });
+}
+
+fn end_pdf_page(pages: &mut Vec<PdfPage>, ops: &mut Vec<Op>) {
+    if ops.is_empty() {
+        return;
+    }
+    pages.push(PdfPage::new(Mm(210.0), Mm(297.0), std::mem::take(ops)));
 }
 
 pub fn write_xlsx(path: &Path, sheet_name: &str, rows: &[Vec<String>]) -> Result<(), String> {
@@ -448,4 +690,43 @@ fn xml_escape(value: &str) -> String {
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Read;
+
+    #[test]
+    fn docx_export_embeds_rendered_mermaid_diagram_png() {
+        let png = BASE64_STANDARD
+            .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=")
+            .unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "{}.docx",
+            knownext_core::compact_id("knownext-docs-test")
+        ));
+        let markdown = "# Documento\n\n```mermaid\nflowchart TD\n  A --> B\n```\n";
+        let assets = vec![DiagramAsset {
+            caption: Some("Flujo principal".to_string()),
+            png,
+        }];
+
+        write_docx_with_diagrams(&path, markdown, &assets).unwrap();
+
+        let file = std::fs::File::open(&path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let mut document_xml = String::new();
+        archive
+            .by_name("word/document.xml")
+            .unwrap()
+            .read_to_string(&mut document_xml)
+            .unwrap();
+
+        assert!(archive.by_name("word/media/diagram-1.png").is_ok());
+        assert!(document_xml.contains("rIdDiagram1"));
+        assert!(document_xml.contains("Flujo principal"));
+
+        let _ = std::fs::remove_file(path);
+    }
 }

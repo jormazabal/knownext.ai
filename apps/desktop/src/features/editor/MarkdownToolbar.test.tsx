@@ -115,6 +115,7 @@ describe("MarkdownToolbar", () => {
 
     expect(screen.getByRole("button", { name: "Negrita" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Imagen" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Diagrama" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Histórico de versiones" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Exportar documento" })).not.toBeInTheDocument();
   });
@@ -268,6 +269,7 @@ describe("MarkdownToolbar", () => {
     expect(screen.getByRole("button", { name: "Rehacer" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Lista con viñetas" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Enlace" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Diagrama" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Tabla" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Zoom del visualizador Markdown" })).not.toBeInTheDocument();
 
@@ -276,6 +278,7 @@ describe("MarkdownToolbar", () => {
     expect(screen.getByRole("dialog", { name: "Opciones del editor" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Viñetas" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Enlace" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Diagrama" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Tabla 3 x 4" })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Viñetas" }));
