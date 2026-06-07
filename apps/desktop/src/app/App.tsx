@@ -144,6 +144,8 @@ import type {
   AiContextSourcePreviewResponse,
   AiConfigStatus,
   AiConversationEvent,
+  AiEditOperation,
+  AiEditProposal,
   AiIndexStatusResponse,
   AiInteractionResponse,
   AiIntentActionType,
@@ -198,6 +200,7 @@ import {
   updateTreeOpenPathsForProject,
   type TreeOpenPathsByProject,
 } from "./treeOpenState";
+import { applyAiEditOperationToMarkdown, type AiMarkdownOperationReviewReason } from "./aiEditProposalApplication";
 
 type AppNotice = {
   title: string;
@@ -249,6 +252,10 @@ export function App() {
   const [aiUsageSummary, setAiUsageSummary] = useState<AiUsageSummaryResponse | null>(null);
   const [aiPendingDelete, setAiPendingDelete] = useState<AiPendingDelete | null>(null);
   const [aiPendingIntent, setAiPendingIntent] = useState<AiPendingIntent | null>(null);
+  const [aiEditProposal, setAiEditProposal] = useState<AiEditProposal | null>(null);
+  const [autoApplyingAiEditProposalId, setAutoApplyingAiEditProposalId] = useState<string | null>(null);
+  const [blockedAiEditOperationReasons, setBlockedAiEditOperationReasons] = useState<Record<string, AiMarkdownOperationReviewReason>>({});
+  const [appliedAiEditOperationIds, setAppliedAiEditOperationIds] = useState<string[]>([]);
   const [aiBubble, setAiBubble] = useState<{ id: string; answer: string } | null>(null);
   const [aiAppliedChange, setAiAppliedChange] = useState<{ documentId: string; summary: string } | null>(null);
   const [aiSelectionFocus, setAiSelectionFocus] = useState<AiSelectionFocus | null>(null);
@@ -310,6 +317,7 @@ export function App() {
   const githubLoginPollingRef = useRef(false);
   const lastDocumentContextRef = useRef<{ id: string | null; path: string | null }>({ id: null, path: null });
   const documentSessionsRef = useRef(documentSessions);
+  const autoAppliedAiEditProposalIdsRef = useRef<Set<string>>(new Set());
   const externalChangesLastCheckRef = useRef(0);
   const projectSyncLastCheckRef = useRef(0);
   const resolvedTheme = useResolvedAppearanceTheme(appearanceConfig.themeMode);
@@ -852,6 +860,26 @@ export function App() {
     () => getPromptContextSourceIds(aiContextSources, removingAiContextSourceIds),
     [aiContextSources, removingAiContextSourceIds],
   );
+  const staleAiEditOperationIds = useMemo(
+    () => getStaleAiEditOperationIds(aiEditProposal, documentSessions, notesMarkdown),
+    [aiEditProposal, documentSessions, notesMarkdown],
+  );
+  const visibleAiEditProposal = useMemo(
+    () => (
+      aiEditProposal?.id === autoApplyingAiEditProposalId
+      && staleAiEditOperationIds.length === 0
+      && Object.keys(blockedAiEditOperationReasons).length === 0
+        ? null
+        : aiEditProposal
+    ),
+    [aiEditProposal, autoApplyingAiEditProposalId, blockedAiEditOperationReasons, staleAiEditOperationIds],
+  );
+  useEffect(() => {
+    if (!aiEditProposal || aiEditProposal.status !== "proposed") return;
+    if (autoAppliedAiEditProposalIdsRef.current.has(aiEditProposal.id)) return;
+    autoAppliedAiEditProposalIdsRef.current.add(aiEditProposal.id);
+    void handleApplyAiEditProposal(aiEditProposal.id);
+  }, [aiEditProposal?.id, aiEditProposal?.status]);
   useEffect(() => {
     if (!activeDocumentId || !activeSession?.document) return;
     lastDocumentContextRef.current = { id: activeDocumentId, path: activeSession.document.path };
@@ -897,6 +925,13 @@ export function App() {
       if (activeProject) persistTreeOpenState(activeProject.id, nextTree);
       return nextTree;
     });
+  }
+
+  function clearAiEditProposalState() {
+    setAiEditProposal(null);
+    setAutoApplyingAiEditProposalId(null);
+    setBlockedAiEditOperationReasons({});
+    setAppliedAiEditOperationIds([]);
   }
 
   function revealTreeNode(nodeId: string) {
@@ -1316,6 +1351,17 @@ export function App() {
 
   function handleEditorOperationFailed(operation: MarkdownEditorExternalOperation) {
     setPendingEditorOperations((currentOperations) => currentOperations.filter((currentOperation) => currentOperation.id !== operation.id));
+    if (operation.aiEditOperationId) {
+      setAppliedAiEditOperationIds((currentIds) => currentIds.filter((operationId) => operationId !== operation.aiEditOperationId));
+      setBlockedAiEditOperationReasons((currentReasons) => ({
+        ...currentReasons,
+        [operation.aiEditOperationId as string]: "editor_apply_failed",
+      }));
+    }
+    if ((operation.kind ?? "replace_document") !== "replace_document") {
+      setAiBubble({ id: `local-${Date.now()}`, answer: "No se pudo aplicar la operación parcial de IA. Revisa el documento y vuelve a intentarlo." });
+      return;
+    }
     if (operation.documentId === NOTES_WORKSPACE_TAB_ID) {
       setNotesMarkdown(operation.markdown);
       void persistNotes(operation.markdown);
@@ -1529,6 +1575,14 @@ export function App() {
     } else if (response.executionMode === "quick") {
       setAiPendingIntent(null);
     }
+    if (response.editProposal && response.editProposal.status === "proposed") {
+      setAutoApplyingAiEditProposalId(response.editProposal.id);
+      setAiEditProposal(response.editProposal);
+      setBlockedAiEditOperationReasons({});
+      setAppliedAiEditOperationIds([]);
+    } else if (response.editProposalStatus === "applied" || response.editProposalStatus === "discarded") {
+      clearAiEditProposalState();
+    }
     const affectedDocuments = response.affectedDocuments ?? [];
     if (response.tree && affectedDocuments.length > 0) {
       applyFileOperationResult({ tree: response.tree, node: null, affectedDocuments });
@@ -1664,6 +1718,196 @@ export function App() {
     }
   }
 
+  async function handleApplyAiEditProposal(proposalId: string, operationIds?: string[]) {
+    if (!aiEditProposal || aiEditProposal.id !== proposalId) return;
+    const selectedOperationIds = new Set(operationIds ?? aiEditProposal.operations.map((operation) => operation.id));
+    const staleOperationIds = new Set(getStaleAiEditOperationIds(aiEditProposal, documentSessions, notesMarkdown));
+    const blockedOperationIds = new Set(Object.keys(blockedAiEditOperationReasons));
+    const appliedOperationIds = new Set(appliedAiEditOperationIds);
+    const applicableAiOperations = aiEditProposal.operations.filter((operation) => (
+      selectedOperationIds.has(operation.id)
+      && !staleOperationIds.has(operation.id)
+      && !blockedOperationIds.has(operation.id)
+      && !appliedOperationIds.has(operation.id)
+    ));
+    if (applicableAiOperations.length === 0) {
+      setAutoApplyingAiEditProposalId(null);
+      setAiBubble({ id: `local-${Date.now()}`, answer: "La propuesta IA ya no coincide con el documento actual. Revisa los cambios o vuelve a pedir la edición." });
+      return;
+    }
+    const activeEditorTargetId = activeUtilityTab === NOTES_UTILITY_TAB_ID ? NOTES_WORKSPACE_TAB_ID : activeDocumentId;
+    const workingMarkdownByDocumentId = new Map<string, string>();
+    const loadedDocuments = new Map<string, DocumentRecord>();
+    const directlyUpdatedDocumentIds = new Set<string>();
+    const editorOperations: MarkdownEditorExternalOperation[] = [];
+    const skippedOperationIds: string[] = [];
+    const skippedOperationReasons: Record<string, AiMarkdownOperationReviewReason> = {};
+    const appliedOperationIdsThisRun: string[] = [];
+
+    async function getCurrentMarkdownForAiOperation(documentId: string) {
+      if (workingMarkdownByDocumentId.has(documentId)) return workingMarkdownByDocumentId.get(documentId) ?? "";
+      if (documentId === NOTES_WORKSPACE_TAB_ID) {
+        workingMarkdownByDocumentId.set(documentId, notesMarkdown);
+        return notesMarkdown;
+      }
+
+      const existingSession = documentSessions[documentId];
+      if (existingSession) {
+        workingMarkdownByDocumentId.set(documentId, existingSession.markdown);
+        return existingSession.markdown;
+      }
+
+      const record = await getDocument(documentId);
+      loadedDocuments.set(documentId, record);
+      workingMarkdownByDocumentId.set(documentId, record.markdown);
+      return record.markdown;
+    }
+
+    try {
+      for (const operation of applicableAiOperations) {
+        const currentMarkdown = await getCurrentMarkdownForAiOperation(operation.documentId);
+        const imageMarkdown = operation.action === "insert_image" && operation.imageAssetId && activeProject
+          ? (await buildImageReference(activeProject.id, operation.documentId, operation.imageAssetId, operation.imageAltText ?? null)).markdown
+          : null;
+        const application = applyAiEditOperationToMarkdown(operation, currentMarkdown, { imageMarkdown });
+        if (application.applied) {
+          workingMarkdownByDocumentId.set(operation.documentId, application.markdown);
+          directlyUpdatedDocumentIds.add(operation.documentId);
+          appliedOperationIdsThisRun.push(operation.id);
+          continue;
+        }
+
+        const fallbackEditorOperation = buildActiveEditorAiOperation(aiEditProposal.interactionId, operation, activeEditorTargetId, imageMarkdown);
+        if (fallbackEditorOperation) {
+          editorOperations.push(fallbackEditorOperation);
+          appliedOperationIdsThisRun.push(operation.id);
+          continue;
+        }
+
+        skippedOperationIds.push(operation.id);
+        skippedOperationReasons[operation.id] = application.reason;
+      }
+    } catch (error) {
+      setAutoApplyingAiEditProposalId(null);
+      showError(error, "No se pudo preparar la propuesta de edición de IA.", { source: "app.aiEditProposal.apply" });
+      return;
+    }
+
+    const activeDirectEditorOperations = Array.from(directlyUpdatedDocumentIds)
+      .filter((documentId) => documentId === activeEditorTargetId)
+      .flatMap((documentId) => {
+        const markdown = workingMarkdownByDocumentId.get(documentId);
+        return markdown
+          ? [{
+              id: `ai-${aiEditProposal.interactionId}-${documentId}-${Date.now()}`,
+              documentId,
+              kind: "replace_document" as const,
+              markdown,
+              source: "ai" as const,
+              addToHistory: true,
+            }]
+          : [];
+      });
+    const sessionUpdatedDocumentIds = Array.from(directlyUpdatedDocumentIds).filter((documentId) => documentId !== activeEditorTargetId);
+    if (sessionUpdatedDocumentIds.length > 0) {
+      if (sessionUpdatedDocumentIds.includes(NOTES_WORKSPACE_TAB_ID)) {
+        const nextNotesMarkdown = workingMarkdownByDocumentId.get(NOTES_WORKSPACE_TAB_ID);
+        if (typeof nextNotesMarkdown === "string") {
+          setNotesMarkdown(nextNotesMarkdown);
+          void persistNotes(nextNotesMarkdown);
+        }
+      }
+      const projectDocumentIds = sessionUpdatedDocumentIds.filter((documentId) => documentId !== NOTES_WORKSPACE_TAB_ID);
+      if (projectDocumentIds.length > 0) {
+        setDocumentSessions((currentSessions) => {
+          let nextSessions = currentSessions;
+          for (const documentId of projectDocumentIds) {
+            const nextMarkdown = workingMarkdownByDocumentId.get(documentId);
+            if (typeof nextMarkdown !== "string") continue;
+            const baseSession = nextSessions[documentId] ?? (loadedDocuments.has(documentId) ? createLoadedDocumentSession(loadedDocuments.get(documentId) as DocumentRecord) : null);
+            if (!baseSession) continue;
+            nextSessions = {
+              ...nextSessions,
+              [documentId]: applyLocalMarkdownEdit(baseSession, nextMarkdown),
+            };
+          }
+          return nextSessions;
+        });
+      }
+    }
+
+    const operations = [...editorOperations, ...activeDirectEditorOperations];
+    if (operations.length > 0) {
+      setPendingEditorOperations((currentOperations) => [...currentOperations, ...operations]);
+    }
+
+    const changedDocumentIds = Array.from(new Set([...sessionUpdatedDocumentIds, ...operations.map((operation) => operation.documentId)]));
+    const changedProjectDocumentIds = changedDocumentIds.filter((documentId) => documentId !== NOTES_WORKSPACE_TAB_ID);
+    if (changedProjectDocumentIds.length > 0) {
+      setTabs((currentTabs) => {
+        const openIds = new Set(currentTabs.map((tab) => tab.id));
+        const nextTabs = [...currentTabs];
+        for (const documentId of changedProjectDocumentIds) {
+          if (openIds.has(documentId)) continue;
+          const targetNode = findNodeById(tree, documentId);
+          nextTabs.push({ id: documentId, name: targetNode?.name ?? documentId });
+          openIds.add(documentId);
+        }
+        return nextTabs;
+      });
+      const firstChangedDocumentId = changedProjectDocumentIds[0];
+      setActiveUtilityTab(null);
+      setActiveImageId("");
+      setActiveReferenceDocumentId("");
+      setActiveDocumentId(firstChangedDocumentId);
+      revealTreeNode(firstChangedDocumentId);
+    } else if (changedDocumentIds.includes(NOTES_WORKSPACE_TAB_ID)) {
+      setOpenUtilityTabs((currentTabs) => currentTabs.includes(NOTES_UTILITY_TAB_ID) ? currentTabs : [...currentTabs, NOTES_UTILITY_TAB_ID]);
+      setActiveUtilityTab(NOTES_UTILITY_TAB_ID);
+      setActiveImageId("");
+      setActiveReferenceDocumentId("");
+      setActiveDocumentId("");
+      setActiveTreeNodeId("");
+    }
+
+    if (changedDocumentIds.length === 0) {
+      setAutoApplyingAiEditProposalId(null);
+      if (skippedOperationIds.length > 0) {
+        setBlockedAiEditOperationReasons((currentReasons) => ({ ...currentReasons, ...skippedOperationReasons }));
+      }
+      setAiBubble({ id: `local-${Date.now()}`, answer: "La propuesta IA no contiene operaciones aplicables en esta versión." });
+      return;
+    }
+    if (appliedOperationIdsThisRun.length > 0) {
+      setAppliedAiEditOperationIds((currentIds) => Array.from(new Set([...currentIds, ...appliedOperationIdsThisRun])));
+    }
+    if (skippedOperationIds.length > 0) {
+      setAutoApplyingAiEditProposalId(null);
+      setBlockedAiEditOperationReasons((currentReasons) => ({ ...currentReasons, ...skippedOperationReasons }));
+    }
+    setAiAppliedChange({
+      documentId: changedDocumentIds[0],
+      summary: skippedOperationIds.length === 0 && applicableAiOperations.length === aiEditProposal.operations.length
+        ? aiEditProposal.summary
+        : `${changedDocumentIds.length} documento(s) actualizados como borrador. ${skippedOperationIds.length > 0 ? `${skippedOperationIds.length} cambio(s) requieren revisión.` : ""}`.trim(),
+    });
+    if (skippedOperationIds.length > 0) {
+      setAiBubble({ id: `local-${Date.now()}`, answer: `He aplicado los cambios seguros y he omitido ${skippedOperationIds.length} operación(es) porque el ancla no era única o ya no coincidía.` });
+    }
+    const remainingReviewOperationIds = new Set([...Object.keys(blockedAiEditOperationReasons), ...skippedOperationIds, ...Array.from(staleOperationIds)]);
+    const nextAppliedOperationIds = new Set([...appliedAiEditOperationIds, ...appliedOperationIdsThisRun]);
+    const hasPendingOperations = aiEditProposal.operations.some((operation) => !nextAppliedOperationIds.has(operation.id) || remainingReviewOperationIds.has(operation.id));
+    if (skippedOperationIds.length === 0 && !hasPendingOperations) {
+      clearAiEditProposalState();
+    }
+  }
+
+  function handleDiscardAiEditProposal(proposalId: string) {
+    if (!aiEditProposal || aiEditProposal.id !== proposalId) return;
+    clearAiEditProposalState();
+    setAiBubble(null);
+  }
+
   function handleDismissAiAppliedChange() {
     setAiAppliedChange(null);
   }
@@ -1679,9 +1923,15 @@ export function App() {
     setAiSelectionFocus({
       documentId,
       path: documentId === NOTES_WORKSPACE_TAB_ID ? NOTES_TITLE : documentSessions[documentId]?.document?.path ?? null,
+      focusType: selection.focusType ?? "selection",
       from: selection.from,
       to: selection.to,
+      position: selection.position ?? null,
       text: selection.text,
+      nearTextBefore: selection.nearTextBefore ?? null,
+      nearTextAfter: selection.nearTextAfter ?? null,
+      blockType: selection.blockType ?? null,
+      blockHash: selection.blockHash ?? null,
     });
   }
 
@@ -1814,6 +2064,7 @@ export function App() {
       setExternalChangeDecisions({});
       setExternalChangesMessage(null);
       setProjectSyncState("synced");
+      clearAiEditProposalState();
       void refreshExternalChangeSet(active.id, { refreshTreeOnChanges: true, silent: true });
       if (!nextVersioningStatus.enabled) setHistoryOpen(false);
     } catch (error) {
@@ -3268,6 +3519,10 @@ export function App() {
         aiConversationEvents={aiConversationEvents}
         aiUsageSummary={aiUsageSummary}
         aiPendingIntent={aiPendingIntent}
+        aiEditProposal={visibleAiEditProposal}
+        staleAiEditOperationIds={staleAiEditOperationIds}
+        blockedAiEditOperationReasons={blockedAiEditOperationReasons}
+        appliedAiEditOperationIds={appliedAiEditOperationIds}
         aiBubble={aiBubble}
         aiAppliedChange={aiAppliedChange}
         aiSelectionFocus={aiSelectionFocus}
@@ -3361,6 +3616,8 @@ export function App() {
         onPreviewAiContextSource={handlePreviewAiContextSource}
         onAddAiContextSourceToProject={handleAddAiContextSourceToProject}
         onAiIntentAction={handleAiIntentAction}
+        onApplyAiEditProposal={handleApplyAiEditProposal}
+        onDiscardAiEditProposal={handleDiscardAiEditProposal}
         onCloseAiBubble={() => setAiBubble(null)}
         onDismissAiAppliedChange={handleDismissAiAppliedChange}
         onOpenAiConversation={() => handleSelectTab(AI_CONVERSATION_TAB_ID)}
@@ -4343,6 +4600,119 @@ function mergeAiEvents(currentEvents: AiConversationEvent[], nextEvents: AiConve
       return true;
     }),
   ];
+}
+
+function getStaleAiEditOperationIds(
+  proposal: AiEditProposal | null,
+  documentSessions: Record<string, DocumentSession>,
+  notesMarkdown: string,
+) {
+  if (!proposal || proposal.status !== "proposed") return [];
+  return proposal.operations
+    .filter((operation) => aiEditOperationIsStale(operation, documentSessions, notesMarkdown))
+    .map((operation) => operation.id);
+}
+
+function aiEditOperationIsStale(
+  operation: AiEditOperation,
+  documentSessions: Record<string, DocumentSession>,
+  notesMarkdown: string,
+) {
+  const currentMarkdown = operation.documentId === NOTES_WORKSPACE_TAB_ID
+    ? notesMarkdown
+    : documentSessions[operation.documentId]?.markdown;
+  if (typeof currentMarkdown !== "string") return false;
+
+  if (operation.action === "replace_selection" || operation.action === "edit_block") {
+    const originalExcerpt = operation.originalExcerpt?.trim();
+    if (!originalExcerpt) return false;
+    return !markdownContainsExcerpt(currentMarkdown, originalExcerpt);
+  }
+
+  return false;
+}
+
+function buildActiveEditorAiOperation(
+  interactionId: string,
+  operation: AiEditOperation,
+  activeEditorTargetId: string,
+  imageMarkdown?: string | null,
+): MarkdownEditorExternalOperation | null {
+  if (!activeEditorTargetId || operation.documentId !== activeEditorTargetId) return null;
+  const operationId = `ai-${interactionId}-${operation.id}-${Date.now()}`;
+
+  if (operation.action === "replace_selection") {
+    const replacement = operation.replacementMarkdown ?? operation.markdown;
+    if (!replacement || typeof operation.from !== "number" || typeof operation.to !== "number") return null;
+    return {
+      id: operationId,
+      documentId: operation.documentId,
+      aiEditOperationId: operation.id,
+      kind: "replace_range",
+      from: operation.from,
+      to: operation.to,
+      markdown: replacement,
+      source: "ai",
+      addToHistory: true,
+    };
+  }
+
+  if (operation.action === "insert_at_cursor") {
+    const insertion = operation.markdown ?? operation.replacementMarkdown;
+    const position = operation.position ?? operation.from;
+    if (!insertion || typeof position !== "number") return null;
+    return {
+      id: operationId,
+      documentId: operation.documentId,
+      aiEditOperationId: operation.id,
+      kind: "insert_at",
+      position,
+      markdown: insertion,
+      source: "ai",
+      addToHistory: true,
+    };
+  }
+
+  if (operation.action === "insert_image") {
+    const placementType = operation.placement?.type ?? "document_end";
+    const position = placementType === "after_selection" ? operation.to : operation.position ?? operation.from;
+    if (!imageMarkdown || typeof position !== "number") return null;
+    if (placementType === "replace_selection" && typeof operation.from === "number" && typeof operation.to === "number") {
+      return {
+        id: operationId,
+        documentId: operation.documentId,
+        aiEditOperationId: operation.id,
+        kind: "replace_range",
+        from: operation.from,
+        to: operation.to,
+        markdown: imageMarkdown,
+        source: "ai",
+        addToHistory: true,
+      };
+    }
+    return {
+      id: operationId,
+      documentId: operation.documentId,
+      aiEditOperationId: operation.id,
+      kind: "insert_at",
+      position,
+      markdown: `\n\n${imageMarkdown}\n\n`,
+      source: "ai",
+      addToHistory: true,
+    };
+  }
+
+  return null;
+}
+
+function markdownContainsExcerpt(markdown: string, excerpt: string) {
+  const normalizedMarkdown = normalizeLooseText(markdown);
+  const normalizedExcerpt = normalizeLooseText(excerpt);
+  return Boolean(normalizedExcerpt && normalizedMarkdown.includes(normalizedExcerpt));
+}
+
+function normalizeLooseText(value: string) {
+  return value.replace(/\s+/g, " ").trim();
 }
 
 function isAutomaticSyncMode(syncMode?: SyncMode | null) {

@@ -20,7 +20,7 @@ describe("InsertImageDialog", () => {
     fireEvent.change(screen.getByPlaceholderText("Buscar imagen del proyecto"), {
       target: { value: "arquitectura" },
     });
-    expect(screen.queryByText("Logo.png")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Logo.png" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Arquitectura.png/ }));
     fireEvent.click(screen.getByRole("button", { name: "Insertar" }));
 
@@ -66,11 +66,69 @@ describe("InsertImageDialog", () => {
     expect(onImportImage).not.toHaveBeenCalled();
     expect(onBuildReference).not.toHaveBeenCalled();
   });
+
+  it("shows edit mode with current alt text and delete action", () => {
+    const onDelete = vi.fn();
+
+    renderDialog({
+      variant: "edit",
+      initialAltText: "Proceso de fermentacion",
+      initialUrl: "https://example.com/old.png",
+      onDelete,
+    });
+
+    expect(screen.getByRole("heading", { name: "Editar imagen" })).toBeInTheDocument();
+    expect(screen.getByLabelText(/Texto alternativo/)).toHaveValue("Proceso de fermentacion");
+
+    fireEvent.click(screen.getByRole("button", { name: "Eliminar" }));
+
+    expect(onDelete).toHaveBeenCalledOnce();
+  });
+
+  it("saves URL changes in edit mode", () => {
+    const onInsert = vi.fn();
+
+    renderDialog({
+      variant: "edit",
+      initialAltText: "Imagen antigua",
+      initialUrl: "https://example.com/old.png",
+      onInsert,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "URL" }));
+    expect(screen.getByLabelText(/URL de la imagen/)).toHaveValue("https://example.com/old.png");
+    fireEvent.change(screen.getByLabelText(/Texto alternativo/), {
+      target: { value: "Nueva imagen contextual" },
+    });
+    fireEvent.change(screen.getByLabelText(/URL de la imagen/), {
+      target: { value: "https://example.com/new.png" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+    expect(onInsert).toHaveBeenCalledWith("![Nueva imagen contextual](https://example.com/new.png)");
+  });
+
+  it("can insert a selected project image with an explicit document width", async () => {
+    const onBuildReference = vi.fn().mockResolvedValue({ markdown: "![Arquitectura](assets/arquitectura.png)", asset });
+    const onInsert = vi.fn();
+
+    renderDialog({ onBuildReference, onInsert });
+
+    fireEvent.click(screen.getByRole("button", { name: "Tamaño fijo Define anchura inicial" }));
+    fireEvent.change(screen.getByLabelText("Anchura de imagen"), {
+      target: { value: "65" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Arquitectura.png/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Insertar" }));
+
+    await waitFor(() => expect(onInsert).toHaveBeenCalledWith('<img src="assets/arquitectura.png" alt="Arquitectura" width="65%">'));
+  });
 });
 
 function renderDialog(overrides: Partial<Parameters<typeof InsertImageDialog>[0]> = {}) {
   return render(
     <InsertImageDialog
+      activeProjectId="project-1"
       activeDocumentId="doc-1"
       activeDocumentPath="docs/Notas.md"
       tree={tree}
@@ -102,6 +160,8 @@ const tree: DocumentTreeNode[] = [
         type: "image",
         path: "docs/assets/logo.png",
         mimeType: "image/png",
+        width: 320,
+        height: 180,
       },
       {
         id: "asset-2",
@@ -109,6 +169,8 @@ const tree: DocumentTreeNode[] = [
         type: "image",
         path: "docs/assets/arquitectura.png",
         mimeType: "image/png",
+        width: 800,
+        height: 450,
       },
     ],
   },

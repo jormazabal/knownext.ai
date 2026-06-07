@@ -1780,7 +1780,7 @@ dependencies = [
 
 [[package]]
 name = "knownext-ai"
-version = "2.0.5"
+version = "2.1.0"
 dependencies = [
  "base64 0.22.1",
  "knownext-core",
@@ -1791,8 +1791,9 @@ dependencies = [
 
 [[package]]
 name = "knownext-ai-desktop"
-version = "2.0.5"
+version = "2.1.0"
 dependencies = [
+ "base64 0.22.1",
  "knownext-core",
  "knownext-storage",
  "rustls",
@@ -1809,7 +1810,7 @@ dependencies = [
 
 [[package]]
 name = "knownext-core"
-version = "2.0.5"
+version = "2.1.0"
 dependencies = [
  "serde_json",
  "time",
@@ -1817,7 +1818,7 @@ dependencies = [
 
 [[package]]
 name = "knownext-docs"
-version = "2.0.5"
+version = "2.1.0"
 dependencies = [
  "knownext-core",
  "roxmltree",
@@ -1827,7 +1828,7 @@ dependencies = [
 
 [[package]]
 name = "knownext-storage"
-version = "2.0.5"
+version = "2.1.0"
 dependencies = [
  "base64 0.22.1",
  "knownext-ai",

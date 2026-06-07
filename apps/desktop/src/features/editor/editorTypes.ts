@@ -27,6 +27,12 @@ export type MarkdownEditorAction =
 export type MarkdownEditorController = {
   run: (action: MarkdownEditorAction, options?: MarkdownEditorActionOptions) => boolean;
   replaceMarkdown: (markdown: string, options?: MarkdownEditorReplaceOptions) => boolean;
+  replaceRange: (from: number, to: number, markdown: string, options?: MarkdownEditorReplaceOptions) => boolean;
+  insertMarkdown: (markdown: string, options?: MarkdownEditorReplaceOptions) => boolean;
+  insertMarkdownAt: (position: number, markdown: string, options?: MarkdownEditorReplaceOptions) => boolean;
+  replaceImageAt: (position: number, markdown: string, options?: MarkdownEditorReplaceOptions) => boolean;
+  deleteImageAt: (position: number, options?: MarkdownEditorReplaceOptions) => boolean;
+  setCursorAtClientPoint: (clientX: number, clientY: number, options?: MarkdownEditorReplaceOptions) => boolean;
   insertText: (text: string, options?: MarkdownEditorInsertTextOptions) => boolean;
   setTransientTextPreview: (text: string) => boolean;
   clearTransientTextPreview: () => boolean;
@@ -58,9 +64,21 @@ export type MarkdownEditorInsertTextOptions = {
 export type MarkdownEditorExternalOperation = {
   id: string;
   documentId: string;
+  aiEditOperationId?: string;
+  kind?: "replace_document" | "replace_range" | "insert_at";
   markdown: string;
+  from?: number | null;
+  to?: number | null;
+  position?: number | null;
   source: "ai";
   addToHistory?: boolean;
+};
+
+export type MarkdownEditorImageEditTarget = {
+  position: number;
+  src: string;
+  alt: string;
+  title?: string | null;
 };
 
 export type MarkdownEditorFormatState = Partial<Record<MarkdownEditorAction, boolean>>;
@@ -73,9 +91,15 @@ export type MarkdownEditorHistoryState = {
 };
 
 export type MarkdownEditorSelection = {
+  focusType?: "selection" | "cursor";
   from: number;
   to: number;
+  position?: number | null;
   text: string;
+  nearTextBefore?: string | null;
+  nearTextAfter?: string | null;
+  blockType?: string | null;
+  blockHash?: string | null;
 };
 
 export const emptyMarkdownEditorFormatState: MarkdownEditorFormatState = {};

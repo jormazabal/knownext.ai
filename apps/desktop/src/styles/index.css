@@ -847,6 +847,7 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .knownext-editor {
+  position: relative;
   color: rgb(var(--app-text));
   font-family: Inter, ui-sans-serif, system-ui, "Segoe UI", Arial, sans-serif;
 }
@@ -1189,11 +1190,107 @@ input[type="range"]::-moz-range-thumb {
 .knownext-editor .ProseMirror img {
   display: block;
   max-width: 100%;
-  height: auto;
-  margin: 10px 0;
+  height: auto !important;
+  margin: 14px auto;
   border: 1px solid rgb(var(--app-border));
   border-radius: 6px;
   background: rgb(var(--app-surface));
+  cursor: default;
+  object-fit: contain !important;
+}
+
+.knownext-editor .milkdown-image-block {
+  max-width: 100%;
+}
+
+.knownext-editor .milkdown-image-block > .image-wrapper {
+  max-width: 100% !important;
+  margin-right: auto;
+  margin-left: auto;
+  cursor: default;
+}
+
+.knownext-editor .milkdown-image-block > .image-wrapper img {
+  max-width: 100% !important;
+  height: auto !important;
+  margin: 0;
+  min-height: 0 !important;
+  max-height: none !important;
+  object-fit: contain !important;
+}
+
+@media (min-width: 768px) {
+  .knownext-editor img:not([width]):not([style*="width"]),
+  .knownext-editor .ProseMirror img:not([width]):not([style*="width"]),
+  .knownext-editor .milkdown-image-block > .image-wrapper:not([style*="width"]) {
+    max-width: 82% !important;
+  }
+}
+
+@media (min-width: 1024px) {
+  .knownext-editor img:not([width]):not([style*="width"]),
+  .knownext-editor .ProseMirror img:not([width]):not([style*="width"]),
+  .knownext-editor .milkdown-image-block > .image-wrapper:not([style*="width"]) {
+    max-width: 70% !important;
+  }
+}
+
+@media (min-width: 1280px) {
+  .knownext-editor img:not([width]):not([style*="width"]),
+  .knownext-editor .ProseMirror img:not([width]):not([style*="width"]),
+  .knownext-editor .milkdown-image-block > .image-wrapper:not([style*="width"]) {
+    max-width: 60% !important;
+  }
+}
+
+@media (min-width: 1536px) {
+  .knownext-editor img:not([width]):not([style*="width"]),
+  .knownext-editor .ProseMirror img:not([width]):not([style*="width"]),
+  .knownext-editor .milkdown-image-block > .image-wrapper:not([style*="width"]) {
+    max-width: 50% !important;
+  }
+}
+
+.knownext-editor .milkdown-image-block > .image-wrapper img {
+  max-width: 100% !important;
+}
+
+.knownext-editor .milkdown-image-block > .image-wrapper .operation {
+  display: none !important;
+}
+
+.knownext-image-edit-overlay {
+  position: fixed;
+  z-index: 90;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  transform: translate(-50%, -100%);
+  border: 1px solid rgb(var(--accent) / 0.34);
+  border-radius: 999px;
+  background: rgb(var(--app-surface) / 0.98);
+  color: rgb(var(--accent));
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 12px 24px rgb(17 24 39 / 0.14);
+  transition: opacity 120ms ease, border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+.knownext-image-edit-overlay svg {
+  flex: 0 0 auto;
+}
+
+.knownext-image-edit-overlay:hover,
+.knownext-image-edit-overlay:focus-visible {
+  border-color: rgb(var(--accent));
+  background: rgb(var(--accent-soft));
+  color: rgb(var(--accent-strong));
+  outline: none;
 }
 
 .knownext-editor .milkdown-menu,

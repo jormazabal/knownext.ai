@@ -127,6 +127,43 @@ describe("AiPromptInput", () => {
     expect(onClearSelectionFocus).toHaveBeenCalledTimes(1);
   });
 
+  it("submits cursor focus as hidden context without rendering a prompt chip", async () => {
+    const onSubmit = vi.fn();
+    const cursorFocus = {
+      documentId: "doc-1",
+      path: "pp.md",
+      focusType: "cursor" as const,
+      from: 42,
+      to: 42,
+      position: 42,
+      text: "",
+      nearTextBefore: "Texto anterior",
+      nearTextAfter: "Texto posterior",
+      blockType: "paragraph",
+      blockHash: "block-1",
+    };
+
+    render(
+      <AiPromptInput
+        documentId="doc-1"
+        projectId="project-1"
+        markdown="Contenido"
+        providerReady
+        selectionFocus={cursorFocus}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    expect(screen.queryByText("Cursor en documento")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Quitar cursor del contexto IA")).not.toBeInTheDocument();
+    expect(screen.queryByText("Texto seleccionado")).not.toBeInTheDocument();
+
+    await userEvent.type(screen.getByPlaceholderText(/Pregunta algo sobre este documento/), "Inserta una tabla aqui");
+    await userEvent.click(screen.getByLabelText("Enviar"));
+
+    expect(onSubmit).toHaveBeenCalledWith("Inserta una tabla aqui", cursorFocus, { executionMode: "quick", reasoningDepth: "light" });
+  });
+
   it("renders attached context files inside the prompt container", () => {
     render(
       <AiPromptInput

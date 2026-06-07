@@ -3008,10 +3008,15 @@ impl LocalApi {
         let user_event = self.ai_user_conversation_event(project_id, &body);
         let context_sources = self.resolve_ai_context_sources(project_id, &body);
         let mut runtime_body = body;
+        let config = self.read_config();
         if let Some(object) = runtime_body.as_object_mut() {
             object.insert(
                 "runtimePermissions".to_string(),
-                self.read_config()["ai"]["permissions"].clone(),
+                config["ai"]["permissions"].clone(),
+            );
+            object.insert(
+                "runtimeAi".to_string(),
+                config["ai"].clone(),
             );
         }
         let mut response = knownext_ai::answer_interaction(
@@ -3268,7 +3273,12 @@ impl LocalApi {
                             .and_then(|document| document["markdown"].as_str().map(str::to_string))
                     })
                     .unwrap_or_default();
-                let next_markdown = append_markdown_reference(&active_markdown, markdown_reference);
+                let next_markdown = insert_markdown_reference_near_focus(
+                    &active_markdown,
+                    markdown_reference,
+                    operation.get("placement"),
+                    runtime_body.get("selectionFocus"),
+                );
                 updated_document = json!({
                     "documentId": document_id,
                     "markdown": next_markdown,
@@ -5364,6 +5374,138 @@ fn append_markdown_reference(markdown: &str, reference: &str) -> String {
     next
 }
 
+fn insert_markdown_reference_near_focus(
+    markdown: &str,
+    reference: &str,
+    placement: Option<&Value>,
+    selection_focus: Option<&Value>,
+) -> String {
+    let placement_type = placement
+        .and_then(|value| value.get("type"))
+        .and_then(Value::as_str)
+        .unwrap_or("document_end");
+    let anchor_excerpt = placement
+        .and_then(|value| value.get("anchorExcerpt"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty());
+    let selection_text = selection_focus
+        .and_then(|value| value.get("text"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty());
+
+    match placement_type {
+        "before_selection" => selection_text
+            .and_then(|excerpt| insert_before_unique_excerpt(markdown, excerpt, reference))
+            .unwrap_or_else(|| append_markdown_reference(markdown, reference)),
+        "after_selection" => selection_text
+            .and_then(|excerpt| insert_after_unique_excerpt(markdown, excerpt, reference))
+            .unwrap_or_else(|| append_markdown_reference(markdown, reference)),
+        "after_paragraph" => anchor_excerpt
+            .and_then(|excerpt| insert_after_unique_excerpt(markdown, excerpt, reference))
+            .unwrap_or_else(|| append_markdown_reference(markdown, reference)),
+        "after_heading" => placement
+            .and_then(|value| value.get("headingPath"))
+            .and_then(Value::as_array)
+            .and_then(|parts| {
+                parts
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .last()
+                    .map(str::to_string)
+            })
+            .and_then(|heading| insert_after_heading(markdown, &heading, reference))
+            .or_else(|| anchor_excerpt.and_then(|excerpt| insert_after_unique_excerpt(markdown, excerpt, reference)))
+            .unwrap_or_else(|| append_markdown_reference(markdown, reference)),
+        "at_cursor" => selection_focus
+            .and_then(|value| value.get("nearTextBefore"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .and_then(|excerpt| insert_after_unique_excerpt(markdown, excerpt, reference))
+            .unwrap_or_else(|| append_markdown_reference(markdown, reference)),
+        _ => append_markdown_reference(markdown, reference),
+    }
+}
+
+fn insert_before_unique_excerpt(markdown: &str, excerpt: &str, reference: &str) -> Option<String> {
+    let normalized_markdown = normalize_line_endings(markdown);
+    let (index, _) = unique_excerpt_match(&normalized_markdown, excerpt)?;
+    Some(join_markdown_blocks(
+        &normalized_markdown[..index],
+        reference,
+        &normalized_markdown[index..],
+    ))
+}
+
+fn insert_after_unique_excerpt(markdown: &str, excerpt: &str, reference: &str) -> Option<String> {
+    let normalized_markdown = normalize_line_endings(markdown);
+    let (index, matched) = unique_excerpt_match(&normalized_markdown, excerpt)?;
+    let insert_at = index + matched.len();
+    Some(join_markdown_blocks(
+        &normalized_markdown[..insert_at],
+        reference,
+        &normalized_markdown[insert_at..],
+    ))
+}
+
+fn insert_after_heading(markdown: &str, heading: &str, reference: &str) -> Option<String> {
+    let normalized = normalize_line_endings(markdown);
+    let mut offset = 0;
+    let mut match_range: Option<(usize, usize)> = None;
+    for line in normalized.split('\n') {
+        let line_len = line.len();
+        if read_atx_heading_text(line).as_deref() == Some(heading) {
+            if match_range.is_some() {
+                return None;
+            }
+            match_range = Some((offset, line_len));
+        }
+        offset += line_len + 1;
+    }
+    let (index, len) = match_range?;
+    let insert_at = index + len;
+    Some(join_markdown_blocks(&normalized[..insert_at], reference, &normalized[insert_at..]))
+}
+
+fn unique_excerpt_match(markdown: &str, excerpt: &str) -> Option<(usize, String)> {
+    let normalized_excerpt = normalize_line_endings(excerpt).trim().to_string();
+    if normalized_excerpt.is_empty() {
+        return None;
+    }
+    let normalized_markdown = normalize_line_endings(markdown);
+    let first = normalized_markdown.find(&normalized_excerpt)?;
+    if normalized_markdown[first + normalized_excerpt.len()..].contains(&normalized_excerpt) {
+        return None;
+    }
+    Some((first, normalized_excerpt))
+}
+
+fn normalize_line_endings(value: &str) -> String {
+    value.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn join_markdown_blocks(before: &str, insertion: &str, after: &str) -> String {
+    let before = before.trim_end();
+    let insertion = insertion.trim();
+    let after = after.trim_start();
+    match (before.is_empty(), after.is_empty()) {
+        (true, true) => format!("{insertion}\n"),
+        (true, false) => format!("{insertion}\n\n{after}"),
+        (false, true) => format!("{before}\n\n{insertion}\n"),
+        (false, false) => format!("{before}\n\n{insertion}\n\n{after}"),
+    }
+}
+
+fn read_atx_heading_text(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    let level = trimmed.chars().take_while(|ch| *ch == '#').count();
+    if !(1..=6).contains(&level) || !trimmed.chars().nth(level).is_some_and(char::is_whitespace) {
+        return None;
+    }
+    Some(trimmed[level..].trim().trim_end_matches('#').trim().to_string())
+}
+
 fn chunk_text(text: &str, max_chars: usize, overlap_chars: usize) -> Vec<String> {
     let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
     let chars = normalized.chars().collect::<Vec<_>>();
@@ -5644,6 +5786,73 @@ mod tests {
 
     fn child_id_for_path(id: &str) -> String {
         id.replace("::", "%3A%3A").replace('/', "%2F")
+    }
+
+    #[test]
+    fn image_reference_uses_selection_as_context_but_respects_model_heading_placement() {
+        let markdown = "# Historia\n\n## Introduccion\n\nTexto inicial.\n\n## Origenes antiguos\n\nLa cerveza nace como bebida fermentada.\n\n## Edad Media\n\nOtro apartado.";
+        let reference = "![Cerveceria antigua](assets/cerveceria-antigua.png)";
+        let next = insert_markdown_reference_near_focus(
+            markdown,
+            reference,
+            Some(&json!({
+                "type": "after_heading",
+                "headingPath": ["Historia", "Edad Media"],
+                "anchorExcerpt": null
+            })),
+            Some(&json!({
+                "text": "La cerveza nace como bebida fermentada.",
+                "nearTextBefore": "## Origenes antiguos"
+            })),
+        );
+
+        assert!(next.contains("## Edad Media\n\n![Cerveceria antigua](assets/cerveceria-antigua.png)\n\nOtro apartado."));
+        assert!(next.contains("La cerveza nace como bebida fermentada.\n\n## Edad Media"));
+    }
+
+    #[test]
+    fn image_reference_can_follow_selected_context_when_model_chooses_selection_placement() {
+        let markdown = "# Historia\r\n\r\n## Origenes antiguos\r\n\r\nParrafo seleccionado para contexto.\r\n\r\nCierre.";
+        let reference = "![Mapa cervecero](assets/mapa.png)";
+        let next = insert_markdown_reference_near_focus(
+            markdown,
+            reference,
+            Some(&json!({
+                "type": "after_selection",
+                "headingPath": null,
+                "anchorExcerpt": null
+            })),
+            Some(&json!({
+                "text": "Parrafo seleccionado para contexto.",
+                "nearTextBefore": "## Origenes antiguos"
+            })),
+        );
+
+        assert_eq!(
+            next,
+            "# Historia\n\n## Origenes antiguos\n\nParrafo seleccionado para contexto.\n\n![Mapa cervecero](assets/mapa.png)\n\nCierre."
+        );
+    }
+
+    #[test]
+    fn image_reference_falls_back_to_document_end_without_reliable_placement() {
+        let markdown = "# Documento\n\nContenido.";
+        let reference = "![Apoyo visual](assets/apoyo.png)";
+        let next = insert_markdown_reference_near_focus(
+            markdown,
+            reference,
+            Some(&json!({
+                "type": "after_heading",
+                "headingPath": ["No existe"],
+                "anchorExcerpt": null
+            })),
+            Some(&json!({ "text": "Contenido." })),
+        );
+
+        assert_eq!(
+            next,
+            "# Documento\n\nContenido.\n\n![Apoyo visual](assets/apoyo.png)\n"
+        );
     }
 
     fn run_git(command: &mut Command) {

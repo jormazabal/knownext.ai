@@ -143,7 +143,7 @@ export async function getProjectImageUsage(projectId: string, assetId: string): 
 }
 
 export function getProjectImageContentUrl(projectId: string, assetId: string): string {
-  return `knownext-asset://${encodeURIComponent(projectId)}/${encodeURIComponent(assetId)}`;
+  return `http://knownext-asset.localhost/${encodeURIComponent(projectId)}/${encodeURIComponent(assetId)}`;
 }
 
 export async function getProjectImageContentDataUrl(projectId: string, assetId: string): Promise<string> {

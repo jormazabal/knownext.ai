@@ -1,17 +1,36 @@
 import { useEffect, useState } from "react";
 import { CountdownCloseButton } from "../../components/ui/CountdownCloseButton";
+import { AiEditProposalCard } from "./AiEditProposalCard";
 import { AiPendingIntentActions } from "./AiPendingIntentActions";
-import type { AiIntentActionType, AiPendingIntent } from "../../types/domain";
+import type { AiEditProposal, AiIntentActionType, AiPendingIntent } from "../../types/domain";
 
 type AiResponseBubbleProps = {
   bubble: { id: string; answer: string } | null;
   pendingIntent?: AiPendingIntent | null;
+  editProposal?: AiEditProposal | null;
+  staleEditOperationIds?: string[];
+  blockedEditOperationReasons?: Record<string, string>;
+  appliedEditOperationIds?: string[];
   onIntentAction?: (action: AiIntentActionType, intentId: string) => void | Promise<void>;
+  onApplyEditProposal?: (proposalId: string, operationIds?: string[]) => void | Promise<void>;
+  onDiscardEditProposal?: (proposalId: string) => void;
   onClose: () => void;
   onOpenConversation: () => void;
 };
 
-export function AiResponseBubble({ bubble, pendingIntent = null, onIntentAction, onClose, onOpenConversation }: AiResponseBubbleProps) {
+export function AiResponseBubble({
+  bubble,
+  pendingIntent = null,
+  editProposal = null,
+  staleEditOperationIds = [],
+  blockedEditOperationReasons = {},
+  appliedEditOperationIds = [],
+  onIntentAction,
+  onApplyEditProposal,
+  onDiscardEditProposal,
+  onClose,
+  onOpenConversation,
+}: AiResponseBubbleProps) {
   const [visibleBubble, setVisibleBubble] = useState(bubble);
   const [closing, setClosing] = useState(false);
 
@@ -57,6 +76,18 @@ export function AiResponseBubble({ bubble, pendingIntent = null, onIntentAction,
               onAction={onIntentAction}
               onOpenConversation={onOpenConversation}
               showConversationAction
+            />
+          ) : null}
+          {onApplyEditProposal && onDiscardEditProposal ? (
+            <AiEditProposalCard
+              proposal={editProposal}
+              staleOperationIds={staleEditOperationIds}
+              blockedOperationReasons={blockedEditOperationReasons}
+              appliedOperationIds={appliedEditOperationIds}
+              compact
+              onApply={onApplyEditProposal}
+              onDiscard={onDiscardEditProposal}
+              onOpenConversation={onOpenConversation}
             />
           ) : null}
         </div>

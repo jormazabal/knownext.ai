@@ -2,6 +2,16 @@
 
 All KnowNext.ai releases use one monolithic application version for the frontend, Tauri shell, Rust runtime, Windows updater, and Android updater.
 
+## 2.1.0 - 2026-06-07
+
+- Reworked AI document editing into a direct Canvas-style workflow: structured edit proposals are validated and applied automatically when safe, including selected text, cursor placement, whole-document updates, tables, generated images and multi-section document changes.
+- Added richer AI edit contracts in the Rust/Tauri runtime, including deterministic Markdown operation application, image generation and insertion operations, cursor-aware context, project context sources, and safer handling when document content has changed.
+- Improved Markdown image handling in the visual editor: project images render through the local asset scheme, preserve aspect ratio, support responsive default sizing, allow explicit width overrides, and expose a hover edit action for replacing, deleting or changing alt text.
+- Redesigned the image insertion/editing dialog with a selected-image preview, compact project image selection, URL/upload paths, alt text, and default/custom document width controls.
+- Restored robust controlled drag and drop in the document tree for Tauri: documents and folders can be moved, project files can be dragged into the AI prompt as context, and project images can be dropped into the active document at the cursor position under the mouse.
+- Kept cursor focus as hidden AI context instead of a visible prompt chip when no text is selected, while selected text remains visibly removable from the prompt input.
+- Expanded automated coverage for AI edit proposal application, prompt context behavior, document tree drag/drop, image editing/insertion UI, and project/runtime contracts.
+
 ## 2.0.5 - 2026-06-06
 
 - Implemented local RAG indexing through the Rust/Tauri runtime: project documents and supported text attachments can be indexed locally, status/rebuild/delete contracts are real, and AI interactions automatically receive relevant indexed chunks alongside explicit prompt context.
