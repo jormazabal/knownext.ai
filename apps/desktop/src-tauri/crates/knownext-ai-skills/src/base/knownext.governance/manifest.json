@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "id": "knownext.governance",
+  "name": "Gobernanza",
+  "version": "2.0.0",
+  "source": "base",
+  "description": "Aplica limites de privacidad, permisos y local-first en interacciones IA.",
+  "categories": ["governance", "privacy"],
+  "capabilities": ["privacy_scan", "local_first"],
+  "outputActions": ["answer"],
+  "requires": [],
+  "validators": ["governance.privacy"],
+  "runtimeEnabled": false,
+  "modes": [
+    {
+      "id": "privacy",
+      "name": "Privacidad",
+      "description": "Detectar y explicar riesgos de secretos o datos sensibles.",
+      "whenToUse": ["El usuario pide revisar privacidad, secretos o contenido compartible."],
+      "whenNotToUse": ["La tarea es una edicion documental ordinaria."],
+      "supportedActions": ["answer"],
+      "requiresCapabilities": ["privacy_scan"],
+      "validators": ["governance.privacy"],
+      "riskLevel": "medium",
+      "contextBudget": 1200
+    },
+    {
+      "id": "local_first",
+      "name": "Local-first",
+      "description": "Recordar limites de ejecucion local y permisos runtime.",
+      "whenToUse": ["La peticion afecta permisos, proveedor IA, datos locales o runtime."],
+      "whenNotToUse": ["La tarea es solo redactar contenido no sensible."],
+      "supportedActions": ["answer"],
+      "requiresCapabilities": [],
+      "validators": ["governance.privacy"],
+      "riskLevel": "low",
+      "contextBudget": 800
+    }
+  ]
+}

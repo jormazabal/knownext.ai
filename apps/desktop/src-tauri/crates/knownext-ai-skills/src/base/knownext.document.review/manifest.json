@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "id": "knownext.document.review",
+  "name": "Revision documental",
+  "version": "2.0.0",
+  "source": "base",
+  "description": "Revisa claridad, riesgos, consistencia y completitud de documentos.",
+  "categories": ["document", "review"],
+  "capabilities": ["document_review", "markdown_review"],
+  "outputActions": ["answer", "edit_document"],
+  "requires": [],
+  "validators": ["document.review.evidence"],
+  "runtimeEnabled": false,
+  "modes": [
+    {
+      "id": "clarity",
+      "name": "Claridad",
+      "description": "Detecta redundancias, ambiguedad y problemas de legibilidad.",
+      "whenToUse": ["El usuario pide revisar, simplificar o mejorar la claridad."],
+      "whenNotToUse": ["El usuario pide crear contenido nuevo desde cero."],
+      "supportedActions": ["answer", "edit_document"],
+      "requiresCapabilities": [],
+      "validators": ["document.review.evidence"],
+      "riskLevel": "medium",
+      "contextBudget": 1200
+    },
+    {
+      "id": "risk",
+      "name": "Riesgos",
+      "description": "Identifica riesgos, contradicciones, supuestos y decisiones abiertas.",
+      "whenToUse": ["El usuario pide encontrar riesgos, huecos o contradicciones."],
+      "whenNotToUse": ["Solo se pide formato o tabla Markdown."],
+      "supportedActions": ["answer", "edit_document"],
+      "requiresCapabilities": [],
+      "validators": ["document.review.evidence"],
+      "riskLevel": "medium",
+      "contextBudget": 1400
+    }
+  ]
+}

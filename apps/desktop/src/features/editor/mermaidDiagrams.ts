@@ -3,6 +3,7 @@ export type MermaidDiagramWidth = "compact" | "auto" | "wide" | "full";
 export type MermaidDiagramMetadata = {
   caption?: string | null;
   width?: MermaidDiagramWidth | null;
+  widthRatio?: number | null;
 };
 
 export type MermaidDiagramBlock = {
@@ -20,6 +21,7 @@ export type MermaidRenderedAsset = {
   code: string;
   caption?: string | null;
   width?: MermaidDiagramWidth | null;
+  widthRatio?: number | null;
   svg: string;
   pngDataUrl: string | null;
 };
@@ -36,14 +38,16 @@ export const defaultMermaidCode = `flowchart TD
 export function buildMermaidMarkdown({
   code,
   caption,
-  width = "wide",
+  width,
+  widthRatio,
 }: {
   code: string;
   caption?: string | null;
   width?: MermaidDiagramWidth | null;
+  widthRatio?: number | null;
 }) {
   const normalizedCode = normalizeMermaidCode(stripKnownextDiagramMetadata(code));
-  const metadata = buildKnownextDiagramMetadata({ caption, width });
+  const metadata = buildKnownextDiagramMetadata({ caption, width, widthRatio });
   return `\`\`\`mermaid\n${metadata ? `${metadata}\n` : ""}${normalizedCode}\n\`\`\``;
 }
 
@@ -61,10 +65,39 @@ export function extractKnownextDiagramMetadata(code: string): MermaidDiagramMeta
     return {
       caption: typeof parsed.caption === "string" ? parsed.caption : null,
       width: isMermaidDiagramWidth(parsed.width) ? parsed.width : null,
+      widthRatio: normalizeDiagramWidthRatio(parsed.widthRatio),
     };
   } catch {
     return {};
   }
+}
+
+export function updateKnownextDiagramMetadata(code: string, patch: MermaidDiagramMetadata) {
+  const current = extractKnownextDiagramMetadata(code);
+  const next: MermaidDiagramMetadata = {
+    caption: patch.caption === undefined ? current.caption : patch.caption,
+    width: patch.width === undefined ? current.width : patch.width,
+    widthRatio: patch.widthRatio === undefined ? current.widthRatio : patch.widthRatio,
+  };
+  const renderCode = stripKnownextDiagramMetadata(code);
+  const metadata = buildKnownextDiagramMetadata(next);
+  return normalizeMermaidCode(`${metadata ? `${metadata}\n` : ""}${renderCode}`);
+}
+
+export function normalizeDiagramWidthRatio(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.max(0.25, Math.min(1, Math.round(value * 1000) / 1000));
+}
+
+export function legacyDiagramWidthToRatio(width?: MermaidDiagramWidth | null) {
+  if (width === "compact") return 0.65;
+  if (width === "wide") return 0.9;
+  if (width === "full") return 1;
+  return null;
+}
+
+export function resolveMermaidDiagramWidthRatio(metadata: MermaidDiagramMetadata) {
+  return normalizeDiagramWidthRatio(metadata.widthRatio) ?? legacyDiagramWidthToRatio(metadata.width);
 }
 
 export function stripKnownextDiagramMetadata(code: string) {
@@ -187,7 +220,8 @@ export async function prepareMermaidDiagramAssets(markdown: string): Promise<Mer
       codeHash: stableHash(block.renderCode),
       code: block.renderCode,
       caption: block.metadata.caption ?? null,
-      width: block.metadata.width ?? "wide",
+      width: block.metadata.width ?? null,
+      widthRatio: block.metadata.widthRatio ?? null,
       svg,
       pngDataUrl,
     });
@@ -265,7 +299,12 @@ function loadMermaid() {
 function buildKnownextDiagramMetadata(metadata: MermaidDiagramMetadata) {
   const cleanMetadata: MermaidDiagramMetadata = {};
   if (metadata.caption?.trim()) cleanMetadata.caption = metadata.caption.trim();
-  if (metadata.width && metadata.width !== "auto") cleanMetadata.width = metadata.width;
+  const widthRatio = normalizeDiagramWidthRatio(metadata.widthRatio);
+  if (widthRatio) {
+    cleanMetadata.widthRatio = widthRatio;
+  } else if (metadata.width && metadata.width !== "auto") {
+    cleanMetadata.width = metadata.width;
+  }
   if (Object.keys(cleanMetadata).length === 0) return "";
   return `${metadataPrefix} ${JSON.stringify(cleanMetadata)}`;
 }

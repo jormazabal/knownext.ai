@@ -12,14 +12,12 @@ import {
   type MermaidDiagramCategory,
   type MermaidDiagramTemplate,
 } from "../editor/mermaidCatalog";
-import type { MermaidDiagramWidth } from "../editor/mermaidDiagrams";
 import { buildMermaidMarkdown, defaultMermaidCode, renderMermaidSvg, validateMermaidCode } from "../editor/mermaidDiagrams";
 
 type InsertDiagramDialogProps = {
   variant?: "insert" | "edit";
   initialCode?: string;
   initialCaption?: string | null;
-  initialWidth?: MermaidDiagramWidth | null;
   diagramConfig?: AiDiagramConfig | null;
   onClose: () => void;
   onInsert: (markdown: string) => void;
@@ -39,7 +37,6 @@ export function InsertDiagramDialog({
   variant = "insert",
   initialCode = defaultMermaidCode,
   initialCaption = "",
-  initialWidth,
   diagramConfig = defaultAiConfig.diagrams,
   onClose,
   onInsert,
@@ -50,7 +47,6 @@ export function InsertDiagramDialog({
   const initialTemplate = findTemplateForCode(initialCode);
   const [code, setCode] = useState(initialCode.trim() || initialTemplate?.code || defaultMermaidCode);
   const [caption, setCaption] = useState(initialCaption ?? "");
-  const [width, setWidth] = useState<MermaidDiagramWidth>(initialWidth ?? config.defaultWidth);
   const [activeTemplateId, setActiveTemplateId] = useState(initialTemplate?.id ?? mermaidDiagramTemplates[0].id);
   const [category, setCategory] = useState<MermaidDiagramCategory | "all">("all");
   const [query, setQuery] = useState("");
@@ -107,7 +103,6 @@ export function InsertDiagramDialog({
     setPreviewSvg(null);
     setSelectorOpen(false);
     if (!caption.trim()) setCaption(template.label);
-    if (!initialWidth) setWidth(config.defaultWidth);
   }
 
   async function validateAndPreview(options: { passive?: boolean } = {}) {
@@ -146,7 +141,7 @@ export function InsertDiagramDialog({
   async function accept() {
     const valid = await validateAndPreview();
     if (!valid) return;
-    onInsert(buildMermaidMarkdown({ code, caption, width }));
+    onInsert(buildMermaidMarkdown({ code, caption }));
   }
 
   async function copyText(value: string) {
@@ -252,30 +247,6 @@ export function InsertDiagramDialog({
                 placeholder="Ej. Arquitectura de sincronizacion local"
               />
             </label>
-
-            <fieldset className="mt-4">
-              <legend className="text-[11px] font-semibold text-ink-secondary">Anchura</legend>
-              <div className="mt-1 grid grid-cols-4 overflow-hidden rounded-md border border-line bg-white">
-                {[
-                  ["compact", "S"],
-                  ["auto", "M"],
-                  ["wide", "L"],
-                  ["full", "XL"],
-                ].map(([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className={[
-                      "h-9 border-r border-line text-[11px] font-semibold last:border-r-0",
-                      width === value ? "bg-brand-orange text-white" : "bg-white text-ink-secondary hover:bg-brand-hover hover:text-brand-orange",
-                    ].join(" ")}
-                    onClick={() => setWidth(value as MermaidDiagramWidth)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </fieldset>
 
             <section className="mt-4 rounded-md border border-line bg-white px-3 py-3">
               <div className="mb-2 flex items-center justify-between gap-2">

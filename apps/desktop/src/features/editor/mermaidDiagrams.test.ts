@@ -1,14 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { defaultAiConfig } from "../../lib/api/config";
 import { mermaidDiagramTemplates, validateMermaidPolicy } from "./mermaidCatalog";
-import { buildMermaidMarkdown, extractKnownextDiagramMetadata, findMermaidDiagramBlocks, stripKnownextDiagramMetadata } from "./mermaidDiagrams";
+import {
+  buildMermaidMarkdown,
+  extractKnownextDiagramMetadata,
+  findMermaidDiagramBlocks,
+  resolveMermaidDiagramWidthRatio,
+  stripKnownextDiagramMetadata,
+  updateKnownextDiagramMetadata,
+} from "./mermaidDiagrams";
 
 describe("mermaidDiagrams", () => {
   it("stores editable diagram metadata inside the Mermaid block", () => {
     const markdown = buildMermaidMarkdown({
       code: "flowchart TD\n  A --> B",
       caption: "Flujo de aprobacion",
-      width: "wide",
+      widthRatio: 0.72,
     });
 
     expect(markdown).toContain("```mermaid");
@@ -17,7 +24,7 @@ describe("mermaidDiagrams", () => {
 
     const block = findMermaidDiagramBlocks(markdown)[0];
     expect(block.renderCode).toBe("flowchart TD\n  A --> B");
-    expect(block.metadata).toEqual({ caption: "Flujo de aprobacion", width: "wide" });
+    expect(block.metadata).toEqual({ caption: "Flujo de aprobacion", width: null, widthRatio: 0.72 });
   });
 
   it("finds only Mermaid fenced blocks and strips KnowNext metadata before rendering", () => {
@@ -37,8 +44,22 @@ describe("mermaidDiagrams", () => {
 
     expect(blocks).toHaveLength(1);
     expect(blocks[0].renderCode).toBe("sequenceDiagram\n  A->>B: Hola");
-    expect(extractKnownextDiagramMetadata(blocks[0].code)).toEqual({ caption: "Arquitectura", width: "full" });
+    expect(extractKnownextDiagramMetadata(blocks[0].code)).toEqual({ caption: "Arquitectura", width: "full", widthRatio: null });
     expect(stripKnownextDiagramMetadata(blocks[0].code)).not.toContain("knownext");
+  });
+
+  it("maps legacy diagram width and can reset persisted size metadata", () => {
+    const code = '%% knownext: {"caption":"Arquitectura","width":"wide"}\nflowchart TD\n  A --> B';
+
+    expect(resolveMermaidDiagramWidthRatio(extractKnownextDiagramMetadata(code))).toBe(0.9);
+
+    const resized = updateKnownextDiagramMetadata(code, { width: null, widthRatio: 0.5 });
+    expect(extractKnownextDiagramMetadata(resized)).toEqual({ caption: "Arquitectura", width: null, widthRatio: 0.5 });
+
+    const reset = updateKnownextDiagramMetadata(resized, { width: null, widthRatio: null });
+    expect(extractKnownextDiagramMetadata(reset)).toEqual({ caption: "Arquitectura", width: null, widthRatio: null });
+    expect(reset).not.toContain("width");
+    expect(reset).toContain("flowchart TD");
   });
 
   it("normalizes literal escaped line breaks generated inside diagram labels", () => {

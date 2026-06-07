@@ -2,6 +2,7 @@ use base64::Engine;
 use reqwest::blocking::{multipart, Client};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT};
 use serde_json::{json, Value};
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 pub fn answer_interaction(
@@ -61,7 +62,11 @@ pub fn answer_interaction(
         );
     };
 
-    let request_body = build_response_request(payload, prompt, &context_sources, model);
+    let selector_proposal = run_skill_selector(openai_key, payload, prompt, model);
+    let skill_context =
+        knownext_ai_skills::select_skills_for_request(payload, selector_proposal.as_ref());
+    let request_body =
+        build_response_request(payload, prompt, &context_sources, model, &skill_context);
     let response = openai_client(openai_key)
         .post("https://api.openai.com/v1/responses")
         .json(&request_body)
@@ -118,7 +123,7 @@ pub fn answer_interaction(
         }
     };
 
-    if let Some(response) = structured_interaction_response(
+    if let Some(mut response) = structured_interaction_response(
         project_id,
         payload,
         document_id,
@@ -131,6 +136,7 @@ pub fn answer_interaction(
         mode,
         &context_sources,
     ) {
+        apply_skill_context_to_response(&mut response, payload, &skill_context);
         return response;
     }
 
@@ -163,7 +169,7 @@ pub fn answer_interaction(
         "sourcesUsed": public_context_sources,
     });
 
-    json!({
+    let mut response = json!({
         "interactionId": interaction_id,
         "status": "completed",
         "display": "bubble",
@@ -190,7 +196,9 @@ pub fn answer_interaction(
         "requiresConfirmation": null,
         "contextSources": null,
         "expiredContextSourceIds": []
-    })
+    });
+    apply_skill_context_to_response(&mut response, payload, &skill_context);
+    response
 }
 
 pub fn prompt_response(
@@ -430,6 +438,7 @@ fn build_response_request(
     prompt: &str,
     context_sources: &Value,
     model: &str,
+    skill_context: &knownext_ai_skills::SkillRuntimeContext,
 ) -> Value {
     let active_markdown = payload
         .get("activeMarkdown")
@@ -452,7 +461,7 @@ fn build_response_request(
         normalize_reasoning_depth(payload.get("reasoningDepth").and_then(Value::as_str))
     };
     let reasoning_guidance = reasoning_instruction(execution_mode, reasoning_depth);
-    let diagram_guidance = diagram_instruction(payload);
+    let diagram_guidance = skill_context.prompt_guidance.as_str();
     let system = format!(
         "{} {} {}",
         concat!(
@@ -502,63 +511,263 @@ fn build_response_request(
     })
 }
 
-fn diagram_instruction(payload: &Value) -> String {
-    let config = payload
-        .pointer("/clientContext/diagramConfig")
-        .filter(|value| value.is_object());
-    let enabled = config
-        .and_then(|value| value.get("enabled"))
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
-    if !enabled {
-        return "La capacidad de diagramas esta desactivada: no propongas action insert_diagram ni bloques mermaid.".to_string();
+fn run_skill_selector(
+    openai_key: &str,
+    payload: &Value,
+    prompt: &str,
+    model: &str,
+) -> Option<knownext_ai_skills::AiSkillSelectorProposal> {
+    let request_body = build_skill_selector_request(payload, prompt, model);
+    let response = openai_client(openai_key)
+        .post("https://api.openai.com/v1/responses")
+        .json(&request_body)
+        .send()
+        .ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let value = response.json::<Value>().ok()?;
+    let text = extract_response_text(&value)?;
+    serde_json::from_str::<knownext_ai_skills::AiSkillSelectorProposal>(&text).ok()
+}
+
+fn build_skill_selector_request(payload: &Value, prompt: &str, model: &str) -> Value {
+    let candidates = knownext_ai_skills::selector_candidates_json(payload);
+    let execution_mode = normalize_execution_mode(payload.get("executionMode").and_then(Value::as_str));
+    let selection = payload
+        .get("selectionFocus")
+        .filter(|value| !value.is_null())
+        .cloned()
+        .unwrap_or(Value::Null);
+    let user_content = json!({
+        "prompt": prompt,
+        "executionMode": execution_mode,
+        "hasActiveDocument": payload.get("documentId").and_then(Value::as_str).is_some(),
+        "hasSelection": selection.is_object(),
+        "candidateSkills": candidates["candidateSkills"],
+        "diagramConfig": payload.pointer("/clientContext/diagramConfig").or_else(|| payload.pointer("/runtimeAi/diagrams")).cloned().unwrap_or(Value::Null),
+        "runtimePermissions": payload.get("runtimePermissions").cloned().unwrap_or_else(|| json!({}))
+    });
+    json!({
+        "model": normalize_text_model(model),
+        "input": [
+            {
+                "role": "system",
+                "content": concat!(
+                    "Eres el selector de skills de KnowNext.ai. ",
+                    "Elige solo skills y modos relevantes desde candidateSkills. ",
+                    "No ejecutes acciones, no pidas permisos y no inventes ids. ",
+                    "Devuelve JSON estricto con selected. ",
+                    "En modo quick elige como maximo una skill; en reasoning como maximo dos. ",
+                    "Selecciona knownext.markdown/table cuando la tarea pida tablas Markdown. ",
+                    "Selecciona knownext.mermaid con el modo diagram_* mas cercano cuando la tarea pida diagramas."
+                )
+            },
+            { "role": "user", "content": serde_json::to_string(&user_content).unwrap_or_else(|_| "{}".to_string()) }
+        ],
+        "max_output_tokens": 900,
+        "text": { "format": skill_selector_output_format() }
+    })
+}
+
+fn skill_selector_output_format() -> Value {
+    json!({
+        "type": "json_schema",
+        "name": "knownext_skill_selector",
+        "strict": true,
+        "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["selected"],
+            "properties": {
+                "selected": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["skillId", "modeId", "action", "confidence", "reason"],
+                        "properties": {
+                            "skillId": { "type": "string" },
+                            "modeId": { "type": "string" },
+                            "action": { "type": "string" },
+                            "confidence": { "enum": ["high", "medium", "low"] },
+                            "reason": { "type": "string" }
+                        }
+                    }
+                }
+            }
+        }
+    })
+}
+
+fn apply_skill_context_to_response(
+    response: &mut Value,
+    payload: &Value,
+    base_context: &knownext_ai_skills::SkillRuntimeContext,
+) {
+    let mut used_skill_ids = base_context.used_skill_ids.clone();
+    let mut applications = base_context.applications.clone();
+    let mut diagnostics = base_context.diagnostics.clone();
+    let mut blocking_message: Option<String> = None;
+
+    let diagram_operations = response
+        .pointer("/editProposal/operations")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|operation| operation.get("action").and_then(Value::as_str) == Some("insert_diagram"))
+        .collect::<Vec<_>>();
+
+    for operation in diagram_operations {
+        let diagram_code = operation
+            .get("diagramCode")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let diagram_type = operation.get("diagramType").and_then(Value::as_str);
+        let validation =
+            knownext_ai_skills::validate_mermaid_diagram(diagram_code, diagram_type, payload);
+        if knownext_ai_skills::diagnostics_have_errors(&validation) {
+            blocking_message = Some(
+                validation
+                    .iter()
+                    .find(|diagnostic| diagnostic.status == "error")
+                    .map(|diagnostic| diagnostic.title.clone())
+                    .unwrap_or_else(|| "La skill Mermaid bloqueo el diagrama propuesto.".to_string()),
+            );
+        }
+        for diagnostic in validation {
+            if !used_skill_ids.contains(&diagnostic.skill_id)
+                && diagnostic.skill_id.starts_with("knownext.")
+            {
+                used_skill_ids.push(diagnostic.skill_id.clone());
+            }
+            diagnostics.push(diagnostic);
+        }
     }
 
-    let profile = config
-        .and_then(|value| value.get("visualProfile"))
-        .and_then(Value::as_str)
-        .unwrap_or("visual_local");
-    let icon_set = config
-        .and_then(|value| value.get("iconSet"))
-        .and_then(Value::as_str)
-        .unwrap_or("lucide");
-    let image_policy = config
-        .and_then(|value| value.get("imagePolicy"))
-        .and_then(Value::as_str)
-        .unwrap_or("project_assets");
-    let beta_policy = config
-        .and_then(|value| value.get("betaPolicy"))
-        .and_then(Value::as_str)
-        .unwrap_or("ask");
-    let ai_mode = config
-        .and_then(|value| value.get("aiGenerationMode"))
-        .and_then(Value::as_str)
-        .unwrap_or("visual");
+    if applications.iter().any(|application| {
+        application.skill_id == "knownext.markdown"
+            && application.mode_id == "table"
+            && application.status == "applied"
+    }) {
+        let mut markdown_fragments = Vec::new();
+        if let Some(answer) = response.get("answer").and_then(Value::as_str) {
+            markdown_fragments.push(answer.to_string());
+        }
+        if let Some(operations) = response
+            .pointer("/editProposal/operations")
+            .and_then(Value::as_array)
+        {
+            for operation in operations {
+                for key in ["markdown", "replacementMarkdown"] {
+                    if let Some(markdown) = operation.get(key).and_then(Value::as_str) {
+                        markdown_fragments.push(markdown.to_string());
+                    }
+                }
+            }
+        }
+        if let Some(fragment) = markdown_fragments.iter().find(|fragment| fragment.contains('|')) {
+            diagnostics.extend(knownext_ai_skills::validate_markdown_table(fragment));
+        }
+    }
 
-    let base = "Tipos Mermaid recomendados por uso: flowchart para procesos y dependencias; sequenceDiagram para interacciones; stateDiagram-v2 para ciclos de vida; classDiagram y erDiagram para modelos; journey para experiencia de usuario; gantt y timeline para planificacion e hitos; mindmap para estructura conceptual; quadrantChart para priorizacion; requirementDiagram para trazabilidad; pie y xychart-beta para datos ligeros; C4Context o architecture-beta para arquitectura cuando el perfil lo permita. ";
-    let visual = if profile == "compatible" || ai_mode == "safe" {
-        "Usa sintaxis Mermaid estable y simple. No uses iconos, imagenes, HTML labels, enlaces externos ni tipos beta. "
-    } else if profile == "advanced" {
-        "Puedes usar Mermaid visual enriquecido y tipos beta si aportan claridad, pero prioriza sintaxis validable y evita efectos decorativos. "
-    } else {
-        "Puedes usar Mermaid visual enriquecido con sintaxis estable; reserva tipos beta para casos donde aporten mucho valor. "
-    };
-    let icons = if icon_set == "lucide" && profile != "compatible" {
-        "Si usas iconos, usa solo IDs locales lucide existentes como lucide:user, lucide:monitor, lucide:file-text, lucide:database, lucide:cloud, lucide:cpu, lucide:shield-check o lucide:sparkles; no inventes packs ni IDs. "
-    } else {
-        "No uses iconos dentro de diagramas. "
-    };
-    let images = match image_policy {
-        "external_confirm" if profile == "advanced" => "Evita imagenes externas salvo que el usuario las pida expresamente; no uses CDN para iconos. ",
-        "project_assets" if profile != "compatible" => "No uses URLs externas en diagramas; si necesitas imagenes, referencia solo assets locales del proyecto cuando existan claramente en el contexto. ",
-        _ => "No uses imagenes dentro de diagramas. ",
-    };
-    let beta = match beta_policy {
-        "enabled" if profile == "advanced" => "Puedes usar tipos beta de Mermaid cuando sean la mejor representacion. ",
-        "ask" if profile != "compatible" => "Evita tipos beta si hay una alternativa estable; si los usas, mantenlos pequenos y facilmente editables. ",
-        _ => "No uses tipos beta de Mermaid. ",
-    };
-    format!("Guia de diagramas activa. {base}{visual}{icons}{images}{beta}")
+    used_skill_ids = unique_strings(used_skill_ids);
+    applications = unique_applications(applications);
+    diagnostics = unique_diagnostics(diagnostics);
+
+    if let Some(message) = blocking_message {
+        block_response_for_skill_error(response, &message);
+    }
+
+    response["usedSkills"] = json!(used_skill_ids);
+    response["skillApplications"] = json!(applications);
+    response["skillDiagnostics"] = json!(diagnostics);
+    let used_skills_value = response["usedSkills"].clone();
+    let skill_applications_value = response["skillApplications"].clone();
+    let skill_diagnostics_value = response["skillDiagnostics"].clone();
+    if let Some(events) = response["conversationEvents"].as_array_mut() {
+        for event in events.iter_mut().filter(|event| {
+            event.get("role").and_then(Value::as_str) == Some("assistant")
+                || event.get("type").and_then(Value::as_str) == Some("permission_blocked")
+        }) {
+            event["usedSkills"] = used_skills_value.clone();
+            event["skillApplications"] = skill_applications_value.clone();
+            event["skillDiagnostics"] = skill_diagnostics_value.clone();
+        }
+    }
+}
+
+fn block_response_for_skill_error(response: &mut Value, message: &str) {
+    let document_id = response
+        .pointer("/editProposal/documentId")
+        .cloned()
+        .unwrap_or(Value::Null);
+    response["status"] = Value::from("blocked");
+    response["executionScope"] = Value::from("needs_permission");
+    response["editProposal"] = Value::Null;
+    response["editProposalStatus"] = Value::Null;
+    response["updatedDocument"] = Value::Null;
+    response["answer"] = Value::from(message.to_string());
+    response["operations"] = json!([{
+        "type": "permission_blocked",
+        "status": "blocked",
+        "message": message,
+        "documentId": document_id,
+        "nodeId": null,
+        "path": null,
+        "paths": [],
+        "summary": message,
+        "task": null,
+        "confirmationId": null
+    }]);
+    if let Some(events) = response["conversationEvents"].as_array_mut() {
+        for event in events.iter_mut().filter(|event| {
+            event.get("role").and_then(Value::as_str) == Some("assistant")
+        }) {
+            event["type"] = Value::from("permission_blocked");
+            event["content"] = Value::from(message.to_string());
+            event["summary"] = Value::from(message.to_string());
+        }
+    }
+}
+
+fn unique_strings(values: Vec<String>) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    values
+        .into_iter()
+        .filter(|value| seen.insert(value.clone()))
+        .collect()
+}
+
+fn unique_diagnostics(
+    diagnostics: Vec<knownext_ai_skills::AiSkillDiagnostic>,
+) -> Vec<knownext_ai_skills::AiSkillDiagnostic> {
+    let mut seen = BTreeSet::new();
+    diagnostics
+        .into_iter()
+        .filter(|diagnostic| {
+            seen.insert(format!(
+                "{}:{}:{}",
+                diagnostic.skill_id, diagnostic.status, diagnostic.title
+            ))
+        })
+        .collect()
+}
+
+fn unique_applications(
+    applications: Vec<knownext_ai_skills::AiSkillApplication>,
+) -> Vec<knownext_ai_skills::AiSkillApplication> {
+    let mut seen = BTreeSet::new();
+    applications
+        .into_iter()
+        .filter(|application| {
+            seen.insert(format!(
+                "{}:{}:{}:{}",
+                application.skill_id, application.mode_id, application.action, application.status
+            ))
+        })
+        .collect()
 }
 
 fn structured_output_format() -> Value {
@@ -738,7 +947,10 @@ fn provider_status_response(
         "path": null,
         "paths": [],
         "summary": null,
-        "sourcesUsed": []
+        "sourcesUsed": [],
+        "usedSkills": [],
+        "skillApplications": [],
+        "skillDiagnostics": []
     });
     json!({
         "interactionId": interaction_id,
@@ -766,7 +978,10 @@ fn provider_status_response(
         "affectedDocuments": [],
         "requiresConfirmation": null,
         "contextSources": null,
-        "expiredContextSourceIds": []
+        "expiredContextSourceIds": [],
+        "usedSkills": [],
+        "skillApplications": [],
+        "skillDiagnostics": []
     })
 }
 
@@ -2366,6 +2581,7 @@ mod tests {
 
     #[test]
     fn response_request_applies_execution_mode_and_reasoning_depth() {
+        let skill_context = knownext_ai_skills::resolve_for_request(&json!({}), None);
         let quick = build_response_request(
             &json!({
                 "activeMarkdown": "# Nota",
@@ -2376,6 +2592,7 @@ mod tests {
             "Resume",
             &json!([]),
             "gpt-5.4-mini",
+            &skill_context,
         );
         assert_eq!(quick["max_output_tokens"], 4000);
         assert_eq!(quick["text"]["format"]["type"], "json_schema");
@@ -2399,6 +2616,7 @@ mod tests {
             "Investiga dentro del documento",
             &json!([{ "id": "source", "name": "Fuente", "text": "Dato" }]),
             "gpt-5.4-mini",
+            &skill_context,
         );
         assert_eq!(reasoning["max_output_tokens"], 10000);
         let system = reasoning["input"][0]["content"].as_str().unwrap();
@@ -2581,10 +2799,11 @@ mod tests {
 
     #[test]
     fn structured_diagram_insert_returns_reviewable_mermaid_proposal() {
-        let response = structured_interaction_response(
+        let mut response = structured_interaction_response(
             "project",
             &json!({
                 "runtimePermissions": { "editDocuments": true },
+                "clientContext": { "diagramConfig": { "enabled": true, "visualProfile": "visual_local", "iconSet": "lucide", "imagePolicy": "project_assets", "betaPolicy": "ask" } },
                 "selectionFocus": {
                     "focusType": "cursor",
                     "documentId": "project::doc.md",
@@ -2606,6 +2825,15 @@ mod tests {
             &json!([]),
         )
         .unwrap();
+        let skill_context = knownext_ai_skills::resolve_for_request(
+            &json!({ "clientContext": { "diagramConfig": { "enabled": true } } }),
+            Some("flowchart"),
+        );
+        apply_skill_context_to_response(
+            &mut response,
+            &json!({ "clientContext": { "diagramConfig": { "enabled": true, "visualProfile": "visual_local", "iconSet": "lucide", "imagePolicy": "project_assets", "betaPolicy": "ask" } } }),
+            &skill_context,
+        );
 
         let operation = &response["editProposal"]["operations"][0];
         assert_eq!(response["status"], "completed");
@@ -2615,6 +2843,54 @@ mod tests {
         assert!(operation["markdown"].as_str().unwrap().contains("```mermaid"));
         assert!(operation["markdown"].as_str().unwrap().contains("%% knownext:"));
         assert!(operation["markdown"].as_str().unwrap().contains("flowchart TD"));
+        assert!(response["usedSkills"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|skill| skill == "knownext.mermaid"));
+    }
+
+    #[test]
+    fn skill_validation_blocks_architecture_beta_with_flowchart_edges() {
+        let payload = json!({
+            "runtimePermissions": { "editDocuments": true },
+            "clientContext": { "diagramConfig": { "enabled": true, "visualProfile": "advanced", "iconSet": "lucide", "imagePolicy": "project_assets", "betaPolicy": "enabled" } },
+            "selectionFocus": {
+                "focusType": "cursor",
+                "documentId": "project::doc.md",
+                "from": 8,
+                "to": 8,
+                "position": 8,
+                "text": ""
+            }
+        });
+        let mut response = structured_interaction_response(
+            "project",
+            &payload,
+            Some("project::doc.md"),
+            "interaction",
+            "event",
+            "2026-06-04T00:00:00Z",
+            r##"{"action":"insert_diagram","answer":"He preparado el diagrama.","summary":"Diagrama insertado","diagramType":"architecture-beta","diagramCode":"architecture-beta\n  app --> runtime","diagramCaption":"Arquitectura","placement":{"type":"at_cursor","headingPath":null,"anchorExcerpt":null}}"##,
+            "quick",
+            "light",
+            "document",
+            &json!([]),
+        )
+        .unwrap();
+        let skill_context =
+            knownext_ai_skills::resolve_for_request(&payload, Some("architecture-beta"));
+        apply_skill_context_to_response(&mut response, &payload, &skill_context);
+
+        assert_eq!(response["status"], "blocked");
+        assert!(response["skillDiagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["skillId"] == "knownext.mermaid"
+                && diagnostic["modeId"] == "diagram_structure"
+                && diagnostic["validatorId"] == "mermaid.architecture_beta"
+                && diagnostic["status"] == "error"));
     }
 
     #[test]

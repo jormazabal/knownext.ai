@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 2,
+  "id": "knownext.mermaid",
+  "name": "Mermaid",
+  "version": "2.0.0",
+  "source": "base",
+  "description": "Genera y valida diagramas Mermaid mediante familias, tipos y politicas runtime.",
+  "categories": ["diagrams"],
+  "capabilities": ["mermaid", "diagram_generation", "diagram_validation"],
+  "outputActions": ["insert_diagram", "answer", "edit_document", "create_document"],
+  "requires": [],
+  "validators": ["mermaid.policy"],
+  "runtimeEnabled": true,
+  "modes": [
+    {
+      "id": "diagram_flow",
+      "name": "Flujo",
+      "description": "Procesos, decisiones, estados, journeys e Ishikawa.",
+      "whenToUse": ["El usuario pide explicar pasos, decisiones, estados o causas."],
+      "whenNotToUse": ["El foco principal son datos numericos, secuencia temporal de llamadas o arquitectura estatica."],
+      "supportedActions": ["insert_diagram", "answer", "edit_document", "create_document"],
+      "requiresCapabilities": ["diagrams"],
+      "validators": ["mermaid.policy", "mermaid.flow"],
+      "riskLevel": "low",
+      "contextBudget": 900
+    },
+    {
+      "id": "diagram_sequence",
+      "name": "Secuencia",
+      "description": "Interacciones ordenadas entre usuarios, servicios o componentes.",
+      "whenToUse": ["Importa el orden de mensajes, llamadas o respuestas."],
+      "whenNotToUse": ["Solo hay relaciones estaticas o un modelo de datos."],
+      "supportedActions": ["insert_diagram", "answer", "edit_document", "create_document"],
+      "requiresCapabilities": ["diagrams"],
+      "validators": ["mermaid.policy", "mermaid.sequence"],
+      "riskLevel": "low",
+      "contextBudget": 900
+    },
+    {
+      "id": "diagram_structure",
+      "name": "Estructura",
+      "description": "Clases, ER, C4, bloques y architecture-beta.",
+      "whenToUse": ["El usuario necesita relaciones estructurales, arquitectura, entidades o componentes."],
+      "whenNotToUse": ["El contenido es una lista de pasos o una planificacion con fechas."],
+      "supportedActions": ["insert_diagram", "answer", "edit_document", "create_document"],
+      "requiresCapabilities": ["diagrams"],
+      "validators": ["mermaid.policy", "mermaid.structure", "mermaid.architecture_beta"],
+      "riskLevel": "medium",
+      "contextBudget": 1200
+    },
+    {
+      "id": "diagram_planning",
+      "name": "Planificacion",
+      "description": "Gantt, timeline, kanban, mindmap y arboles.",
+      "whenToUse": ["Hay hitos, tareas, calendario, tablero o taxonomia."],
+      "whenNotToUse": ["La salida requiere precision de hoja de calculo o relaciones tecnicas detalladas."],
+      "supportedActions": ["insert_diagram", "answer", "edit_document", "create_document"],
+      "requiresCapabilities": ["diagrams"],
+      "validators": ["mermaid.policy", "mermaid.planning"],
+      "riskLevel": "low",
+      "contextBudget": 900
+    },
+    {
+      "id": "diagram_data",
+      "name": "Datos",
+      "description": "Pie, quadrant, xychart, sankey, radar, treemap y venn.",
+      "whenToUse": ["El usuario pide comparar, distribuir o mostrar datos ligeros visualmente."],
+      "whenNotToUse": ["Los datos necesitan formulas, precision tabular o multiples ejes complejos."],
+      "supportedActions": ["insert_diagram", "answer", "edit_document", "create_document"],
+      "requiresCapabilities": ["diagrams"],
+      "validators": ["mermaid.policy", "mermaid.data"],
+      "riskLevel": "medium",
+      "contextBudget": 1000
+    },
+    {
+      "id": "diagram_technical",
+      "name": "Tecnico",
+      "description": "GitGraph, requisitos, paquetes, Wardley y event modeling.",
+      "whenToUse": ["El usuario documenta versionado, trazabilidad, paquetes, estrategia tecnica o eventos."],
+      "whenNotToUse": ["La audiencia necesita una representacion sencilla de negocio."],
+      "supportedActions": ["insert_diagram", "answer", "edit_document", "create_document"],
+      "requiresCapabilities": ["diagrams"],
+      "validators": ["mermaid.policy", "mermaid.technical"],
+      "riskLevel": "medium",
+      "contextBudget": 1100
+    }
+  ]
+}

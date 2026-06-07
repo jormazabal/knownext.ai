@@ -918,6 +918,50 @@ input[type="range"]::-moz-range-thumb {
   box-shadow: 0 0 0 1px rgb(var(--accent) / 0.22);
 }
 
+.knownext-editor .ProseMirror-selectednode::before,
+.knownext-editor .ProseMirror-selectednode::after,
+.knownext-editor .knownext-selection-media::before,
+.knownext-editor .knownext-selection-media::after,
+.knownext-editor .milkdown-image-block.ProseMirror-selectednode > .image-wrapper::before,
+.knownext-editor .milkdown-image-block.ProseMirror-selectednode > .image-wrapper::after,
+.knownext-editor .milkdown-image-block.knownext-selection-media > .image-wrapper::before,
+.knownext-editor .milkdown-image-block.knownext-selection-media > .image-wrapper::after {
+  display: none !important;
+  background: transparent !important;
+  content: none !important;
+  opacity: 0 !important;
+}
+
+.knownext-editor .milkdown-image-block.ProseMirror-selectednode,
+.knownext-editor .milkdown-image-block.knownext-selection-media,
+.knownext-editor img.ProseMirror-selectednode,
+.knownext-editor img.knownext-selection-media,
+.knownext-editor .knownext-mermaid-diagram-selected,
+.knownext-editor .knownext-mermaid-diagram.knownext-selection-media {
+  border-color: rgb(var(--accent) / 0.74) !important;
+  outline: 2px solid rgb(var(--accent) / 0.58);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 5px rgb(var(--accent) / 0.10);
+}
+
+.knownext-editor .milkdown-image-block.ProseMirror-selectednode > .image-wrapper,
+.knownext-editor .milkdown-image-block.knownext-selection-media > .image-wrapper {
+  border-radius: 7px;
+  outline: 2px solid rgb(var(--accent) / 0.58);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 5px rgb(var(--accent) / 0.10);
+}
+
+.knownext-editor .milkdown-image-block.ProseMirror-selectednode img,
+.knownext-editor .milkdown-image-block.knownext-selection-media img,
+.knownext-editor img.ProseMirror-selectednode,
+.knownext-editor img.knownext-selection-media,
+.knownext-editor .knownext-mermaid-diagram-selected,
+.knownext-editor .knownext-mermaid-diagram.knownext-selection-media {
+  filter: none !important;
+  opacity: 1 !important;
+}
+
 .knownext-editor .knownext-dictation-preview {
   border-radius: 3px;
   background: rgb(var(--accent) / 0.14);
@@ -1190,7 +1234,6 @@ input[type="range"]::-moz-range-thumb {
 .knownext-editor .ProseMirror img {
   display: block;
   max-width: 100%;
-  height: auto !important;
   margin: 14px auto;
   border: 1px solid rgb(var(--app-border));
   border-radius: 6px;
@@ -1199,24 +1242,44 @@ input[type="range"]::-moz-range-thumb {
   object-fit: contain !important;
 }
 
+.knownext-editor img:not([data-type="image-block"]),
+.knownext-editor .ProseMirror img:not([data-type="image-block"]) {
+  height: auto !important;
+}
+
 .knownext-editor .milkdown-image-block {
+  display: flex;
+  justify-content: center;
   max-width: 100%;
 }
 
 .knownext-editor .milkdown-image-block > .image-wrapper {
+  display: inline-block !important;
+  width: fit-content;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
   max-width: 100% !important;
+  aspect-ratio: auto !important;
   margin-right: auto;
   margin-left: auto;
+  padding: 0 !important;
+  background: transparent !important;
   cursor: default;
 }
 
 .knownext-editor .milkdown-image-block > .image-wrapper img {
   max-width: 100% !important;
-  height: auto !important;
   margin: 0;
   min-height: 0 !important;
+  height: auto !important;
   max-height: none !important;
   object-fit: contain !important;
+}
+
+.knownext-editor .milkdown-image-block > .image-wrapper[data-knownext-image-size="manual"] img {
+  width: 100% !important;
+  height: auto !important;
 }
 
 @media (min-width: 768px) {
@@ -1262,11 +1325,12 @@ input[type="range"]::-moz-range-thumb {
 .knownext-mermaid-diagram {
   position: relative;
   margin: 18px auto 20px;
-  overflow: hidden;
-  border: 1px solid rgb(var(--app-border));
-  border-radius: 8px;
-  background: linear-gradient(180deg, rgb(var(--app-surface)) 0%, rgb(var(--app-panel)) 100%);
-  box-shadow: 0 10px 28px rgb(17 24 39 / 0.07);
+  overflow: visible;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  cursor: default;
+  box-shadow: none;
 }
 
 .knownext-mermaid-diagram-compact {
@@ -1283,76 +1347,45 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .knownext-mermaid-diagram-selected {
-  border-color: rgb(var(--accent) / 0.65);
-  box-shadow: 0 0 0 2px rgb(var(--accent) / 0.12), 0 14px 34px rgb(17 24 39 / 0.09);
+  outline: 2px solid rgb(var(--accent) / 0.58);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 5px rgb(var(--accent) / 0.10);
 }
 
 .knownext-mermaid-diagram-header {
-  display: flex;
-  min-height: 34px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  border-bottom: 1px solid rgb(var(--app-border));
-  background: rgb(var(--app-surface) / 0.92);
-  padding: 6px 8px 6px 12px;
+  display: none;
 }
 
 .knownext-mermaid-diagram-badge {
-  display: inline-flex;
-  align-items: center;
-  height: 20px;
-  border-radius: 999px;
-  border: 1px solid rgb(var(--accent) / 0.22);
-  background: rgb(var(--accent-soft));
-  padding: 0 8px;
-  color: rgb(var(--accent));
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0;
+  display: none;
 }
 
 .knownext-mermaid-diagram-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  opacity: 0;
-  transform: translateY(-1px);
-  transition: opacity 120ms ease, transform 120ms ease;
+  display: none;
 }
 
 .knownext-mermaid-diagram:hover .knownext-mermaid-diagram-actions,
 .knownext-mermaid-diagram:focus-within .knownext-mermaid-diagram-actions,
 .knownext-mermaid-diagram-selected .knownext-mermaid-diagram-actions {
-  opacity: 1;
-  transform: translateY(0);
+  display: none;
 }
 
 .knownext-mermaid-diagram-edit {
-  height: 24px;
-  border: 1px solid rgb(var(--app-border));
-  border-radius: 6px;
-  background: rgb(var(--app-surface));
-  padding: 0 9px;
-  color: rgb(var(--app-text));
-  font-size: 10px;
-  font-weight: 800;
+  display: none;
 }
 
 .knownext-mermaid-diagram-edit:hover,
 .knownext-mermaid-diagram-edit:focus-visible {
-  border-color: rgb(var(--accent) / 0.4);
-  background: rgb(var(--accent-soft));
-  color: rgb(var(--accent));
-  outline: none;
+  display: none;
 }
 
 .knownext-mermaid-diagram-viewport {
   display: grid;
-  min-height: 220px;
+  min-height: 0;
   place-items: center;
-  overflow: auto;
-  padding: 24px;
+  cursor: default;
+  overflow: visible;
+  padding: 0;
 }
 
 .knownext-mermaid-diagram-viewport svg,
@@ -1360,6 +1393,16 @@ input[type="range"]::-moz-range-thumb {
   display: block;
   max-width: 100%;
   height: auto;
+  cursor: default;
+}
+
+.knownext-mermaid-diagram-viewport svg {
+  border: 1px solid rgb(var(--app-border));
+  border-radius: 6px;
+}
+
+.knownext-mermaid-diagram-viewport svg * {
+  cursor: default !important;
 }
 
 .knownext-mermaid-diagram-loading {
@@ -1372,9 +1415,10 @@ input[type="range"]::-moz-range-thumb {
   min-height: 120px;
   padding: 18px;
   place-items: center;
-  border-top: 1px solid rgb(var(--accent) / 0.18);
+  border: 1px solid rgb(var(--accent) / 0.18);
+  border-radius: 6px;
   background: rgb(var(--accent-soft));
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--accent-hover));
   text-align: center;
 }
 
@@ -1387,11 +1431,40 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .knownext-mermaid-diagram-caption {
-  margin: -8px 18px 16px !important;
+  margin: 8px 0 0 !important;
   color: rgb(var(--app-muted)) !important;
   text-align: center;
   font-size: 11px !important;
   line-height: 1.5 !important;
+}
+
+.knownext-diagram-resize-handle {
+  position: absolute;
+  bottom: -11px;
+  left: 50%;
+  width: min(116px, 48%);
+  height: 13px;
+  transform: translateX(-50%);
+  cursor: row-resize;
+  opacity: 0;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.knownext-diagram-resize-handle::before {
+  position: absolute;
+  top: 3px;
+  right: 0;
+  left: 0;
+  height: 7px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgb(var(--accent-ring)), rgb(var(--accent)));
+  box-shadow: 0 10px 18px rgb(var(--accent) / 0.22);
+  content: "";
+}
+
+.knownext-mermaid-diagram:hover .knownext-diagram-resize-handle,
+.knownext-mermaid-diagram-selected .knownext-diagram-resize-handle {
+  opacity: 1;
 }
 
 .knownext-mermaid-dialog-preview {
@@ -1457,32 +1530,85 @@ input[type="range"]::-moz-range-thumb {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 10px;
-  transform: translate(-50%, -100%);
-  border: 1px solid rgb(var(--accent) / 0.34);
-  border-radius: 999px;
+  gap: 3px;
+  padding: 3px;
+  transform: translate(-100%, 0);
+  border: 1px solid rgb(var(--app-border));
+  border-radius: 8px;
   background: rgb(var(--app-surface) / 0.98);
   color: rgb(var(--accent));
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1;
-  cursor: pointer;
   box-shadow: 0 12px 24px rgb(17 24 39 / 0.14);
-  transition: opacity 120ms ease, border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+  cursor: default;
+  backdrop-filter: blur(8px);
 }
 
-.knownext-image-edit-overlay svg {
+.knownext-image-edit-action {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgb(var(--accent));
+  cursor: pointer;
+  outline: none;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.knownext-image-edit-action:hover,
+.knownext-image-edit-action:focus-visible {
+  background: rgb(var(--accent-soft));
+  color: rgb(var(--accent-hover));
+}
+
+.knownext-image-edit-action-danger {
+  color: #dc2626;
+}
+
+.knownext-image-edit-action-danger:hover,
+.knownext-image-edit-action-danger:focus-visible {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.knownext-image-edit-action svg {
   flex: 0 0 auto;
 }
 
-.knownext-image-edit-overlay:hover,
-.knownext-image-edit-overlay:focus-visible {
-  border-color: rgb(var(--accent));
-  background: rgb(var(--accent-soft));
-  color: rgb(var(--accent-strong));
+.knownext-media-viewer-button {
+  display: inline-flex;
+  min-width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 6px;
+  background: rgb(255 255 255 / 0.08);
+  color: #fff;
+  cursor: pointer;
+}
+
+.knownext-media-viewer-button:hover,
+.knownext-media-viewer-button:focus-visible {
+  border-color: rgb(var(--accent) / 0.72);
+  background: rgb(var(--accent) / 0.18);
   outline: none;
+}
+
+.knownext-media-viewer-content {
+  transform-origin: center;
+  transition: transform 120ms ease;
+}
+
+.knownext-media-viewer-diagram svg {
+  display: block;
+  max-width: calc(100vw - 64px);
+  max-height: calc(100dvh - 120px);
+  width: auto;
+  height: auto;
 }
 
 .knownext-editor .milkdown-menu,

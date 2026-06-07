@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Image as ImageIcon, Link, MonitorSmartphone, Search, Trash2, Upload, X } from "lucide-react";
+import { Check, Image as ImageIcon, Link, Search, Trash2, Upload, X } from "lucide-react";
 import { getProjectImageContentUrl } from "../../lib/api/projects";
 import type { AssetImportResponse, DocumentTreeNode, InsertImageReferenceResponse } from "../../types/domain";
 
@@ -40,8 +40,6 @@ export function InsertImageDialog({
   const [query, setQuery] = useState("");
   const [altText, setAltText] = useState(initialAltText);
   const [url, setUrl] = useState(initialUrl || "https://");
-  const [sizeMode, setSizeMode] = useState<"auto" | "custom">("auto");
-  const [customWidth, setCustomWidth] = useState("50");
   const [busy, setBusy] = useState(false);
   const [selectedAssetId, setSelectedAssetId] = useState(initialProjectAsset?.id ?? images[0]?.id ?? "");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -67,7 +65,7 @@ export function InsertImageDialog({
     setBusy(true);
     try {
       const reference = await onBuildReference(activeDocumentId, assetId, altText || null);
-      onInsert(applyImageSize(reference.markdown, sizeMode, customWidth));
+      onInsert(reference.markdown);
     } finally {
       setBusy(false);
     }
@@ -78,7 +76,7 @@ export function InsertImageDialog({
     try {
       const imported = await onImportImage(uploadParentId, file);
       const reference = await onBuildReference(activeDocumentId, imported.asset.id, altText || imported.asset.name.replace(/\.[^.]+$/, ""));
-      onInsert(applyImageSize(reference.markdown, sizeMode, customWidth));
+      onInsert(reference.markdown);
     } finally {
       setBusy(false);
     }
@@ -87,7 +85,7 @@ export function InsertImageDialog({
   function insertUrl() {
     if (!url.trim()) return;
     const alt = altText.trim() || "Imagen";
-    onInsert(buildImageMarkup(alt, url.trim(), sizeMode, customWidth));
+    onInsert(buildImageMarkup(alt, url.trim()));
   }
 
   return (
@@ -130,43 +128,6 @@ export function InsertImageDialog({
                 placeholder="Descripcion breve de la imagen"
               />
             </label>
-            <fieldset className="mt-4">
-              <legend className="flex items-center gap-1.5 text-[11px] font-semibold text-ink-secondary">
-                <MonitorSmartphone size={13} />
-                Tamaño en el documento
-              </legend>
-              <div className="mt-2 grid grid-cols-[1fr_1fr] gap-2 max-[520px]:grid-cols-1">
-                <button
-                  type="button"
-                  className={["rounded-md border px-3 py-2 text-left", sizeMode === "auto" ? "border-orange-200 bg-brand-hover" : "border-line hover:bg-panel"].join(" ")}
-                  onClick={() => setSizeMode("auto")}
-                >
-                  <span className="block text-[12px] font-semibold text-ink-primary">Automatico</span>
-                  <span className="mt-0.5 block text-[10px] text-ink-secondary">Responsive por defecto</span>
-                </button>
-                <button
-                  type="button"
-                  className={["rounded-md border px-3 py-2 text-left", sizeMode === "custom" ? "border-orange-200 bg-brand-hover" : "border-line hover:bg-panel"].join(" ")}
-                  onClick={() => setSizeMode("custom")}
-                >
-                  <span className="block text-[12px] font-semibold text-ink-primary">Tamaño fijo</span>
-                  <span className="mt-0.5 block text-[10px] text-ink-secondary">Define anchura inicial</span>
-                </button>
-              </div>
-              {sizeMode === "custom" ? (
-                <label className="mt-3 flex items-center gap-3 text-[11px] font-semibold text-ink-secondary">
-                  Anchura
-                  <input className="flex-1 accent-brand-orange" type="range" min="20" max="100" step="5" value={customWidth} onChange={(event) => setCustomWidth(event.target.value)} />
-                  <input
-                    className="h-8 w-16 rounded-md border border-line px-2 text-right text-[12px] text-ink-primary outline-none focus:border-brand-orange"
-                    value={customWidth}
-                    onChange={(event) => setCustomWidth(normalizeWidthInput(event.target.value))}
-                    aria-label="Anchura de imagen"
-                  />
-                  <span className="text-[11px] text-ink-secondary">%</span>
-                </label>
-              ) : null}
-            </fieldset>
             {tabMode === "project" ? (
               <div className="mt-4">
                 <label className="relative block">
@@ -258,10 +219,6 @@ export function InsertImageDialog({
                 <dt className="font-semibold text-ink-secondary">Origen</dt>
                 <dd className="mt-0.5 break-words text-ink-primary">{selectedAsset?.path ?? (tabMode === "url" ? url : "Proyecto")}</dd>
               </div>
-              <div>
-                <dt className="font-semibold text-ink-secondary">Tamaño</dt>
-                <dd className="mt-0.5 text-ink-primary">{sizeMode === "auto" ? "Automatico responsive" : `${clampImageWidth(customWidth)}% del ancho disponible`}</dd>
-              </div>
               {selectedAsset?.width && selectedAsset.height ? (
                 <div>
                   <dt className="font-semibold text-ink-secondary">Dimensiones originales</dt>
@@ -312,32 +269,8 @@ function findImageByInitialUrl(images: DocumentTreeNode[], projectId: string, in
   return images.find((image) => initialUrl === getProjectImageContentUrl(projectId, image.id) || initialUrl.endsWith(encodeURIComponent(image.id)) || initialUrl.endsWith(image.path ?? "")) ?? null;
 }
 
-function applyImageSize(markdown: string, sizeMode: "auto" | "custom", width: string) {
-  if (sizeMode === "auto") return markdown;
-
-  const match = markdown.match(/^!\[([^\]]*)\]\(([^)\n]+)\)$/);
-  if (!match) return markdown;
-
-  return buildImageMarkup(match[1], match[2], sizeMode, width);
-}
-
-function buildImageMarkup(alt: string, source: string, sizeMode: "auto" | "custom", width: string) {
-  const safeAlt = alt.replace(/"/g, "&quot;");
-  const safeSource = source.replace(/"/g, "%22");
-  if (sizeMode === "auto") return `![${alt}](${source})`;
-
-  return `<img src="${safeSource}" alt="${safeAlt}" width="${clampImageWidth(width)}%">`;
-}
-
-function clampImageWidth(value: string) {
-  const numberValue = Number.parseInt(value, 10);
-  if (!Number.isFinite(numberValue)) return 50;
-  return Math.min(Math.max(numberValue, 20), 100);
-}
-
-function normalizeWidthInput(value: string) {
-  if (!value.trim()) return "";
-  return String(clampImageWidth(value));
+function buildImageMarkup(alt: string, source: string) {
+  return `![${alt}](${source})`;
 }
 
 function isPreviewableUrl(value: string) {

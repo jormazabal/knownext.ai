@@ -745,6 +745,13 @@ export type AiConfidence = "high" | "medium" | "low";
 export type AiExecutionMode = "quick" | "reasoning";
 export type AiReasoningDepth = "light" | "medium" | "deep";
 export type AiExecutionScope = "direct_action" | "needs_permission" | "needs_clarification" | "agentic_task" | "too_expensive_or_unclear";
+export type AiSkillSource = "base" | "user" | "imported";
+export type AiSkillStatus = "valid" | "error" | "draft";
+export type AiSkillVisibility = "readonly" | "editable";
+export type AiSkillDiagnosticStatus = "candidate" | "applied" | "warning" | "error" | "skipped" | "rejected";
+export type AiSkillApplicationStatus = "applied" | "skipped" | "rejected" | "blocked";
+export type AiSkillDiagnosticPhase = "prefilter" | "selection" | "policy" | "compose" | "validation";
+export type AiSkillDiagnosticSeverity = "info" | "warning" | "error";
 export type AiPendingIntentStatus = "awaiting_decision" | "awaiting_web_permission" | "ready" | "running" | "completed" | "cancelled";
 export type AiPendingIntentAction = "replace_document" | "edit_document" | "create_document" | "project_operation" | "research_then_write";
 export type AiIntentActionType = "allow_web_research" | "apply" | "cancel";
@@ -872,6 +879,130 @@ export type AiContextSourceRef = {
   name: string;
   path?: string | null;
   status: "used" | "expired" | "failed";
+};
+
+export type AiSkillDiagnostic = {
+  skillId: string;
+  status: AiSkillDiagnosticStatus;
+  title: string;
+  notes: string[];
+  phase?: AiSkillDiagnosticPhase;
+  severity?: AiSkillDiagnosticSeverity;
+  modeId?: string;
+  validatorId?: string;
+};
+
+export type AiSkillApplication = {
+  skillId: string;
+  modeId: string;
+  action: string;
+  status: AiSkillApplicationStatus;
+  reason: string;
+  confidence: AiConfidence;
+};
+
+export type AiSkillMode = {
+  id: string;
+  name: string;
+  description: string;
+  whenToUse: string[];
+  whenNotToUse: string[];
+  supportedActions: string[];
+  requiresCapabilities: string[];
+  validators: string[];
+  riskLevel: "low" | "medium" | "high";
+  contextBudget: number;
+};
+
+export type AiSkillSummary = {
+  id: string;
+  name: string;
+  version: string;
+  source: AiSkillSource;
+  status: AiSkillStatus;
+  visibility: AiSkillVisibility;
+  runtimeEnabled: boolean;
+  description: string;
+  categories: string[];
+  capabilities: string[];
+  outputActions: string[];
+  modes: AiSkillMode[];
+};
+
+export type AiSkillManifest = {
+  schemaVersion: number;
+  id: string;
+  name: string;
+  version: string;
+  source: AiSkillSource;
+  description: string;
+  categories: string[];
+  capabilities: string[];
+  outputActions: string[];
+  requires: string[];
+  validators: string[];
+  runtimeEnabled?: boolean;
+  modes?: AiSkillMode[];
+};
+
+export type AiSkillExample = {
+  name: string;
+  markdown: string;
+};
+
+export type MermaidDiagramType = {
+  id: string;
+  label: string;
+  family: string;
+  maturity: "stable" | "advanced" | "beta";
+  aliases: string[];
+  requiredPolicy: string;
+  validatorId: string;
+};
+
+export type AiSkillDetail = AiSkillSummary & {
+  manifest: AiSkillManifest;
+  manifestJson: string;
+  instructionsMarkdown: string;
+  examples: AiSkillExample[];
+  diagnostics: AiSkillDiagnostic[];
+  mermaidCatalog: MermaidDiagramType[];
+};
+
+export type AiSkillListResponse = {
+  skills: AiSkillSummary[];
+};
+
+export type AiSkillValidationResponse = {
+  skillId: string;
+  status: AiSkillStatus;
+  diagnostics: AiSkillDiagnostic[];
+};
+
+export type AiSkillSelectorChoice = {
+  skillId: string;
+  modeId: string;
+  action: string;
+  confidence: AiConfidence;
+  reason: string;
+};
+
+export type AiSkillSelectionPreviewRequest = {
+  prompt: string;
+  expectedAction?: string;
+  selectorProposal?: {
+    selected: AiSkillSelectorChoice[];
+  };
+};
+
+export type AiSkillSelectionPreview = {
+  status: string;
+  selectorStatus: string;
+  candidateSkills: AiSkillSummary[];
+  proposed: AiSkillSelectorChoice[];
+  applications: AiSkillApplication[];
+  diagnostics: AiSkillDiagnostic[];
+  promptGuidance: string;
 };
 
 export type AiContextSearchResult = {
@@ -1112,6 +1243,9 @@ export type AiConversationEvent = {
   summary?: string | null;
   task?: AiAgenticTask | null;
   sourcesUsed?: AiContextSourceRef[];
+  usedSkills?: string[];
+  skillApplications?: AiSkillApplication[];
+  skillDiagnostics?: AiSkillDiagnostic[];
 };
 
 export type AiConversationResponse = {
@@ -1145,6 +1279,9 @@ export type AiInteractionResponse = {
   requiresConfirmation?: AiPendingDelete | null;
   contextSources?: AiContextSource[];
   expiredContextSourceIds?: string[];
+  usedSkills?: string[];
+  skillApplications?: AiSkillApplication[];
+  skillDiagnostics?: AiSkillDiagnostic[];
 };
 
 export type AiIndexStatusResponse = {

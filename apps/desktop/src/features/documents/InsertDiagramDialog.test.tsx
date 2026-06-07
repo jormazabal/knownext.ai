@@ -10,8 +10,8 @@ vi.mock("../editor/mermaidDiagrams", () => ({
       : { valid: true, error: null }
   )),
   renderMermaidSvg: vi.fn(async () => "<svg role=\"img\"></svg>"),
-  buildMermaidMarkdown: ({ code, caption, width }: { code: string; caption?: string | null; width?: string | null }) => {
-    const metadata = caption || width ? `%% knownext: ${JSON.stringify({ caption, width })}\n` : "";
+  buildMermaidMarkdown: ({ code, caption }: { code: string; caption?: string | null }) => {
+    const metadata = caption ? `%% knownext: ${JSON.stringify({ caption })}\n` : "";
     return `\`\`\`mermaid\n${metadata}${code.trim()}\n\`\`\``;
   },
 }));
@@ -41,6 +41,8 @@ describe("InsertDiagramDialog", () => {
     expect(onInsert.mock.calls[0][0]).toContain("```mermaid");
     expect(onInsert.mock.calls[0][0]).toContain("Flujo principal");
     expect(onInsert.mock.calls[0][0]).toContain("flowchart LR");
+    expect(onInsert.mock.calls[0][0]).not.toContain("width");
+    expect(screen.queryByText("Anchura")).not.toBeInTheDocument();
   });
 
   it("shows delete action in edit mode", () => {

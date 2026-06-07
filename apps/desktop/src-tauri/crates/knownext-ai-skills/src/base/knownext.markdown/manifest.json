@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "id": "knownext.markdown",
+  "name": "Markdown",
+  "version": "2.0.0",
+  "source": "base",
+  "description": "Crea y repara Markdown portable para documentos KnowNext.ai.",
+  "categories": ["markdown", "document"],
+  "capabilities": ["markdown", "markdown_tables", "markdown_structure"],
+  "outputActions": ["answer", "edit_document", "replace_selection", "insert_at_cursor", "create_document"],
+  "requires": [],
+  "validators": ["markdown.table.syntax", "markdown.structure"],
+  "runtimeEnabled": true,
+  "modes": [
+    {
+      "id": "table",
+      "name": "Tablas",
+      "description": "Crear, normalizar o reparar tablas Markdown compactas.",
+      "whenToUse": ["El usuario pide comparar, resumir o estructurar datos como tabla.", "La salida esperada es una tabla Markdown."],
+      "whenNotToUse": ["El usuario necesita formulas, XLSX o graficos precisos.", "El contenido no es tabular."],
+      "supportedActions": ["answer", "edit_document", "replace_selection", "insert_at_cursor", "create_document"],
+      "requiresCapabilities": ["markdown"],
+      "validators": ["markdown.table.syntax"],
+      "riskLevel": "low",
+      "contextBudget": 800
+    },
+    {
+      "id": "structure",
+      "name": "Estructura",
+      "description": "Ordenar headings, listas y secciones Markdown.",
+      "whenToUse": ["El usuario pide organizar, dividir o limpiar la estructura de un documento."],
+      "whenNotToUse": ["Solo se requiere una respuesta breve sin modificar formato."],
+      "supportedActions": ["answer", "edit_document", "replace_selection", "insert_at_cursor", "create_document"],
+      "requiresCapabilities": ["markdown"],
+      "validators": ["markdown.structure"],
+      "riskLevel": "medium",
+      "contextBudget": 1000
+    }
+  ]
+}

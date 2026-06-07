@@ -81,6 +81,7 @@ describe("AppSettingsDialog", () => {
     expect(screen.queryByText("Coste por 1M tokens")).not.toBeInTheDocument();
     expect(screen.getByRole("tablist", { name: /apartados de configuración/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /resumen/i })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /skills de ia/i })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: /sistema y diagnóstico/i }));
 

@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "id": "knownext.document.edit",
+  "name": "Edicion documental",
+  "version": "2.0.0",
+  "source": "base",
+  "description": "Aplica ediciones acotadas y revisables en documentos Markdown.",
+  "categories": ["document", "edit"],
+  "capabilities": ["document_edit", "markdown_edit"],
+  "outputActions": ["replace_selection", "insert_at_cursor", "edit_document", "replace_document"],
+  "requires": [],
+  "validators": ["document.edit.anchor_policy"],
+  "runtimeEnabled": false,
+  "modes": [
+    {
+      "id": "selection",
+      "name": "Seleccion",
+      "description": "Reescribe o expande solo la seleccion activa.",
+      "whenToUse": ["Hay seleccion activa y el usuario pide modificarla."],
+      "whenNotToUse": ["No existe seleccion o la peticion afecta varias secciones."],
+      "supportedActions": ["replace_selection"],
+      "requiresCapabilities": ["document_edit"],
+      "validators": ["document.edit.anchor_policy"],
+      "riskLevel": "low",
+      "contextBudget": 900
+    },
+    {
+      "id": "anchored_edit",
+      "name": "Edicion anclada",
+      "description": "Edita una seccion o bloque mediante anchors deterministas.",
+      "whenToUse": ["El usuario pide cambiar una seccion concreta o insertar bajo un heading."],
+      "whenNotToUse": ["La tarea pide crear un documento nuevo."],
+      "supportedActions": ["insert_at_cursor", "edit_document", "replace_document"],
+      "requiresCapabilities": ["document_edit"],
+      "validators": ["document.edit.anchor_policy"],
+      "riskLevel": "high",
+      "contextBudget": 1500
+    }
+  ]
+}

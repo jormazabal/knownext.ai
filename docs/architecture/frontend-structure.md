@@ -32,6 +32,10 @@ AI-generated document changes, images, and project operations must return struct
 
 AI edit proposals are the UX boundary for document mutation. Selection/cursor operations can use the active Milkdown controller; project or multi-document operations must use validated Markdown anchors or explicit full-document replacement. If an anchor is missing or ambiguous, the UI keeps the operation reviewable instead of guessing a target.
 
+AI skills are displayed through the settings surface and response metadata, but they remain runtime-owned. The frontend uses `src/lib/api/skills.ts` to list, inspect, request validation, and request non-mutating selection previews for skills. It may show `usedSkills`, `skillApplications`, and `skillDiagnostics` returned by Rust, but it must not compose skill prompts, validate manifests locally, infer applied skills from assistant text, or treat a skill as a permission grant.
+
+The Skills de IA settings tab is a compact capability manager, not an editor. It shows base skills, modes, runtime status, Mermaid catalog families, manifest data, examples, diagnostics, and the selection preview panel. Import, export, duplicate, edit, and project-level activation controls must remain passive or absent until user/imported skills are implemented in the runtime.
+
 ## Visual Structure
 
 - Keep the document editor as a single-column Milkdown surface.

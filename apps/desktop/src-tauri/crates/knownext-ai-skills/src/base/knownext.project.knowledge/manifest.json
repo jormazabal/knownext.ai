@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "id": "knownext.project.knowledge",
+  "name": "Conocimiento del proyecto",
+  "version": "2.0.0",
+  "source": "base",
+  "description": "Consulta y sintetiza conocimiento multi-documento usando contexto local.",
+  "categories": ["project", "knowledge"],
+  "capabilities": ["project_context", "rag"],
+  "outputActions": ["answer", "edit_document", "create_document"],
+  "requires": [],
+  "validators": ["project.knowledge.sources"],
+  "runtimeEnabled": false,
+  "modes": [
+    {
+      "id": "rag_answer",
+      "name": "Respuesta contextual",
+      "description": "Responder usando fuentes del proyecto y contexto RAG local.",
+      "whenToUse": ["El usuario pregunta por conocimiento repartido en varios documentos."],
+      "whenNotToUse": ["La pregunta se puede resolver solo con el documento activo."],
+      "supportedActions": ["answer"],
+      "requiresCapabilities": ["project_context", "rag"],
+      "validators": ["project.knowledge.sources"],
+      "riskLevel": "medium",
+      "contextBudget": 1600
+    },
+    {
+      "id": "consistency",
+      "name": "Consistencia",
+      "description": "Detectar contradicciones, duplicados o terminos inconsistentes.",
+      "whenToUse": ["El usuario pide comparar documentos o encontrar inconsistencias."],
+      "whenNotToUse": ["No hay fuentes de contexto suficientes."],
+      "supportedActions": ["answer", "edit_document", "create_document"],
+      "requiresCapabilities": ["project_context"],
+      "validators": ["project.knowledge.sources"],
+      "riskLevel": "medium",
+      "contextBudget": 1800
+    }
+  ]
+}

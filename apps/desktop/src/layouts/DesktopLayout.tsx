@@ -35,7 +35,7 @@ import { TitleBar } from "../components/window/TitleBar";
 import { getProjectImageContentUrl } from "../lib/api/projects";
 import { getDocumentTreeFileDragData } from "../lib/dragData";
 import { isMobileDeviceRuntime, isPhoneAppShell } from "../lib/runtime/platform";
-import type { ActivityEvent, AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiEditProposal, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentSyncStatus, DocumentTreeNode, ExportFormat, ExternalChangeDecision, ExternalChangeSet, InsertImageReferenceResponse, LayoutConfig, Project, ProjectSyncState, ProjectSyncStatus, ProjectVersioningStatus, VersionRecord, WorkspaceTab } from "../types/domain";
+import type { ActivityEvent, AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiEditProposal, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiSkillApplication, AiSkillDiagnostic, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentSyncStatus, DocumentTreeNode, ExportFormat, ExternalChangeDecision, ExternalChangeSet, InsertImageReferenceResponse, LayoutConfig, Project, ProjectSyncState, ProjectSyncStatus, ProjectVersioningStatus, VersionRecord, WorkspaceTab } from "../types/domain";
 
 const sidebarWidthConfig = {
   defaultWidth: 338,
@@ -67,7 +67,7 @@ type DesktopLayoutProps = {
   staleAiEditOperationIds: string[];
   blockedAiEditOperationReasons: Record<string, string>;
   appliedAiEditOperationIds: string[];
-  aiBubble: { id: string; answer: string } | null;
+  aiBubble: { id: string; answer: string; usedSkills?: string[]; skillApplications?: AiSkillApplication[]; skillDiagnostics?: AiSkillDiagnostic[] } | null;
   aiAppliedChange: { documentId: string; summary: string } | null;
   aiSelectionFocus: AiSelectionFocus | null;
   aiContextSources: AiContextSource[];
@@ -941,7 +941,6 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                   diagramConfig={props.aiConfig.diagrams}
                   initialCode={diagramEditTarget.code}
                   initialCaption={diagramEditTarget.caption}
-                  initialWidth={diagramEditTarget.width}
                   onClose={() => setDiagramEditTarget(null)}
                   onInsert={(markdown) => handleReplaceActiveDiagram(diagramEditTarget, markdown)}
                   onDelete={() => handleDeleteActiveDiagram(diagramEditTarget)}
