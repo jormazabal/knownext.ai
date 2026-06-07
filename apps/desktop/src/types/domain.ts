@@ -496,6 +496,8 @@ export type DocumentTreeNode = {
   path?: string;
   mimeType?: string | null;
   sizeBytes?: number | null;
+  width?: number | null;
+  height?: number | null;
   children?: DocumentTreeNode[];
   open?: boolean;
   isEditing?: boolean;
@@ -717,6 +719,24 @@ export type AiExecutionScope = "direct_action" | "needs_permission" | "needs_cla
 export type AiPendingIntentStatus = "awaiting_decision" | "awaiting_web_permission" | "ready" | "running" | "completed" | "cancelled";
 export type AiPendingIntentAction = "replace_document" | "edit_document" | "create_document" | "project_operation" | "research_then_write";
 export type AiIntentActionType = "allow_web_research" | "apply" | "cancel";
+export type AiDocumentFocusType = "selection" | "cursor" | "block" | "document" | "project";
+export type AiEditProposalStatus = "proposed" | "applied" | "discarded" | "stale";
+export type AiEditOperationAction =
+  | "replace_selection"
+  | "insert_at_cursor"
+  | "edit_block"
+  | "edit_document"
+  | "edit_project"
+  | "insert_image"
+  | "replace_document";
+export type AiEditOperationPlacementType =
+  | "at_cursor"
+  | "before_selection"
+  | "after_selection"
+  | "replace_selection"
+  | "after_heading"
+  | "after_paragraph"
+  | "document_end";
 export type AiOperationType =
   | "document_modified"
   | "folder_created"
@@ -781,9 +801,16 @@ export type AiIntentActionRequest = {
 export type AiSelectionFocus = {
   documentId?: string | null;
   path?: string | null;
+  focusType?: AiDocumentFocusType;
   from?: number | null;
   to?: number | null;
+  position?: number | null;
   text: string;
+  nearTextBefore?: string | null;
+  nearTextAfter?: string | null;
+  headingPath?: string[] | null;
+  blockType?: string | null;
+  blockHash?: string | null;
 };
 
 export type AiContextSourceKind = "project_document" | "external_file" | "image";
@@ -913,6 +940,61 @@ export type AiPendingIntent = {
   expiresAt: string;
 };
 
+export type AiDocumentFocus = {
+  type: AiDocumentFocusType;
+  documentId?: string | null;
+  path?: string | null;
+  from?: number | null;
+  to?: number | null;
+  position?: number | null;
+  text?: string | null;
+  nearTextBefore?: string | null;
+  nearTextAfter?: string | null;
+  headingPath?: string[] | null;
+  blockType?: string | null;
+  blockHash?: string | null;
+};
+
+export type AiEditOperationPlacement = {
+  type: AiEditOperationPlacementType;
+  headingPath?: string[] | null;
+  anchorExcerpt?: string | null;
+};
+
+export type AiEditOperation = {
+  id: string;
+  action: AiEditOperationAction;
+  documentId: string;
+  summary: string;
+  confidence: AiConfidence;
+  from?: number | null;
+  to?: number | null;
+  position?: number | null;
+  markdown?: string | null;
+  replacementMarkdown?: string | null;
+  headingPath?: string[] | null;
+  originalExcerpt?: string | null;
+  anchorExcerpt?: string | null;
+  imageAssetId?: string | null;
+  imageAltText?: string | null;
+  placement?: AiEditOperationPlacement | null;
+};
+
+export type AiEditProposal = {
+  id: string;
+  projectId: string;
+  interactionId: string;
+  status: AiEditProposalStatus;
+  documentId?: string | null;
+  title: string;
+  summary: string;
+  scope: AiDocumentFocusType;
+  focus?: AiDocumentFocus | null;
+  operations: AiEditOperation[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type AiUpdatedDocument = {
   documentId: string;
   markdown: string;
@@ -1015,6 +1097,8 @@ export type AiInteractionResponse = {
   needsUserClarification: boolean;
   pendingIntent?: AiPendingIntent | null;
   pendingIntentStatus?: AiPendingIntentStatus | null;
+  editProposal?: AiEditProposal | null;
+  editProposalStatus?: AiEditProposalStatus | null;
   answer?: string | null;
   conversationEvents: AiConversationEvent[];
   operations: AiOperation[];

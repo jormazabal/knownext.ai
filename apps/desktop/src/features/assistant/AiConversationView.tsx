@@ -1,7 +1,8 @@
 import { Bot, CheckCircle2, Circle, Clock3, Euro, FileText, FolderPlus, Globe2, ListChecks, ShieldCheck, ShieldAlert, Sparkles, Trash2, User } from "lucide-react";
 import { useEffect, useRef } from "react";
+import { AiEditProposalCard } from "./AiEditProposalCard";
 import { AiPendingIntentActions } from "./AiPendingIntentActions";
-import type { AiAgenticTask, AiConfigStatus, AiConversationEvent, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, Project } from "../../types/domain";
+import type { AiAgenticTask, AiConfigStatus, AiConversationEvent, AiEditProposal, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, Project } from "../../types/domain";
 
 type AiConversationViewProps = {
   project: Project | null;
@@ -9,14 +10,33 @@ type AiConversationViewProps = {
   indexStatus: AiIndexStatusResponse | null;
   events: AiConversationEvent[];
   pendingIntent: AiPendingIntent | null;
+  editProposal?: AiEditProposal | null;
+  staleEditOperationIds?: string[];
+  blockedEditOperationReasons?: Record<string, string>;
+  appliedEditOperationIds?: string[];
   onIntentAction: (action: AiIntentActionType, intentId: string) => void | Promise<void>;
+  onApplyEditProposal?: (proposalId: string, operationIds?: string[]) => void | Promise<void>;
+  onDiscardEditProposal?: (proposalId: string) => void;
 };
 
-export function AiConversationView({ project, config, indexStatus, events, pendingIntent, onIntentAction }: AiConversationViewProps) {
+export function AiConversationView({
+  project,
+  config,
+  indexStatus,
+  events,
+  pendingIntent,
+  editProposal = null,
+  staleEditOperationIds = [],
+  blockedEditOperationReasons = {},
+  appliedEditOperationIds = [],
+  onIntentAction,
+  onApplyEditProposal,
+  onDiscardEditProposal,
+}: AiConversationViewProps) {
   const groupedEvents = groupEventsByDay(events);
   const ragLabel = getRagLabel(config, indexStatus);
   const endRef = useRef<HTMLDivElement | null>(null);
-  const pendingActionEventId = getPendingActionEventId(events, pendingIntent);
+  const pendingActionEventId = getPendingActionEventId(events, pendingIntent, editProposal);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
@@ -71,7 +91,13 @@ export function AiConversationView({ project, config, indexStatus, events, pendi
                         key={event.id}
                         event={event}
                         pendingIntent={event.id === pendingActionEventId ? pendingIntent : null}
+                        editProposal={event.id === pendingActionEventId ? editProposal : null}
+                        staleEditOperationIds={staleEditOperationIds}
+                        blockedEditOperationReasons={blockedEditOperationReasons}
+                        appliedEditOperationIds={appliedEditOperationIds}
                         onIntentAction={onIntentAction}
+                        onApplyEditProposal={onApplyEditProposal}
+                        onDiscardEditProposal={onDiscardEditProposal}
                       />
                     ))}
                   </div>
@@ -98,11 +124,23 @@ function StatusPill({ active, children }: { active: boolean; children: string })
 function AiEventBubble({
   event,
   pendingIntent,
+  editProposal,
+  staleEditOperationIds,
+  blockedEditOperationReasons,
+  appliedEditOperationIds,
   onIntentAction,
+  onApplyEditProposal,
+  onDiscardEditProposal,
 }: {
   event: AiConversationEvent;
   pendingIntent: AiPendingIntent | null;
+  editProposal: AiEditProposal | null;
+  staleEditOperationIds: string[];
+  blockedEditOperationReasons: Record<string, string>;
+  appliedEditOperationIds: string[];
   onIntentAction: (action: AiIntentActionType, intentId: string) => void | Promise<void>;
+  onApplyEditProposal?: (proposalId: string, operationIds?: string[]) => void | Promise<void>;
+  onDiscardEditProposal?: (proposalId: string) => void;
 }) {
   if (event.role === "user") {
     return (
@@ -139,6 +177,16 @@ function AiEventBubble({
           {event.content ? <p className="whitespace-pre-wrap">{event.content}</p> : null}
           {event.task ? <AiTaskCard task={event.task} /> : null}
           <AiPendingIntentActions intent={pendingIntent} onAction={onIntentAction} />
+          {onApplyEditProposal && onDiscardEditProposal ? (
+            <AiEditProposalCard
+              proposal={editProposal}
+              staleOperationIds={staleEditOperationIds}
+              blockedOperationReasons={blockedEditOperationReasons}
+              appliedOperationIds={appliedEditOperationIds}
+              onApply={onApplyEditProposal}
+              onDiscard={onDiscardEditProposal}
+            />
+          ) : null}
         </div>
       </div>
     );
@@ -175,8 +223,10 @@ function shouldRenderEventPath(event: AiConversationEvent) {
   return Boolean(event.path && !event.content.includes(event.path));
 }
 
-function getPendingActionEventId(events: AiConversationEvent[], pendingIntent: AiPendingIntent | null) {
-  if (!pendingIntent || pendingIntent.status === "completed" || pendingIntent.status === "cancelled") return null;
+function getPendingActionEventId(events: AiConversationEvent[], pendingIntent: AiPendingIntent | null, editProposal: AiEditProposal | null) {
+  const hasPendingIntent = Boolean(pendingIntent && pendingIntent.status !== "completed" && pendingIntent.status !== "cancelled");
+  const hasEditProposal = Boolean(editProposal && editProposal.status === "proposed");
+  if (!hasPendingIntent && !hasEditProposal) return null;
   for (let index = events.length - 1; index >= 0; index -= 1) {
     if (events[index].role === "assistant") return events[index].id;
   }

@@ -1,7 +1,9 @@
+use base64::Engine;
 use knownext_storage::{LocalApi, LocalApiContentResponse, LocalApiFile, LocalApiResponse};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use tauri::http::{header, Response, StatusCode, Uri};
 use tauri::Manager;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
@@ -325,6 +327,69 @@ fn runtime_profile() -> &'static str {
     }
 }
 
+fn knownext_asset_response(api: &LocalApi, uri: &Uri) -> Response<Vec<u8>> {
+    let Some((project_id, asset_id)) = parse_knownext_asset_uri(uri) else {
+        return text_response(
+            StatusCode::BAD_REQUEST,
+            "Referencia de imagen de proyecto no valida.",
+        );
+    };
+    let content_path = format!("/api/projects/{project_id}/assets/{asset_id}/content");
+    match api.content(&content_path, serde_json::Value::Null) {
+        Ok(content) if content.status == 200 => {
+            let bytes = match base64::engine::general_purpose::STANDARD.decode(content.data_base64)
+            {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    return text_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        &format!("No se pudo decodificar la imagen: {error}"),
+                    )
+                }
+            };
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, content.content_type)
+                .header(header::CACHE_CONTROL, "no-store")
+                .body(bytes)
+                .unwrap_or_else(|_| {
+                    text_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Respuesta de imagen no valida.",
+                    )
+                })
+        }
+        Ok(content) => text_response(
+            StatusCode::from_u16(content.status).unwrap_or(StatusCode::BAD_REQUEST),
+            "No se pudo cargar la imagen del proyecto.",
+        ),
+        Err(error) => text_response(StatusCode::NOT_FOUND, &error),
+    }
+}
+
+fn parse_knownext_asset_uri(uri: &Uri) -> Option<(String, String)> {
+    let host = uri.host();
+    let path = uri.path().trim_start_matches('/');
+    if let Some(project_id) = host.filter(|value| {
+        !value.is_empty() && *value != "localhost" && !value.ends_with(".localhost")
+    }) {
+        let asset_id = path.split('/').next().filter(|value| !value.is_empty())?;
+        return Some((project_id.to_string(), asset_id.to_string()));
+    }
+    let mut parts = path.split('/');
+    let project_id = parts.next().filter(|value| !value.is_empty())?;
+    let asset_id = parts.next().filter(|value| !value.is_empty())?;
+    Some((project_id.to_string(), asset_id.to_string()))
+}
+
+fn text_response(status: StatusCode, message: &str) -> Response<Vec<u8>> {
+    Response::builder()
+        .status(status)
+        .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+        .body(message.as_bytes().to_vec())
+        .unwrap()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -333,6 +398,14 @@ pub fn run() {
     let builder = tauri::Builder::default();
 
     builder
+        .register_uri_scheme_protocol("knownext-asset", |ctx, request| {
+            let api = ctx.app_handle().state::<LocalApiState>();
+            let response = match api.0.lock() {
+                Ok(api) => knownext_asset_response(&api, request.uri()),
+                Err(error) => text_response(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+            };
+            response
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
@@ -363,4 +436,36 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running KnowNext.ai");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_knownext_asset_uri_with_project_host() {
+        let uri: Uri = "knownext-asset://knownext-lks/knownext-lks%3A%3Aassets%2Fimage.png"
+            .parse()
+            .unwrap();
+
+        assert_eq!(
+            parse_knownext_asset_uri(&uri),
+            Some((
+                "knownext-lks".to_string(),
+                "knownext-lks%3A%3Aassets%2Fimage.png".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn parses_knownext_asset_uri_with_project_path() {
+        let uri: Uri = "http://knownext-asset.localhost/knownext-lks/assets%2Fimage.png"
+            .parse()
+            .unwrap();
+
+        assert_eq!(
+            parse_knownext_asset_uri(&uri),
+            Some(("knownext-lks".to_string(), "assets%2Fimage.png".to_string()))
+        );
+    }
 }

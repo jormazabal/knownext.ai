@@ -49,6 +49,7 @@ Use `docs/development/functional-validation-matrix.md` to record which areas are
 - Import or attach an image and confirm it renders in the document/reference viewer when supported.
 - Import a single Markdown/PDF/DOCX/XLSX file and confirm the imported file opens immediately as the active editable document or supported preview.
 - Insert an imported image into a Markdown document, then move the image, move the document, and move their containing folders; confirm Markdown image references are recalculated and remain valid.
+- Hover an image in a Markdown document, click the bottom-center edit icon, then confirm the edit dialog can change the alt text, replace the image through project/upload/URL modes, and delete the image from the document.
 - Reindex project images from settings and confirm the result reports the real number of project images and indexed images.
 - Open AI/capabilities settings and confirm image generation exposes `gpt-image-2`, model, size, quality, format, destination folder, document insertion, document-context and asset-permission controls.
 - Open AI/documental settings and confirm RAG exposes local index status, document counts, local index ID, `Reconstruir índice` and `Limpiar índice`; rebuild the index and confirm the document count updates.
@@ -58,6 +59,11 @@ Use `docs/development/functional-validation-matrix.md` to record which areas are
 - Open PDF/DOCX/XLSX reference previews where supported and confirm failures are visible and non-destructive; for XLSX, verify the sheet selector lists real workbook sheets and the grid shows actual cell values.
 - Export a document to MD, PDF, and DOCX.
 - Use the AI panel on the active document. With an OpenAI key configured, ask a question that requires context from another indexed project document and confirm the answer cites/uses that context. Then ask for a generated image and confirm a local image asset is created, appears in the tree/viewer, and is inserted into the document when insertion is enabled.
+- Select a paragraph, ask IA to include an image that supports that selected text, and verify the app does not ask where to place it: the image is generated as a local asset, inserted directly where the IA judged appropriate, and the selected text is treated as context rather than as a mandatory insertion point.
+- Select text in a Markdown document, ask IA to expand or rewrite only that selection, and verify the selected text changes directly as a dirty draft instead of showing raw JSON or an approval dialog.
+- Place the cursor without selecting text, ask IA to insert content at that point, confirm the prompt chip says cursor context, and verify the insertion lands directly at the cursor.
+- Ask IA to update one concept across several sections or documents. Confirm safe anchored operations apply directly, changed documents open as dirty tabs when needed, and only ambiguous/stale operations remain blocked for review in the IA surface.
+- Ask IA to insert an existing project image into the active document and verify the Markdown image reference is inserted directly, renders, and points to the local project asset.
 - Ask the AI to create a new document with document-creation permission enabled and confirm the request is visible in the IA tab conversation and the created document opens as the active tab.
 - Open settings > Capacidades and confirm local guided agentic controls are configurable for depth, confirmation, max steps, documents, sources and cost, while web research remains marked unavailable.
 - Open settings, confirm Services shows `Runtime local`, `Contrato local`, `tauri://local-api/health`, no port control, no restart action, and no external executable.

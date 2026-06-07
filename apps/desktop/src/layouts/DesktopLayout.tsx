@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type PointerEvent } from "react";
 import { AlertTriangle, ArrowLeft, FileText, GitCompareArrows, History, Image as ImageIcon, Maximize2, Minus, PanelLeftClose, PanelLeftOpen, Plus, RotateCcw } from "lucide-react";
 import { AiConversationView } from "../features/assistant/AiConversationView";
 import { AiPromptInput, type AiPromptExecutionOptions } from "../features/assistant/AiPromptInput";
@@ -20,6 +20,7 @@ import {
   type MarkdownEditorExternalOperation,
   type MarkdownEditorFormatState,
   type MarkdownEditorHistoryState,
+  type MarkdownEditorImageEditTarget,
   type MarkdownEditorSelection,
 } from "../features/editor/editorTypes";
 import { ReadonlyMarkdownViewer } from "../features/editor/ReadonlyMarkdownViewer";
@@ -30,8 +31,9 @@ import { formatVersionFullDate, VersionHistoryPanel, type VersionPreview, type V
 import { BrandMark } from "../components/brand/BrandMark";
 import { TitleBar } from "../components/window/TitleBar";
 import { getProjectImageContentUrl } from "../lib/api/projects";
+import { getDocumentTreeFileDragData } from "../lib/dragData";
 import { isMobileDeviceRuntime, isPhoneAppShell } from "../lib/runtime/platform";
-import type { ActivityEvent, AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentSyncStatus, DocumentTreeNode, ExportFormat, ExternalChangeDecision, ExternalChangeSet, InsertImageReferenceResponse, LayoutConfig, Project, ProjectSyncState, ProjectSyncStatus, ProjectVersioningStatus, VersionRecord, WorkspaceTab } from "../types/domain";
+import type { ActivityEvent, AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiEditProposal, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentSyncStatus, DocumentTreeNode, ExportFormat, ExternalChangeDecision, ExternalChangeSet, InsertImageReferenceResponse, LayoutConfig, Project, ProjectSyncState, ProjectSyncStatus, ProjectVersioningStatus, VersionRecord, WorkspaceTab } from "../types/domain";
 
 const sidebarWidthConfig = {
   defaultWidth: 338,
@@ -59,6 +61,10 @@ type DesktopLayoutProps = {
   aiConversationEvents: AiConversationEvent[];
   aiUsageSummary: AiUsageSummaryResponse | null;
   aiPendingIntent: AiPendingIntent | null;
+  aiEditProposal: AiEditProposal | null;
+  staleAiEditOperationIds: string[];
+  blockedAiEditOperationReasons: Record<string, string>;
+  appliedAiEditOperationIds: string[];
   aiBubble: { id: string; answer: string } | null;
   aiAppliedChange: { documentId: string; summary: string } | null;
   aiSelectionFocus: AiSelectionFocus | null;
@@ -144,6 +150,8 @@ type DesktopLayoutProps = {
   onPreviewAiContextSource: (sourceId: string) => Promise<AiContextSourcePreviewResponse>;
   onAddAiContextSourceToProject: (sourceId: string) => void | Promise<void>;
   onAiIntentAction: (action: AiIntentActionType, intentId: string) => void | Promise<void>;
+  onApplyAiEditProposal: (proposalId: string, operationIds?: string[]) => void | Promise<void>;
+  onDiscardAiEditProposal: (proposalId: string) => void;
   onCloseAiBubble: () => void;
   onDismissAiAppliedChange: () => void;
   onOpenAiConversation: () => void;
@@ -257,6 +265,77 @@ export function DesktopLayout(props: DesktopLayoutProps) {
     setEditorHistoryStates((currentHistoryStates) => keepStableHistoryStateForDocument(currentHistoryStates, activeEditorId, activeEditorController.getHistoryState()));
   }, [activeEditorController, activeEditorId]);
 
+  const refreshActiveEditorState = useCallback(() => {
+    if (!activeEditorController) return;
+    setEditorFormatState((currentFormatState) => keepStableFormatState(currentFormatState, activeEditorController.getFormatState()));
+    setEditorHistoryStates((currentHistoryStates) => keepStableHistoryStateForDocument(currentHistoryStates, activeEditorId, activeEditorController.getHistoryState()));
+  }, [activeEditorController, activeEditorId]);
+
+  const handleReplaceActiveImage = useCallback((target: MarkdownEditorImageEditTarget, markdown: string) => {
+    if (!activeEditorController) return;
+    const materializedMarkdown = materializeProjectImageReferences(
+      markdown,
+      props.activeProject?.id ?? "",
+      props.activeDocument?.path ?? "",
+      props.tree,
+    );
+    if (activeEditorController.replaceImageAt(target.position, materializedMarkdown, { addToHistory: true })) {
+      refreshActiveEditorState();
+    }
+    setImageEditTarget(null);
+  }, [activeEditorController, props.activeDocument?.path, props.activeProject?.id, props.tree, refreshActiveEditorState]);
+
+  const handleDeleteActiveImage = useCallback((target: MarkdownEditorImageEditTarget) => {
+    if (activeEditorController?.deleteImageAt(target.position, { addToHistory: true })) {
+      refreshActiveEditorState();
+    }
+    setImageEditTarget(null);
+  }, [activeEditorController, refreshActiveEditorState]);
+
+  const insertProjectImageAtEditorPoint = useCallback(async (assetId: string, clientX: number, clientY: number) => {
+    if (!activeEditorController || !props.activeProject || !props.activeDocumentId || !props.activeDocument?.path) return false;
+
+    const cursorMoved = activeEditorController.setCursorAtClientPoint(clientX, clientY, { addToHistory: false });
+    if (!cursorMoved) return false;
+
+    const reference = await props.onBuildImageReference(props.activeDocumentId, assetId, null);
+    const materializedMarkdown = materializeProjectImageReferences(
+      reference.markdown,
+      props.activeProject.id,
+      props.activeDocument.path,
+      props.tree,
+    );
+    if (!activeEditorController.insertMarkdown(materializedMarkdown, { addToHistory: true })) return false;
+
+    refreshActiveEditorState();
+    return true;
+  }, [activeEditorController, props.activeDocument?.path, props.activeDocumentId, props.activeProject, props.onBuildImageReference, props.tree, refreshActiveEditorState]);
+
+  const previewProjectImageDropAtEditorPoint = useCallback((assetId: string, clientX: number, clientY: number) => {
+    if (!assetId || !activeEditorController || !hasOpenDocument) return;
+    activeEditorController.setCursorAtClientPoint(clientX, clientY, { addToHistory: false });
+  }, [activeEditorController, hasOpenDocument]);
+
+  const handleEditorImageDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
+    const projectFile = getDocumentTreeFileDragData(event.dataTransfer);
+    if (projectFile?.type !== "image" || !activeEditorController || !hasOpenDocument) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+    activeEditorController.setCursorAtClientPoint(event.clientX, event.clientY, { addToHistory: false });
+  }, [activeEditorController, hasOpenDocument]);
+
+  const handleEditorImageDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
+    const projectFile = getDocumentTreeFileDragData(event.dataTransfer);
+    if (projectFile?.type !== "image" || !activeEditorController || !hasOpenDocument) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+    void insertProjectImageAtEditorPoint(projectFile.id, event.clientX, event.clientY);
+  }, [activeEditorController, hasOpenDocument, insertProjectImageAtEditorPoint]);
+
   const handlePreviewDocumentDictation = useCallback((text: string) => {
     activeEditorController?.setTransientTextPreview(text);
   }, [activeEditorController]);
@@ -320,7 +399,12 @@ export function DesktopLayout(props: DesktopLayoutProps) {
         : session?.document
         ? materializeProjectImageReferences(operation.markdown, props.activeProject?.id ?? "", session.document.path, props.tree)
         : operation.markdown;
-      const applied = controller.replaceMarkdown(markdown, { addToHistory: operation.addToHistory ?? true });
+      const operationKind = operation.kind ?? "replace_document";
+      const applied = operationKind === "replace_range"
+        ? controller.replaceRange(operation.from ?? 0, operation.to ?? operation.from ?? 0, markdown, { addToHistory: operation.addToHistory ?? true })
+        : operationKind === "insert_at"
+        ? controller.insertMarkdownAt(operation.position ?? operation.from ?? 0, markdown, { addToHistory: operation.addToHistory ?? true })
+        : controller.replaceMarkdown(markdown, { addToHistory: operation.addToHistory ?? true });
       if (!applied) {
         props.onEditorOperationFailed(operation);
         continue;
@@ -383,6 +467,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   }, [props.onOpenReleaseNotes]);
 
   const [imageInsertOpen, setImageInsertOpen] = useState(false);
+  const [imageEditTarget, setImageEditTarget] = useState<MarkdownEditorImageEditTarget | null>(null);
 
   const externalChangeBadges = useMemo(() => buildExternalChangeBadges(props.externalChangeSet), [props.externalChangeSet]);
   const projectTreeStatus = useMemo(
@@ -489,6 +574,8 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 onContextAction={props.onTreeContextAction}
                 onMoveNode={props.onMoveTreeNode}
                 onAddNodeContext={props.onAddProjectDocumentContext}
+                onPreviewImageDropIntoActiveDocument={previewProjectImageDropAtEditorPoint}
+                onDropImageIntoActiveDocument={(assetId, clientX, clientY) => void insertProjectImageAtEditorPoint(assetId, clientX, clientY)}
                 changeBadges={externalChangeBadges}
                 projectStatus={projectTreeStatus}
               />
@@ -601,7 +688,13 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                           indexStatus={props.aiIndexStatus}
                           events={props.aiConversationEvents}
                           pendingIntent={props.aiPendingIntent}
+                          editProposal={props.aiEditProposal}
+                          staleEditOperationIds={props.staleAiEditOperationIds}
+                          blockedEditOperationReasons={props.blockedAiEditOperationReasons}
+                          appliedEditOperationIds={props.appliedAiEditOperationIds}
                           onIntentAction={props.onAiIntentAction}
+                          onApplyEditProposal={props.onApplyAiEditProposal}
+                          onDiscardEditProposal={props.onDiscardAiEditProposal}
                         />
                       ) : hasNotes ? (
                         props.notesLoaded ? (
@@ -668,7 +761,12 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                         />
                       ) : null}
                       {props.editorSessions.map((session) => (
-                        <div key={session.documentId} className={session.documentId === props.activeDocumentId ? "" : "hidden"}>
+                        <div
+                          key={session.documentId}
+                          className={session.documentId === props.activeDocumentId ? "" : "hidden"}
+                          onDragOver={session.documentId === props.activeDocumentId ? handleEditorImageDragOver : undefined}
+                          onDrop={session.documentId === props.activeDocumentId ? handleEditorImageDrop : undefined}
+                        >
                           {session.document ? (
                             <Suspense fallback={<div className="pt-6 text-[11px] text-ink-secondary">Cargando editor...</div>}>
                               <MarkdownEditor
@@ -688,6 +786,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                                   );
                                 }}
                                 onSelectionChange={(selection) => props.onDocumentSelectionChange(session.documentId, selection)}
+                                onImageEditRequest={setImageEditTarget}
                                 selectionFocus={toMarkdownEditorSelection(props.aiSelectionFocus, session.documentId)}
                                 zoomPercent={markdownZoomPercent}
                               />
@@ -751,13 +850,20 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 <AiResponseBubble
                   bubble={props.aiBubble}
                   pendingIntent={props.aiPendingIntent}
+                  editProposal={props.aiEditProposal}
+                  staleEditOperationIds={props.staleAiEditOperationIds}
+                  blockedEditOperationReasons={props.blockedAiEditOperationReasons}
+                  appliedEditOperationIds={props.appliedAiEditOperationIds}
                   onIntentAction={props.onAiIntentAction}
+                  onApplyEditProposal={props.onApplyAiEditProposal}
+                  onDiscardEditProposal={props.onDiscardAiEditProposal}
                   onClose={props.onCloseAiBubble}
                   onOpenConversation={props.onOpenAiConversation}
                 />
               ) : null}
               {imageInsertOpen && props.activeProject && hasOpenDocument ? (
                 <InsertImageDialog
+                  activeProjectId={props.activeProject.id}
                   activeDocumentId={props.activeDocumentId}
                   activeDocumentPath={props.activeDocument?.path ?? null}
                   tree={props.tree}
@@ -771,9 +877,27 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                       props.activeDocument?.path ?? "",
                       props.tree,
                     );
-                    activeEditorController?.run("image", parseImageMarkdown(materializedMarkdown));
+                    if (activeEditorController?.insertMarkdown(materializedMarkdown, { addToHistory: true })) {
+                      refreshActiveEditorState();
+                    }
                     setImageInsertOpen(false);
                   }}
+                />
+              ) : null}
+              {imageEditTarget && props.activeProject && hasOpenDocument ? (
+                <InsertImageDialog
+                  variant="edit"
+                  activeProjectId={props.activeProject.id}
+                  activeDocumentId={props.activeDocumentId}
+                  activeDocumentPath={props.activeDocument?.path ?? null}
+                  tree={props.tree}
+                  initialAltText={imageEditTarget.alt}
+                  initialUrl={formatEditableImageTarget(imageEditTarget.src, props.activeProject.id, props.activeDocument?.path ?? "")}
+                  onClose={() => setImageEditTarget(null)}
+                  onImportImage={props.onImportProjectImage}
+                  onBuildReference={props.onBuildImageReference}
+                  onInsert={(markdown) => handleReplaceActiveImage(imageEditTarget, markdown)}
+                  onDelete={() => handleDeleteActiveImage(imageEditTarget)}
                 />
               ) : null}
               <ExternalChangesDrawer
@@ -1389,13 +1513,14 @@ function collectImages(nodes: DocumentTreeNode[]): DocumentTreeNode[] {
 }
 
 const markdownImageReferencePattern = /!\[([^\]]*)\]\(([^)\n]+)\)/g;
+const htmlImageSourcePattern = /(<img\b[^>]*\bsrc=)(["'])([^"']+)(\2[^>]*>)/gi;
 
 function materializeProjectImageReferences(markdown: string, projectId: string, documentPath: string, tree: DocumentTreeNode[]) {
-  if (!projectId || !documentPath || !markdown.includes("](")) return markdown;
+  if (!projectId || !documentPath || (!markdown.includes("](") && !markdown.includes("<img"))) return markdown;
   const images = collectImages(tree);
   if (images.length === 0) return markdown;
 
-  return markdown.replace(markdownImageReferencePattern, (fullMatch, alt: string, body: string) => {
+  const materializedMarkdownImages = markdown.replace(markdownImageReferencePattern, (fullMatch, alt: string, body: string) => {
     const parsed = splitMarkdownImageTarget(body);
     if (!parsed || isExternalImageTarget(parsed.target)) return fullMatch;
     const resolvedPath = resolveMarkdownAssetPath(documentPath, parsed.target);
@@ -1410,14 +1535,23 @@ function materializeProjectImageReferences(markdown: string, projectId: string, 
     }
     return `![${alt}](${getProjectImageContentUrl(projectId, image.id)}${titlePart})`;
   });
+
+  return materializedMarkdownImages.replace(htmlImageSourcePattern, (fullMatch, prefix: string, quote: string, source: string, suffix: string) => {
+    if (isExternalImageTarget(source)) return fullMatch;
+
+    const resolvedPath = resolveMarkdownAssetPath(documentPath, source);
+    const image = images.find((node) => node.path === resolvedPath);
+    const nextSource = image ? getProjectImageContentUrl(projectId, image.id) : isImagePath(resolvedPath) ? getProjectImageContentUrl(projectId, projectScopedNodeId(projectId, resolvedPath)) : null;
+    return nextSource ? `${prefix}${quote}${nextSource}${suffix}` : fullMatch;
+  });
 }
 
 function restoreProjectImageReferences(markdown: string, projectId: string, documentPath: string, tree: DocumentTreeNode[]) {
-  if (!projectId || !documentPath || (!markdown.includes("/assets/") && !markdown.includes("knownext-asset://"))) return markdown;
+  if (!projectId || !documentPath || (!markdown.includes("/assets/") && !markdown.includes("knownext-asset://") && !markdown.includes("knownext-asset.localhost"))) return markdown;
   const images = collectImages(tree);
   const byContentUrl = new Map(images.map((image) => [getProjectImageContentUrl(projectId, image.id), image]));
 
-  return markdown.replace(markdownImageReferencePattern, (fullMatch, alt: string, body: string) => {
+  const restoredMarkdownImages = markdown.replace(markdownImageReferencePattern, (fullMatch, alt: string, body: string) => {
     const parsed = splitMarkdownImageTarget(body);
     if (!parsed) return fullMatch;
     const image = byContentUrl.get(parsed.target);
@@ -1426,6 +1560,15 @@ function restoreProjectImageReferences(markdown: string, projectId: string, docu
     const relativeTarget = relativeMarkdownTarget(fallbackPath, documentPath);
     const titlePart = parsed.title ? ` "${parsed.title}"` : "";
     return `![${alt}](${formatMarkdownImageTarget(relativeTarget)}${titlePart})`;
+  });
+
+  return restoredMarkdownImages.replace(htmlImageSourcePattern, (fullMatch, prefix: string, quote: string, source: string, suffix: string) => {
+    const image = byContentUrl.get(source);
+    const fallbackPath = image?.path ?? pathFromProjectImageContentUrl(projectId, source);
+    if (!fallbackPath) return fullMatch;
+
+    const relativeTarget = formatMarkdownImageTarget(relativeMarkdownTarget(fallbackPath, documentPath));
+    return `${prefix}${quote}${relativeTarget}${suffix}`;
   });
 }
 
@@ -1455,15 +1598,29 @@ function projectScopedNodeId(projectId: string, path: string) {
 }
 
 function pathFromProjectImageContentUrl(projectId: string, target: string) {
-  const prefix = `knownext-asset://${encodeURIComponent(projectId)}/`;
-  if (!target.startsWith(prefix)) return null;
   try {
-    const assetId = decodeURIComponent(target.slice(prefix.length));
+    const legacyPrefix = `knownext-asset://${encodeURIComponent(projectId)}/`;
+    let assetId: string | null = null;
+    if (target.startsWith(legacyPrefix)) {
+      assetId = decodeURIComponent(target.slice(legacyPrefix.length));
+    } else {
+      const url = new URL(target);
+      if (url.hostname !== "knownext-asset.localhost") return null;
+      const parts = url.pathname.split("/").filter(Boolean);
+      if (decodeURIComponent(parts[0] ?? "") !== projectId || !parts[1]) return null;
+      assetId = decodeURIComponent(parts[1]);
+    }
     const scopedPrefix = `${projectId}::`;
-    return assetId.startsWith(scopedPrefix) ? assetId.slice(scopedPrefix.length) : null;
+    return assetId?.startsWith(scopedPrefix) ? assetId.slice(scopedPrefix.length) : assetId;
   } catch {
     return null;
   }
+}
+
+function formatEditableImageTarget(target: string, projectId: string, documentPath: string) {
+  const projectImagePath = pathFromProjectImageContentUrl(projectId, target);
+  if (!projectImagePath || !documentPath) return target;
+  return formatMarkdownImageTarget(relativeMarkdownTarget(projectImagePath, documentPath));
 }
 
 function resolveMarkdownAssetPath(documentPath: string, target: string) {
@@ -1518,11 +1675,17 @@ function parseImageMarkdown(markdown: string): MarkdownEditorActionOptions {
 function toMarkdownEditorSelection(selectionFocus: AiSelectionFocus | null, documentId: string): MarkdownEditorSelection | null {
   if (selectionFocus?.documentId !== documentId) return null;
   if (typeof selectionFocus.from !== "number" || typeof selectionFocus.to !== "number") return null;
-  if (!selectionFocus.text.trim()) return null;
+  if (selectionFocus.focusType !== "cursor" && !selectionFocus.text.trim()) return null;
   return {
+    focusType: selectionFocus.focusType === "cursor" ? "cursor" : "selection",
     from: selectionFocus.from,
     to: selectionFocus.to,
+    position: selectionFocus.position ?? null,
     text: selectionFocus.text,
+    nearTextBefore: selectionFocus.nearTextBefore ?? null,
+    nearTextAfter: selectionFocus.nearTextAfter ?? null,
+    blockType: selectionFocus.blockType ?? null,
+    blockHash: selectionFocus.blockHash ?? null,
   };
 }
 

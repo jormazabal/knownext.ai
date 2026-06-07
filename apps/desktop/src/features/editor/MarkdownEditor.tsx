@@ -7,7 +7,8 @@ import type { EditorState, Selection } from "@milkdown/kit/prose/state";
 import { Decoration, DecorationSet } from "@milkdown/kit/prose/view";
 import type { EditorView } from "@milkdown/kit/prose/view";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
-import { useEffect, useRef, type CSSProperties } from "react";
+import { Pencil } from "lucide-react";
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 import {
   createMarkdownEditorController,
   readMarkdownEditorHistoryState,
@@ -19,7 +20,7 @@ import {
   toggleUnderlineCommand,
   underlineSchema,
 } from "./underlineExtension";
-import type { MarkdownEditorController, MarkdownEditorFormatState, MarkdownEditorHistoryState } from "./editorTypes";
+import type { MarkdownEditorController, MarkdownEditorFormatState, MarkdownEditorHistoryState, MarkdownEditorImageEditTarget } from "./editorTypes";
 import type { MarkdownEditorSelection } from "./editorTypes";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
@@ -32,8 +33,18 @@ type MarkdownEditorProps = {
   onFormatStateChange: (formatState: MarkdownEditorFormatState) => void;
   onHistoryStateChange: (historyState: MarkdownEditorHistoryState) => void;
   onSelectionChange: (selection: MarkdownEditorSelection | null) => void;
+  onImageEditRequest?: (target: MarkdownEditorImageEditTarget) => void;
   selectionFocus?: MarkdownEditorSelection | null;
   zoomPercent: number;
+};
+
+type MarkdownEditorCallbacks = {
+  onChange: (markdown: string) => void;
+  onControllerChange: (controller: MarkdownEditorController | null) => void;
+  onFormatStateChange: (formatState: MarkdownEditorFormatState) => void;
+  onHistoryStateChange: (historyState: MarkdownEditorHistoryState) => void;
+  onSelectionChange: (selection: MarkdownEditorSelection | null) => void;
+  onImageEditRequest?: (target: MarkdownEditorImageEditTarget) => void;
 };
 
 export function MarkdownEditor(props: MarkdownEditorProps) {
@@ -48,18 +59,21 @@ const selectionFocusPluginKey = new PluginKey<SelectionFocusRange | null>("known
 const transientTextPluginKey = new PluginKey<TransientTextPreview | null>("knownext-transient-text-preview");
 const persistentCaretPluginKey = new PluginKey<PersistentCaretState>("knownext-persistent-caret");
 
-function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, selectionFocus, zoomPercent }: MarkdownEditorProps) {
+function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, onImageEditRequest, selectionFocus, zoomPercent }: MarkdownEditorProps) {
+  const editorShellRef = useRef<HTMLDivElement | null>(null);
+  const viewRef = useRef<EditorView | null>(null);
   const skipInitialUpdate = useRef(true);
   const lastMarkdownRef = useRef(markdown);
   const lastFormatStateRef = useRef<MarkdownEditorFormatState>({});
   const lastHistoryStateRef = useRef<MarkdownEditorHistoryState>({ canUndo: false, canRedo: false, undoDepth: 0, redoDepth: 0 });
   const lastSelectionRef = useRef<MarkdownEditorSelection | null>(null);
-  const callbacksRef = useRef({ onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange });
+  const callbacksRef = useRef<MarkdownEditorCallbacks>({ onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, onImageEditRequest });
   const controllerReadyRef = useRef(false);
+  const [imageEditOverlay, setImageEditOverlay] = useState<ImageEditOverlayState | null>(null);
 
   useEffect(() => {
-    callbacksRef.current = { onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange };
-  }, [onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange]);
+    callbacksRef.current = { onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, onImageEditRequest };
+  }, [onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, onImageEditRequest]);
 
   const { loading, get } = useEditor((root) => {
     const crepe = new Crepe({
@@ -90,6 +104,7 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
 
         if (!view?.state) return;
 
+        viewRef.current = view;
         const state = getStateForFormat(view.state, selection);
         notifyFormatState(readMarkdownEditorFormatState(state));
         notifyHistoryState(readMarkdownEditorHistoryState(view.state));
@@ -144,10 +159,66 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
   }, []);
 
   return (
-    <div className="knownext-editor" style={{ "--knownext-markdown-zoom": String(zoomPercent / 100) } as CSSProperties}>
+    <div
+      ref={editorShellRef}
+      className="knownext-editor"
+      style={{ "--knownext-markdown-zoom": String(zoomPercent / 100) } as CSSProperties}
+      onMouseMove={handleEditorMouseMove}
+      onMouseLeave={() => setImageEditOverlay(null)}
+    >
       <Milkdown />
+      {imageEditOverlay ? (
+        <button
+          type="button"
+          className="knownext-image-edit-overlay"
+          style={{ left: imageEditOverlay.left, top: imageEditOverlay.top }}
+          onMouseDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            callbacksRef.current.onImageEditRequest?.(imageEditOverlay.target);
+          }}
+        >
+          <Pencil size={14} strokeWidth={2} aria-hidden="true" />
+          <span>Editar imagen</span>
+        </button>
+      ) : null}
     </div>
   );
+
+  function handleEditorMouseMove(event: ReactMouseEvent<HTMLDivElement>) {
+    if (!callbacksRef.current.onImageEditRequest) return;
+
+    const eventTarget = event.target;
+    if (!(eventTarget instanceof Element)) return;
+    if (eventTarget.closest(".knownext-image-edit-overlay")) return;
+
+    const imageElement = eventTarget.closest("img");
+    if (!(imageElement instanceof HTMLImageElement) || !event.currentTarget.contains(imageElement)) {
+      setImageEditOverlay(null);
+      return;
+    }
+
+    const view = viewRef.current;
+    if (!view) return;
+
+    const target = findImageEditTarget(view, imageElement);
+    if (!target) {
+      setImageEditOverlay(null);
+      return;
+    }
+
+    const imageRect = imageElement.getBoundingClientRect();
+    const nextOverlay: ImageEditOverlayState = {
+      left: Math.round(imageRect.left + imageRect.width / 2),
+      top: Math.round(imageRect.bottom - 10),
+      target,
+    };
+    setImageEditOverlay((currentOverlay) => (imageEditOverlayStatesAreEqual(currentOverlay, nextOverlay) ? currentOverlay : nextOverlay));
+  }
 
   function notifyFormatState(formatState: MarkdownEditorFormatState) {
     if (formatStatesAreEqual(lastFormatStateRef.current, formatState)) return;
@@ -324,26 +395,174 @@ function createPersistentCaretPlugin() {
   });
 }
 
+type ImageEditOverlayState = {
+  left: number;
+  top: number;
+  target: MarkdownEditorImageEditTarget;
+};
+
+function isEditableImageNode(node: EditorState["doc"]) {
+  const typeName = node.type.name.toLowerCase();
+  return typeName.includes("image") && (typeof node.attrs.src === "string" || typeof node.attrs.url === "string");
+}
+
+function findImageEditTarget(view: EditorView, imageElement: HTMLImageElement): MarkdownEditorImageEditTarget | null {
+  const positionMatch = findImageNodeNearDomPosition(view, imageElement);
+  if (positionMatch) return imageNodeToEditTarget(positionMatch.node, positionMatch.position);
+
+  const sourceMatch = findImageNodeByRenderedSource(view.state, imageElement);
+  return sourceMatch ? imageNodeToEditTarget(sourceMatch.node, sourceMatch.position) : null;
+}
+
+function findImageNodeNearDomPosition(view: EditorView, imageElement: HTMLImageElement) {
+  try {
+    const position = view.posAtDOM(imageElement, 0);
+    return findImageNodeNearPosition(view.state, position);
+  } catch {
+    return null;
+  }
+}
+
+function findImageNodeNearPosition(state: EditorState, position: number): { node: EditorState["doc"]; position: number } | null {
+  const boundedPosition = clampDocumentPosition(position, state.doc.content.size);
+  const directPositions = [boundedPosition, boundedPosition - 1, boundedPosition + 1]
+    .filter((candidatePosition) => candidatePosition >= 0 && candidatePosition <= state.doc.content.size);
+
+  for (const candidatePosition of directPositions) {
+    const candidateNode = state.doc.nodeAt(candidatePosition);
+    if (candidateNode && isEditableImageNode(candidateNode)) return { node: candidateNode, position: candidatePosition };
+  }
+
+  let match: { node: EditorState["doc"]; position: number } | null = null;
+  const from = Math.max(0, boundedPosition - 8);
+  const to = Math.min(state.doc.content.size, boundedPosition + 8);
+  state.doc.nodesBetween(from, to, (node, nodePosition) => {
+    if (!match && isEditableImageNode(node)) {
+      match = { node, position: nodePosition };
+      return false;
+    }
+    return !match;
+  });
+
+  return match;
+}
+
+function findImageNodeByRenderedSource(state: EditorState, imageElement: HTMLImageElement): { node: EditorState["doc"]; position: number } | null {
+  let match: { node: EditorState["doc"]; position: number } | null = null;
+
+  state.doc.descendants((node, position) => {
+    if (!isEditableImageNode(node) || !imageElementMatchesNodeSource(imageElement, node)) return true;
+
+    match = { node, position };
+    return false;
+  });
+
+  return match;
+}
+
+function imageElementMatchesNodeSource(imageElement: HTMLImageElement, node: EditorState["doc"]) {
+  const nodeSource = readStringNodeAttribute(node.attrs.src || node.attrs.url);
+  if (!nodeSource) return false;
+
+  const renderedSources = [imageElement.getAttribute("src"), imageElement.currentSrc, imageElement.src]
+    .filter((source): source is string => Boolean(source));
+
+  return renderedSources.some((renderedSource) => renderedSource === nodeSource || renderedSource.endsWith(nodeSource));
+}
+
+function imageNodeToEditTarget(node: EditorState["doc"], position: number): MarkdownEditorImageEditTarget {
+  return {
+    position,
+    src: readStringNodeAttribute(node.attrs.src || node.attrs.url),
+    alt: readStringNodeAttribute(node.attrs.alt),
+    title: readNullableStringNodeAttribute(node.attrs.title),
+  };
+}
+
+function imageEditOverlayStatesAreEqual(currentOverlay: ImageEditOverlayState | null, nextOverlay: ImageEditOverlayState) {
+  return (
+    currentOverlay?.left === nextOverlay.left &&
+    currentOverlay.top === nextOverlay.top &&
+    currentOverlay.target.position === nextOverlay.target.position &&
+    currentOverlay.target.src === nextOverlay.target.src &&
+    currentOverlay.target.alt === nextOverlay.target.alt &&
+    currentOverlay.target.title === nextOverlay.target.title
+  );
+}
+
 function clampDocumentPosition(position: number, maxPosition: number) {
   return Math.max(0, Math.min(position, maxPosition));
 }
 
 function readEditorSelection(state: EditorState): MarkdownEditorSelection | null {
   const { from, to, empty } = state.selection;
-  if (empty || from >= to) return null;
+  if (empty || from >= to) {
+    const position = from;
+    const nearTextBefore = state.doc.textBetween(Math.max(0, position - 260), position, "\n", "\n").trim();
+    const nearTextAfter = state.doc.textBetween(position, Math.min(state.doc.content.size, position + 260), "\n", "\n").trim();
+    return {
+      focusType: "cursor",
+      from: position,
+      to: position,
+      position,
+      text: "",
+      nearTextBefore,
+      nearTextAfter,
+      blockType: blockTypeAtSelection(state),
+      blockHash: stableTextHash(`${nearTextBefore}|${nearTextAfter}`),
+    };
+  }
 
   const text = state.doc.textBetween(from, to, "\n", "\n").trim();
   if (!text) return null;
 
-  return { from, to, text };
+  const nearTextBefore = state.doc.textBetween(Math.max(0, from - 260), from, "\n", "\n").trim();
+  const nearTextAfter = state.doc.textBetween(to, Math.min(state.doc.content.size, to + 260), "\n", "\n").trim();
+  return {
+    focusType: "selection",
+    from,
+    to,
+    position: null,
+    text,
+    nearTextBefore,
+    nearTextAfter,
+    blockType: blockTypeAtSelection(state),
+    blockHash: stableTextHash(`${nearTextBefore}|${text}|${nearTextAfter}`),
+  };
 }
 
 function applySelectionFocusDecoration(view: EditorView, selection: MarkdownEditorSelection | null) {
-  const nextRange = selection ? { from: selection.from, to: selection.to } : null;
+  const nextRange = selection?.focusType !== "cursor" && selection?.text ? { from: selection.from, to: selection.to } : null;
   const currentRange = selectionFocusPluginKey.getState(view.state);
   if (selectionRangesAreEqual(currentRange, nextRange)) return;
 
   view.dispatch(view.state.tr.setMeta(selectionFocusPluginKey, nextRange));
+}
+
+function blockTypeAtSelection(state: EditorState) {
+  const { $from } = state.selection;
+  for (let depth = $from.depth; depth > 0; depth -= 1) {
+    const node = $from.node(depth);
+    if (node.isTextblock) return node.type.name;
+  }
+  return "document";
+}
+
+function stableTextHash(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv1a-${(hash >>> 0).toString(16)}`;
+}
+
+function readStringNodeAttribute(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function readNullableStringNodeAttribute(value: unknown) {
+  return typeof value === "string" && value ? value : null;
 }
 
 function formatStatesAreEqual(currentFormatState: MarkdownEditorFormatState, nextFormatState: MarkdownEditorFormatState) {
@@ -367,7 +586,15 @@ function historyStatesAreEqual(currentHistoryState: MarkdownEditorHistoryState, 
 function editorSelectionsAreEqual(currentSelection: MarkdownEditorSelection | null, nextSelection: MarkdownEditorSelection | null) {
   if (currentSelection === nextSelection) return true;
   if (!currentSelection || !nextSelection) return false;
-  return currentSelection.from === nextSelection.from && currentSelection.to === nextSelection.to && currentSelection.text === nextSelection.text;
+  return (
+    currentSelection.focusType === nextSelection.focusType &&
+    currentSelection.from === nextSelection.from &&
+    currentSelection.to === nextSelection.to &&
+    currentSelection.position === nextSelection.position &&
+    currentSelection.text === nextSelection.text &&
+    currentSelection.nearTextBefore === nextSelection.nearTextBefore &&
+    currentSelection.nearTextAfter === nextSelection.nearTextAfter
+  );
 }
 
 function selectionRangesAreEqual(currentRange: SelectionFocusRange | null | undefined, nextRange: SelectionFocusRange | null) {

@@ -83,10 +83,10 @@ Use one release commit and one annotated tag per application release.
 git status --short
 pnpm release:check
 git add VERSION package.json pnpm-lock.yaml .github/workflows/release.yml apps/desktop/package.json apps/desktop/src-tauri apps/desktop/src docs CHANGELOG.md scripts README.md AGENTS.md
-git commit -m "chore(release): 2.0.5"
-git tag -a v2.0.5 -m "KnowNext.ai 2.0.5"
+git commit -m "chore(release): 2.1.0"
+git tag -a v2.1.0 -m "KnowNext.ai 2.1.0"
 git push origin HEAD
-git push origin v2.0.5
+git push origin v2.1.0
 ```
 
 Pushing the tag runs `.github/workflows/release.yml`. The workflow builds Windows, uploads the NSIS installer, MSI installer, updater signatures, and publishes `latest.json` through `tauri-apps/tauri-action@v0.6.2`. It then builds and uploads the signed Android APK plus `android-latest.json`.
@@ -98,7 +98,7 @@ The workflow starts with `pnpm release:secrets:check`. If mandatory updater, Git
 After the workflow completes, inspect the draft release before publishing it:
 
 ```bash
-gh release view v2.0.5 --repo jormazabal/knownext.ai --json isDraft,isPrerelease,name,tagName,url,assets
+gh release view v2.1.0 --repo jormazabal/knownext.ai --json isDraft,isPrerelease,name,tagName,url,assets
 ```
 
 The release must contain:
@@ -114,7 +114,7 @@ The release must contain:
 Publish the draft only after those assets are present:
 
 ```bash
-gh release edit v2.0.5 --repo jormazabal/knownext.ai --draft=false
+gh release edit v2.1.0 --repo jormazabal/knownext.ai --draft=false
 ```
 
 ## Verification
@@ -122,7 +122,7 @@ gh release edit v2.0.5 --repo jormazabal/knownext.ai --draft=false
 After publishing, verify the Windows and Android manifests:
 
 ```powershell
-$version = "2.0.5"
+$version = "2.1.0"
 $manifest = Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/jormazabal/knownext.ai/releases/latest/download/latest.json" -MaximumRedirection 10
 $json = [System.Text.Encoding]::UTF8.GetString($manifest.Content) | ConvertFrom-Json
 $json.version

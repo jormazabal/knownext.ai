@@ -127,7 +127,7 @@ describe("projects API contracts", () => {
     expect(requestJson).toHaveBeenLastCalledWith("/api/projects/project-1/assets/assets%2Fimage.png");
     await getProjectImageUsage("project-1", "assets/image.png");
     expect(requestJson).toHaveBeenLastCalledWith("/api/projects/project-1/assets/assets%2Fimage.png/usage");
-    expect(getProjectImageContentUrl("project-1", "assets/image.png")).toBe("knownext-asset://project-1/assets%2Fimage.png");
+    expect(getProjectImageContentUrl("project-1", "assets/image.png")).toBe("http://knownext-asset.localhost/project-1/assets%2Fimage.png");
     await getProjectImageContentDataUrl("project-1", "assets/image.png");
     expect(requestDataUrl).toHaveBeenLastCalledWith("/api/projects/project-1/assets/assets%2Fimage.png/content");
     await buildImageReference("project-1", "docs/Plan.md", "assets/image.png", "Diagrama");

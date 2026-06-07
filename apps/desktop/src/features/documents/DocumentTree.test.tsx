@@ -415,6 +415,38 @@ describe("DocumentTree", () => {
     expect(onMoveNode).toHaveBeenCalledWith(folderNodes[0], "folder-target");
   });
 
+  it("shows a floating preview during controlled tree dragging", () => {
+    render(
+      <DocumentTree
+        nodes={nodes}
+        activeDocumentId=""
+        onOpenDocument={vi.fn()}
+        onActivateTreeNode={vi.fn()}
+        onSelectTreeNode={vi.fn()}
+        onCreateFolder={vi.fn()}
+        onCreateDocument={vi.fn()}
+        onExpandTree={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onConfigureProject={vi.fn()}
+        onRenameNode={vi.fn()}
+        onToggleNode={vi.fn()}
+        onContextAction={vi.fn()}
+        onMoveNode={vi.fn()}
+      />,
+    );
+
+    const row = screen.getByText("Requisitos").closest(".tree-row");
+    expect(row).not.toBeNull();
+
+    fireEvent.mouseDown(row!, { button: 0, clientX: 72, clientY: 92 });
+    fireEvent.mouseMove(window, { clientX: 110, clientY: 116 });
+
+    const preview = screen.getByTestId("document-tree-drag-preview");
+    expect(preview).toHaveTextContent("Requisitos");
+
+    fireEvent.mouseUp(window, { clientX: 110, clientY: 116 });
+  });
+
   it("moves a file to the target file parent when dropped onto a file row", () => {
     const onMoveNode = vi.fn();
     const attachmentNode = nodes[3];
@@ -791,6 +823,60 @@ describe("DocumentTree", () => {
     await waitFor(() => expect(screen.getByText("Copiar referencia")).toBeInTheDocument());
     await userEvent.click(screen.getByText("Copiar referencia"));
     expect(onContextAction).toHaveBeenCalledWith("copy-image-reference", imageNode);
+  });
+
+  it("inserts a dragged image into the active document with the controlled mouse drag", () => {
+    const onPreviewImageDropIntoActiveDocument = vi.fn();
+    const onDropImageIntoActiveDocument = vi.fn();
+    const editorTarget = document.createElement("div");
+    editorTarget.className = "knownext-editor";
+    document.body.appendChild(editorTarget);
+
+    render(
+      <DocumentTree
+        nodes={nodes}
+        activeDocumentId=""
+        onOpenDocument={vi.fn()}
+        onActivateTreeNode={vi.fn()}
+        onSelectTreeNode={vi.fn()}
+        onCreateFolder={vi.fn()}
+        onCreateDocument={vi.fn()}
+        onExpandTree={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onConfigureProject={vi.fn()}
+        onRenameNode={vi.fn()}
+        onToggleNode={vi.fn()}
+        onContextAction={vi.fn()}
+        onMoveNode={vi.fn()}
+        onPreviewImageDropIntoActiveDocument={onPreviewImageDropIntoActiveDocument}
+        onDropImageIntoActiveDocument={onDropImageIntoActiveDocument}
+      />,
+    );
+
+    const imageRow = screen.getByText("diagram.png").closest(".tree-row") as HTMLElement;
+    expect(imageRow).not.toBeNull();
+    expect(imageRow).toHaveAttribute("draggable", "false");
+
+    const originalElementsFromPoint = document.elementsFromPoint;
+    Object.defineProperty(document, "elementsFromPoint", {
+      configurable: true,
+      value: vi.fn(() => [editorTarget]),
+    });
+
+    try {
+      fireEvent.mouseDown(imageRow, { button: 0, clientX: 80, clientY: 80 });
+      fireEvent.mouseMove(window, { clientX: 720, clientY: 360 });
+      fireEvent.mouseUp(window, { clientX: 720, clientY: 360 });
+    } finally {
+      Object.defineProperty(document, "elementsFromPoint", {
+        configurable: true,
+        value: originalElementsFromPoint,
+      });
+      editorTarget.remove();
+    }
+
+    expect(onPreviewImageDropIntoActiveDocument).toHaveBeenCalledWith("image-diagram", 720, 360);
+    expect(onDropImageIntoActiveDocument).toHaveBeenCalledWith("image-diagram", 720, 360);
   });
 });
 

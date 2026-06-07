@@ -134,6 +134,20 @@ pub fn answer_interaction(
         return response;
     }
 
+    if looks_like_structured_payload(&provider_text) {
+        return provider_error_response(
+            project_id,
+            document_id,
+            &interaction_id,
+            &event_id,
+            &created_at,
+            "La IA devolvió una propuesta estructurada incompleta o no validable. Vuelve a intentarlo con un alcance más pequeño.",
+            execution_mode,
+            reasoning_depth,
+            mode,
+        );
+    }
+
     let public_context_sources = public_context_sources(&context_sources);
     let assistant_event = json!({
         "id": event_id,
@@ -163,6 +177,8 @@ pub fn answer_interaction(
         "needsUserClarification": false,
         "pendingIntent": null,
         "pendingIntentStatus": null,
+        "editProposal": null,
+        "editProposalStatus": null,
         "answer": assistant_event["content"],
         "conversationEvents": [assistant_event],
         "operations": [],
@@ -443,13 +459,22 @@ fn build_response_request(
         "Usa el documento activo y las fuentes aportadas como contexto. ",
         "Devuelve siempre un JSON sin markdown externo ni bloques de codigo. ",
         "Contrato de salida: {\"action\":\"answer\",\"answer\":\"texto\"} para consultas; ",
-        "{\"action\":\"replace_document\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"markdown\":\"documento markdown completo\"} para cambios de contenido del documento activo. ",
+        "{\"action\":\"replace_selection\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"replacementMarkdown\":\"markdown que sustituye solo la seleccion\"} para reemplazar texto seleccionado. ",
+        "{\"action\":\"insert_at_cursor\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"markdown\":\"markdown a insertar en el cursor\"} para insertar contenido en el cursor activo. ",
+        "{\"action\":\"insert_image\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"assetId\":\"id del asset\",\"altText\":\"texto alternativo\",\"placement\":{\"type\":\"at_cursor\"}} para insertar una imagen existente del proyecto. ",
+        "{\"action\":\"edit_document\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"patches\":[...]} para cambios en varios apartados sin devolver el documento completo. ",
+        "{\"action\":\"replace_document\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"markdown\":\"documento markdown completo\"} solo para reescrituras completas explicitas. ",
         "{\"action\":\"create_document\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"name\":\"nombre.md\",\"markdown\":\"documento markdown completo\"} para crear un documento Markdown nuevo cuando el usuario lo pida. ",
-        "{\"action\":\"generate_image\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"prompt\":\"prompt visual detallado\",\"name\":\"nombre.png\",\"altText\":\"texto alternativo\",\"insertIntoDocument\":true} para generar una imagen local como asset del proyecto. ",
-        "No afirmes que has modificado archivos: propone el cambio con action replace_document y el runtime lo validara contra permisos. ",
+        "{\"action\":\"generate_image\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"prompt\":\"prompt visual detallado\",\"name\":\"nombre.png\",\"altText\":\"texto alternativo\",\"insertIntoDocument\":true,\"placement\":{\"type\":\"after_heading\",\"headingPath\":[\"titulo del apartado\"],\"anchorExcerpt\":null}} para generar una imagen local como asset del proyecto e insertarla en el documento. ",
+        "No afirmes que has modificado archivos: devuelve una accion estructurada y el runtime la convertira en una propuesta revisable o una operacion validada segun permisos. ",
         "No afirmes que has creado archivos: propone el cambio con action create_document y el runtime lo validara contra permisos. ",
         "No afirmes que has generado imagenes: propone action generate_image y el runtime la creara, guardara e insertara si los permisos lo permiten. ",
-        "No uses action replace_document si no hay documento activo o si la peticion no requiere modificar contenido."
+        "Si el usuario pide incluir, anadir, insertar o apoyar el texto con una imagen y hay documento activo, no preguntes ubicacion ni respondas con action answer: usa action generate_image, insertIntoDocument true, altText descriptivo, placement elegido por ti y un prompt visual basado en el texto seleccionado, el cursor o el apartado activo. ",
+        "El texto seleccionado puede ser solo contexto: no asumas que la imagen debe ir justo despues de la seleccion. Decide proactivamente donde encaja mejor la imagen. Usa placement con at_cursor, after_selection, after_heading, after_paragraph o document_end segun el documento y la peticion. ",
+        "No uses action replace_document si no hay documento activo o si la peticion no requiere modificar contenido. ",
+        "Si hay seleccion activa y el usuario pide modificarla, usa replace_selection. ",
+        "Si no hay seleccion pero hay cursor y el usuario pide insertar, continuar o incluir contenido aqui, usa insert_at_cursor. ",
+        "Para cambios sobre un concepto en varios apartados, usa edit_document con parches pequenos."
         ),
         reasoning_guidance,
     );
@@ -467,7 +492,71 @@ fn build_response_request(
             { "role": "system", "content": system },
             { "role": "user", "content": user_content }
         ],
-        "max_output_tokens": max_output_tokens_for_execution(execution_mode, reasoning_depth)
+        "max_output_tokens": max_output_tokens_for_execution(execution_mode, reasoning_depth),
+        "text": { "format": structured_output_format() }
+    })
+}
+
+fn structured_output_format() -> Value {
+    let nullable_string = || json!({ "anyOf": [{ "type": "string" }, { "type": "null" }] });
+    let nullable_number = || json!({ "anyOf": [{ "type": "integer" }, { "type": "null" }] });
+    let string_array_or_null = || json!({ "anyOf": [{ "type": "array", "items": { "type": "string" } }, { "type": "null" }] });
+    let placement_schema = json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "headingPath", "anchorExcerpt"],
+        "properties": {
+            "type": { "enum": ["at_cursor", "before_selection", "after_selection", "replace_selection", "after_heading", "after_paragraph", "document_end"] },
+            "headingPath": string_array_or_null(),
+            "anchorExcerpt": nullable_string()
+        }
+    });
+    let patch_schema = json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "action", "documentId", "summary", "confidence", "from", "to", "position", "markdown", "replacementMarkdown", "headingPath", "originalExcerpt", "anchorExcerpt", "imageAssetId", "imageAltText", "placement"],
+        "properties": {
+            "id": nullable_string(),
+            "action": { "enum": ["replace_selection", "insert_at_cursor", "edit_block", "edit_document", "edit_project", "insert_image", "replace_document"] },
+            "documentId": nullable_string(),
+            "summary": nullable_string(),
+            "confidence": { "enum": ["high", "medium", "low"] },
+            "from": nullable_number(),
+            "to": nullable_number(),
+            "position": nullable_number(),
+            "markdown": nullable_string(),
+            "replacementMarkdown": nullable_string(),
+            "headingPath": string_array_or_null(),
+            "originalExcerpt": nullable_string(),
+            "anchorExcerpt": nullable_string(),
+            "imageAssetId": nullable_string(),
+            "imageAltText": nullable_string(),
+            "placement": { "anyOf": [placement_schema.clone(), { "type": "null" }] }
+        }
+    });
+    json!({
+        "type": "json_schema",
+        "name": "knownext_ai_interaction",
+        "strict": true,
+        "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["action", "answer", "summary", "markdown", "replacementMarkdown", "name", "prompt", "assetId", "altText", "insertIntoDocument", "placement", "patches"],
+            "properties": {
+                "action": { "enum": ["answer", "replace_selection", "insert_at_cursor", "edit_document", "edit_project", "replace_document", "create_document", "generate_image", "insert_image"] },
+                "answer": nullable_string(),
+                "summary": nullable_string(),
+                "markdown": nullable_string(),
+                "replacementMarkdown": nullable_string(),
+                "name": nullable_string(),
+                "prompt": nullable_string(),
+                "assetId": nullable_string(),
+                "altText": nullable_string(),
+                "insertIntoDocument": { "anyOf": [{ "type": "boolean" }, { "type": "null" }] },
+                "placement": { "anyOf": [placement_schema.clone(), { "type": "null" }] },
+                "patches": { "anyOf": [{ "type": "array", "items": patch_schema }, { "type": "null" }] }
+            }
+        }
     })
 }
 
@@ -497,10 +586,10 @@ fn reasoning_instruction(execution_mode: &str, reasoning_depth: &str) -> &'stati
 
 fn max_output_tokens_for_execution(execution_mode: &str, reasoning_depth: &str) -> u32 {
     match (execution_mode, reasoning_depth) {
-        ("reasoning", "deep") => 2600,
-        ("reasoning", "medium") => 2000,
-        ("reasoning", _) => 1700,
-        _ => 1400,
+        ("reasoning", "deep") => 10000,
+        ("reasoning", "medium") => 8000,
+        ("reasoning", _) => 6000,
+        _ => 4000,
     }
 }
 
@@ -593,6 +682,8 @@ fn provider_status_response(
         "needsUserClarification": false,
         "pendingIntent": null,
         "pendingIntentStatus": null,
+        "editProposal": null,
+        "editProposalStatus": null,
         "answer": message,
         "conversationEvents": [event],
         "operations": [{ "type": event_type }],
@@ -682,6 +773,24 @@ fn structured_interaction_response(
         ));
     }
 
+    if action == "replace_selection" || action == "insert_at_cursor" || action == "insert_image" || action == "edit_document" || action == "edit_project" {
+        return Some(edit_proposal_response(
+            project_id,
+            payload,
+            document_id,
+            interaction_id,
+            event_id,
+            created_at,
+            &decision,
+            action,
+            answer,
+            execution_mode,
+            reasoning_depth,
+            mode,
+            context_sources,
+        ));
+    }
+
     if action != "replace_document" {
         return Some(permission_blocked_response(
             project_id,
@@ -750,6 +859,46 @@ fn structured_interaction_response(
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
         .unwrap_or(answer);
+    if payload
+        .pointer("/runtimeAi/agentic/confirmBeforeApplying")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        let operation = json!({
+            "id": knownext_core::compact_id("ai-op"),
+            "action": "replace_document",
+            "documentId": document_id,
+            "summary": summary,
+            "confidence": "medium",
+            "from": null,
+            "to": null,
+            "position": null,
+            "markdown": markdown,
+            "replacementMarkdown": null,
+            "headingPath": null,
+            "originalExcerpt": null,
+            "anchorExcerpt": null,
+            "imageAssetId": null,
+            "imageAltText": null,
+            "placement": null
+        });
+        return Some(edit_proposal_response_from_operations(
+            project_id,
+            payload,
+            Some(document_id),
+            interaction_id,
+            event_id,
+            created_at,
+            answer,
+            summary,
+            "document",
+            execution_mode,
+            reasoning_depth,
+            mode,
+            context_sources,
+            vec![operation],
+        ));
+    }
     let public_context_sources = public_context_sources(context_sources);
     let assistant_event = json!({
         "id": event_id,
@@ -778,6 +927,8 @@ fn structured_interaction_response(
         "needsUserClarification": false,
         "pendingIntent": null,
         "pendingIntentStatus": null,
+        "editProposal": null,
+        "editProposalStatus": null,
         "answer": answer,
         "conversationEvents": [assistant_event],
         "operations": [{
@@ -805,6 +956,463 @@ fn structured_interaction_response(
         "contextSources": null,
         "expiredContextSourceIds": []
     }))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn edit_proposal_response(
+    project_id: &str,
+    payload: &Value,
+    document_id: Option<&str>,
+    interaction_id: &str,
+    event_id: &str,
+    created_at: &str,
+    decision: &Value,
+    action: &str,
+    answer: &str,
+    execution_mode: &str,
+    reasoning_depth: &str,
+    mode: &str,
+    context_sources: &Value,
+) -> Value {
+    let active_document_id = document_id.filter(|value| !value.trim().is_empty());
+    if action != "edit_project" && active_document_id.is_none() {
+        return permission_blocked_response(
+            project_id,
+            None,
+            interaction_id,
+            event_id,
+            created_at,
+            "La IA propuso editar, pero no hay un documento activo sobre el que aplicar el cambio.",
+            execution_mode,
+            reasoning_depth,
+            mode,
+        );
+    }
+
+    if !payload
+        .pointer("/runtimePermissions/editDocuments")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return permission_blocked_response(
+            project_id,
+            active_document_id,
+            interaction_id,
+            event_id,
+            created_at,
+            "La IA propuso modificar el documento, pero el permiso de edición está desactivado en Ajustes > IA.",
+            execution_mode,
+            reasoning_depth,
+            mode,
+        );
+    }
+
+    let summary = decision
+        .get("summary")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(answer);
+    let operations = match action {
+        "replace_selection" => {
+            let document_id = active_document_id.expect("document-scoped edit requires an active document");
+            let Some(replacement) = decision
+                .get("replacementMarkdown")
+                .or_else(|| decision.get("markdown"))
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+            else {
+                return permission_blocked_response(
+                    project_id,
+                    active_document_id,
+                    interaction_id,
+                    event_id,
+                    created_at,
+                    "La IA propuso reemplazar la selección, pero no devolvió Markdown aplicable.",
+                    execution_mode,
+                    reasoning_depth,
+                    mode,
+                );
+            };
+            let Some(selection) = payload.get("selectionFocus").filter(|value| !value.is_null()) else {
+                return permission_blocked_response(
+                    project_id,
+                    active_document_id,
+                    interaction_id,
+                    event_id,
+                    created_at,
+                    "La IA propuso reemplazar una selección, pero no hay selección activa.",
+                    execution_mode,
+                    reasoning_depth,
+                    mode,
+                );
+            };
+            let from = selection.get("from").and_then(Value::as_i64).unwrap_or(0);
+            let to = selection.get("to").and_then(Value::as_i64).unwrap_or(from);
+            vec![json!({
+                "id": knownext_core::compact_id("ai-op"),
+                "action": "replace_selection",
+                "documentId": document_id,
+                "summary": summary,
+                "confidence": "medium",
+                "from": from,
+                "to": to,
+                "position": null,
+                "markdown": null,
+                "replacementMarkdown": replacement,
+                "headingPath": selection.get("headingPath").cloned().unwrap_or(Value::Null),
+                "originalExcerpt": selection.get("text").cloned().unwrap_or(Value::Null),
+                "anchorExcerpt": null,
+                "imageAssetId": null,
+                "imageAltText": null,
+                "placement": null
+            })]
+        }
+        "insert_at_cursor" => {
+            let document_id = active_document_id.expect("document-scoped edit requires an active document");
+            let Some(markdown) = decision
+                .get("markdown")
+                .or_else(|| decision.get("replacementMarkdown"))
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+            else {
+                return permission_blocked_response(
+                    project_id,
+                    active_document_id,
+                    interaction_id,
+                    event_id,
+                    created_at,
+                    "La IA propuso insertar en el cursor, pero no devolvió Markdown aplicable.",
+                    execution_mode,
+                    reasoning_depth,
+                    mode,
+                );
+            };
+            let Some(focus) = payload.get("selectionFocus").filter(|value| !value.is_null()) else {
+                return permission_blocked_response(
+                    project_id,
+                    active_document_id,
+                    interaction_id,
+                    event_id,
+                    created_at,
+                    "La IA propuso insertar en el cursor, pero no hay cursor activo.",
+                    execution_mode,
+                    reasoning_depth,
+                    mode,
+                );
+            };
+            let position = focus
+                .get("position")
+                .or_else(|| focus.get("from"))
+                .and_then(Value::as_i64)
+                .unwrap_or(0);
+            vec![json!({
+                "id": knownext_core::compact_id("ai-op"),
+                "action": "insert_at_cursor",
+                "documentId": document_id,
+                "summary": summary,
+                "confidence": "medium",
+                "from": null,
+                "to": null,
+                "position": position,
+                "markdown": markdown,
+                "replacementMarkdown": null,
+                "headingPath": focus.get("headingPath").cloned().unwrap_or(Value::Null),
+                "originalExcerpt": null,
+                "anchorExcerpt": focus.get("nearTextBefore").cloned().unwrap_or(Value::Null),
+                "imageAssetId": null,
+                "imageAltText": null,
+                "placement": { "type": "at_cursor", "headingPath": null, "anchorExcerpt": null }
+            })]
+        }
+        "insert_image" => {
+            let document_id = active_document_id.expect("document-scoped edit requires an active document");
+            let Some(asset_id) = decision
+                .get("assetId")
+                .or_else(|| decision.get("imageAssetId"))
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+            else {
+                return permission_blocked_response(
+                    project_id,
+                    active_document_id,
+                    interaction_id,
+                    event_id,
+                    created_at,
+                    "La IA propuso insertar una imagen, pero no identificó un asset del proyecto.",
+                    execution_mode,
+                    reasoning_depth,
+                    mode,
+                );
+            };
+            let focus = payload.get("selectionFocus").filter(|value| !value.is_null());
+            let position = focus
+                .and_then(|value| value.get("position").or_else(|| value.get("from")))
+                .and_then(Value::as_i64);
+            let from = focus.and_then(|value| value.get("from")).and_then(Value::as_i64);
+            let to = focus.and_then(|value| value.get("to")).and_then(Value::as_i64);
+            vec![json!({
+                "id": knownext_core::compact_id("ai-op"),
+                "action": "insert_image",
+                "documentId": document_id,
+                "summary": summary,
+                "confidence": "medium",
+                "from": from,
+                "to": to,
+                "position": position,
+                "markdown": null,
+                "replacementMarkdown": null,
+                "headingPath": focus.and_then(|value| value.get("headingPath")).cloned().unwrap_or(Value::Null),
+                "originalExcerpt": focus.and_then(|value| value.get("text")).cloned().unwrap_or(Value::Null),
+                "anchorExcerpt": focus.and_then(|value| value.get("nearTextBefore")).cloned().unwrap_or(Value::Null),
+                "imageAssetId": asset_id,
+                "imageAltText": decision.get("altText").or_else(|| decision.get("alt")).cloned().unwrap_or(Value::Null),
+                "placement": decision.get("placement").cloned().unwrap_or_else(|| json!({ "type": "at_cursor", "headingPath": null, "anchorExcerpt": null }))
+            })]
+        }
+        "edit_document" | "edit_project" => normalize_ai_patches(decision, active_document_id, summary),
+        _ => Vec::new(),
+    };
+
+    if operations.is_empty() {
+        return permission_blocked_response(
+            project_id,
+            active_document_id,
+            interaction_id,
+            event_id,
+            created_at,
+            "La IA propuso cambios, pero no devolvió operaciones aplicables.",
+            execution_mode,
+            reasoning_depth,
+            mode,
+        );
+    }
+
+    edit_proposal_response_from_operations(
+        project_id,
+        payload,
+        active_document_id,
+        interaction_id,
+        event_id,
+        created_at,
+        answer,
+        summary,
+        if action == "edit_project" { "project" } else { document_focus_scope(payload) },
+        execution_mode,
+        reasoning_depth,
+        mode,
+        context_sources,
+        operations,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn edit_proposal_response_from_operations(
+    project_id: &str,
+    payload: &Value,
+    document_id: Option<&str>,
+    interaction_id: &str,
+    event_id: &str,
+    created_at: &str,
+    answer: &str,
+    summary: &str,
+    scope: &str,
+    execution_mode: &str,
+    reasoning_depth: &str,
+    mode: &str,
+    context_sources: &Value,
+    operations: Vec<Value>,
+) -> Value {
+    let public_context_sources = public_context_sources(context_sources);
+    let operation_count = operations.len();
+    let title = proposal_title(scope, operation_count);
+    let assistant_event = json!({
+        "id": event_id,
+        "projectId": project_id,
+        "type": "document_modified",
+        "role": "assistant",
+        "content": answer,
+        "createdAt": created_at,
+        "documentId": document_id,
+        "path": null,
+        "paths": [],
+        "summary": summary,
+        "sourcesUsed": public_context_sources,
+    });
+    let proposal_id = knownext_core::compact_id("ai-proposal");
+    json!({
+        "interactionId": interaction_id,
+        "status": "completed",
+        "display": "bubble",
+        "uiPlacement": if mode == "project" { "conversation_tab" } else { "document_bubble" },
+        "interactionType": "document_edit",
+        "confidence": "medium",
+        "executionMode": execution_mode,
+        "reasoningDepth": reasoning_depth,
+        "executionScope": "needs_permission",
+        "routeToAiTab": mode == "project",
+        "needsUserClarification": false,
+        "pendingIntent": null,
+        "pendingIntentStatus": null,
+        "editProposal": {
+            "id": proposal_id,
+            "projectId": project_id,
+            "interactionId": interaction_id,
+            "status": "proposed",
+            "documentId": document_id,
+            "title": title,
+            "summary": summary,
+            "scope": scope,
+            "focus": focus_payload(payload, document_id),
+            "operations": operations,
+            "createdAt": created_at,
+            "updatedAt": created_at
+        },
+        "editProposalStatus": "proposed",
+        "answer": answer,
+        "conversationEvents": [assistant_event],
+        "operations": [{
+            "type": "document_modified",
+            "status": "pending",
+            "message": summary,
+            "documentId": document_id,
+            "nodeId": null,
+            "path": null,
+            "paths": [],
+            "summary": summary,
+            "task": null,
+            "confirmationId": null
+        }],
+        "updatedDocument": null,
+        "generatedImages": [],
+        "task": null,
+        "tree": null,
+        "affectedDocuments": [],
+        "requiresConfirmation": null,
+        "contextSources": null,
+        "expiredContextSourceIds": []
+    })
+}
+
+fn normalize_ai_patches(decision: &Value, fallback_document_id: Option<&str>, fallback_summary: &str) -> Vec<Value> {
+    decision
+        .get("patches")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, patch)| {
+            let action = patch
+                .get("action")
+                .and_then(Value::as_str)
+                .unwrap_or_else(|| patch.get("operation").and_then(Value::as_str).unwrap_or("edit_block"));
+            let action = match action {
+                "replace_selection" | "insert_at_cursor" | "edit_block" | "edit_document"
+                | "edit_project" | "insert_image" | "replace_document" => action,
+                _ => "edit_block",
+            };
+            let document_id = patch
+                .get("documentId")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .or(fallback_document_id)?;
+            let summary = patch
+                .get("summary")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or(fallback_summary);
+            let markdown = patch
+                .get("markdown")
+                .or_else(|| patch.get("replacementMarkdown"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let replacement = patch
+                .get("replacementMarkdown")
+                .or_else(|| patch.get("markdown"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let image_asset_id = patch
+                .get("imageAssetId")
+                .or_else(|| patch.get("assetId"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if markdown.trim().is_empty()
+                && replacement.trim().is_empty()
+                && !(action == "insert_image" && !image_asset_id.trim().is_empty())
+            {
+                return None;
+            }
+            Some(json!({
+                "id": patch.get("id").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| format!("patch-{}", index + 1)),
+                "action": action,
+                "documentId": document_id,
+                "summary": summary,
+                "confidence": patch.get("confidence").and_then(Value::as_str).unwrap_or("medium"),
+                "from": patch.get("from").cloned().unwrap_or(Value::Null),
+                "to": patch.get("to").cloned().unwrap_or(Value::Null),
+                "position": patch.get("position").cloned().unwrap_or(Value::Null),
+                "markdown": if markdown.is_empty() { Value::Null } else { Value::from(markdown) },
+                "replacementMarkdown": if replacement.is_empty() { Value::Null } else { Value::from(replacement) },
+                "headingPath": patch.get("headingPath").cloned().unwrap_or(Value::Null),
+                "originalExcerpt": patch.get("originalExcerpt").cloned().unwrap_or(Value::Null),
+                "anchorExcerpt": patch.get("anchorExcerpt").cloned().unwrap_or(Value::Null),
+                "imageAssetId": if image_asset_id.trim().is_empty() { Value::Null } else { Value::from(image_asset_id) },
+                "imageAltText": patch.get("imageAltText").or_else(|| patch.get("altText")).cloned().unwrap_or(Value::Null),
+                "placement": patch.get("placement").cloned().unwrap_or(Value::Null)
+            }))
+        })
+        .collect()
+}
+
+fn document_focus_scope(payload: &Value) -> &str {
+    payload
+        .pointer("/selectionFocus/focusType")
+        .and_then(Value::as_str)
+        .unwrap_or("document")
+}
+
+fn focus_payload(payload: &Value, document_id: Option<&str>) -> Value {
+    let Some(focus) = payload.get("selectionFocus").filter(|value| !value.is_null()) else {
+        return json!({
+            "type": if document_id.is_some() { "document" } else { "project" },
+            "documentId": document_id,
+            "path": payload.pointer("/clientContext/lastDocumentPath").cloned().unwrap_or(Value::Null),
+            "from": null,
+            "to": null,
+            "position": null,
+            "text": null,
+            "nearTextBefore": null,
+            "nearTextAfter": null,
+            "headingPath": null,
+            "blockType": null,
+            "blockHash": null
+        });
+    };
+    json!({
+        "type": focus.get("focusType").and_then(Value::as_str).unwrap_or("selection"),
+        "documentId": document_id,
+        "path": focus.get("path").cloned().unwrap_or(Value::Null),
+        "from": focus.get("from").cloned().unwrap_or(Value::Null),
+        "to": focus.get("to").cloned().unwrap_or(Value::Null),
+        "position": focus.get("position").cloned().unwrap_or(Value::Null),
+        "text": focus.get("text").cloned().unwrap_or(Value::Null),
+        "nearTextBefore": focus.get("nearTextBefore").cloned().unwrap_or(Value::Null),
+        "nearTextAfter": focus.get("nearTextAfter").cloned().unwrap_or(Value::Null),
+        "headingPath": focus.get("headingPath").cloned().unwrap_or(Value::Null),
+        "blockType": focus.get("blockType").cloned().unwrap_or(Value::Null),
+        "blockHash": focus.get("blockHash").cloned().unwrap_or(Value::Null)
+    })
+}
+
+fn proposal_title(scope: &str, operation_count: usize) -> String {
+    match (scope, operation_count) {
+        ("selection", _) => "Cambio sobre texto seleccionado".to_string(),
+        ("cursor", _) => "Inserción en el cursor".to_string(),
+        ("project", 1) => "Cambio de proyecto preparado".to_string(),
+        ("project", count) => format!("{count} cambios de proyecto preparados"),
+        (_, 1) => "Cambio de documento preparado".to_string(),
+        (_, count) => format!("{count} cambios de documento preparados"),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -908,7 +1516,7 @@ fn generate_image_response(
         "executionMode": execution_mode,
         "reasoningDepth": reasoning_depth,
         "executionScope": "direct_action",
-        "routeToAiTab": true,
+        "routeToAiTab": mode == "project",
         "needsUserClarification": false,
         "pendingIntent": null,
         "pendingIntentStatus": null,
@@ -928,7 +1536,8 @@ fn generate_image_response(
             "name": name,
             "prompt": prompt,
             "altText": alt_text,
-            "insertIntoDocument": insert_into_document
+            "insertIntoDocument": insert_into_document,
+            "placement": decision.get("placement").cloned().unwrap_or(Value::Null)
         }],
         "updatedDocument": null,
         "generatedImages": [],
@@ -1184,7 +1793,17 @@ fn parse_provider_decision(text: &str) -> Option<Value> {
             extract_fenced_json(trimmed)
                 .and_then(|json_text| serde_json::from_str::<Value>(json_text).ok())
         })
+        .or_else(|| {
+            extract_first_json_object(trimmed)
+                .and_then(|json_text| serde_json::from_str::<Value>(&json_text).ok())
+        })
+        .map(normalize_provider_decision)
         .filter(|value| value.is_object() && value.get("action").and_then(Value::as_str).is_some())
+}
+
+fn looks_like_structured_payload(text: &str) -> bool {
+    let trimmed = text.trim();
+    trimmed.starts_with('{') || trimmed.starts_with("```json") || trimmed.contains("\"action\"")
 }
 
 fn extract_fenced_json(text: &str) -> Option<&str> {
@@ -1194,6 +1813,117 @@ fn extract_fenced_json(text: &str) -> Option<&str> {
     let content = &after_start[content_start..];
     let end = content.find("```")?;
     Some(content[..end].trim())
+}
+
+fn extract_first_json_object(text: &str) -> Option<String> {
+    let start = text.find('{')?;
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (relative_index, character) in text[start..].char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if in_string {
+            match character {
+                '\\' => escaped = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match character {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    let end = start + relative_index + character.len_utf8();
+                    return Some(text[start..end].to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn normalize_provider_decision(mut decision: Value) -> Value {
+    let Some(object) = decision.as_object_mut() else {
+        return decision;
+    };
+    let action = object
+        .get("action")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    if action != "generate_image" {
+        return decision;
+    }
+
+    if missing_string(object.get("prompt")) {
+        let fallback_prompt = object
+            .get("imagePrompt")
+            .or_else(|| object.get("visualPrompt"))
+            .or_else(|| object.get("description"))
+            .or_else(|| object.get("caption"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_string);
+        if let Some(prompt) = fallback_prompt {
+            object.insert("prompt".to_string(), Value::String(prompt));
+        }
+    }
+    if missing_string(object.get("answer")) {
+        object.insert(
+            "answer".to_string(),
+            Value::String("He preparado una imagen de apoyo para el documento.".to_string()),
+        );
+    }
+    if missing_string(object.get("summary")) {
+        let summary = object
+            .get("answer")
+            .and_then(Value::as_str)
+            .unwrap_or("Imagen de apoyo preparada")
+            .to_string();
+        object.insert("summary".to_string(), Value::String(summary));
+    }
+    if missing_string(object.get("name")) {
+        object.insert("name".to_string(), Value::String("imagen-apoyo.png".to_string()));
+    }
+    if missing_string(object.get("altText")) {
+        object.insert(
+            "altText".to_string(),
+            Value::String("Imagen de apoyo para el texto seleccionado".to_string()),
+        );
+    }
+    if !object
+        .get("insertIntoDocument")
+        .map(Value::is_boolean)
+        .unwrap_or(false)
+    {
+        object.insert("insertIntoDocument".to_string(), Value::Bool(true));
+    }
+    if object
+        .get("placement")
+        .map(|value| value.is_null())
+        .unwrap_or(true)
+    {
+        object.insert(
+            "placement".to_string(),
+            json!({ "type": "after_selection", "headingPath": null, "anchorExcerpt": null }),
+        );
+    }
+    decision
+}
+
+fn missing_string(value: Option<&Value>) -> bool {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .map(str::is_empty)
+        .unwrap_or(true)
 }
 
 fn normalize_markdown_file_name(raw: &str) -> String {
@@ -1448,7 +2178,9 @@ mod tests {
             &json!([]),
             "gpt-5.4-mini",
         );
-        assert_eq!(quick["max_output_tokens"], 1400);
+        assert_eq!(quick["max_output_tokens"], 4000);
+        assert_eq!(quick["text"]["format"]["type"], "json_schema");
+        assert_eq!(quick["text"]["format"]["name"], "knownext_ai_interaction");
         assert!(quick["input"][0]["content"]
             .as_str()
             .unwrap()
@@ -1469,11 +2201,14 @@ mod tests {
             &json!([{ "id": "source", "name": "Fuente", "text": "Dato" }]),
             "gpt-5.4-mini",
         );
-        assert_eq!(reasoning["max_output_tokens"], 2600);
+        assert_eq!(reasoning["max_output_tokens"], 10000);
         let system = reasoning["input"][0]["content"].as_str().unwrap();
         let user = reasoning["input"][1]["content"].as_str().unwrap();
         assert!(system.contains("Modo Razonar profundo"));
         assert!(system.contains("no uses fuentes externas no aportadas"));
+        assert!(system.contains("devuelve una accion estructurada"));
+        assert!(system.contains("replace_document") && system.contains("solo para reescrituras completas explicitas"));
+        assert!(!system.contains("propone el cambio con action replace_document"));
         assert!(user.contains("reasoning (deep)"));
     }
 
@@ -1519,6 +2254,224 @@ mod tests {
     }
 
     #[test]
+    fn structured_selection_edit_returns_reviewable_edit_proposal() {
+        let response = structured_interaction_response(
+            "project",
+            &json!({
+                "runtimePermissions": { "editDocuments": true },
+                "selectionFocus": {
+                    "focusType": "selection",
+                    "documentId": "project::doc.md",
+                    "from": 12,
+                    "to": 34,
+                    "text": "Texto original"
+                }
+            }),
+            Some("project::doc.md"),
+            "interaction",
+            "event",
+            "2026-06-04T00:00:00Z",
+            r##"{"action":"replace_selection","answer":"He preparado una ampliación.","summary":"Selección ampliada","replacementMarkdown":"Texto original ampliado con más detalle."}"##,
+            "quick",
+            "light",
+            "document",
+            &json!([]),
+        )
+        .unwrap();
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["updatedDocument"], Value::Null);
+        assert_eq!(response["editProposal"]["status"], "proposed");
+        assert_eq!(response["editProposal"]["scope"], "selection");
+        assert_eq!(
+            response["editProposal"]["operations"][0]["action"],
+            "replace_selection"
+        );
+        assert_eq!(response["editProposal"]["operations"][0]["from"], 12);
+        assert_eq!(response["editProposal"]["operations"][0]["to"], 34);
+        assert_eq!(
+            response["editProposal"]["operations"][0]["replacementMarkdown"],
+            "Texto original ampliado con más detalle."
+        );
+    }
+
+    #[test]
+    fn structured_cursor_insert_returns_reviewable_edit_proposal() {
+        let response = structured_interaction_response(
+            "project",
+            &json!({
+                "runtimePermissions": { "editDocuments": true },
+                "selectionFocus": {
+                    "focusType": "cursor",
+                    "documentId": "project::doc.md",
+                    "from": 42,
+                    "to": 42,
+                    "position": 42,
+                    "text": "",
+                    "nearTextBefore": "## Origenes"
+                }
+            }),
+            Some("project::doc.md"),
+            "interaction",
+            "event",
+            "2026-06-04T00:00:00Z",
+            r##"{"action":"insert_at_cursor","answer":"He preparado un párrafo nuevo.","summary":"Párrafo insertado","markdown":"Nuevo párrafo contextual."}"##,
+            "quick",
+            "light",
+            "document",
+            &json!([]),
+        )
+        .unwrap();
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["updatedDocument"], Value::Null);
+        assert_eq!(response["editProposal"]["scope"], "cursor");
+        assert_eq!(
+            response["editProposal"]["operations"][0]["action"],
+            "insert_at_cursor"
+        );
+        assert_eq!(response["editProposal"]["operations"][0]["position"], 42);
+        assert_eq!(
+            response["editProposal"]["operations"][0]["markdown"],
+            "Nuevo párrafo contextual."
+        );
+    }
+
+    #[test]
+    fn structured_image_insert_returns_reviewable_asset_proposal() {
+        let response = structured_interaction_response(
+            "project",
+            &json!({
+                "runtimePermissions": { "editDocuments": true },
+                "selectionFocus": {
+                    "focusType": "cursor",
+                    "documentId": "project::doc.md",
+                    "from": 8,
+                    "to": 8,
+                    "position": 8,
+                    "text": ""
+                }
+            }),
+            Some("project::doc.md"),
+            "interaction",
+            "event",
+            "2026-06-04T00:00:00Z",
+            r##"{"action":"insert_image","answer":"He preparado la imagen.","summary":"Imagen insertada","assetId":"project::assets/origen.png","altText":"Origen de la cerveza","placement":{"type":"at_cursor","headingPath":null,"anchorExcerpt":null}}"##,
+            "quick",
+            "light",
+            "document",
+            &json!([]),
+        )
+        .unwrap();
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["updatedDocument"], Value::Null);
+        assert_eq!(
+            response["editProposal"]["operations"][0]["action"],
+            "insert_image"
+        );
+        assert_eq!(
+            response["editProposal"]["operations"][0]["imageAssetId"],
+            "project::assets/origen.png"
+        );
+        assert_eq!(
+            response["editProposal"]["operations"][0]["placement"]["type"],
+            "at_cursor"
+        );
+    }
+
+    #[test]
+    fn structured_project_edit_without_active_document_returns_multi_document_proposal() {
+        let response = structured_interaction_response(
+            "project",
+            &json!({ "runtimePermissions": { "editDocuments": true } }),
+            None,
+            "interaction",
+            "event",
+            "2026-06-04T00:00:00Z",
+            r##"{"action":"edit_project","answer":"He preparado cambios en varios documentos.","summary":"Concepto actualizado","patches":[{"id":"patch-1","action":"edit_block","documentId":"project::docs/a.md","summary":"Actualizar A","confidence":"medium","from":null,"to":null,"position":null,"markdown":null,"replacementMarkdown":"Nuevo texto A","headingPath":["A"],"originalExcerpt":"Texto A","anchorExcerpt":null,"imageAssetId":null,"imageAltText":null,"placement":null},{"id":"patch-2","action":"edit_block","documentId":"project::docs/b.md","summary":"Actualizar B","confidence":"medium","from":null,"to":null,"position":null,"markdown":null,"replacementMarkdown":"Nuevo texto B","headingPath":["B"],"originalExcerpt":"Texto B","anchorExcerpt":null,"imageAssetId":null,"imageAltText":null,"placement":null}]}"##,
+            "reasoning",
+            "medium",
+            "project",
+            &json!([]),
+        )
+        .unwrap();
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["editProposal"]["status"], "proposed");
+        assert_eq!(response["editProposal"]["documentId"], Value::Null);
+        assert_eq!(response["editProposal"]["scope"], "project");
+        assert_eq!(response["routeToAiTab"], true);
+        assert_eq!(response["editProposal"]["operations"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            response["editProposal"]["operations"][0]["documentId"],
+            "project::docs/a.md"
+        );
+        assert_eq!(
+            response["editProposal"]["operations"][1]["documentId"],
+            "project::docs/b.md"
+        );
+    }
+
+    #[test]
+    fn structured_document_multi_patch_keeps_user_in_document_surface() {
+        let response = structured_interaction_response(
+            "project",
+            &json!({ "runtimePermissions": { "editDocuments": true } }),
+            Some("project::docs/a.md"),
+            "interaction",
+            "event",
+            "2026-06-04T00:00:00Z",
+            r##"{"action":"edit_document","answer":"He preparado cambios en varios apartados.","summary":"Apartados actualizados","patches":[{"id":"patch-1","action":"edit_block","documentId":"project::docs/a.md","summary":"Actualizar A","confidence":"medium","from":null,"to":null,"position":null,"markdown":null,"replacementMarkdown":"Nuevo texto A","headingPath":["A"],"originalExcerpt":"Texto A","anchorExcerpt":null,"imageAssetId":null,"imageAltText":null,"placement":null},{"id":"patch-2","action":"edit_block","documentId":"project::docs/a.md","summary":"Actualizar B","confidence":"medium","from":null,"to":null,"position":null,"markdown":null,"replacementMarkdown":"Nuevo texto B","headingPath":["B"],"originalExcerpt":"Texto B","anchorExcerpt":null,"imageAssetId":null,"imageAltText":null,"placement":null}]}"##,
+            "reasoning",
+            "medium",
+            "document",
+            &json!([]),
+        )
+        .unwrap();
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["editProposal"]["status"], "proposed");
+        assert_eq!(response["editProposal"]["operations"].as_array().unwrap().len(), 2);
+        assert_eq!(response["uiPlacement"], "document_bubble");
+        assert_eq!(response["routeToAiTab"], false);
+    }
+
+    #[test]
+    fn structured_project_image_patch_returns_reviewable_asset_operation() {
+        let response = structured_interaction_response(
+            "project",
+            &json!({ "runtimePermissions": { "editDocuments": true } }),
+            None,
+            "interaction",
+            "event",
+            "2026-06-04T00:00:00Z",
+            r##"{"action":"edit_project","answer":"He preparado una imagen en el apartado.","summary":"Imagen añadida","patches":[{"id":"patch-img","action":"insert_image","documentId":"project::docs/a.md","summary":"Insertar imagen","confidence":"medium","from":null,"to":null,"position":null,"markdown":null,"replacementMarkdown":null,"headingPath":["A"],"originalExcerpt":null,"anchorExcerpt":null,"imageAssetId":"project::assets/origen.png","imageAltText":"Origen","placement":{"type":"after_heading","headingPath":["A"],"anchorExcerpt":null}}]}"##,
+            "reasoning",
+            "medium",
+            "project",
+            &json!([]),
+        )
+        .unwrap();
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["editProposal"]["scope"], "project");
+        assert_eq!(response["editProposal"]["operations"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            response["editProposal"]["operations"][0]["action"],
+            "insert_image"
+        );
+        assert_eq!(
+            response["editProposal"]["operations"][0]["imageAssetId"],
+            "project::assets/origen.png"
+        );
+        assert_eq!(
+            response["editProposal"]["operations"][0]["placement"]["type"],
+            "after_heading"
+        );
+    }
+
+    #[test]
     fn structured_document_creation_returns_validated_project_operation() {
         let response = structured_interaction_response(
             "project",
@@ -1559,7 +2512,7 @@ mod tests {
             "interaction",
             "event",
             "2026-06-04T00:00:00Z",
-            r##"{"action":"generate_image","answer":"He preparado la imagen.","summary":"Imagen preparada","prompt":"Ilustración técnica de un flujo local-first","name":"flujo-local","altText":"Flujo local-first","insertIntoDocument":true}"##,
+            r##"{"action":"generate_image","answer":"He preparado la imagen.","summary":"Imagen preparada","prompt":"Ilustración técnica de un flujo local-first","name":"flujo-local","altText":"Flujo local-first","insertIntoDocument":true,"placement":{"type":"after_heading","headingPath":["Arquitectura"],"anchorExcerpt":null}}"##,
             "quick",
             "light",
             "document",
@@ -1572,13 +2525,70 @@ mod tests {
         assert_eq!(response["operations"][0]["type"], "image_generated");
         assert_eq!(response["operations"][0]["status"], "ready");
         assert_eq!(response["operations"][0]["name"], "flujo-local.png");
+        assert_eq!(response["routeToAiTab"], false);
         assert_eq!(
             response["operations"][0]["prompt"],
             "Ilustración técnica de un flujo local-first"
         );
         assert_eq!(response["operations"][0]["insertIntoDocument"], true);
+        assert_eq!(response["operations"][0]["placement"]["type"], "after_heading");
+        assert_eq!(
+            response["operations"][0]["placement"]["headingPath"][0],
+            "Arquitectura"
+        );
         assert_eq!(response["conversationEvents"][0]["type"], "image_generated");
         assert!(response["conversationEvents"][0]["sourcesUsed"][0]["text"].is_null());
+    }
+
+    #[test]
+    fn structured_image_generation_accepts_json_embedded_in_provider_text() {
+        let response = structured_interaction_response(
+            "project",
+            &json!({ "runtimePermissions": { "generateImages": true, "createImageAssets": true, "insertImagesIntoDocuments": true } }),
+            Some("project::doc.md"),
+            "interaction",
+            "event",
+            "2026-06-04T00:00:00Z",
+            r##"Claro. {"action":"generate_image","answer":"He preparado la imagen.","summary":"Imagen preparada","prompt":"Ilustración documental sobre cerveza antigua","name":"cerveza-antigua","altText":"Cerveza en la antigüedad","insertIntoDocument":true,"placement":{"type":"after_selection","headingPath":null,"anchorExcerpt":null}} La insertaré en el documento."##,
+            "quick",
+            "light",
+            "document",
+            &json!([]),
+        )
+        .unwrap();
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["operations"][0]["type"], "image_generated");
+        assert_eq!(response["operations"][0]["prompt"], "Ilustración documental sobre cerveza antigua");
+        assert_eq!(response["operations"][0]["placement"]["type"], "after_selection");
+        assert_eq!(response["routeToAiTab"], false);
+    }
+
+    #[test]
+    fn structured_image_generation_normalizes_recoverable_incomplete_decision() {
+        let response = structured_interaction_response(
+            "project",
+            &json!({ "runtimePermissions": { "generateImages": true, "createImageAssets": true, "insertImagesIntoDocuments": true } }),
+            Some("project::doc.md"),
+            "interaction",
+            "event",
+            "2026-06-04T00:00:00Z",
+            r##"{"action":"generate_image","description":"Ilustración histórica de elaboración de cerveza en Mesopotamia"}"##,
+            "quick",
+            "light",
+            "document",
+            &json!([]),
+        )
+        .unwrap();
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["operations"][0]["type"], "image_generated");
+        assert_eq!(
+            response["operations"][0]["prompt"],
+            "Ilustración histórica de elaboración de cerveza en Mesopotamia"
+        );
+        assert_eq!(response["operations"][0]["insertIntoDocument"], true);
+        assert_eq!(response["operations"][0]["placement"]["type"], "after_selection");
     }
 
     #[test]

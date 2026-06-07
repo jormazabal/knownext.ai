@@ -1,6 +1,7 @@
 import type { Editor } from "@milkdown/kit/core";
 import { commandsCtx, editorViewCtx, parserCtx } from "@milkdown/kit/core";
-import type { EditorState } from "@milkdown/kit/prose/state";
+import { Slice, type Node as ProseMirrorNode } from "@milkdown/kit/prose/model";
+import { TextSelection, type EditorState } from "@milkdown/kit/prose/state";
 import type { PluginKey } from "@milkdown/kit/prose/state";
 import { redoDepth, undoDepth } from "@milkdown/kit/prose/history";
 import { lift } from "@milkdown/kit/prose/commands";
@@ -113,6 +114,137 @@ export function createMarkdownEditorController(editor: Editor, selectionFocusPlu
         return false;
       }
     },
+    replaceRange(from, to, markdown, options) {
+      try {
+        return editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const parser = ctx.get(parserCtx);
+          const nextDocument = parser(markdown);
+          const { state } = view;
+          const safeFrom = clampDocumentPosition(from, state.doc.content.size);
+          const safeTo = clampDocumentPosition(to, state.doc.content.size);
+
+          if (safeFrom > safeTo) return false;
+
+          const transaction = state.tr
+            .replaceWith(safeFrom, safeTo, nextDocument.content)
+            .setMeta("addToHistory", options?.addToHistory !== false)
+            .scrollIntoView();
+
+          view.dispatch(transaction);
+          return true;
+        });
+      } catch {
+        return false;
+      }
+    },
+    insertMarkdown(markdown, options) {
+      try {
+        return editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const parser = ctx.get(parserCtx);
+          const nextDocument = parser(markdown);
+          const transaction = view.state.tr
+            .replaceSelection(new Slice(nextDocument.content, 0, 0))
+            .setMeta("addToHistory", options?.addToHistory !== false)
+            .scrollIntoView();
+
+          view.dispatch(transaction);
+          return true;
+        });
+      } catch {
+        return false;
+      }
+    },
+    insertMarkdownAt(position, markdown, options) {
+      try {
+        return editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const parser = ctx.get(parserCtx);
+          const nextDocument = parser(markdown);
+          const { state } = view;
+          const safePosition = clampDocumentPosition(position, state.doc.content.size);
+
+          const transaction = state.tr
+            .replaceWith(safePosition, safePosition, nextDocument.content)
+            .setMeta("addToHistory", options?.addToHistory !== false)
+            .scrollIntoView();
+
+          view.dispatch(transaction);
+          return true;
+        });
+      } catch {
+        return false;
+      }
+    },
+    replaceImageAt(position, markdown, options) {
+      try {
+        return editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const parser = ctx.get(parserCtx);
+          const image = findImageNodeAt(view.state, position);
+          if (!image) return false;
+
+          const nextImage = findFirstImageNode(parser(markdown));
+          if (!nextImage) return false;
+
+          const transaction = view.state.tr
+            .setNodeMarkup(image.position, undefined, {
+              ...image.node.attrs,
+              ...nextImage.attrs,
+            })
+            .setMeta("addToHistory", options?.addToHistory !== false)
+            .scrollIntoView();
+
+          view.dispatch(transaction);
+          return true;
+        });
+      } catch {
+        return false;
+      }
+    },
+    deleteImageAt(position, options) {
+      try {
+        return editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const image = findImageNodeAt(view.state, position);
+          if (!image) return false;
+
+          const range = findImageDeletionRange(view.state, image.position, image.node.nodeSize);
+          const transaction = view.state.tr
+            .delete(range.from, range.to)
+            .setMeta("addToHistory", options?.addToHistory !== false)
+            .scrollIntoView();
+
+          view.dispatch(transaction);
+          return true;
+        });
+      } catch {
+        return false;
+      }
+    },
+    setCursorAtClientPoint(clientX, clientY, options) {
+      try {
+        return editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const position = view.posAtCoords({ left: clientX, top: clientY });
+          if (!position) return false;
+
+          const safePosition = clampDocumentPosition(position.pos, view.state.doc.content.size);
+          const selection = TextSelection.near(view.state.doc.resolve(safePosition));
+          const transaction = view.state.tr
+            .setSelection(selection)
+            .setMeta("addToHistory", options?.addToHistory === true)
+            .scrollIntoView();
+
+          view.dispatch(transaction);
+          view.focus();
+          return true;
+        });
+      } catch {
+        return false;
+      }
+    },
     insertText(text, options) {
       if (!text) return true;
       try {
@@ -195,6 +327,10 @@ export function createMarkdownEditorController(editor: Editor, selectionFocusPlu
       }
     },
   };
+}
+
+function clampDocumentPosition(position: number, maxPosition: number) {
+  return Math.max(0, Math.min(position, maxPosition));
 }
 
 type EditorCommandContext = Parameters<Editor["action"]>[0] extends (ctx: infer Ctx) => unknown ? Ctx : never;
@@ -306,6 +442,58 @@ function applyImage(ctx: EditorCommandContext, image?: { src: string; alt: strin
 
   const alt = image?.alt ?? window.prompt("Texto alternativo", "Imagen") ?? "Imagen";
   return ctx.get(commandsCtx).call(insertImageCommand.key, { src, alt });
+}
+
+function findFirstImageNode(doc: ProseMirrorNode): { attrs: Record<string, unknown> } | null {
+  let image: { attrs: Record<string, unknown> } | null = null;
+  doc.descendants((node) => {
+    if (!isImageLikeNode(node) || image) return !image;
+    image = { attrs: node.attrs };
+    return false;
+  });
+  return image;
+}
+
+function findImageNodeAt(state: EditorState, position: number) {
+  const safePosition = clampDocumentPosition(position, state.doc.content.size);
+  const directNode = state.doc.nodeAt(safePosition);
+  if (directNode && isImageLikeNode(directNode)) {
+    return { node: directNode, position: safePosition };
+  }
+
+  const previousNode = safePosition > 0 ? state.doc.nodeAt(safePosition - 1) : null;
+  if (previousNode && isImageLikeNode(previousNode)) {
+    return { node: previousNode, position: safePosition - 1 };
+  }
+
+  let found: { node: ProseMirrorNode; position: number } | null = null;
+  const from = Math.max(0, safePosition - 4);
+  const to = Math.min(state.doc.content.size, safePosition + 4);
+  state.doc.nodesBetween(from, to, (node, nodePosition) => {
+    if (!isImageLikeNode(node) || found) return !found;
+    found = { node, position: nodePosition };
+    return false;
+  });
+  return found;
+}
+
+function isImageLikeNode(node: ProseMirrorNode) {
+  const typeName = node.type.name.toLowerCase();
+  return typeName.includes("image") && (typeof node.attrs.src === "string" || typeof node.attrs.url === "string");
+}
+
+function findImageDeletionRange(state: EditorState, position: number, nodeSize: number) {
+  const resolvedPosition = state.doc.resolve(position);
+  const parent = resolvedPosition.parent;
+
+  if (parent.type.name === "paragraph" && parent.childCount === 1 && resolvedPosition.depth > 0 && state.doc.childCount > 1) {
+    return {
+      from: resolvedPosition.before(resolvedPosition.depth),
+      to: resolvedPosition.after(resolvedPosition.depth),
+    };
+  }
+
+  return { from: position, to: position + nodeSize };
 }
 
 function toggleBulletList(ctx: EditorCommandContext) {

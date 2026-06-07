@@ -109,6 +109,7 @@ export function AiPromptInput({
   const visibleSources = activeContextSources.slice(0, 4);
   const hiddenSourceCount = Math.max(0, activeContextSources.length - visibleSources.length);
   const contextWeightLabel = useMemo(() => getContextWeightLabel(activeContextSources), [activeContextSources]);
+  const visibleSelectionFocus = selectionFocus?.focusType === "cursor" ? null : selectionFocus;
 
   useEffect(() => {
     if (!modeMenuOpen) return;
@@ -537,9 +538,9 @@ export function AiPromptInput({
         }}
         onDrop={handleDrop}
       >
-        {selectionFocus || activeContextSources.length > 0 ? (
+        {visibleSelectionFocus || activeContextSources.length > 0 ? (
           <div className="knownext-ai-context-strip pointer-events-auto flex max-h-[52px] w-full flex-wrap items-center gap-1 overflow-hidden px-1 pb-1.5 pt-0.5">
-            {selectionFocus ? (
+            {visibleSelectionFocus ? (
             <span className="inline-flex items-center gap-1.5 rounded-full border border-orange-200 bg-brand-hover px-2 py-1 text-[10px] font-semibold text-brand-orange">
               Texto seleccionado
               <button
@@ -939,7 +940,7 @@ export function AiPromptInput({
             reasoningDepth={reasoningDepth}
             selectedDepthLabel={selectedDepthLabel}
             activeContextSources={activeContextSources}
-            selectionFocus={selectionFocus}
+            selectionFocus={visibleSelectionFocus}
             contextWeightLabel={contextWeightLabel}
             onClose={() => setCompactOptionsOpen(false)}
             onFocusProjectReferenceSearch={focusProjectReferenceSearch}
@@ -1184,9 +1185,9 @@ function PromptOptionsDialog({
             </div>
             {selectionFocus ? (
               <div className="flex items-center gap-2 rounded-xl border border-orange-200 bg-brand-hover px-3 py-2 text-[11px] text-brand-orange">
-                <span className="min-w-0 flex-1 truncate font-semibold">Texto seleccionado</span>
+                <span className="min-w-0 flex-1 truncate font-semibold">{selectionFocus.focusType === "cursor" ? "Cursor en documento" : "Texto seleccionado"}</span>
                 {onClearSelectionFocus ? (
-                  <button className="grid h-7 w-7 place-items-center rounded-md hover:bg-white" aria-label="Quitar texto seleccionado del contexto IA" onClick={onClearSelectionFocus}>
+                  <button className="grid h-7 w-7 place-items-center rounded-md hover:bg-white" aria-label={selectionFocus.focusType === "cursor" ? "Quitar cursor del contexto IA" : "Quitar texto seleccionado del contexto IA"} onClick={onClearSelectionFocus}>
                     <X size={14} />
                   </button>
                 ) : null}

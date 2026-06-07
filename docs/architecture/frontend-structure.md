@@ -28,7 +28,9 @@ The Services settings section shows the local Rust runtime, version/profile deta
 
 The IA workspace tab is project-scoped and renders conversation events from runtime contracts. Prompt context chips are presentation state; source resolution, extraction, indexing, provider credentials, and operation validation belong to Rust services.
 
-AI-generated document changes, images, and project operations must return structured operations that the app can apply deterministically.
+AI-generated document changes, images, and project operations must return structured operations that the app can apply deterministically. The frontend may apply already validated edit proposals to local editor/document state, but it must treat provider text as display-only and must not call providers or infer intent from prompt wording.
+
+AI edit proposals are the UX boundary for document mutation. Selection/cursor operations can use the active Milkdown controller; project or multi-document operations must use validated Markdown anchors or explicit full-document replacement. If an anchor is missing or ambiguous, the UI keeps the operation reviewable instead of guessing a target.
 
 ## Visual Structure
 
