@@ -1,12 +1,13 @@
 [package]
 name = "knownext-storage"
-version = "2.2.0"
+version = "2.3.0"
 edition = "2021"
 license = "Apache-2.0"
 
 [dependencies]
 base64 = "0.22"
 knownext-ai = { path = "../knownext-ai" }
+knownext-ai-skills = { path = "../knownext-ai-skills" }
 knownext-core = { path = "../knownext-core" }
 knownext-docs = { path = "../knownext-docs" }
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "form", "json", "rustls"] }

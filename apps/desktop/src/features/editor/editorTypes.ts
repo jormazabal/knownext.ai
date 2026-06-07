@@ -93,6 +93,7 @@ export type MarkdownEditorDiagramEditTarget = {
   code: string;
   caption?: string | null;
   width?: "compact" | "auto" | "wide" | "full" | null;
+  widthRatio?: number | null;
 };
 
 export type MarkdownEditorFormatState = Partial<Record<MarkdownEditorAction, boolean>>;

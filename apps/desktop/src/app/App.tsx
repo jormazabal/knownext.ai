@@ -153,6 +153,8 @@ import type {
   AiPendingDelete,
   AiPendingIntent,
   AiSelectionFocus,
+  AiSkillApplication,
+  AiSkillDiagnostic,
   AiUsageSummaryResponse,
   AppearanceConfig,
   AppUtilityTabId,
@@ -257,7 +259,7 @@ export function App() {
   const [autoApplyingAiEditProposalId, setAutoApplyingAiEditProposalId] = useState<string | null>(null);
   const [blockedAiEditOperationReasons, setBlockedAiEditOperationReasons] = useState<Record<string, AiMarkdownOperationReviewReason>>({});
   const [appliedAiEditOperationIds, setAppliedAiEditOperationIds] = useState<string[]>([]);
-  const [aiBubble, setAiBubble] = useState<{ id: string; answer: string } | null>(null);
+  const [aiBubble, setAiBubble] = useState<{ id: string; answer: string; usedSkills?: string[]; skillApplications?: AiSkillApplication[]; skillDiagnostics?: AiSkillDiagnostic[] } | null>(null);
   const [aiAppliedChange, setAiAppliedChange] = useState<{ documentId: string; summary: string } | null>(null);
   const [aiSelectionFocus, setAiSelectionFocus] = useState<AiSelectionFocus | null>(null);
   const [pendingEditorOperations, setPendingEditorOperations] = useState<MarkdownEditorExternalOperation[]>([]);
@@ -1717,7 +1719,13 @@ export function App() {
     }
 
     if (response.answer && response.display !== "none") {
-      setAiBubble({ id: response.interactionId, answer: response.answer });
+      setAiBubble({
+        id: response.interactionId,
+        answer: response.answer,
+        usedSkills: response.usedSkills,
+        skillApplications: response.skillApplications,
+        skillDiagnostics: response.skillDiagnostics,
+      });
     }
   }
 

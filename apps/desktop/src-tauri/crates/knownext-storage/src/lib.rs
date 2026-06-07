@@ -157,6 +157,24 @@ impl LocalApi {
             ("PUT", ["api", "config"]) => ok(self.update_config(body)),
             ("GET", ["api", "config", "ai"]) => ok(self.ai_config_status()),
             ("PUT", ["api", "config", "ai"]) => ok(self.update_ai_config(body)),
+            ("GET", ["api", "ai", "skills"]) => ok(knownext_ai_skills::list_ai_skills_json()),
+            ("POST", ["api", "ai", "skills", "selection-preview"]) => {
+                ok(knownext_ai_skills::selection_preview_json(&body))
+            }
+            ("GET", ["api", "ai", "skills", skill_id]) => {
+                if let Some(skill) = knownext_ai_skills::get_ai_skill_json(skill_id) {
+                    ok(skill)
+                } else {
+                    bad(404, "Skill de IA no encontrada.")
+                }
+            }
+            ("POST", ["api", "ai", "skills", skill_id, "validate"]) => {
+                if let Some(validation) = knownext_ai_skills::validate_ai_skill_json(skill_id) {
+                    ok(validation)
+                } else {
+                    bad(404, "Skill de IA no encontrada.")
+                }
+            }
             ("POST", ["api", "transcription"]) => ok(self.transcribe_audio(body, files)),
             ("GET", ["api", "config", "export-template"]) => ok(self.read_export_template()),
             ("PUT", ["api", "config", "export-template"]) => ok(self.update_export_template(body)),
@@ -7832,6 +7850,65 @@ mod tests {
         assert_eq!(deleted.body["enabled"], true);
         assert_eq!(deleted.body["status"], "not-indexed");
         assert_eq!(deleted.body["indexedDocumentCount"], 0);
+    }
+
+    #[test]
+    fn ai_skills_contracts_are_global_and_readonly() {
+        let api = api();
+
+        let list = api.handle("GET", "/api/ai/skills", Value::Null, vec![]).unwrap();
+        assert_eq!(list.status, 200);
+        let skills = list.body["skills"].as_array().unwrap();
+        assert!(skills
+            .iter()
+            .any(|skill| skill["id"] == "knownext.mermaid"
+                && skill["source"] == "base"
+                && skill["visibility"] == "readonly"
+                && skill["runtimeEnabled"] == true
+                && skill["modes"].as_array().unwrap().iter().any(|mode| mode["id"] == "diagram_structure")));
+
+        let detail = api
+            .handle(
+                "GET",
+                "/api/ai/skills/knownext.mermaid",
+                Value::Null,
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(detail.status, 200);
+        assert_eq!(detail.body["manifest"]["id"], "knownext.mermaid");
+        assert!(detail.body["mermaidCatalog"].as_array().unwrap().iter().any(|item| item["id"] == "architecture-beta"));
+        assert!(detail.body["instructionsMarkdown"]
+            .as_str()
+            .unwrap()
+            .contains("architecture-beta"));
+
+        let validation = api
+            .handle(
+                "POST",
+                "/api/ai/skills/knownext.mermaid/validate",
+                Value::Null,
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(validation.status, 200);
+        assert_eq!(validation.body["status"], "valid");
+
+        let preview = api
+            .handle(
+                "POST",
+                "/api/ai/skills/selection-preview",
+                json!({ "prompt": "Crea una tabla Markdown comparativa", "expectedAction": "answer" }),
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(preview.status, 200);
+        assert!(preview.body["candidateSkills"].as_array().unwrap().iter().any(|skill| skill["id"] == "knownext.markdown"));
+
+        let missing = api
+            .handle("GET", "/api/ai/skills/knownext.missing", Value::Null, vec![])
+            .unwrap();
+        assert_eq!(missing.status, 404);
     }
 
     #[test]

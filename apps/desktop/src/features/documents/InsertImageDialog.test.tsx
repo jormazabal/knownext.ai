@@ -108,20 +108,19 @@ describe("InsertImageDialog", () => {
     expect(onInsert).toHaveBeenCalledWith("![Nueva imagen contextual](https://example.com/new.png)");
   });
 
-  it("can insert a selected project image with an explicit document width", async () => {
+  it("does not expose document display size configuration when inserting images", async () => {
     const onBuildReference = vi.fn().mockResolvedValue({ markdown: "![Arquitectura](assets/arquitectura.png)", asset });
     const onInsert = vi.fn();
 
     renderDialog({ onBuildReference, onInsert });
 
-    fireEvent.click(screen.getByRole("button", { name: "Tamaño fijo Define anchura inicial" }));
-    fireEvent.change(screen.getByLabelText("Anchura de imagen"), {
-      target: { value: "65" },
-    });
+    expect(screen.queryByText("Tamaño en el documento")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Anchura de imagen")).not.toBeInTheDocument();
+
     fireEvent.click(screen.getByRole("button", { name: /Arquitectura.png/ }));
     fireEvent.click(screen.getByRole("button", { name: "Insertar" }));
 
-    await waitFor(() => expect(onInsert).toHaveBeenCalledWith('<img src="assets/arquitectura.png" alt="Arquitectura" width="65%">'));
+    await waitFor(() => expect(onInsert).toHaveBeenCalledWith("![Arquitectura](assets/arquitectura.png)"));
   });
 });
 

@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Activity, ArrowRight, Brain, Check, ChevronDown, Copy, Download, Eye, FileText, FolderOpen, Gauge, Globe2, Grid2X2, Image as ImageIcon, Info, KeyRound, Languages, ListChecks, Mic, Monitor, Moon, Paintbrush, RefreshCw, RotateCcw, Server, Settings, ShieldCheck, Sparkles, Sun, Trash2, Type as TypeIcon, Underline, Workflow, Wrench, X } from "lucide-react";
 import { AiModelSelector, type AiModelSelectorOption, type AiModelSelectorTone } from "../../components/ai/AiModelSelector";
+import { AiSkillsSettings } from "./AiSkillsSettings";
 import { defaultAiConfig } from "../../lib/api/config";
 import { accentPalettes } from "../../lib/theme/appearance";
 import type { AiConfigStatus, AiImageGenerationModelId, AiIndexStatusResponse, AiModelId, AiTranscriptionLanguage, AiVisionModelId, AppearanceAccentColor, AppearanceConfig, AppearanceThemeMode, DiagnosticsConfig, ExportTemplateConfig, ExportTemplateUpdate, ExportTextFormat } from "../../types/domain";
 import type { TraceLogStatus } from "../../lib/runtime/logging";
 import type { RuntimeServicesStatus } from "../../lib/runtime/services";
 
-type AppSettingsSection = "summary" | "interface" | "export" | "ai" | "capabilities" | "system";
+type AppSettingsSection = "summary" | "interface" | "export" | "ai" | "skills" | "capabilities" | "system";
 export type AppSettingsSaveState = "idle" | "saving" | "saved" | "error" | "local-only";
 
 const exportFontOptions: Array<[string, string]> = [
@@ -162,6 +163,7 @@ export function AppSettingsDialog({
     { id: "summary", label: text.summaryNav, description: text.summaryNavDescription, icon: Grid2X2 },
     { id: "interface", label: text.interfaceNav, description: text.interfaceNavDescription, icon: Monitor },
     { id: "ai", label: text.aiNav, description: text.aiNavDescription, icon: Brain },
+    { id: "skills", label: text.skillsNav, description: text.skillsNavDescription, icon: Sparkles },
     { id: "capabilities", label: text.capabilitiesNav, description: text.capabilitiesNavDescription, icon: Wrench },
     { id: "export", label: text.exportNav, description: text.exportNavDescription, icon: Download },
     { id: "system", label: text.systemNav, description: text.systemNavDescription, icon: Settings },
@@ -266,6 +268,8 @@ export function AppSettingsDialog({
                 onReindexImages={onReindexImages}
                 onDeleteAiIndex={onDeleteAiIndex}
               />
+            ) : activeSection === "skills" ? (
+              <AiSkillsSettings />
             ) : activeSection === "capabilities" ? (
               <CapabilitiesSettings ai={ai} text={text} onAiChange={onAiChange} onReindexImages={onReindexImages} />
             ) : (
@@ -3448,6 +3452,8 @@ const settingsCopy = {
     interfaceNavDescription: "Apariencia y comportamiento",
     exportNav: "Exportar",
     exportNavDescription: "PDF, DOCX y Markdown",
+    skillsNav: "Skills de IA",
+    skillsNavDescription: "Capacidades base inspeccionables",
     capabilitiesNav: "Capacidades",
     capabilitiesNavDescription: "Funciones avanzadas de IA",
     systemNav: "Sistema y diagnóstico",
@@ -3905,6 +3911,8 @@ const settingsCopy = {
     interfaceNavDescription: "Appearance and behavior",
     exportNav: "Export",
     exportNavDescription: "PDF, DOCX, and Markdown",
+    skillsNav: "AI Skills",
+    skillsNavDescription: "Inspectable base capabilities",
     capabilitiesNav: "Capabilities",
     capabilitiesNavDescription: "Advanced AI functions",
     systemNav: "System and diagnostics",

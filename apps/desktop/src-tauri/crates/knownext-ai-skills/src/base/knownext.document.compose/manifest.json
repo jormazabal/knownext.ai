@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "id": "knownext.document.compose",
+  "name": "Composicion documental",
+  "version": "2.0.0",
+  "source": "base",
+  "description": "Crea documentos y secciones completas con estructura util.",
+  "categories": ["document", "compose"],
+  "capabilities": ["document_create", "document_writing"],
+  "outputActions": ["answer", "create_document", "insert_at_cursor"],
+  "requires": [],
+  "validators": ["document.compose.sections"],
+  "runtimeEnabled": false,
+  "modes": [
+    {
+      "id": "requirements",
+      "name": "Requisitos",
+      "description": "PRD, requisitos, criterios de aceptacion y alcance.",
+      "whenToUse": ["El usuario pide crear requisitos, especificacion funcional o criterios de aceptacion."],
+      "whenNotToUse": ["El usuario solo pide revisar o resumir contenido existente."],
+      "supportedActions": ["answer", "create_document", "insert_at_cursor"],
+      "requiresCapabilities": ["document_create"],
+      "validators": ["document.compose.sections"],
+      "riskLevel": "medium",
+      "contextBudget": 1400
+    },
+    {
+      "id": "architecture",
+      "name": "Arquitectura",
+      "description": "ADR, diseno tecnico, tradeoffs y decisiones.",
+      "whenToUse": ["El usuario pide documentar arquitectura, decision tecnica o diseno."],
+      "whenNotToUse": ["La peticion es solo un diagrama aislado."],
+      "supportedActions": ["answer", "create_document", "insert_at_cursor"],
+      "requiresCapabilities": ["document_create"],
+      "validators": ["document.compose.sections"],
+      "riskLevel": "medium",
+      "contextBudget": 1600
+    }
+  ]
+}

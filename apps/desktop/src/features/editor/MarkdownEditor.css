@@ -1,0 +1,97 @@
+.knownext-editor .milkdown-image-block > .image-wrapper {
+  display: inline-block !important;
+  width: fit-content;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  aspect-ratio: auto !important;
+  align-items: flex-start !important;
+  padding: 0 !important;
+  line-height: 0;
+  background: transparent !important;
+}
+
+.knownext-editor .milkdown-image-block > .image-wrapper img[data-type="image-block"] {
+  display: block;
+  width: auto !important;
+  height: auto !important;
+  max-width: 100% !important;
+  aspect-ratio: auto !important;
+  object-fit: contain !important;
+}
+
+.knownext-editor .milkdown-image-block > .image-wrapper[data-knownext-image-size="manual"] img[data-type="image-block"] {
+  width: 100% !important;
+  height: auto !important;
+}
+
+.knownext-editor .milkdown-image-block:is(.ProseMirror-selectednode, .knownext-selection-media, .selected, [data-selected="true"]),
+.knownext-editor .milkdown-image-block:has(> .image-wrapper:is(.ProseMirror-selectednode, .knownext-selection-media, .selected, [data-selected="true"])) {
+  background: transparent !important;
+  filter: none !important;
+  opacity: 1 !important;
+}
+
+.knownext-editor .milkdown-image-block:is(.ProseMirror-selectednode, .knownext-selection-media, .selected, [data-selected="true"]) > .image-wrapper,
+.knownext-editor .milkdown-image-block > .image-wrapper:is(.ProseMirror-selectednode, .knownext-selection-media, .selected, [data-selected="true"]) {
+  position: relative;
+  overflow: visible !important;
+  border-radius: 7px;
+  background: transparent !important;
+  outline: 2px solid rgb(var(--accent) / 0.58) !important;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 5px rgb(var(--accent) / 0.10) !important;
+}
+
+.knownext-editor .milkdown-image-block:is(.ProseMirror-selectednode, .knownext-selection-media, .selected, [data-selected="true"]) > .image-wrapper::before,
+.knownext-editor .milkdown-image-block:is(.ProseMirror-selectednode, .knownext-selection-media, .selected, [data-selected="true"]) > .image-wrapper::after,
+.knownext-editor .milkdown-image-block > .image-wrapper:is(.ProseMirror-selectednode, .knownext-selection-media, .selected, [data-selected="true"])::before,
+.knownext-editor .milkdown-image-block > .image-wrapper:is(.ProseMirror-selectednode, .knownext-selection-media, .selected, [data-selected="true"])::after,
+.knownext-editor .milkdown-image-block:is(.ProseMirror-selectednode, .knownext-selection-media, .selected, [data-selected="true"])::before,
+.knownext-editor .milkdown-image-block:is(.ProseMirror-selectednode, .knownext-selection-media, .selected, [data-selected="true"])::after {
+  display: none !important;
+  background: transparent !important;
+  content: none !important;
+  opacity: 0 !important;
+}
+
+.knownext-editor .milkdown-image-block:is(.ProseMirror-selectednode, .knownext-selection-media, .selected, [data-selected="true"]) > .image-wrapper > :not(img, .image-resize-handle),
+.knownext-editor .milkdown-image-block > .image-wrapper:is(.ProseMirror-selectednode, .knownext-selection-media, .selected, [data-selected="true"]) > :not(img, .image-resize-handle) {
+  background: transparent !important;
+  opacity: 0 !important;
+}
+
+.knownext-editor .milkdown-image-block:is(.ProseMirror-selectednode, .knownext-selection-media, .selected, [data-selected="true"]) img,
+.knownext-editor .milkdown-image-block > .image-wrapper:is(.ProseMirror-selectednode, .knownext-selection-media, .selected, [data-selected="true"]) img,
+.knownext-editor img:is(.ProseMirror-selectednode, .knownext-selection-media, .selected, [data-selected="true"]) {
+  border-color: rgb(var(--accent) / 0.74) !important;
+  filter: none !important;
+  opacity: 1 !important;
+  mix-blend-mode: normal !important;
+}
+
+.knownext-editor .milkdown-image-block > .image-wrapper > .image-resize-handle {
+  bottom: -8px !important;
+  z-index: 2;
+  height: 8px !important;
+  max-width: min(180px, 46%) !important;
+  min-width: 72px;
+  border: 1px solid rgb(var(--accent) / 0.35);
+  border-radius: 999px;
+  background: rgb(var(--accent) / 0.72) !important;
+  cursor: row-resize !important;
+  opacity: 0;
+  box-shadow: 0 3px 10px rgb(17 24 39 / 0.18);
+}
+
+.knownext-editor .milkdown-image-block:hover > .image-wrapper > .image-resize-handle,
+.knownext-editor .milkdown-image-block:is(.ProseMirror-selectednode, .knownext-selection-media, .selected, [data-selected="true"]) > .image-wrapper > .image-resize-handle,
+.knownext-editor .milkdown-image-block > .image-wrapper:is(.ProseMirror-selectednode, .knownext-selection-media, .selected, [data-selected="true"]) > .image-resize-handle {
+  opacity: 1 !important;
+}
+
+.knownext-editor .milkdown-image-block > .image-wrapper > .image-resize-handle::before {
+  position: absolute;
+  inset: -8px -16px;
+  content: "";
+}

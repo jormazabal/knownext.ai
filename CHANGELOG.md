@@ -2,6 +2,17 @@
 
 All KnowNext.ai releases use one monolithic application version for the frontend, Tauri shell, Rust runtime, Windows updater, and Android updater.
 
+## 2.3.0 - 2026-06-07
+
+- Added compact AI base skills with Rust-managed manifests, modes, validators, diagnostics and a read-only Skills de IA settings surface for inspecting bundled capabilities.
+- Added the hybrid skill-selection pipeline for AI interactions: Rust prefilters candidates, accepts or rejects structured selector output, composes only accepted instructions and reports applied skill/mode diagnostics.
+- Activated runtime skill application for Mermaid diagrams and Markdown tables, while keeping future user/imported skills represented in contracts without enabling editing, import, export or project-level activation.
+- Reworked Mermaid skills into modes under `knownext.mermaid` and exposed a Rust-backed Mermaid catalog so supported diagram families, maturity, aliases and policies stay consistent.
+- Unified embedded images and Mermaid diagrams as document visual elements with common hover actions for edit, reset size, fullscreen inspection and deletion.
+- Added a shared fullscreen media viewer with zoom, fit and pan support for embedded images and rendered Mermaid diagrams.
+- Improved image sizing in Milkdown documents: default images follow responsive viewport rules, manual resizing is proportional, live while dragging, capped at the available document width and no longer creates empty white vertical margins.
+- Removed obsolete image/diagram insertion size controls from dialogs so presentation sizing is managed directly in the document.
+
 ## 2.2.0 - 2026-06-07
 
 - Added Mermaid diagrams as first-class editable Markdown content: users can insert, validate, preview, edit, delete and render diagrams visually inside the document instead of seeing raw code as the primary experience.
