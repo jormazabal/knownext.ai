@@ -13,6 +13,7 @@ The frontend is React + TypeScript and renders product state received through th
 ## State And Persistence
 
 - Project creation, editing, selection, and tree operations go through `src/lib/api/projects.ts`.
+- Project file guard/sync overviews go through `src/lib/api/sync.ts` and are rendered as state; React does not inspect Git or the filesystem directly.
 - Layout, tabs, folder open state, notes, drafts, export templates, and settings go through API modules.
 - Unsaved document changes are autosaved through `src/lib/api/documents.ts` to runtime-managed drafts.
 - Document export goes through `src/lib/api/documents.ts`; React may open native save dialogs, but Rust writes or returns the export artifact.

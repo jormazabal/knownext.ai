@@ -44,8 +44,9 @@ Use `docs/development/functional-validation-matrix.md` to record which areas are
 - Edit a document without saving, force an orphaned draft by removing the backing Markdown file from disk, then open `Borradores recuperables`; confirm the draft is listed, can recreate the file, and disappears after restore or discard.
 - Create and save user notes.
 - In a disposable validation project or copied workspace, drag documents, folders, images, and attachments in the tree to move them between folders and to the project root; confirm the resulting filesystem paths, open tabs, and image/document references stay consistent.
-- Open the history/protection drawer and confirm version state is shown without product branch names.
-- Add a Markdown file and a `.env` file directly in the project folder outside the app; scan external changes and confirm the Markdown can be imported into local history while the private file remains omitted.
+- Open `Guardado y sincronización` from the file tree toolbar and confirm it shows a single file list ordered by modification date, with Local, Historial local and GitHub status columns and no Actividad or Detalles tabs.
+- In `Guardado y sincronización`, verify filters for `Necesitan atención`, `Borradores`, `Historial pendiente`, `GitHub pendiente`, `Conflictos` and `Omitidos`, and confirm actions are available per file or as batch actions.
+- Add a Markdown file and a `.env` file directly in the project folder outside the app; scan guardado/sincronización and confirm the Markdown can be imported into local history while the private file remains omitted.
 - Import or attach an image and confirm it renders in the document/reference viewer when supported.
 - Import a single Markdown/PDF/DOCX/XLSX file and confirm the imported file opens immediately as the active editable document or supported preview.
 - Insert an imported image into a Markdown document, then move the image, move the document, and move their containing folders; confirm Markdown image references are recalculated and remain valid.

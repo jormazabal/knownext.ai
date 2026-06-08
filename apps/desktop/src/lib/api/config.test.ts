@@ -275,12 +275,14 @@ describe("app configuration contracts", () => {
       },
       paragraph: {
         lineSpacing: 9,
+        spaceBeforePt: 99,
         spaceAfterPt: -5,
       },
       document: {
         includeTitle: true,
         linkColor: "#123456",
         horizontalRuleColor: "bad",
+        diagramResolution: "ultra",
       },
       updatedAt: "2026-06-04T20:00:00.000Z",
     } as unknown as ExportTemplateConfig);
@@ -301,6 +303,8 @@ describe("app configuration contracts", () => {
       fontSizePt: 60,
       color: defaultExportTemplateConfig.normal.color,
       textFormat: defaultExportTemplateConfig.normal.textFormat,
+      spaceBeforePt: 0,
+      spaceAfterPt: 0,
     });
     expect(template.headingFontFamily).toBe("Georgia");
     expect(template.headings.h1).toEqual({
@@ -308,13 +312,16 @@ describe("app configuration contracts", () => {
       fontSizePt: 6,
       color: "#f37021",
       textFormat: "bold_underline",
+      spaceBeforePt: defaultExportTemplateConfig.headings.h1.spaceBeforePt,
+      spaceAfterPt: defaultExportTemplateConfig.headings.h1.spaceAfterPt,
     });
     expect(template.code.fontSizePt).toBe(6);
-    expect(template.paragraph).toEqual({ lineSpacing: 2.5, spaceAfterPt: 0 });
+    expect(template.paragraph).toEqual({ lineSpacing: 2.5, spaceBeforePt: 24, spaceAfterPt: 0 });
     expect(template.document).toEqual({
       includeTitle: false,
       linkColor: "#123456",
       horizontalRuleColor: defaultExportTemplateConfig.document.horizontalRuleColor,
+      diagramResolution: "medium",
     });
   });
 });

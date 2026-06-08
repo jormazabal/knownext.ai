@@ -1115,7 +1115,7 @@ function DocumentTreeToolbar({
         />
         {onOpenProjectStatus ? (
           <ToolbarIconButton
-            label={projectStatus ? `Protección e historial: ${projectStatus.label}` : "Protección e historial"}
+            label={projectStatus ? `Guardado y sincronización: ${projectStatus.label}` : "Guardado y sincronización"}
             icon={GitBranch}
             disabled={disabled}
             badge={projectStatus?.badge}

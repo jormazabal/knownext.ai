@@ -1,3 +1,5 @@
+import type { ExportDiagramResolution } from "../../types/domain";
+
 export type MermaidDiagramWidth = "compact" | "auto" | "wide" | "full";
 
 export type MermaidDiagramMetadata = {
@@ -208,13 +210,14 @@ export function findMermaidDiagramBlocks(markdown: string): MermaidDiagramBlock[
   return blocks;
 }
 
-export async function prepareMermaidDiagramAssets(markdown: string): Promise<MermaidRenderedAsset[]> {
+export async function prepareMermaidDiagramAssets(markdown: string, resolution: ExportDiagramResolution = "medium"): Promise<MermaidRenderedAsset[]> {
   const blocks = findMermaidDiagramBlocks(markdown);
   const assets: MermaidRenderedAsset[] = [];
+  const scale = diagramResolutionScale(resolution);
 
   for (const block of blocks) {
     const svg = await renderMermaidSvg(block.renderCode, block.id);
-    const pngDataUrl = await renderMermaidPngDataUrl(svg);
+    const pngDataUrl = await renderMermaidPngDataUrl(svg, scale);
     assets.push({
       id: block.id,
       codeHash: stableHash(block.renderCode),
@@ -228,6 +231,12 @@ export async function prepareMermaidDiagramAssets(markdown: string): Promise<Mer
   }
 
   return assets;
+}
+
+export function diagramResolutionScale(resolution: ExportDiagramResolution) {
+  if (resolution === "high") return 8;
+  if (resolution === "low") return 2;
+  return 4;
 }
 
 export function stableHash(value: string) {

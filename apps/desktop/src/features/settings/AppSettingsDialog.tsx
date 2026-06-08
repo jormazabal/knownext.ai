@@ -2466,7 +2466,7 @@ function ExportSettings({
         </ExportPanel>
 
         <ExportPanel icon={TypeIcon} title={text.exportTextHeading}>
-          <div className="grid gap-4 md:grid-cols-[1.45fr_0.75fr_1fr_1fr]">
+          <div className="grid gap-4 md:grid-cols-[1.35fr_0.7fr_0.9fr_0.9fr_0.9fr]">
             <LabeledSelect label={text.exportFontFamily} value={draft.normal.fontFamily} onChange={(fontFamily) => updateNormal({ fontFamily })} options={exportFontOptions} previewOptionFont />
             <LabeledSelect
               label={text.exportNormalSize}
@@ -2483,6 +2483,14 @@ function ExportSettings({
               onChange={(lineSpacing) => updateParagraph({ lineSpacing })}
             />
             <LabeledNumber
+              label={text.exportSpaceBefore}
+              value={draft.paragraph.spaceBeforePt}
+              min={0}
+              max={24}
+              step={1}
+              onChange={(spaceBeforePt) => updateParagraph({ spaceBeforePt })}
+            />
+            <LabeledNumber
               label={text.exportSpaceAfter}
               value={draft.paragraph.spaceAfterPt}
               min={0}
@@ -2491,24 +2499,36 @@ function ExportSettings({
               onChange={(spaceAfterPt) => updateParagraph({ spaceAfterPt })}
             />
           </div>
-          <div className="mt-4 grid gap-4 md:grid-cols-3">
+          <div className="mt-4 grid gap-4 md:grid-cols-4">
             <LabeledColor label={text.exportTextColor} value={draft.normal.color} onChange={(color) => updateNormal({ color })} />
             <LabeledColor label={text.exportLinkColor} value={draft.document.linkColor} onChange={(linkColor) => updateDocument({ linkColor })} />
             <LabeledColor label={text.exportRuleColor} value={draft.document.horizontalRuleColor} onChange={(horizontalRuleColor) => updateDocument({ horizontalRuleColor })} />
+            <LabeledSelect
+              label={text.exportDiagramResolution}
+              value={draft.document.diagramResolution}
+              onChange={(diagramResolution) => updateDocument({ diagramResolution: diagramResolution as ExportTemplateConfig["document"]["diagramResolution"] })}
+              options={[
+                ["low", text.exportDiagramResolutionLow],
+                ["medium", text.exportDiagramResolutionMedium],
+                ["high", text.exportDiagramResolutionHigh],
+              ]}
+            />
           </div>
         </ExportPanel>
 
         <ExportPanel title={text.exportHeadingsHeading} description={text.exportHeadingsDescription}>
           <div className="grid gap-2">
-            <div className="hidden grid-cols-[130px_minmax(150px,1.3fr)_minmax(150px,1fr)_minmax(90px,0.7fr)_minmax(150px,1fr)] gap-4 px-0.5 text-[11px] font-medium text-ink-secondary md:grid">
+            <div className="hidden grid-cols-[110px_minmax(130px,1.2fr)_minmax(120px,0.9fr)_minmax(74px,0.55fr)_minmax(74px,0.55fr)_minmax(74px,0.55fr)_minmax(130px,1fr)] gap-3 px-0.5 text-[11px] font-medium text-ink-secondary md:grid">
               <span>{text.exportHeadingLevel}</span>
               <span>{text.exportHeadingFontFamily}</span>
               <span>{text.exportHeadingFormat}</span>
               <span>{text.exportHeadingSize}</span>
+              <span>{text.exportHeadingSpaceBefore}</span>
+              <span>{text.exportHeadingSpaceAfter}</span>
               <span>{text.exportHeadingColor}</span>
             </div>
             {headingLevels.map((level) => (
-              <div key={level} className="grid gap-3 md:grid-cols-[130px_minmax(150px,1.3fr)_minmax(150px,1fr)_minmax(90px,0.7fr)_minmax(150px,1fr)] md:gap-4">
+              <div key={level} className="grid gap-3 md:grid-cols-[110px_minmax(130px,1.2fr)_minmax(120px,0.9fr)_minmax(74px,0.55fr)_minmax(74px,0.55fr)_minmax(74px,0.55fr)_minmax(130px,1fr)] md:gap-3">
                 <div className="flex h-10 items-center rounded-md border border-line bg-panel px-3 text-[13px] font-semibold text-ink-primary">
                   {headingLabel(level)}
                 </div>
@@ -2535,6 +2555,24 @@ function ExportSettings({
                   max={60}
                   step={0.5}
                   onChange={(fontSizePt) => updateHeading(level, { fontSizePt })}
+                />
+                <LabeledNumber
+                  label={`${text.exportHeadingSpaceBefore} ${headingLabel(level)}`}
+                  hideLabel
+                  value={draft.headings[level].spaceBeforePt ?? 0}
+                  min={0}
+                  max={48}
+                  step={1}
+                  onChange={(spaceBeforePt) => updateHeading(level, { spaceBeforePt })}
+                />
+                <LabeledNumber
+                  label={`${text.exportHeadingSpaceAfter} ${headingLabel(level)}`}
+                  hideLabel
+                  value={draft.headings[level].spaceAfterPt ?? 0}
+                  min={0}
+                  max={48}
+                  step={1}
+                  onChange={(spaceAfterPt) => updateHeading(level, { spaceAfterPt })}
                 />
                 <LabeledColor
                   label={`${text.exportHeadingColor} ${headingLabel(level)}`}
@@ -3533,6 +3571,7 @@ const settingsCopy = {
     exportNormalSize: "Tamano",
     exportTextColor: "Color texto",
     exportLineSpacing: "Interlineado",
+    exportSpaceBefore: "Espaciado anterior",
     exportSpaceAfter: "Espaciado posterior",
     exportHeadingsHeading: "Titulos",
     exportHeadingsDescription: "Tipografia comun y estilos principales para titulos.",
@@ -3541,6 +3580,8 @@ const settingsCopy = {
     exportHeadingFontFamily: "Tipografia",
     exportHeadingFormat: "Formato",
     exportHeadingSize: "Tamano",
+    exportHeadingSpaceBefore: "Antes",
+    exportHeadingSpaceAfter: "Despues",
     exportHeadingColor: "Color",
     exportTextFormatNormal: "Normal",
     exportTextFormatBold: "Negrita",
@@ -3552,6 +3593,10 @@ const settingsCopy = {
     exportIncludeTitleDescription: "Anade el nombre del documento al inicio del PDF o DOCX.",
     exportLinkColor: "Color enlaces",
     exportRuleColor: "Color separador",
+    exportDiagramResolution: "Resolucion diagramas",
+    exportDiagramResolutionLow: "Baja",
+    exportDiagramResolutionMedium: "Media",
+    exportDiagramResolutionHigh: "Alta",
     exportTemplateFileHeading: "Archivo ASCII",
     exportTemplateFileDescription: "La plantilla basica se guarda como JSON editable por fuera de la app.",
     exportResetTemplate: "Restablecer plantilla",
@@ -3992,6 +4037,7 @@ const settingsCopy = {
     exportNormalSize: "Size",
     exportTextColor: "Text color",
     exportLineSpacing: "Line spacing",
+    exportSpaceBefore: "Space before",
     exportSpaceAfter: "Space after",
     exportHeadingsHeading: "Headings",
     exportHeadingsDescription: "Shared heading font and main heading styles.",
@@ -4000,6 +4046,8 @@ const settingsCopy = {
     exportHeadingFontFamily: "Font",
     exportHeadingFormat: "Format",
     exportHeadingSize: "Size",
+    exportHeadingSpaceBefore: "Before",
+    exportHeadingSpaceAfter: "After",
     exportHeadingColor: "Color",
     exportTextFormatNormal: "Normal",
     exportTextFormatBold: "Bold",
@@ -4011,6 +4059,10 @@ const settingsCopy = {
     exportIncludeTitleDescription: "Adds the document name at the start of the PDF or DOCX.",
     exportLinkColor: "Link color",
     exportRuleColor: "Rule color",
+    exportDiagramResolution: "Diagram resolution",
+    exportDiagramResolutionLow: "Low",
+    exportDiagramResolutionMedium: "Medium",
+    exportDiagramResolutionHigh: "High",
     exportTemplateFileHeading: "ASCII file",
     exportTemplateFileDescription: "The basic template is saved as JSON and can be edited outside the app.",
     exportResetTemplate: "Reset template",

@@ -62,7 +62,9 @@ pub fn answer_interaction(
         );
     };
 
-    let selector_proposal = run_skill_selector(openai_key, payload, prompt, model);
+    let (selector_proposal, mut usage_records) = run_skill_selector(openai_key, payload, prompt, model)
+        .map(|(proposal, usage)| (Some(proposal), usage.into_iter().collect::<Vec<_>>()))
+        .unwrap_or((None, Vec::new()));
     let skill_context =
         knownext_ai_skills::select_skills_for_request(payload, selector_proposal.as_ref());
     let request_body =
@@ -74,8 +76,13 @@ pub fn answer_interaction(
 
     let provider_text = match response {
         Ok(response) if response.status().is_success() => match response.json::<Value>() {
-            Ok(value) => extract_response_text(&value)
-                .unwrap_or_else(|| "La IA respondió sin texto utilizable.".to_string()),
+            Ok(value) => {
+                if let Some(usage) = provider_usage_record("document_ai", model, &value) {
+                    usage_records.push(usage);
+                }
+                extract_response_text(&value)
+                    .unwrap_or_else(|| "La IA respondió sin texto utilizable.".to_string())
+            }
             Err(error) => {
                 return provider_error_response(
                     project_id,
@@ -137,6 +144,7 @@ pub fn answer_interaction(
         &context_sources,
     ) {
         apply_skill_context_to_response(&mut response, payload, &skill_context);
+        attach_usage_records(&mut response, usage_records);
         return response;
     }
 
@@ -198,6 +206,7 @@ pub fn answer_interaction(
         "expiredContextSourceIds": []
     });
     apply_skill_context_to_response(&mut response, payload, &skill_context);
+    attach_usage_records(&mut response, usage_records);
     response
 }
 
@@ -212,6 +221,7 @@ pub fn prompt_response(
     let response = answer_interaction("prompt", &request, json!([]), openai_key, model);
     json!({
         "answer": response["answer"].clone(),
+        "usageRecords": response["usageRecords"].clone(),
         "suggestedActions": if response["status"].as_str() == Some("completed") {
             json!(["Revisar el documento activo", "Crear una versión", "Actualizar notas"])
         } else {
@@ -516,7 +526,7 @@ fn run_skill_selector(
     payload: &Value,
     prompt: &str,
     model: &str,
-) -> Option<knownext_ai_skills::AiSkillSelectorProposal> {
+) -> Option<(knownext_ai_skills::AiSkillSelectorProposal, Option<Value>)> {
     let request_body = build_skill_selector_request(payload, prompt, model);
     let response = openai_client(openai_key)
         .post("https://api.openai.com/v1/responses")
@@ -527,8 +537,11 @@ fn run_skill_selector(
         return None;
     }
     let value = response.json::<Value>().ok()?;
+    let usage = provider_usage_record("document_ai", model, &value);
     let text = extract_response_text(&value)?;
-    serde_json::from_str::<knownext_ai_skills::AiSkillSelectorProposal>(&text).ok()
+    serde_json::from_str::<knownext_ai_skills::AiSkillSelectorProposal>(&text)
+        .ok()
+        .map(|proposal| (proposal, usage))
 }
 
 fn build_skill_selector_request(payload: &Value, prompt: &str, model: &str) -> Value {
@@ -2501,6 +2514,52 @@ fn extract_response_text(value: &Value) -> Option<String> {
     } else {
         Some(text)
     }
+}
+
+fn attach_usage_records(response: &mut Value, usage_records: Vec<Value>) {
+    if usage_records.is_empty() {
+        response["usageRecords"] = json!([]);
+    } else {
+        response["usageRecords"] = Value::Array(usage_records);
+    }
+}
+
+fn provider_usage_record(capability: &str, model: &str, value: &Value) -> Option<Value> {
+    let usage = value.get("usage")?;
+    let input_tokens = usage_number(usage, &["input_tokens", "inputTokens"]);
+    let output_tokens = usage_number(usage, &["output_tokens", "outputTokens"]);
+    let total_tokens = usage_number(usage, &["total_tokens", "totalTokens"])
+        .max(input_tokens + output_tokens);
+    if input_tokens == 0 && output_tokens == 0 && total_tokens == 0 {
+        return None;
+    }
+    let cached_input_tokens = usage
+        .get("input_tokens_details")
+        .or_else(|| usage.get("inputTokensDetails"))
+        .map(|details| usage_number(details, &["cached_tokens", "cachedTokens"]))
+        .unwrap_or(0);
+    let reasoning_tokens = usage
+        .get("output_tokens_details")
+        .or_else(|| usage.get("outputTokensDetails"))
+        .map(|details| usage_number(details, &["reasoning_tokens", "reasoningTokens"]))
+        .unwrap_or(0);
+    Some(json!({
+        "capability": capability,
+        "model": normalize_text_model(model),
+        "inputTokens": input_tokens,
+        "cachedInputTokens": cached_input_tokens,
+        "outputTokens": output_tokens,
+        "reasoningTokens": reasoning_tokens,
+        "embeddingTokens": 0,
+        "totalTokens": total_tokens,
+        "usageSource": "provider"
+    }))
+}
+
+fn usage_number(value: &Value, keys: &[&str]) -> u64 {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_u64))
+        .unwrap_or(0)
 }
 
 fn normalize_text_model(model: &str) -> &'static str {

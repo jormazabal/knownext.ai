@@ -1,44 +1,56 @@
 import {
   AlertTriangle,
-  Check,
+  Ban,
+  CheckCircle2,
   ChevronDown,
-  ChevronRight,
   Clock3,
-  Cloud,
   Download,
+  Eye,
   File,
   FileImage,
   FileText,
-  Folder,
+  FolderOpen,
   GitBranch,
   Github,
   HardDrive,
-  Info,
   Loader2,
   RefreshCw,
   ShieldAlert,
-  ShieldCheck,
+  Trash2,
   Upload,
   X,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import type {
-  ActivityEvent,
   ExternalChangeDecision,
-  ExternalChangeItem,
-  ExternalChangeKind,
   ExternalChangeSet,
   Project,
+  ProjectFileSyncItem,
+  ProjectFileSyncOverview,
+  ProjectFileSyncPhaseState,
+  ProjectFileSyncPhaseStatus,
   ProjectSyncState,
   ProjectSyncStatus,
 } from "../../types/domain";
 
+export type OpenDocumentDraftState = {
+  documentId: string;
+  path: string;
+  name: string;
+  isDirty: boolean;
+  hasRecoveredDraft: boolean;
+  draftUpdatedAt?: string | null;
+};
+
 type ExternalChangesDrawerProps = {
   open: boolean;
   project: Project | null;
+  overview: ProjectFileSyncOverview | null;
+  overviewError?: string | null;
+  openDrafts: OpenDocumentDraftState[];
   changeSet: ExternalChangeSet | null;
   decisions: Record<string, ExternalChangeDecision>;
-  activityEvents: ActivityEvent[];
   syncStatus?: ProjectSyncStatus | null;
   syncState: ProjectSyncState;
   acknowledged: boolean;
@@ -46,46 +58,52 @@ type ExternalChangesDrawerProps = {
   message?: string | null;
   onDecisionChange: (itemId: string, decision: ExternalChangeDecision) => void;
   onImport: () => void;
-  onImportSafe: () => void;
   onOmitAll: () => void;
   onPushGithub: () => void;
   onPullGithub: () => void;
   onResolveGithubConflict: (resolution: "keep-local" | "take-remote") => void;
   onOpenGithubRepository: () => void;
+  onOpenDocument: (documentId: string, name: string) => void;
+  onSaveDocument: (documentId: string) => void | Promise<boolean>;
+  onDiscardDocumentDraft: (documentId: string) => void | Promise<boolean>;
   onRefresh: () => void;
   onClose: () => void;
 };
 
-type ProtectionTab = "summary" | "local" | "github" | "omitted" | "activity" | "details";
-type ProtectionPrimaryAction =
-  | "refresh"
-  | "save-recommended"
-  | "save-selected"
-  | "accept-omitted"
-  | "push-github"
-  | "pull-github"
-  | "review-github"
-  | "none";
+type FileSyncFilterPhase = "local" | "history" | "github";
 
-const saveableGroupOrder: Array<{ key: ExternalChangeKind; title: string }> = [
-  { key: "folder", title: "Carpetas" },
-  { key: "document", title: "Documentos" },
-  { key: "image", title: "Imágenes" },
-  { key: "attachment", title: "Archivos de apoyo" },
-];
+type FileSyncFilterState = Record<FileSyncFilterPhase, ProjectFileSyncPhaseState[]>;
 
-const omittedGroupOrder: Array<{ key: ExternalChangeKind; title: string }> = [
-  { key: "private", title: "Omitidos por seguridad" },
-  { key: "ignored", title: "Omitidos automáticamente" },
-  { key: "unsupported", title: "No compatibles" },
+type FileSyncFilterOption = {
+  state: ProjectFileSyncPhaseState;
+  label: string;
+  count: number;
+};
+
+type DisplayFileSyncItem = ProjectFileSyncItem & {
+  draft?: OpenDocumentDraftState | null;
+};
+
+const emptyFilterState: FileSyncFilterState = {
+  local: [],
+  history: [],
+  github: [],
+};
+
+const filterPhases: Array<{ id: FileSyncFilterPhase; label: string }> = [
+  { id: "local", label: "Local" },
+  { id: "history", label: "Historial local" },
+  { id: "github", label: "GitHub" },
 ];
 
 export function ExternalChangesDrawer({
   open,
   project,
+  overview,
+  overviewError,
+  openDrafts,
   changeSet,
   decisions,
-  activityEvents,
   syncStatus,
   syncState,
   acknowledged,
@@ -93,188 +111,124 @@ export function ExternalChangesDrawer({
   message,
   onDecisionChange,
   onImport,
-  onImportSafe,
   onOmitAll,
   onPushGithub,
   onPullGithub,
   onResolveGithubConflict,
   onOpenGithubRepository,
+  onOpenDocument,
+  onSaveDocument,
+  onDiscardDocumentDraft,
   onRefresh,
   onClose,
 }: ExternalChangesDrawerProps) {
-  const [activeTab, setActiveTab] = useState<ProtectionTab>("summary");
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<ExternalChangeKind>>(new Set(["ignored", "unsupported"]));
+  const [filters, setFilters] = useState<FileSyncFilterState>(emptyFilterState);
   const [pendingConflictResolution, setPendingConflictResolution] = useState<"keep-local" | "take-remote" | null>(null);
-  const items = changeSet?.items ?? [];
-  const saveableItems = useMemo(() => items.filter((item) => item.risk !== "blocked"), [items]);
-  const omittedItems = useMemo(() => items.filter((item) => item.risk === "blocked"), [items]);
-  const groupedSaveableItems = useMemo(() => groupItems(saveableItems), [saveableItems]);
-  const groupedOmittedItems = useMemo(() => groupItems(omittedItems), [omittedItems]);
-  const selectedCount = saveableItems.filter((item) => (decisions[item.id] ?? item.decision) === "include").length;
-  const summary = getProtectionSummary(project, changeSet, syncStatus, syncState, busy, acknowledged);
-  const githubAttentionCount = summary.githubAttention ? 1 : 0;
-  const canSaveRecommended = Boolean(changeSet?.summary.safe);
-  const canAcceptOmitted = omittedItems.length > 0 && !acknowledged;
+  const files = useMemo(() => buildDisplayFiles(project, overview, openDrafts, syncStatus), [project, overview, openDrafts, syncStatus]);
+  const filterOptions = useMemo(() => buildPhaseFilterOptions(files), [files]);
+  const visibleFiles = useMemo(() => files.filter((file) => fileMatchesPhaseFilters(file, filters)), [files, filters]);
+  const includedChanges = files.filter((file) => isIncludeDecision(file, decisions)).length;
+  const omittedCount = files.filter(isOmittedFile).length;
+  const canUseGithub = hasGithub(project) && !syncStatus?.remotePaused;
+  const canPushGithub = canUseGithub && Boolean(syncStatus?.pendingPush || syncStatus?.state === "local-pending") && includedChanges === 0;
+  const canPullGithub = canUseGithub && Boolean(syncStatus?.pendingPull || syncStatus?.state === "remote-available");
+  const summary = getHeaderSummary(files, overviewError, busy, syncStatus, syncState, message);
 
   if (!open) return null;
 
   return (
     <div className="knownext-modal-overlay fixed inset-0 z-[80] flex items-center justify-center bg-black/20 px-4 py-8" onMouseDown={onClose}>
       <section
-        className="relative flex max-h-[min(820px,calc(100dvh-56px))] w-[min(920px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
+        className="relative flex max-h-[min(820px,calc(100dvh-56px))] w-[min(1080px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="protection-history-title"
+        aria-labelledby="file-sync-title"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <header className="border-b border-line">
-          <div className="flex items-start justify-between gap-4 px-5 py-4">
-            <div className="flex min-w-0 items-start gap-3">
-              <span className={["grid h-9 w-9 shrink-0 place-items-center rounded-md", summary.iconClass].join(" ")}>
-                <summary.icon size={18} />
-              </span>
-              <div className="min-w-0">
-                <h2 id="protection-history-title" className="truncate text-[16px] font-semibold text-ink-primary">
-                  Protección e historial
-                </h2>
-                <p className="mt-1 truncate text-[11px] text-ink-secondary">
-                  {project?.name ?? "Proyecto"} · Revisa cómo se guarda, versiona y sincroniza tu documentación.
-                </p>
+        <FileSyncToolbar
+          projectName={project?.name ?? "Proyecto"}
+          summary={summary}
+          busy={busy}
+          onRefresh={onRefresh}
+          onClose={onClose}
+        />
+        <FileSyncFilters
+          filters={filters}
+          options={filterOptions}
+          onToggle={(phase, state) => setFilters((current) => togglePhaseFilter(current, phase, state))}
+          onClear={(phase) => setFilters((current) => ({ ...current, [phase]: [] }))}
+          onClearAll={() => setFilters(emptyFilterState)}
+        />
+        <BulkActionBar
+          includedChanges={includedChanges}
+          omittedCount={omittedCount}
+          acknowledged={acknowledged}
+          canPushGithub={canPushGithub}
+          canPullGithub={canPullGithub}
+          busy={busy}
+          onImport={onImport}
+          onOmitAll={onOmitAll}
+          onPushGithub={onPushGithub}
+          onPullGithub={onPullGithub}
+        />
+
+        <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
+          {overviewError ? (
+            <section className="mb-3 rounded-md border border-red-100 bg-red-50 px-4 py-3 text-[12px] text-red-900">
+              <div className="flex items-start gap-3">
+                <AlertTriangle size={17} className="mt-0.5 shrink-0 text-red-700" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold">No se pudo cargar el estado de archivos</p>
+                  <p className="mt-1 leading-5">{overviewError}</p>
+                </div>
+                <button className="h-8 rounded-md border border-red-200 bg-white px-3 text-[11px] font-semibold hover:bg-red-50" onClick={onRefresh}>
+                  Comprobar de nuevo
+                </button>
               </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-1">
-              <button
-                className="grid h-8 w-8 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange disabled:cursor-not-allowed disabled:opacity-50"
-                data-tooltip="Comprobar de nuevo"
-                aria-label="Comprobar protección e historial de nuevo"
-                disabled={busy}
-                onClick={onRefresh}
-              >
-                {busy ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-              </button>
-              <button
-                className="grid h-8 w-8 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
-                data-tooltip="Cerrar"
-                aria-label="Cerrar protección e historial"
-                onClick={onClose}
-              >
-                <X size={16} />
-              </button>
-            </div>
-          </div>
-          <nav className="flex gap-1 px-5" aria-label="Secciones de protección e historial">
-            <TabButton active={activeTab === "summary"} label="Resumen" onClick={() => setActiveTab("summary")} />
-            <TabButton active={activeTab === "local"} label="Historial local" count={saveableItems.length} onClick={() => setActiveTab("local")} />
-            <TabButton active={activeTab === "github"} label="GitHub" count={githubAttentionCount || undefined} onClick={() => setActiveTab("github")} />
-            <TabButton active={activeTab === "omitted"} label="Omitidos" count={omittedItems.length} onClick={() => setActiveTab("omitted")} />
-            <TabButton active={activeTab === "activity"} label="Actividad" count={activityEvents.length || undefined} onClick={() => setActiveTab("activity")} />
-            <TabButton active={activeTab === "details"} label="Detalles" onClick={() => setActiveTab("details")} />
-          </nav>
-        </header>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          {activeTab === "summary" ? (
-            <SummaryTab
-              summary={summary}
-              acknowledged={acknowledged}
-              message={message}
-              changeSet={changeSet}
-              saveableCount={saveableItems.length}
-              omittedCount={omittedItems.length}
-              selectedCount={selectedCount}
-              canSaveRecommended={canSaveRecommended}
-              canAcceptOmitted={canAcceptOmitted}
-              busy={busy}
-              onRefresh={onRefresh}
-              onImportSafe={onImportSafe}
-              onImport={onImport}
-              onOmitAll={onOmitAll}
-              onPushGithub={onPushGithub}
-              onPullGithub={onPullGithub}
-              onTabChange={setActiveTab}
-            />
+            </section>
           ) : null}
-
-          {activeTab === "local" ? (
-            <FilesTab
-              title="Cambios locales para guardar en el historial"
-              description="Estos cambios existen en la carpeta del proyecto, pero todavía no forman parte del historial de KnowNext.ai."
-              emptyTitle="No hay cambios pendientes de guardar"
-              emptyDetail="La documentación visible ya está recogida en el historial."
-              groupOrder={saveableGroupOrder}
-              groupedItems={groupedSaveableItems}
-              collapsedGroups={collapsedGroups}
-              decisions={decisions}
-              onToggleGroup={toggleGroup}
-              onDecisionChange={onDecisionChange}
-            />
-          ) : null}
-
-          {activeTab === "github" ? (
-            <GithubTab
-              project={project}
-              summary={summary}
-              syncStatus={syncStatus}
-              busy={busy}
-              onPushGithub={onPushGithub}
-              onPullGithub={onPullGithub}
-              onRequestResolveGithubConflict={setPendingConflictResolution}
-              onOpenGithubRepository={onOpenGithubRepository}
-              onRefresh={onRefresh}
-            />
-          ) : null}
-
-          {activeTab === "omitted" ? (
-            <FilesTab
-              title="Archivos omitidos"
-              description="Estos archivos se mantienen en tu carpeta, pero KnowNext.ai no los guarda en el historial ni los sube a GitHub."
-              emptyTitle="No hay archivos omitidos"
-              emptyDetail="No se han detectado archivos privados, técnicos o no compatibles."
-              groupOrder={omittedGroupOrder}
-              groupedItems={groupedOmittedItems}
-              collapsedGroups={collapsedGroups}
-              decisions={decisions}
-              onToggleGroup={toggleGroup}
-              onDecisionChange={onDecisionChange}
-              acknowledged={acknowledged}
-            />
-          ) : null}
-
-          {activeTab === "activity" ? (
-            <ActivityTab events={activityEvents} />
-          ) : null}
-
-          {activeTab === "details" ? (
-            <DetailsTab project={project} syncStatus={syncStatus} syncState={syncState} changeSet={changeSet} acknowledged={acknowledged} />
+          <FileSyncTable
+            files={visibleFiles}
+            decisions={decisions}
+            acknowledged={acknowledged}
+            busy={busy}
+            syncStatus={syncStatus}
+            canUseGithub={canUseGithub}
+            onDecisionChange={onDecisionChange}
+            onOmitAll={onOmitAll}
+            onPushGithub={onPushGithub}
+            onPullGithub={onPullGithub}
+            onOpenGithubRepository={onOpenGithubRepository}
+            onOpenDocument={(documentId, name) => {
+              onOpenDocument(documentId, name);
+              onClose();
+            }}
+            onRequestResolveGithubConflict={setPendingConflictResolution}
+            onSaveDocument={onSaveDocument}
+            onDiscardDocumentDraft={onDiscardDocumentDraft}
+            onRefresh={onRefresh}
+          />
+          {!overviewError && visibleFiles.length === 0 ? (
+            <section className="rounded-md border border-dashed border-line bg-white px-4 py-10 text-center">
+              <CheckCircle2 size={24} className="mx-auto text-green-600" />
+              <p className="mt-2 text-[12px] font-semibold text-ink-primary">No hay archivos con estos filtros</p>
+              <p className="mt-1 text-[11px] text-ink-secondary">
+                Ajusta los estados seleccionados o comprueba de nuevo para actualizar el estado del proyecto.
+              </p>
+            </section>
           ) : null}
         </div>
 
         <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-line px-5 py-4">
-          <div className="min-w-0 text-[11px] text-ink-secondary">
-            {summary.footerText}
+          <div className="min-w-0 truncate text-[11px] text-ink-secondary">
+            {summary.footer}
           </div>
-          <div className="flex flex-wrap justify-end gap-2">
-            <button className="h-9 rounded-md border border-line px-3 text-[11px] font-medium hover:bg-panel" disabled={busy} onClick={onRefresh}>
-              Comprobar de nuevo
-            </button>
-            {summary.primaryAction !== "none" ? (
-              <PrimarySummaryAction
-                action={summary.primaryAction}
-                busy={busy}
-                canSaveRecommended={canSaveRecommended}
-                canAcceptOmitted={canAcceptOmitted}
-                selectedCount={selectedCount}
-                onImportSafe={onImportSafe}
-                onImport={onImport}
-                onOmitAll={onOmitAll}
-                onPushGithub={onPushGithub}
-                onPullGithub={onPullGithub}
-                onRefresh={onRefresh}
-                onTabChange={setActiveTab}
-              />
-            ) : null}
-          </div>
+          <button className="inline-flex h-9 items-center gap-2 rounded-md border border-line px-3 text-[11px] font-medium hover:bg-panel" disabled={busy} onClick={onRefresh}>
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+            Comprobar de nuevo
+          </button>
         </footer>
+
         {pendingConflictResolution ? (
           <GithubConflictConfirmationDialog
             resolution={pendingConflictResolution}
@@ -289,344 +243,575 @@ export function ExternalChangesDrawer({
       </section>
     </div>
   );
-
-  function toggleGroup(group: ExternalChangeKind) {
-    setCollapsedGroups((current) => {
-      const next = new Set(current);
-      if (next.has(group)) next.delete(group);
-      else next.add(group);
-      return next;
-    });
-  }
 }
 
-function TabButton({ active, label, count, onClick }: { active: boolean; label: string; count?: number; onClick: () => void }) {
+function FileSyncToolbar({
+  projectName,
+  summary,
+  busy,
+  onRefresh,
+  onClose,
+}: {
+  projectName: string;
+  summary: ReturnType<typeof getHeaderSummary>;
+  busy: boolean;
+  onRefresh: () => void;
+  onClose: () => void;
+}) {
+  const Icon = summary.icon;
   return (
-    <button
-      className={[
-        "flex h-10 items-center gap-2 border-b-2 px-3 text-[12px] font-semibold transition",
-        active ? "border-brand-orange text-brand-orange" : "border-transparent text-ink-secondary hover:text-ink-primary",
-      ].join(" ")}
-      aria-current={active ? "page" : undefined}
-      onClick={onClick}
-    >
-      {label}
-      {typeof count === "number" ? (
-        <span className={["rounded px-1.5 py-0.5 text-[10px]", active ? "bg-brand-hover text-brand-orange" : "bg-panel text-ink-secondary"].join(" ")}>
-          {count}
-        </span>
-      ) : null}
-    </button>
+    <header className="shrink-0 border-b border-line px-5 py-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className={["grid h-9 w-9 shrink-0 place-items-center rounded-md", summary.iconClass].join(" ")}>
+            <Icon size={18} />
+          </span>
+          <div className="min-w-0">
+            <h2 id="file-sync-title" className="truncate text-[16px] font-semibold text-ink-primary">Guardado y sincronización</h2>
+            <p className="mt-1 truncate text-[11px] text-ink-secondary">
+              {projectName} · {summary.detail}
+            </p>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            className="grid h-8 w-8 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange disabled:cursor-not-allowed disabled:opacity-50"
+            data-tooltip="Comprobar de nuevo"
+            aria-label="Comprobar guardado y sincronización de nuevo"
+            disabled={busy}
+            onClick={onRefresh}
+          >
+            {busy ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+          </button>
+          <button
+            className="grid h-8 w-8 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
+            data-tooltip="Cerrar"
+            aria-label="Cerrar guardado y sincronización"
+            onClick={onClose}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      </div>
+    </header>
   );
 }
 
-function SummaryTab({
-  summary,
-  acknowledged,
-  message,
-  changeSet,
-  saveableCount,
-  omittedCount,
-  selectedCount,
-  canSaveRecommended,
-  canAcceptOmitted,
-  busy,
-  onRefresh,
-  onImportSafe,
-  onImport,
-  onOmitAll,
-  onPushGithub,
-  onPullGithub,
-  onTabChange,
+function FileSyncFilters({
+  filters,
+  options,
+  onToggle,
+  onClear,
+  onClearAll,
 }: {
-  summary: ProtectionSummary;
-  acknowledged: boolean;
-  message?: string | null;
-  changeSet: ExternalChangeSet | null;
-  saveableCount: number;
-  omittedCount: number;
-  selectedCount: number;
-  canSaveRecommended: boolean;
-  canAcceptOmitted: boolean;
-  busy: boolean;
-  onRefresh: () => void;
-  onImportSafe: () => void;
-  onImport: () => void;
-  onOmitAll: () => void;
-  onPushGithub: () => void;
-  onPullGithub: () => void;
-  onTabChange: (tab: ProtectionTab) => void;
+  filters: FileSyncFilterState;
+  options: Record<FileSyncFilterPhase, FileSyncFilterOption[]>;
+  onToggle: (phase: FileSyncFilterPhase, state: ProjectFileSyncPhaseState) => void;
+  onClear: (phase: FileSyncFilterPhase) => void;
+  onClearAll: () => void;
 }) {
-  const explanation = acknowledged ? summary.recommendationDetail : message || changeSet?.message || summary.recommendationDetail;
+  const [openPhase, setOpenPhase] = useState<FileSyncFilterPhase | null>(null);
+  const selectedCount = filterPhases.reduce((total, phase) => total + filters[phase.id].length, 0);
   return (
-    <div className="space-y-4">
-      <section className={["rounded-md border px-4 py-4", summary.calloutClass].join(" ")}>
-        <div className="flex items-start gap-3">
-          <span className={["grid h-9 w-9 shrink-0 place-items-center rounded-md", summary.iconClass].join(" ")}>
-            <summary.icon size={18} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-[15px] font-semibold text-ink-primary">{summary.recommendationTitle}</p>
-            <p className="mt-1 text-[12px] leading-5 text-ink-secondary">{explanation}</p>
+    <nav className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-5 py-2" aria-label="Filtros de guardado y sincronización">
+      <span className="mr-1 text-[10px] font-semibold uppercase text-ink-secondary">Filtros</span>
+      {filterPhases.map((phase) => (
+        <PhaseFilterDropdown
+          key={phase.id}
+          phase={phase.id}
+          label={phase.label}
+          selected={filters[phase.id]}
+          options={options[phase.id]}
+          open={openPhase === phase.id}
+          onOpenChange={(open) => setOpenPhase(open ? phase.id : null)}
+          onToggle={onToggle}
+          onClear={onClear}
+        />
+      ))}
+      {selectedCount > 0 ? (
+        <button
+          type="button"
+          className="ml-auto h-8 rounded-md px-2.5 text-[11px] font-semibold text-ink-secondary hover:bg-panel hover:text-ink-primary"
+          onClick={onClearAll}
+        >
+          Limpiar filtros ({selectedCount})
+        </button>
+      ) : null}
+    </nav>
+  );
+}
+
+function PhaseFilterDropdown({
+  phase,
+  label,
+  selected,
+  options,
+  open,
+  onOpenChange,
+  onToggle,
+  onClear,
+}: {
+  phase: FileSyncFilterPhase;
+  label: string;
+  selected: ProjectFileSyncPhaseState[];
+  options: FileSyncFilterOption[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onToggle: (phase: FileSyncFilterPhase, state: ProjectFileSyncPhaseState) => void;
+  onClear: (phase: FileSyncFilterPhase) => void;
+}) {
+  const active = selected.length > 0;
+  const buttonLabel = active ? `${label}: ${selected.length}` : `${label}: Todos`;
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        className={[
+          "inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-[11px] font-semibold transition",
+          active ? "border-orange-200 bg-brand-hover text-brand-orange" : "border-line bg-white text-ink-secondary hover:bg-panel hover:text-ink-primary",
+        ].join(" ")}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => onOpenChange(!open)}
+      >
+        {buttonLabel}
+        <ChevronDown size={13} className={open ? "rotate-180 transition" : "transition"} />
+      </button>
+      {open ? (
+        <div
+          className="absolute left-0 top-9 z-30 w-56 rounded-md border border-line bg-white p-2 shadow-menu"
+          role="menu"
+          aria-label={`Filtrar por estado ${label}`}
+        >
+          <div className="mb-1 flex items-center justify-between gap-2 px-1">
+            <span className="text-[10px] font-semibold uppercase text-ink-secondary">{label}</span>
+            {active ? (
+              <button type="button" className="text-[10px] font-semibold text-brand-orange hover:text-brand-dark" onClick={() => onClear(phase)}>
+                Todos
+              </button>
+            ) : null}
+          </div>
+          <div className="max-h-64 overflow-y-auto">
+            {options.map((option) => {
+              const checked = selected.includes(option.state);
+              return (
+                <label
+                  key={option.state}
+                  className="flex h-8 cursor-default items-center gap-2 rounded px-2 text-[11px] text-ink-primary hover:bg-panel"
+                >
+                  <input
+                    type="checkbox"
+                    className="h-3.5 w-3.5 cursor-default accent-brand-orange"
+                    checked={checked}
+                    onChange={() => onToggle(phase, option.state)}
+                  />
+                  <span className={["h-1.5 w-1.5 shrink-0 rounded-full", statusDotClass(option.state)].join(" ")} />
+                  <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                  <span className="rounded bg-panel px-1.5 py-0.5 text-[10px] text-ink-secondary">{option.count}</span>
+                </label>
+              );
+            })}
           </div>
         </div>
-      </section>
-
-      <section className="grid gap-2 md:grid-cols-4">
-        <SummaryCard icon={summary.protectionIcon} label="Protección" value={summary.protection} />
-        <SummaryCard icon={summary.syncIcon} label="Modo" value={summary.syncMode} />
-        <SummaryCard icon={summary.statusIcon} label="Situación" value={summary.status} tone={summary.tone} />
-        <SummaryCard icon={RefreshCw} label="Última sincronización" value={summary.lastActivity} />
-      </section>
-
-      <section className="rounded-md border border-line bg-white p-4">
-        <div className="flex items-start gap-3">
-          <Info size={17} className="mt-0.5 shrink-0 text-ink-secondary" />
-          <div className="min-w-0 flex-1">
-            <h3 className="text-[13px] font-semibold text-ink-primary">Qué significa</h3>
-            <p className="mt-1 text-[12px] leading-5 text-ink-secondary">{summary.userExplanation}</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button className="h-8 rounded-md border border-line px-3 text-[11px] font-medium hover:bg-panel" onClick={() => onTabChange("local")}>
-                Ver historial local ({saveableCount})
-              </button>
-              <button className="h-8 rounded-md border border-line px-3 text-[11px] font-medium hover:bg-panel" onClick={() => onTabChange("github")}>
-                Ver GitHub
-              </button>
-              <button className="h-8 rounded-md border border-line px-3 text-[11px] font-medium hover:bg-panel" onClick={() => onTabChange("omitted")}>
-                Ver omitidos ({omittedCount})
-              </button>
-              <button className="h-8 rounded-md border border-line px-3 text-[11px] font-medium hover:bg-panel" onClick={() => onTabChange("activity")}>
-                Ver actividad
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="rounded-md border border-line bg-panel p-4">
-        <h3 className="text-[13px] font-semibold text-ink-primary">Acción recomendada</h3>
-        <p className="mt-1 text-[12px] leading-5 text-ink-secondary">{summary.actionDetail}</p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <PrimarySummaryAction
-            action={summary.primaryAction}
-            busy={busy}
-            canSaveRecommended={canSaveRecommended}
-            canAcceptOmitted={canAcceptOmitted}
-            selectedCount={selectedCount}
-            onImportSafe={onImportSafe}
-            onImport={onImport}
-            onOmitAll={onOmitAll}
-            onPushGithub={onPushGithub}
-            onPullGithub={onPullGithub}
-            onRefresh={onRefresh}
-            onTabChange={onTabChange}
-          />
-        </div>
-      </section>
+      ) : null}
     </div>
   );
 }
 
-function PrimarySummaryAction({
-  action,
+function BulkActionBar({
+  includedChanges,
+  omittedCount,
+  acknowledged,
+  canPushGithub,
+  canPullGithub,
   busy,
-  canSaveRecommended,
-  canAcceptOmitted,
-  selectedCount,
-  onImportSafe,
   onImport,
   onOmitAll,
   onPushGithub,
   onPullGithub,
-  onRefresh,
-  onTabChange,
 }: {
-  action: ProtectionPrimaryAction;
+  includedChanges: number;
+  omittedCount: number;
+  acknowledged: boolean;
+  canPushGithub: boolean;
+  canPullGithub: boolean;
   busy: boolean;
-  canSaveRecommended: boolean;
-  canAcceptOmitted: boolean;
-  selectedCount: number;
-  onImportSafe: () => void;
   onImport: () => void;
   onOmitAll: () => void;
   onPushGithub: () => void;
   onPullGithub: () => void;
-  onRefresh: () => void;
-  onTabChange: (tab: ProtectionTab) => void;
 }) {
-  if (action === "push-github") {
-    return (
-      <button className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy} onClick={onPushGithub}>
-        {busy ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-        Subir historial a GitHub
-      </button>
-    );
-  }
-  if (action === "pull-github") {
-    return (
-      <button className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy} onClick={onPullGithub}>
-        {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-        Actualizar desde GitHub
-      </button>
-    );
-  }
-  if (action === "review-github") {
-    return (
-      <button className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark" onClick={() => onTabChange("github")}>
-        <Github size={14} />
-        Revisar GitHub
-      </button>
-    );
-  }
-  if (action === "save-recommended" && canSaveRecommended) {
-    return (
-      <button className="h-9 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy} onClick={onImportSafe}>
-        Guardar en historial
-      </button>
-    );
-  }
-  if (action === "save-selected" && selectedCount > 0) {
-    return (
-      <button className="h-9 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy} onClick={onImport}>
-        Guardar seleccionados
-      </button>
-    );
-  }
-  if (action === "accept-omitted" && canAcceptOmitted) {
-    return (
-      <button className="h-9 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy} onClick={onOmitAll}>
-        Aceptar omitidos
-      </button>
-    );
-  }
-  if (action === "none") {
-    return <span className="text-[11px] font-medium text-green-700">No hay acciones pendientes.</span>;
-  }
+  const hasAction = includedChanges > 0 || (omittedCount > 0 && !acknowledged) || canPushGithub || canPullGithub;
   return (
-    <button className="h-9 rounded-md border border-line px-3 text-[11px] font-medium hover:bg-white" disabled={busy} onClick={onRefresh}>
-      Comprobar de nuevo
-    </button>
+    <section className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line bg-panel px-5 py-3">
+      <p className="min-w-0 text-[11px] text-ink-secondary">
+        {hasAction ? "Resuelve los archivos pendientes desde la lista o ejecuta una acción de lote." : "No hay acciones de lote disponibles ahora."}
+      </p>
+      <div className="flex flex-wrap justify-end gap-2">
+        {includedChanges > 0 ? (
+          <button className="inline-flex h-8 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy} onClick={onImport}>
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <GitBranch size={14} />}
+            Guardar seleccionados en historial ({includedChanges})
+          </button>
+        ) : null}
+        {omittedCount > 0 && !acknowledged ? (
+          <button className="inline-flex h-8 items-center gap-2 rounded-md border border-orange-200 bg-white px-3 text-[11px] font-semibold text-brand-orange hover:bg-brand-hover disabled:opacity-50" disabled={busy} onClick={onOmitAll}>
+            <ShieldAlert size={14} />
+            Aceptar omitidos ({omittedCount})
+          </button>
+        ) : null}
+        {canPushGithub ? (
+          <button className="inline-flex h-8 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy} onClick={onPushGithub}>
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+            Subir a GitHub
+          </button>
+        ) : null}
+        {canPullGithub ? (
+          <button className="inline-flex h-8 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy} onClick={onPullGithub}>
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+            Actualizar desde GitHub
+          </button>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
-function GithubTab({
-  project,
-  summary,
-  syncStatus,
+function FileSyncTable({
+  files,
+  decisions,
+  acknowledged,
   busy,
+  syncStatus,
+  canUseGithub,
+  onDecisionChange,
+  onOmitAll,
   onPushGithub,
   onPullGithub,
-  onRequestResolveGithubConflict,
   onOpenGithubRepository,
+  onOpenDocument,
+  onRequestResolveGithubConflict,
+  onSaveDocument,
+  onDiscardDocumentDraft,
   onRefresh,
 }: {
-  project: Project | null;
-  summary: ProtectionSummary;
-  syncStatus?: ProjectSyncStatus | null;
+  files: DisplayFileSyncItem[];
+  decisions: Record<string, ExternalChangeDecision>;
+  acknowledged: boolean;
   busy: boolean;
+  syncStatus?: ProjectSyncStatus | null;
+  canUseGithub: boolean;
+  onDecisionChange: (itemId: string, decision: ExternalChangeDecision) => void;
+  onOmitAll: () => void;
   onPushGithub: () => void;
   onPullGithub: () => void;
-  onRequestResolveGithubConflict: (resolution: "keep-local" | "take-remote") => void;
   onOpenGithubRepository: () => void;
+  onOpenDocument: (documentId: string, name: string) => void;
+  onRequestResolveGithubConflict: (resolution: "keep-local" | "take-remote") => void;
+  onSaveDocument: (documentId: string) => void | Promise<boolean>;
+  onDiscardDocumentDraft: (documentId: string) => void | Promise<boolean>;
   onRefresh: () => void;
 }) {
-  const repository = project?.githubRepository ? `${project.githubRepository.owner}/${project.githubRepository.repo}` : "No conectado";
-  const openConflict = syncStatus?.conflicts.find((conflict) => conflict.status === "open");
-  const isConflict = syncStatus?.state === "conflict" || syncStatus?.hasConflicts;
-  const localHash = openConflict?.localHash ?? syncStatus?.lastLocalVersionHash?.slice(0, 7) ?? null;
-  const remoteHash = openConflict?.remoteHash ?? syncStatus?.lastRemoteHash?.slice(0, 7) ?? null;
-  const hasRemoteVersion = Boolean(remoteHash);
+  if (files.length === 0) return null;
   return (
-    <section className="space-y-3">
-      <div className={["rounded-md border px-4 py-4", summary.calloutClass].join(" ")}>
-        <div className="flex items-start gap-3">
-          <span className={["grid h-9 w-9 shrink-0 place-items-center rounded-md", summary.iconClass].join(" ")}>
-            <summary.statusIcon size={18} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <h3 className="text-[14px] font-semibold text-ink-primary">{summary.githubTitle}</h3>
-            <p className="mt-1 text-[12px] leading-5 text-ink-secondary">{summary.githubDetail}</p>
-            {!isConflict ? (
-              <div className="mt-3 flex flex-wrap gap-2">
-                  <PrimarySummaryAction
-                    action={summary.primaryAction}
-                    busy={busy}
-                    canSaveRecommended={false}
-                    canAcceptOmitted={false}
-                    selectedCount={0}
-                    onImportSafe={() => undefined}
-                    onImport={() => undefined}
-                    onOmitAll={() => undefined}
-                    onPushGithub={onPushGithub}
-                    onPullGithub={onPullGithub}
-                    onRefresh={onRefresh}
-                    onTabChange={() => undefined}
-                  />
-                {summary.primaryAction !== "refresh" ? (
-                  <button className="h-9 rounded-md border border-line px-3 text-[11px] font-medium hover:bg-panel" disabled={busy} onClick={onRefresh}>
-                    Comprobar de nuevo
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
+    <section className="rounded-md border border-line bg-white">
+      <div className="sticky top-0 z-10 grid min-h-9 min-w-[900px] grid-cols-[minmax(260px,1.8fr)_100px_120px_140px_140px_132px] items-center gap-3 border-b border-line bg-panel px-3 text-[10px] font-semibold uppercase text-ink-secondary">
+        <span>Archivo</span>
+        <span>Modificado</span>
+        <span>Local</span>
+        <span>Historial local</span>
+        <span>GitHub</span>
+        <span className="text-right">Acciones</span>
+      </div>
+      <div className="min-w-[900px] divide-y divide-line/70">
+        {files.map((file) => (
+          <FileSyncRow
+            key={file.id}
+            file={file}
+            decision={file.change ? decisions[file.change.itemId] ?? file.change.decision : null}
+            acknowledged={acknowledged}
+            busy={busy}
+            syncStatus={syncStatus}
+            canUseGithub={canUseGithub}
+            onDecisionChange={onDecisionChange}
+            onOmitAll={onOmitAll}
+            onPushGithub={onPushGithub}
+            onPullGithub={onPullGithub}
+            onOpenGithubRepository={onOpenGithubRepository}
+            onOpenDocument={onOpenDocument}
+            onRequestResolveGithubConflict={onRequestResolveGithubConflict}
+            onSaveDocument={onSaveDocument}
+            onDiscardDocumentDraft={onDiscardDocumentDraft}
+            onRefresh={onRefresh}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function FileSyncRow({
+  file,
+  decision,
+  acknowledged,
+  busy,
+  syncStatus,
+  canUseGithub,
+  onDecisionChange,
+  onOmitAll,
+  onPushGithub,
+  onPullGithub,
+  onOpenGithubRepository,
+  onOpenDocument,
+  onRequestResolveGithubConflict,
+  onSaveDocument,
+  onDiscardDocumentDraft,
+  onRefresh,
+}: {
+  file: DisplayFileSyncItem;
+  decision: ExternalChangeDecision | null;
+  acknowledged: boolean;
+  busy: boolean;
+  syncStatus?: ProjectSyncStatus | null;
+  canUseGithub: boolean;
+  onDecisionChange: (itemId: string, decision: ExternalChangeDecision) => void;
+  onOmitAll: () => void;
+  onPushGithub: () => void;
+  onPullGithub: () => void;
+  onOpenGithubRepository: () => void;
+  onOpenDocument: (documentId: string, name: string) => void;
+  onRequestResolveGithubConflict: (resolution: "keep-local" | "take-remote") => void;
+  onSaveDocument: (documentId: string) => void | Promise<boolean>;
+  onDiscardDocumentDraft: (documentId: string) => void | Promise<boolean>;
+  onRefresh: () => void;
+}) {
+  const Icon = getFileIcon(file.kind);
+  return (
+    <article className="grid min-h-[58px] grid-cols-[minmax(260px,1.8fr)_100px_120px_140px_140px_132px] items-center gap-3 px-3 py-2 text-[11px] hover:bg-panel/70">
+      <div className="flex min-w-0 items-center gap-2">
+        <Icon size={16} className="shrink-0 text-ink-secondary" />
+        <div className="min-w-0">
+          <p className="truncate font-semibold text-ink-primary">{file.name}</p>
+          <p className="mt-0.5 truncate text-[10px] leading-4 text-ink-secondary">{formatParentPath(file.path)}</p>
         </div>
       </div>
-      <dl className="grid gap-2 text-[11px] md:grid-cols-2">
-        <DetailItem label="Repositorio" value={repository} />
-        <DetailItem label="Modo" value={summary.syncMode} />
-        <DetailItem label="Estado" value={summary.status} />
-        <DetailItem label="Última sincronización" value={summary.lastActivity} />
-        <DetailItem label="Versión local" value={syncStatus?.lastLocalVersionHash?.slice(0, 7) ?? "No disponible"} />
-        <DetailItem label="Versión en GitHub" value={syncStatus?.lastRemoteHash?.slice(0, 7) ?? "No disponible"} />
-      </dl>
-      {isConflict ? (
-        <section className="rounded-md border border-red-200 bg-red-50 px-4 py-4 text-[12px] dark:border-red-900/70 dark:bg-red-950/30">
-          <div className="flex items-start gap-3">
-            <AlertTriangle size={18} className="mt-0.5 shrink-0 text-red-700 dark:text-red-300" />
-            <div className="min-w-0 flex-1">
-              <h4 className="font-semibold text-red-900 dark:text-red-100">{hasRemoteVersion ? "Elige qué versión debe quedar como válida" : "Listo para subir el historial local"}</h4>
-              <p className="mt-1 leading-5 text-red-800 dark:text-red-200">
-                {hasRemoteVersion
-                  ? "Hay cambios guardados en este equipo y también en GitHub. KnowNext.ai necesita que elijas una dirección para evitar sobrescribir trabajo sin permiso."
-                  : "KnowNext.ai no ha encontrado una versión útil en GitHub para comparar. Puedes sincronizar subiendo el historial guardado en este equipo al repositorio conectado."}
-              </p>
-              <div className="mt-3 grid gap-2 text-[11px] md:grid-cols-2">
-                <DetailItem label="Este equipo" value={localHash ?? "No disponible"} />
-                <DetailItem label="GitHub" value={remoteHash ?? "No disponible"} />
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {hasRemoteVersion ? (
-                  <>
-                    <button className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy} onClick={() => onRequestResolveGithubConflict("keep-local")}>
-                      {busy ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-                      Usar este equipo
-                    </button>
-                    <button className="inline-flex h-9 items-center gap-2 rounded-md border border-red-200 bg-white px-3 text-[11px] font-semibold text-red-900 hover:bg-red-50 disabled:opacity-50 dark:border-red-900/70 dark:bg-transparent dark:text-red-100 dark:hover:bg-red-950/40" disabled={busy} onClick={() => onRequestResolveGithubConflict("take-remote")}>
-                      <Download size={14} />
-                      Usar GitHub
-                    </button>
-                  </>
-                ) : (
-                  <button className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy} onClick={onPushGithub}>
-                    {busy ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-                    Sincronizar con GitHub
-                  </button>
-                )}
-                <button className="inline-flex h-9 items-center gap-2 rounded-md border border-red-200 bg-white px-3 text-[11px] font-semibold text-red-900 hover:bg-red-50 disabled:opacity-50 dark:border-red-900/70 dark:bg-transparent dark:text-red-100 dark:hover:bg-red-950/40" disabled={busy} onClick={onRefresh}>
-                  {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                  Comprobar de nuevo
-                </button>
-                <button className="inline-flex h-9 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-medium text-ink-primary hover:bg-panel disabled:opacity-50 dark:bg-transparent" disabled={busy || !project?.githubRepository} onClick={onOpenGithubRepository}>
-                  <Github size={14} />
-                  Abrir repositorio
-                </button>
-              </div>
-            </div>
-          </div>
-        </section>
-      ) : null}
-    </section>
+      <span className="text-ink-secondary">{formatDate(file.modifiedAt ?? file.draft?.draftUpdatedAt)}</span>
+      <SyncStatusBadge status={file.localStatus} />
+      <SyncStatusBadge status={file.historyStatus} />
+      <SyncStatusBadge status={file.githubStatus} />
+      <FileRowActions
+        file={file}
+        decision={decision}
+        acknowledged={acknowledged}
+        busy={busy}
+        syncStatus={syncStatus}
+        canUseGithub={canUseGithub}
+        onDecisionChange={onDecisionChange}
+        onOmitAll={onOmitAll}
+        onPushGithub={onPushGithub}
+        onPullGithub={onPullGithub}
+        onOpenGithubRepository={onOpenGithubRepository}
+        onOpenDocument={onOpenDocument}
+        onRequestResolveGithubConflict={onRequestResolveGithubConflict}
+        onSaveDocument={onSaveDocument}
+        onDiscardDocumentDraft={onDiscardDocumentDraft}
+        onRefresh={onRefresh}
+      />
+    </article>
+  );
+}
+
+function SyncStatusBadge({ status }: { status: ProjectFileSyncPhaseStatus }) {
+  return (
+    <span
+      className={[
+        "inline-flex min-w-0 items-center gap-1.5 rounded-full px-2 py-1 text-[10px] font-semibold",
+        statusBadgeClass(status.state),
+      ].join(" ")}
+      title={status.detail ?? status.label}
+      aria-label={`${status.label}${status.detail ? `: ${status.detail}` : ""}`}
+    >
+      <span className={["h-1.5 w-1.5 shrink-0 rounded-full", statusDotClass(status.state)].join(" ")} />
+      <span className="truncate">{status.label}</span>
+    </span>
+  );
+}
+
+function FileRowActions({
+  file,
+  decision,
+  acknowledged,
+  busy,
+  syncStatus,
+  canUseGithub,
+  onDecisionChange,
+  onOmitAll,
+  onPushGithub,
+  onPullGithub,
+  onOpenGithubRepository,
+  onOpenDocument,
+  onRequestResolveGithubConflict,
+  onSaveDocument,
+  onDiscardDocumentDraft,
+  onRefresh,
+}: {
+  file: DisplayFileSyncItem;
+  decision: ExternalChangeDecision | null;
+  acknowledged: boolean;
+  busy: boolean;
+  syncStatus?: ProjectSyncStatus | null;
+  canUseGithub: boolean;
+  onDecisionChange: (itemId: string, decision: ExternalChangeDecision) => void;
+  onOmitAll: () => void;
+  onPushGithub: () => void;
+  onPullGithub: () => void;
+  onOpenGithubRepository: () => void;
+  onOpenDocument: (documentId: string, name: string) => void;
+  onRequestResolveGithubConflict: (resolution: "keep-local" | "take-remote") => void;
+  onSaveDocument: (documentId: string) => void | Promise<boolean>;
+  onDiscardDocumentDraft: (documentId: string) => void | Promise<boolean>;
+  onRefresh: () => void;
+}) {
+  const openDocumentButton = file.kind === "document" ? (
+    <ActionIconButton
+      label={`Abrir ${file.name}`}
+      disabled={busy}
+      onClick={() => onOpenDocument(file.id, file.name)}
+    >
+      <Eye size={14} />
+    </ActionIconButton>
+  ) : null;
+
+  if (file.draft) {
+    return (
+      <div className="flex justify-end gap-1">
+        {openDocumentButton}
+        <ActionIconButton label={`Guardar ${file.name}`} tone="primary" disabled={busy} onClick={() => onSaveDocument(file.draft!.documentId)}>
+          <CheckCircle2 size={14} />
+        </ActionIconButton>
+        <ActionIconButton label={`Descartar borrador de ${file.name}`} tone="danger" disabled={busy} onClick={() => onDiscardDocumentDraft(file.draft!.documentId)}>
+          <Trash2 size={14} />
+        </ActionIconButton>
+      </div>
+    );
+  }
+
+  if (file.change?.risk === "blocked") {
+    return (
+      <div className="flex justify-end gap-1">
+        {openDocumentButton}
+        <ActionIconButton label={acknowledged ? `${file.name} omitido aceptado` : `Aceptar omitido ${file.name}`} disabled={busy || acknowledged} onClick={onOmitAll}>
+          <ShieldAlert size={14} />
+        </ActionIconButton>
+      </div>
+    );
+  }
+
+  if (file.change) {
+    return (
+      <div className="flex justify-end gap-1">
+        {openDocumentButton}
+        <ActionIconButton label={`Incluir ${file.name} en historial`} tone={decision === "include" ? "primary" : "default"} disabled={busy} onClick={() => onDecisionChange(file.change!.itemId, "include")}>
+          <GitBranch size={14} />
+        </ActionIconButton>
+        <ActionIconButton label={`Omitir ${file.name}`} tone={decision === "omit" ? "active" : "default"} disabled={busy} onClick={() => onDecisionChange(file.change!.itemId, "omit")}>
+          <Ban size={14} />
+        </ActionIconButton>
+      </div>
+    );
+  }
+
+  if (file.githubStatus.state === "conflict") {
+    return (
+      <div className="flex justify-end gap-1">
+        {openDocumentButton}
+        <ActionIconButton label={`Usar este equipo para ${file.name}`} tone="primary" disabled={busy} onClick={() => onRequestResolveGithubConflict("keep-local")}>
+          <Upload size={14} />
+        </ActionIconButton>
+        <ActionIconButton label={`Usar GitHub para ${file.name}`} tone="danger" disabled={busy} onClick={() => onRequestResolveGithubConflict("take-remote")}>
+          <Download size={14} />
+        </ActionIconButton>
+      </div>
+    );
+  }
+
+  if (canUseGithub && file.githubStatus.state === "pending" && syncStatus?.pendingPush) {
+    return (
+      <div className="flex justify-end gap-1">
+        {openDocumentButton}
+        <ActionIconButton label={`Subir ${file.name} a GitHub`} tone="primary" disabled={busy} onClick={onPushGithub}>
+          <Upload size={14} />
+        </ActionIconButton>
+      </div>
+    );
+  }
+
+  if (canUseGithub && file.githubStatus.state === "pending" && syncStatus?.pendingPull) {
+    return (
+      <div className="flex justify-end gap-1">
+        {openDocumentButton}
+        <ActionIconButton label={`Actualizar ${file.name} desde GitHub`} tone="primary" disabled={busy} onClick={onPullGithub}>
+          <Download size={14} />
+        </ActionIconButton>
+      </div>
+    );
+  }
+
+  if (file.githubStatus.state === "error") {
+    return (
+      <div className="flex justify-end gap-1">
+        {openDocumentButton}
+        <ActionIconButton label={`Reintentar ${file.name}`} disabled={busy} onClick={onRefresh}>
+          <RefreshCw size={14} />
+        </ActionIconButton>
+      </div>
+    );
+  }
+
+  if (canUseGithub && file.githubStatus.state === "ok") {
+    return (
+      <div className="flex justify-end gap-1">
+        {openDocumentButton}
+        <ActionIconButton label={`Abrir GitHub para ${file.name}`} disabled={busy} onClick={onOpenGithubRepository}>
+          <Github size={14} />
+        </ActionIconButton>
+      </div>
+    );
+  }
+
+  return <div className="flex justify-end gap-1">{openDocumentButton}</div>;
+}
+
+function ActionIconButton({
+  label,
+  tone = "default",
+  disabled,
+  onClick,
+  children,
+}: {
+  label: string;
+  tone?: "default" | "primary" | "danger" | "active";
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  const className = {
+    default: "border-line text-ink-secondary hover:bg-panel hover:text-ink-primary",
+    primary: "border-brand-orange bg-brand-orange text-white hover:bg-brand-dark",
+    danger: "border-red-200 text-red-700 hover:bg-red-50",
+    active: "border-line bg-panel text-ink-primary",
+  }[tone];
+  return (
+    <button
+      type="button"
+      className={["grid h-8 w-8 place-items-center rounded-md border disabled:cursor-not-allowed disabled:opacity-50", className].join(" ")}
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -655,8 +840,8 @@ function GithubConflictConfirmationDialog({
             </h3>
             <p className="mt-2 text-[12px] leading-5 text-ink-secondary">
               {keepLocal
-                ? "KnowNext.ai subirá el historial local y GitHub quedará alineado con esta copia. Los cambios que solo existan en GitHub dejarán de ser la versión principal."
-                : "KnowNext.ai descargará la versión de GitHub y esta copia local quedará alineada con el repositorio remoto. Los cambios locales que no estén en GitHub dejarán de ser la versión principal."}
+                ? "KnowNext.ai subirá el historial local y GitHub quedará alineado con esta copia."
+                : "KnowNext.ai descargará la versión de GitHub y esta copia local quedará alineada con el repositorio remoto."}
             </p>
           </div>
         </div>
@@ -674,644 +859,235 @@ function GithubConflictConfirmationDialog({
   );
 }
 
-function ActivityTab({ events }: { events: ActivityEvent[] }) {
-  if (events.length === 0) {
-    return (
-      <section className="rounded-md border border-line bg-white px-4 py-8 text-center">
-        <Clock3 size={24} className="mx-auto text-ink-secondary" />
-        <p className="mt-2 text-[12px] font-semibold text-ink-primary">Todavía no hay actividad registrada</p>
-        <p className="mt-1 text-[11px] text-ink-secondary">
-          Las próximas acciones de historial, GitHub y seguridad aparecerán aquí.
-        </p>
-      </section>
-    );
+function buildDisplayFiles(
+  project: Project | null,
+  overview: ProjectFileSyncOverview | null,
+  drafts: OpenDocumentDraftState[],
+  syncStatus?: ProjectSyncStatus | null,
+) {
+  const draftByPath = new Map(drafts.map((draft) => [normalizePath(draft.path), draft]));
+  const files: DisplayFileSyncItem[] = (overview?.files ?? []).map((file) => {
+    const draft = draftByPath.get(normalizePath(file.path)) ?? null;
+    if (!draft) return file;
+    return {
+      ...file,
+      draft,
+      localStatus: {
+        state: "draft",
+        label: "Borrador",
+        detail: "Hay cambios abiertos pendientes de guardar en disco.",
+      },
+      historyStatus: {
+        state: "waiting",
+        label: "Esperando local",
+        detail: "Guarda el borrador antes de crear historial.",
+      },
+      githubStatus: hasGithub(project)
+        ? {
+            state: "waiting",
+            label: "Esperando local",
+            detail: "GitHub esperará hasta guardar el borrador.",
+          }
+        : file.githubStatus,
+    };
+  });
+
+  for (const draft of drafts) {
+    if (files.some((file) => normalizePath(file.path) === normalizePath(draft.path))) continue;
+    files.push({
+      id: draft.documentId,
+      projectId: project?.id ?? "",
+      path: draft.path,
+      name: draft.name,
+      kind: "document",
+      modifiedAt: draft.draftUpdatedAt ?? null,
+      sizeBytes: null,
+      localStatus: { state: "draft", label: "Borrador", detail: "Hay cambios abiertos pendientes de guardar en disco." },
+      historyStatus: { state: "waiting", label: "Esperando local", detail: "Guarda el borrador antes de crear historial." },
+      githubStatus: hasGithub(project)
+        ? { state: "waiting", label: "Esperando local", detail: "GitHub esperará hasta guardar el borrador." }
+        : { state: "unavailable", label: "No conectado", detail: "Este proyecto no usa GitHub." },
+      change: null,
+      conflictId: null,
+      draft,
+    });
   }
 
-  const grouped = groupActivityEvents(events);
-  return (
-    <section className="rounded-md border border-line bg-white">
-      <div className="border-b border-line px-4 py-3">
-        <h3 className="text-[13px] font-semibold text-ink-primary">Actividad reciente</h3>
-        <p className="mt-0.5 text-[11px] leading-5 text-ink-secondary">
-          Consulta las últimas acciones relevantes de historial, GitHub y archivos omitidos.
-        </p>
-      </div>
-      <div className="divide-y divide-line/70">
-        {grouped.map((group) => (
-          <section key={group.label} className="px-4 py-3">
-            <h4 className="mb-2 text-[10px] font-semibold uppercase text-ink-secondary">{group.label}</h4>
-            <div className="space-y-2">
-              {group.events.map((event) => (
-                <ActivityEventRow key={event.id} event={event} />
-              ))}
-            </div>
-          </section>
-        ))}
-      </div>
-    </section>
-  );
+  return files.sort((left, right) => {
+    const leftDate = left.modifiedAt ?? left.draft?.draftUpdatedAt ?? "";
+    const rightDate = right.modifiedAt ?? right.draft?.draftUpdatedAt ?? "";
+    return rightDate.localeCompare(leftDate) || left.path.localeCompare(right.path);
+  });
 }
 
-function ActivityEventRow({ event }: { event: ActivityEvent }) {
-  const Icon = activityIcon(event);
-  return (
-    <article className="flex min-h-12 gap-3 rounded-md px-2 py-2 hover:bg-panel">
-      <span className={["mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md", activityIconClass(event.tone)].join(" ")}>
-        <Icon size={15} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-start justify-between gap-3">
-          <h5 className="truncate text-[12px] font-semibold text-ink-primary">{event.title}</h5>
-          <span className={["shrink-0 rounded px-2 py-0.5 text-[10px] font-semibold", activityBadgeClass(event.tone)].join(" ")}>
-            {activityToneLabel(event.tone)}
-          </span>
-        </div>
-        <p className="mt-0.5 text-[11px] leading-5 text-ink-secondary">{event.message}</p>
-        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-ink-secondary">
-          <span>{formatActivityTime(event.createdAt)}</span>
-          {event.documentPath ? <span>{formatItemPath(event.documentPath)}</span> : null}
-          {event.repository ? <span>{event.repository}</span> : null}
-        </div>
-      </div>
-    </article>
-  );
+function buildPhaseFilterOptions(files: DisplayFileSyncItem[]): Record<FileSyncFilterPhase, FileSyncFilterOption[]> {
+  return {
+    local: buildPhaseOptions(files, "local"),
+    history: buildPhaseOptions(files, "history"),
+    github: buildPhaseOptions(files, "github"),
+  };
 }
 
-function groupActivityEvents(events: ActivityEvent[]) {
-  const groups: Array<{ label: string; events: ActivityEvent[] }> = [];
-  for (const event of events) {
-    const label = activityDayLabel(event.createdAt);
-    const group = groups.find((candidate) => candidate.label === label);
-    if (group) group.events.push(event);
-    else groups.push({ label, events: [event] });
+function buildPhaseOptions(files: DisplayFileSyncItem[], phase: FileSyncFilterPhase): FileSyncFilterOption[] {
+  const options = new Map<ProjectFileSyncPhaseState, FileSyncFilterOption>();
+  for (const file of files) {
+    const status = getPhaseStatus(file, phase);
+    const current = options.get(status.state);
+    options.set(status.state, {
+      state: status.state,
+      label: status.label,
+      count: (current?.count ?? 0) + 1,
+    });
   }
-  return groups;
+  return Array.from(options.values()).sort((left, right) => statusSortWeight(left.state) - statusSortWeight(right.state) || left.label.localeCompare(right.label));
 }
 
-function activityIcon(event: ActivityEvent) {
-  if (event.scope === "github") return event.type.includes("pull") ? Download : event.type.includes("push") ? Upload : Github;
-  if (event.scope === "security") return ShieldCheck;
-  if (event.scope === "history") return GitBranch;
-  if (event.scope === "document") return FileText;
-  return Clock3;
+function fileMatchesPhaseFilters(file: DisplayFileSyncItem, filters: FileSyncFilterState) {
+  return filterPhases.every((phase) => {
+    const selected = filters[phase.id];
+    return selected.length === 0 || selected.includes(getPhaseStatus(file, phase.id).state);
+  });
 }
 
-function activityIconClass(tone: ActivityEvent["tone"]) {
-  if (tone === "success") return "bg-green-50 text-green-700";
-  if (tone === "warning") return "bg-brand-hover text-brand-orange";
-  if (tone === "danger") return "bg-red-50 text-red-700";
-  return "bg-panel text-ink-secondary";
+function togglePhaseFilter(filters: FileSyncFilterState, phase: FileSyncFilterPhase, state: ProjectFileSyncPhaseState): FileSyncFilterState {
+  const selected = filters[phase];
+  const nextSelected = selected.includes(state)
+    ? selected.filter((value) => value !== state)
+    : [...selected, state];
+  return { ...filters, [phase]: nextSelected };
 }
 
-function activityBadgeClass(tone: ActivityEvent["tone"]) {
-  if (tone === "success") return "bg-green-50 text-green-700";
-  if (tone === "warning") return "bg-brand-hover text-brand-orange";
-  if (tone === "danger") return "bg-red-50 text-red-700";
-  return "bg-panel text-ink-secondary";
+function getPhaseStatus(file: DisplayFileSyncItem, phase: FileSyncFilterPhase) {
+  if (phase === "local") return file.localStatus;
+  if (phase === "history") return file.historyStatus;
+  return file.githubStatus;
 }
 
-function activityToneLabel(tone: ActivityEvent["tone"]) {
-  if (tone === "success") return "Completado";
-  if (tone === "warning") return "Pendiente";
-  if (tone === "danger") return "Error";
-  return "Info";
+function statusSortWeight(state: ProjectFileSyncPhaseState) {
+  if (state === "conflict" || state === "error" || state === "blocked") return 0;
+  if (state === "draft" || state === "pending" || state === "waiting" || state === "omitted") return 1;
+  if (state === "ok") return 2;
+  return 3;
 }
 
-function FilesTab({
-  title,
-  description,
-  emptyTitle,
-  emptyDetail,
-  groupOrder,
-  groupedItems,
-  collapsedGroups,
-  decisions,
-  onToggleGroup,
-  onDecisionChange,
-  acknowledged = false,
-}: {
-  title: string;
-  description: string;
-  emptyTitle: string;
-  emptyDetail: string;
-  groupOrder: Array<{ key: ExternalChangeKind; title: string }>;
-  groupedItems: Partial<Record<ExternalChangeKind, ExternalChangeItem[]>>;
-  collapsedGroups: Set<ExternalChangeKind>;
-  decisions: Record<string, ExternalChangeDecision>;
-  onToggleGroup: (group: ExternalChangeKind) => void;
-  onDecisionChange: (itemId: string, decision: ExternalChangeDecision) => void;
-  acknowledged?: boolean;
-}) {
-  const total = Object.values(groupedItems).reduce((count, items) => count + (items?.length ?? 0), 0);
-  return (
-    <section className="rounded-md border border-line bg-white">
-      <div className="border-b border-line px-4 py-3">
-        <h3 className="text-[13px] font-semibold text-ink-primary">{title}</h3>
-        <p className="mt-0.5 text-[11px] leading-5 text-ink-secondary">{description}</p>
-      </div>
-      {total > 0 ? (
-        <div className="p-2">
-          {groupOrder.map((group) => {
-            const items = groupedItems[group.key] ?? [];
-            if (items.length === 0) return null;
-            const collapsed = collapsedGroups.has(group.key);
-            return (
-              <section key={group.key} className="border-b border-line/70 last:border-b-0">
-                <button
-                  className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] font-semibold text-ink-primary hover:bg-panel"
-                  onClick={() => onToggleGroup(group.key)}
-                >
-                  {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-                  <span className="flex-1">{group.title}</span>
-                  <span className="font-normal text-ink-secondary">{items.length}</span>
-                </button>
-                {!collapsed ? (
-                  <div className="space-y-1 pb-2">
-                    {items.map((item) => (
-                      <ChangeItemRow
-                        key={item.id}
-                        item={item}
-                        decision={decisions[item.id] ?? item.decision}
-                        onDecisionChange={onDecisionChange}
-                        acknowledged={acknowledged}
-                      />
-                    ))}
-                  </div>
-                ) : null}
-              </section>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="px-4 py-8 text-center">
-          <ShieldCheck size={24} className="mx-auto text-green-600" />
-          <p className="mt-2 text-[12px] font-semibold text-ink-primary">{emptyTitle}</p>
-          <p className="mt-1 text-[11px] text-ink-secondary">{emptyDetail}</p>
-        </div>
-      )}
-    </section>
+function hasAttention(file: DisplayFileSyncItem) {
+  return [file.localStatus.state, file.historyStatus.state, file.githubStatus.state].some((state) =>
+    ["draft", "pending", "waiting", "conflict", "blocked", "omitted", "error"].includes(state),
   );
 }
 
-function DetailsTab({
-  project,
-  syncStatus,
-  syncState,
-  changeSet,
-  acknowledged,
-}: {
-  project: Project | null;
-  syncStatus?: ProjectSyncStatus | null;
-  syncState: ProjectSyncState;
-  changeSet: ExternalChangeSet | null;
-  acknowledged: boolean;
-}) {
-  return (
-    <section className="rounded-md border border-line bg-panel px-4 py-3">
-      <h3 className="text-[13px] font-semibold text-ink-primary">Detalles técnicos</h3>
-      <p className="mt-1 text-[11px] leading-5 text-ink-secondary">
-        Información de soporte para entender la carpeta local, Git y GitHub. No hace falta revisarla para editar documentación.
-      </p>
-      <dl className="mt-3 grid gap-2 text-[11px] md:grid-cols-2">
-        <DetailItem label="Carpeta local" value={project?.folderPath ?? "No disponible"} />
-        <DetailItem label="Repositorio GitHub" value={project?.githubRepository ? `${project.githubRepository.owner}/${project.githubRepository.repo}` : "No conectado"} />
-        <DetailItem label="Estado técnico" value={syncStatus?.state ?? syncState} />
-        <DetailItem label="Última versión local" value={syncStatus?.lastLocalVersionHash?.slice(0, 7) ?? "No disponible"} />
-        <DetailItem label="Última versión GitHub" value={syncStatus?.lastRemoteHash?.slice(0, 7) ?? "No disponible"} />
-        <DetailItem label="Revisión de omitidos" value={acknowledged ? "Aceptada" : changeSet?.summary.blocked ? "Pendiente" : "Sin omitidos"} />
-        <DetailItem label="Cambios detectados" value={String(changeSet?.summary.total ?? 0)} />
-        <DetailItem label="Último aviso" value={syncStatus?.detail ?? "Sin avisos técnicos"} />
-      </dl>
-    </section>
-  );
+function hasConflict(file: DisplayFileSyncItem) {
+  return [file.localStatus.state, file.historyStatus.state, file.githubStatus.state].some((state) => state === "conflict" || state === "error");
 }
 
-function SummaryCard({
-  icon: Icon,
-  label,
-  value,
-  tone = "neutral",
-}: {
-  icon: typeof HardDrive;
-  label: string;
-  value: string;
-  tone?: "neutral" | "ok" | "warning" | "danger";
-}) {
-  const toneClass =
-    tone === "ok"
-      ? "text-green-700"
-      : tone === "warning"
-        ? "text-brand-orange"
-        : tone === "danger"
-          ? "text-red-700"
-          : "text-ink-secondary";
-  return (
-    <div className="flex min-h-[68px] items-center gap-3 rounded-md border border-line bg-white px-3 py-2">
-      <Icon size={16} className={["shrink-0", toneClass].join(" ")} />
-      <span className="min-w-0">
-        <span className="block text-[10px] font-semibold uppercase text-ink-secondary">{label}</span>
-        <span className="mt-0.5 block truncate text-[12px] font-semibold text-ink-primary">{value}</span>
-      </span>
-    </div>
-  );
+function isOmittedFile(file: DisplayFileSyncItem) {
+  return file.historyStatus.state === "omitted" || file.change?.risk === "blocked";
 }
 
-function ChangeItemRow({
-  item,
-  decision,
-  acknowledged = false,
-  onDecisionChange,
-}: {
-  item: ExternalChangeItem;
-  decision: ExternalChangeDecision;
-  acknowledged?: boolean;
-  onDecisionChange: (itemId: string, decision: ExternalChangeDecision) => void;
-}) {
-  const Icon = getItemIcon(item.kind);
-  const blocked = item.risk === "blocked";
-  return (
-    <div className="group flex min-h-12 items-center gap-3 rounded-md px-2 py-1.5 hover:bg-brand-hover">
-      <button
-        className={[
-          "grid h-5 w-5 shrink-0 place-items-center rounded-full border text-[10px]",
-          decision === "include" ? "border-brand-orange bg-brand-orange text-white" : "border-line bg-white text-ink-secondary",
-          blocked ? "cursor-not-allowed opacity-45" : "",
-        ].join(" ")}
-        aria-label={blocked ? `${item.name} no se puede guardar automáticamente` : decision === "include" ? `No guardar ${item.name}` : `Guardar ${item.name}`}
-        disabled={blocked}
-        onClick={() => onDecisionChange(item.id, decision === "include" ? "omit" : "include")}
-      >
-        {decision === "include" ? <Check size={13} /> : null}
-      </button>
-      <Icon size={15} className={blocked ? "text-ink-secondary" : item.risk === "review" ? "text-brand-orange" : "text-ink-secondary"} />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[12px] font-semibold text-ink-primary">{item.name}</span>
-        <span className="block truncate text-[10px] text-ink-secondary">{formatItemPath(item.path)}</span>
-        {item.reason ? <span className="mt-0.5 block truncate text-[10px] text-ink-secondary">{formatItemReason(item.reason)}</span> : null}
-      </span>
-      <span className={["shrink-0 rounded px-2 py-1 text-[10px] font-semibold", getRiskClass(item, acknowledged)].join(" ")}>
-        {getRiskLabel(item, acknowledged)}
-      </span>
-    </div>
-  );
+function isIncludeDecision(file: DisplayFileSyncItem, decisions: Record<string, ExternalChangeDecision>) {
+  if (!file.change || file.change.risk === "blocked") return false;
+  return (decisions[file.change.itemId] ?? file.change.decision) === "include";
 }
 
-function DetailItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0 rounded border border-line bg-white px-3 py-2">
-      <dt className="text-[10px] font-semibold uppercase text-ink-secondary">{label}</dt>
-      <dd className="mt-0.5 truncate text-[11px] text-ink-primary">{value}</dd>
-    </div>
-  );
+function getHeaderSummary(
+  files: DisplayFileSyncItem[],
+  overviewError: string | null | undefined,
+  busy: boolean,
+  syncStatus: ProjectSyncStatus | null | undefined,
+  syncState: ProjectSyncState,
+  message?: string | null,
+) {
+  const attention = files.filter(hasAttention).length;
+  const conflicts = files.filter(hasConflict).length;
+  const drafts = files.filter((file) => file.localStatus.state === "draft").length;
+  const detail = message || syncStatus?.detail || "Revisa el estado local, historial y GitHub por archivo.";
+  if (overviewError) {
+    return {
+      icon: AlertTriangle,
+      iconClass: "bg-red-50 text-red-700",
+      detail: "No se pudo cargar la lista de archivos.",
+      footer: "No se pudo cargar el estado de archivos.",
+    };
+  }
+  if (busy) {
+    return {
+      icon: RefreshCw,
+      iconClass: "bg-brand-hover text-brand-orange",
+      detail: "Comprobando archivos, historial y GitHub.",
+      footer: "Comprobando el estado del proyecto.",
+    };
+  }
+  if (conflicts > 0 || syncState === "conflict" || syncStatus?.hasConflicts) {
+    return {
+      icon: AlertTriangle,
+      iconClass: "bg-red-50 text-red-700",
+      detail: `${conflicts || 1} conflicto(s) requieren decisión.`,
+      footer: "Hay conflictos que requieren elegir una versión.",
+    };
+  }
+  if (drafts > 0) {
+    return {
+      icon: HardDrive,
+      iconClass: "bg-brand-hover text-brand-orange",
+      detail: `${drafts} borrador(es) pendientes de guardar.`,
+      footer: "Guarda o descarta los borradores antes de sincronizar.",
+    };
+  }
+  if (attention > 0) {
+    return {
+      icon: GitBranch,
+      iconClass: "bg-brand-hover text-brand-orange",
+      detail: `${attention} archivo(s) necesitan atención.`,
+      footer: detail,
+    };
+  }
+  return {
+    icon: CheckCircle2,
+    iconClass: "bg-green-50 text-green-700",
+    detail: "Todos los archivos están al día.",
+    footer: "No hay acciones pendientes.",
+  };
 }
 
-function groupItems(items: ExternalChangeItem[]) {
-  return items.reduce<Partial<Record<ExternalChangeKind, ExternalChangeItem[]>>>((groups, item) => {
-    groups[item.kind] = [...(groups[item.kind] ?? []), item];
-    return groups;
-  }, {});
+function hasGithub(project: Project | null) {
+  return Boolean(project?.githubRepository || project?.syncMode === "manual-github" || project?.syncMode === "auto-github");
 }
 
-function getItemIcon(kind: ExternalChangeKind) {
-  if (kind === "folder") return Folder;
+function normalizePath(path: string) {
+  return path.replace(/\\/g, "/").replace(/^\/+/, "");
+}
+
+function getFileIcon(kind: ProjectFileSyncItem["kind"]) {
+  if (kind === "folder") return FolderOpen;
   if (kind === "document") return FileText;
   if (kind === "image") return FileImage;
-  if (kind === "private") return ShieldAlert;
+  if (kind === "private" || kind === "ignored") return ShieldAlert;
   return File;
 }
 
-function getRiskLabel(item: ExternalChangeItem, acknowledged = false) {
-  if (item.risk === "blocked") return acknowledged ? "Omitido aceptado" : item.kind === "private" ? "Omitido por seguridad" : "Omitido";
-  if (item.risk === "review") return "Requiere revisión";
-  if (item.changeType === "modified") return "Modificado";
-  if (item.changeType === "deleted") return "Eliminado";
-  return "Recomendado";
+function statusBadgeClass(state: ProjectFileSyncPhaseState) {
+  if (state === "ok") return "bg-green-50 text-green-700";
+  if (state === "conflict" || state === "error" || state === "blocked") return "bg-red-50 text-red-700";
+  if (state === "unavailable") return "bg-panel text-ink-secondary";
+  return "bg-brand-hover text-brand-orange";
 }
 
-function getRiskClass(item: ExternalChangeItem, acknowledged = false) {
-  if (item.risk === "blocked") return acknowledged ? "bg-green-50 text-green-700" : "bg-brand-hover text-brand-orange";
-  if (item.risk === "review") return "bg-orange-50 text-brand-orange";
-  return "bg-green-50 text-green-700";
+function statusDotClass(state: ProjectFileSyncPhaseState) {
+  if (state === "ok") return "bg-green-600";
+  if (state === "conflict" || state === "error" || state === "blocked") return "bg-red-600";
+  if (state === "unavailable") return "bg-ink-secondary";
+  return "bg-brand-orange";
 }
 
-type ProtectionSummary = ReturnType<typeof getProtectionSummary>;
-
-function getProtectionSummary(
-  project: Project | null,
-  changeSet: ExternalChangeSet | null,
-  syncStatus: ProjectSyncStatus | null | undefined,
-  syncState: ProjectSyncState,
-  busy: boolean,
-  acknowledged: boolean,
-) {
-  const total = changeSet?.summary.total ?? 0;
-  const blocked = changeSet?.summary.blocked ?? 0;
-  const safe = changeSet?.summary.safe ?? 0;
-  const review = changeSet?.summary.review ?? 0;
-  const localWork = safe + review;
-  const state = syncStatus?.state ?? syncState;
-  const hasGithub = Boolean(project?.githubRepository) || project?.syncMode === "manual-github" || project?.syncMode === "auto-github";
-  const hasLocalGit = hasGithub || project?.versioningMode === "local-git" || project?.isGitRepository || project?.syncMode === "manual-local" || project?.syncMode === "auto-local";
-  const protection = hasGithub ? "Historial local + GitHub" : hasLocalGit ? "Historial local" : "Solo archivos locales";
-  const syncMode = project?.syncMode?.startsWith("auto") ? "Automático" : project?.syncMode && project.syncMode !== "none" ? "Manual" : "Sin sincronización remota";
-  const remotePaused = Boolean(syncStatus?.remotePaused || (hasGithub && syncStatus?.remoteAccess && syncStatus.remoteAccess !== "available" && syncStatus.remoteAccess !== "not-configured"));
-  const remotePausedLabel = syncStatus?.remoteAccess === "unauthorized"
-    ? "Sin permiso GitHub"
-    : syncStatus?.remoteAccess === "offline"
-      ? "GitHub sin conexión"
-      : syncStatus?.remoteAccess === "unauthenticated"
-        ? "Sin acceso a GitHub"
-        : "GitHub pausado";
-  const pendingGithubUpload = Boolean(hasGithub && !remotePaused && (syncStatus?.pendingPush || state === "local-pending"));
-  const pendingGithubDownload = Boolean(hasGithub && !remotePaused && (syncStatus?.pendingPull || state === "remote-available"));
-  const needsAttention = busy || state === "conflict" || state === "error" || state === "offline" || review > 0 || blocked > 0 || Boolean(changeSet?.requiresReview);
-  const hasPending = total > 0 || syncStatus?.pendingPush || syncStatus?.pendingPull || state === "local-pending" || state === "remote-available" || state === "pending";
-  const common = {
-    protectionIcon: hasGithub ? Github : hasLocalGit ? GitBranch : HardDrive,
-    syncIcon: hasGithub ? Cloud : GitBranch,
-    protection,
-    syncMode,
-    lastActivity: formatDate(syncStatus?.lastSyncAt),
-    githubAttention: Boolean(hasGithub && (remotePaused || pendingGithubUpload || pendingGithubDownload || state === "conflict" || syncStatus?.hasConflicts || state === "error" || state === "offline")),
-  };
-
-  if (acknowledged && !pendingGithubUpload && !pendingGithubDownload && localWork === 0 && state !== "conflict" && !syncStatus?.hasConflicts && state !== "error" && state !== "offline") {
-    return {
-      ...common,
-      icon: ShieldCheck,
-      iconClass: "bg-green-50 text-green-700",
-      statusIcon: ShieldCheck,
-      status: "Todo correcto",
-      tone: "ok" as const,
-      calloutClass: "border-green-100 bg-green-50",
-      needsAttention: false,
-      primaryAction: "none" as ProtectionPrimaryAction,
-      footerText: "Los omitidos aceptados siguen visibles para consulta.",
-      recommendationTitle: "Archivos omitidos aceptados",
-      recommendationDetail: "Los archivos omitidos siguen fuera del historial y no generarán aviso mientras no cambie la revisión detectada.",
-      userExplanation: "KnowNext.ai ha detectado archivos que no conviene guardar en el historial, como credenciales o configuración privada. Ya has aceptado que se mantengan fuera.",
-      actionDetail: "No tienes que hacer nada ahora. Puedes revisar la pestaña Omitidos si quieres ver qué archivos han quedado fuera.",
-      githubTitle: "GitHub no requiere acciones",
-      githubDetail: hasGithub ? "La conexión con GitHub no tiene avisos pendientes." : "Este proyecto no tiene GitHub conectado.",
-    };
-  }
-
-  if (busy) {
-    return {
-      ...common,
-      icon: RefreshCw,
-      iconClass: "bg-brand-hover text-brand-orange",
-      statusIcon: RefreshCw,
-      status: "Comprobando",
-      tone: "warning" as const,
-      calloutClass: "border-orange-200 bg-brand-hover",
-      needsAttention: true,
-      primaryAction: "refresh" as ProtectionPrimaryAction,
-      footerText: "Comprobando la carpeta y el historial.",
-      recommendationTitle: "Comprobando protección e historial",
-      recommendationDetail: "KnowNext.ai está revisando la carpeta local, el historial y la conexión remota.",
-      userExplanation: "La aplicación está verificando si hay cambios fuera de KnowNext.ai y si el historial está al día.",
-      actionDetail: "Espera a que termine la comprobación.",
-      githubTitle: "Comprobando GitHub",
-      githubDetail: "KnowNext.ai está revisando la conexión y el estado del repositorio.",
-    };
-  }
-
-  if (state === "error" || state === "offline") {
-    return {
-      ...common,
-      icon: AlertTriangle,
-      iconClass: "bg-red-50 text-red-700",
-      statusIcon: AlertTriangle,
-      status: state === "offline" ? "Sin conexión" : "Error de conexión",
-      tone: "danger" as const,
-      calloutClass: "border-red-100 bg-red-50",
-      needsAttention: true,
-      primaryAction: "refresh" as ProtectionPrimaryAction,
-      footerText: "No se pudo comprobar GitHub.",
-      recommendationTitle: "No se puede comprobar GitHub",
-      recommendationDetail: syncStatus?.detail || "Revisa la conexión o vuelve a conectar la cuenta de GitHub desde la configuración del proyecto.",
-      userExplanation: "KnowNext.ai no puede confirmar si el historial local y GitHub están sincronizados. La documentación local no se modifica.",
-      actionDetail: "Comprueba de nuevo. Si sigue fallando, revisa la cuenta de GitHub en la configuración del proyecto.",
-      githubTitle: "GitHub no responde correctamente",
-      githubDetail: syncStatus?.detail || "No se pudo validar el repositorio remoto con la conexión actual.",
-    };
-  }
-
-  if (hasGithub && remotePaused) {
-    return {
-      ...common,
-      icon: AlertTriangle,
-      iconClass: "bg-brand-hover text-brand-orange",
-      statusIcon: AlertTriangle,
-      status: remotePausedLabel,
-      tone: "warning" as const,
-      calloutClass: "border-orange-200 bg-brand-hover",
-      needsAttention: true,
-      primaryAction: "refresh" as ProtectionPrimaryAction,
-      footerText: "GitHub está pausado; el historial local sigue disponible.",
-      recommendationTitle: remotePausedLabel,
-      recommendationDetail: syncStatus?.detail || "Puedes seguir trabajando localmente. La sincronización remota se reanudará cuando vuelva el acceso.",
-      userExplanation: "KnowNext.ai mantiene la carpeta y el historial local operativos aunque GitHub no esté disponible para esta instalación.",
-      actionDetail: "Comprueba de nuevo cuando recuperes cuenta, conexión o permisos. No se subirá ni descargará nada de GitHub mientras esté pausado.",
-      githubTitle: remotePausedLabel,
-      githubDetail: syncStatus?.detail || "La sincronización remota está pausada hasta recuperar acceso a GitHub.",
-    };
-  }
-
-  if (state === "conflict" || syncStatus?.hasConflicts) {
-    const hasRemoteVersion = Boolean(syncStatus?.conflicts.find((conflict) => conflict.status === "open")?.remoteHash ?? syncStatus?.lastRemoteHash);
-    return {
-      ...common,
-      icon: hasRemoteVersion ? AlertTriangle : Upload,
-      iconClass: hasRemoteVersion ? "bg-red-50 text-red-700" : "bg-brand-hover text-brand-orange",
-      statusIcon: hasRemoteVersion ? AlertTriangle : Upload,
-      status: hasRemoteVersion ? "Decisión necesaria" : "Pendiente de subir",
-      tone: hasRemoteVersion ? "danger" as const : "warning" as const,
-      calloutClass: hasRemoteVersion ? "border-red-100 bg-red-50" : "border-orange-200 bg-brand-hover",
-      needsAttention: true,
-      primaryAction: hasRemoteVersion ? "review-github" as ProtectionPrimaryAction : "push-github" as ProtectionPrimaryAction,
-      footerText: hasRemoteVersion ? "Hay diferencias que requieren decisión." : "Hay historial local pendiente de subir.",
-      recommendationTitle: hasRemoteVersion ? "Elige qué versión debe quedar como válida" : "Falta sincronizar este equipo con GitHub",
-      recommendationDetail: hasRemoteVersion
-        ? "El historial local y GitHub han avanzado por separado. Elige si quieres conservar lo de este equipo o descargar lo de GitHub."
-        : "GitHub no muestra una versión comparable. Puedes subir el historial guardado en este equipo para dejar el repositorio sincronizado.",
-      userExplanation: hasRemoteVersion
-        ? "Hay diferencias entre la carpeta local y el historial remoto que KnowNext.ai no puede resolver automáticamente sin riesgo de perder información."
-        : "La documentación está guardada en el historial local, pero todavía falta completar la copia en GitHub.",
-      actionDetail: hasRemoteVersion
-        ? "Abre la pestaña GitHub y elige una de las dos opciones de sincronización."
-        : "Pulsa Sincronizar con GitHub para subir el historial local al repositorio conectado.",
-      githubTitle: hasRemoteVersion ? "Hay diferencias entre este equipo y GitHub" : "GitHub está conectado, pero falta sincronizar",
-      githubDetail: hasRemoteVersion
-        ? "El historial local y GitHub han avanzado por separado. KnowNext.ai necesita que elijas una dirección de sincronización."
-        : "Sube el historial local para que GitHub tenga la misma versión que este equipo.",
-    };
-  }
-
-  if (pendingGithubDownload) {
-    return {
-      ...common,
-      icon: Download,
-      iconClass: "bg-brand-hover text-brand-orange",
-      statusIcon: Download,
-      status: "GitHub tiene cambios",
-      tone: "warning" as const,
-      calloutClass: "border-orange-200 bg-brand-hover",
-      needsAttention: true,
-      primaryAction: "pull-github" as ProtectionPrimaryAction,
-      footerText: "Hay una versión en GitHub pendiente de traer.",
-      recommendationTitle: "GitHub tiene cambios disponibles",
-      recommendationDetail: "Hay cambios en GitHub que todavía no están en este equipo. Actualiza desde GitHub cuando no tengas documentos abiertos con cambios pendientes.",
-      userExplanation: "El repositorio remoto contiene una versión más reciente. KnowNext.ai puede traerla para dejar este equipo al día.",
-      actionDetail: "Pulsa Actualizar desde GitHub para descargar la última versión del historial.",
-      githubTitle: "GitHub tiene una versión más reciente",
-      githubDetail: "Puedes descargar los cambios remotos para actualizar la copia local del proyecto.",
-    };
-  }
-
-  if (localWork > 0 || changeSet?.requiresReview) {
-    return {
-      ...common,
-      icon: AlertTriangle,
-      iconClass: "bg-brand-hover text-brand-orange",
-      statusIcon: AlertTriangle,
-      status: "Revisión necesaria",
-      tone: "warning" as const,
-      calloutClass: "border-orange-200 bg-brand-hover",
-      needsAttention,
-      primaryAction: canUseRecommendedAction(safe) ? "save-recommended" as ProtectionPrimaryAction : "save-selected" as ProtectionPrimaryAction,
-      footerText: "Hay cambios que requieren una decisión.",
-      recommendationTitle: "Hay cambios locales sin guardar en el historial",
-      recommendationDetail: "Hay cambios detectados fuera de KnowNext.ai. Decide cuáles deben guardarse en el historial y cuáles deben quedar fuera.",
-      userExplanation: "Puede que alguien haya añadido archivos directamente en la carpeta del proyecto, o que existan archivos técnicos que KnowNext.ai no debe guardar.",
-      actionDetail: safe > 0 ? "Guarda los cambios en el historial local. Después, si usas GitHub, podrás subir ese historial." : "Revisa la pestaña Historial local y selecciona qué cambios deben guardarse.",
-      githubTitle: pendingGithubUpload ? "GitHub queda pendiente hasta guardar los cambios locales" : "GitHub no requiere acciones ahora",
-      githubDetail: pendingGithubUpload ? "Primero guarda los cambios locales en el historial. Después podrás subir el historial completo a GitHub." : "No hay una acción de GitHub prioritaria mientras existan cambios locales sin guardar.",
-    };
-  }
-
-  if (pendingGithubUpload) {
-    return {
-      ...common,
-      icon: Upload,
-      iconClass: "bg-brand-hover text-brand-orange",
-      statusIcon: Upload,
-      status: "Pendiente de subir",
-      tone: "warning" as const,
-      calloutClass: "border-orange-200 bg-brand-hover",
-      needsAttention: true,
-      primaryAction: "push-github" as ProtectionPrimaryAction,
-      footerText: "Hay historial local pendiente de subir a GitHub.",
-      recommendationTitle: "Falta subir el historial local a GitHub",
-      recommendationDetail: "Este proyecto ya tiene versiones guardadas en este equipo. GitHub está conectado, pero todavía no tiene esa copia.",
-      userExplanation: "La documentación está protegida en el historial local. Para completar el respaldo en GitHub, sube ahora ese historial al repositorio conectado.",
-      actionDetail: "Pulsa Subir historial a GitHub. KnowNext.ai enviará las versiones locales y dejará el proyecto sincronizado.",
-      githubTitle: "GitHub está conectado, pero falta la primera subida",
-      githubDetail: "El repositorio remoto todavía no contiene la copia completa del historial local de este proyecto.",
-    };
-  }
-
-  if (blocked > 0 && safe === 0) {
-    return {
-      ...common,
-      icon: ShieldAlert,
-      iconClass: "bg-brand-hover text-brand-orange",
-      statusIcon: ShieldAlert,
-      status: "Omitidos pendientes",
-      tone: "warning" as const,
-      calloutClass: "border-orange-200 bg-brand-hover",
-      needsAttention: true,
-      primaryAction: "accept-omitted" as ProtectionPrimaryAction,
-      footerText: "Hay archivos omitidos pendientes de aceptar.",
-      recommendationTitle: "Acepta los archivos omitidos si son esperados",
-      recommendationDetail: "KnowNext.ai ha detectado archivos privados o técnicos. No se guardarán en el historial ni se subirán a GitHub.",
-      userExplanation: "Estos archivos existen en la carpeta, pero no forman parte de la documentación que conviene versionar. Aceptarlos evita que sigan apareciendo como aviso.",
-      actionDetail: "Pulsa Aceptar omitidos para confirmar que deben quedarse fuera del historial.",
-      githubTitle: "GitHub no subirá los archivos omitidos",
-      githubDetail: "Los archivos privados o técnicos se quedan fuera del historial y no se envían al repositorio remoto.",
-    };
-  }
-
-  if (safe > 0 || hasPending) {
-    return {
-      ...common,
-      icon: GitBranch,
-      iconClass: "bg-brand-hover text-brand-orange",
-      statusIcon: GitBranch,
-      status: "Cambios pendientes",
-      tone: "warning" as const,
-      calloutClass: "border-orange-200 bg-brand-hover",
-      needsAttention,
-      primaryAction: "save-recommended" as ProtectionPrimaryAction,
-      footerText: "Hay cambios listos para guardar en el historial.",
-      recommendationTitle: "Guarda los cambios en el historial",
-      recommendationDetail: "Se han detectado cambios que pueden incorporarse al historial de documentación.",
-      userExplanation: "Guardar estos cambios crea una versión local del proyecto y, si corresponde, la deja lista para sincronizar con GitHub.",
-      actionDetail: "Guarda los cambios en el historial para que formen parte de las versiones del proyecto.",
-      githubTitle: "GitHub esperará al historial local",
-      githubDetail: "Primero se guardan los cambios en el historial local. Después se sincronizan con GitHub si el proyecto lo tiene conectado.",
-    };
-  }
-
-  return {
-    ...common,
-    icon: ShieldCheck,
-    iconClass: "bg-green-50 text-green-700",
-    statusIcon: ShieldCheck,
-    status: "Todo correcto",
-    tone: "ok" as const,
-    calloutClass: "border-green-100 bg-green-50",
-    needsAttention: false,
-    primaryAction: "none" as ProtectionPrimaryAction,
-    footerText: "No hay acciones pendientes.",
-    recommendationTitle: "Tu documentación está al día",
-    recommendationDetail: syncStatus?.detail || "No hay cambios pendientes ni avisos de protección.",
-    userExplanation: "La carpeta del proyecto no tiene cambios externos pendientes y el historial no requiere ninguna acción.",
-    actionDetail: "Puedes seguir editando. Usa Comprobar de nuevo si quieres revisar la carpeta manualmente.",
-    githubTitle: hasGithub ? "GitHub está al día" : "GitHub no está conectado",
-    githubDetail: hasGithub ? "El historial local y GitHub están sincronizados." : "Este proyecto se guarda sin copia remota en GitHub.",
-  };
-}
-
-function canUseRecommendedAction(safe: number) {
-  return safe > 0;
-}
-
-function formatItemPath(path: string) {
-  const normalized = path.replace(/\\/g, "/").replace(/^\/+/, "");
-  if (!normalized.includes("/")) return `Raíz del proyecto / ${normalized}`;
-  return normalized.split("/").join(" / ");
-}
-
-function formatItemReason(reason: string) {
-  return reason.replace("No se importa automáticamente", "No se guarda automáticamente");
+function formatParentPath(path: string) {
+  const normalized = normalizePath(path);
+  const parent = normalized.split("/").slice(0, -1).join(" / ");
+  return parent ? `/${parent}` : "/Raíz";
 }
 
 function formatDate(value?: string | null) {
-  if (!value) return "No disponible";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "No disponible";
-  return new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(date);
-}
-
-function formatActivityTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Fecha no disponible";
-  return new Intl.DateTimeFormat("es-ES", { hour: "2-digit", minute: "2-digit" }).format(date);
-}
-
-function activityDayLabel(value: string) {
+  if (!value) return "Sin fecha";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Sin fecha";
-  const today = new Date();
-  const yesterday = new Date();
-  yesterday.setDate(today.getDate() - 1);
-  if (sameLocalDate(date, today)) return "Hoy";
-  if (sameLocalDate(date, yesterday)) return "Ayer";
-  return new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "short" }).format(date);
-}
-
-function sameLocalDate(left: Date, right: Date) {
-  return left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth() && left.getDate() === right.getDate();
+  return new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(date);
 }
