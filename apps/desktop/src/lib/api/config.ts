@@ -38,12 +38,12 @@ export const defaultExportTemplateConfig: ExportTemplateConfig = {
   },
   headingFontFamily: "Arial",
   headings: {
-    h1: { fontFamily: "Arial", fontSizePt: 22, color: "#111827", textFormat: "bold" },
-    h2: { fontFamily: "Arial", fontSizePt: 18, color: "#111827", textFormat: "bold" },
-    h3: { fontFamily: "Arial", fontSizePt: 15, color: "#111827", textFormat: "bold" },
-    h4: { fontFamily: "Arial", fontSizePt: 13, color: "#111827", textFormat: "bold" },
-    h5: { fontFamily: "Arial", fontSizePt: 12, color: "#111827", textFormat: "bold" },
-    h6: { fontFamily: "Arial", fontSizePt: 11, color: "#111827", textFormat: "bold" },
+    h1: { fontFamily: "Arial", fontSizePt: 22, color: "#111827", textFormat: "bold", spaceBeforePt: 12, spaceAfterPt: 8 },
+    h2: { fontFamily: "Arial", fontSizePt: 18, color: "#111827", textFormat: "bold", spaceBeforePt: 10, spaceAfterPt: 6 },
+    h3: { fontFamily: "Arial", fontSizePt: 15, color: "#111827", textFormat: "bold", spaceBeforePt: 8, spaceAfterPt: 5 },
+    h4: { fontFamily: "Arial", fontSizePt: 13, color: "#111827", textFormat: "bold", spaceBeforePt: 6, spaceAfterPt: 4 },
+    h5: { fontFamily: "Arial", fontSizePt: 12, color: "#111827", textFormat: "bold", spaceBeforePt: 4, spaceAfterPt: 3 },
+    h6: { fontFamily: "Arial", fontSizePt: 11, color: "#111827", textFormat: "bold", spaceBeforePt: 3, spaceAfterPt: 3 },
   },
   code: {
     fontFamily: "Consolas",
@@ -53,12 +53,14 @@ export const defaultExportTemplateConfig: ExportTemplateConfig = {
   },
   paragraph: {
     lineSpacing: 1.2,
+    spaceBeforePt: 0,
     spaceAfterPt: 3,
   },
   document: {
     includeTitle: false,
     linkColor: "#D85A12",
     horizontalRuleColor: "#E5E7EB",
+    diagramResolution: "medium",
   },
   updatedAt: new Date(0).toISOString(),
 };
@@ -349,12 +351,14 @@ function normalizeExportTemplate(template: ExportTemplateConfig | undefined): Ex
     code: normalizeExportTextStyle(template.code, defaultExportTemplateConfig.code),
     paragraph: {
       lineSpacing: clampNumber(template.paragraph?.lineSpacing, 1, 2.5, defaultExportTemplateConfig.paragraph.lineSpacing),
+      spaceBeforePt: clampNumber(template.paragraph?.spaceBeforePt, 0, 24, defaultExportTemplateConfig.paragraph.spaceBeforePt),
       spaceAfterPt: clampNumber(template.paragraph?.spaceAfterPt, 0, 24, defaultExportTemplateConfig.paragraph.spaceAfterPt),
     },
     document: {
       includeTitle: false,
       linkColor: normalizeColor(template.document?.linkColor, defaultExportTemplateConfig.document.linkColor),
       horizontalRuleColor: normalizeColor(template.document?.horizontalRuleColor, defaultExportTemplateConfig.document.horizontalRuleColor),
+      diagramResolution: normalizeDiagramResolution(template.document?.diagramResolution, defaultExportTemplateConfig.document.diagramResolution),
     },
     updatedAt: template.updatedAt ?? defaultExportTemplateConfig.updatedAt,
   };
@@ -366,6 +370,8 @@ function normalizeExportTextStyle(style: ExportTemplateConfig["normal"] | undefi
     fontSizePt: clampNumber(style?.fontSizePt, 6, 60, fallback.fontSizePt),
     color: normalizeColor(style?.color, fallback.color),
     textFormat: normalizeTextFormat(style?.textFormat, fallback.textFormat),
+    spaceBeforePt: clampNumber(style?.spaceBeforePt, 0, 48, fallback.spaceBeforePt ?? 0),
+    spaceAfterPt: clampNumber(style?.spaceAfterPt, 0, 48, fallback.spaceAfterPt ?? 0),
   };
 }
 
@@ -381,6 +387,11 @@ function normalizeColor(value: unknown, fallback: string) {
 function normalizeTextFormat(value: unknown, fallback: ExportTemplateConfig["normal"]["textFormat"]) {
   const normalized = String(value ?? "").trim();
   return exportTextFormats.has(normalized) ? normalized as ExportTemplateConfig["normal"]["textFormat"] : fallback;
+}
+
+function normalizeDiagramResolution(value: unknown, fallback: ExportTemplateConfig["document"]["diagramResolution"]) {
+  const normalized = String(value ?? "").trim();
+  return normalized === "low" || normalized === "medium" || normalized === "high" ? normalized : fallback;
 }
 
 function normalizeAi(ai: AiConfig | undefined): AiConfig | undefined {

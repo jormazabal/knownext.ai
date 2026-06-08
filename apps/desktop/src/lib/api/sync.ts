@@ -1,6 +1,7 @@
 import { requestJson } from "./client";
 import type {
   OpenDocumentSyncState,
+  ProjectFileSyncOverview,
   ProjectSyncStatus,
   SyncMode,
 } from "../../types/domain";
@@ -12,6 +13,10 @@ type SyncScanPayload = {
 
 export async function getProjectSyncStatus(projectId: string): Promise<ProjectSyncStatus> {
   return requestJson<ProjectSyncStatus>(`/api/projects/${projectId}/sync/status`);
+}
+
+export async function getProjectFileSyncOverview(projectId: string): Promise<ProjectFileSyncOverview> {
+  return requestJson<ProjectFileSyncOverview>(`/api/projects/${projectId}/file-sync-overview`);
 }
 
 export async function scanProjectSync(projectId: string, payload: SyncScanPayload): Promise<ProjectSyncStatus> {

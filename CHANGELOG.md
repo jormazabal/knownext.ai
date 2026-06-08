@@ -2,6 +2,18 @@
 
 All KnowNext.ai releases use one monolithic application version for the frontend, Tauri shell, Rust runtime, Windows updater, and Android updater.
 
+## 2.4.0 - 2026-06-08
+
+- Replaced the protection/history drawer with a compact `Guardado y sincronización` workspace that shows every project file in one operational list with Local, Historial local and GitHub status columns.
+- Added per-file and batch actions for drafts, local history imports, omitted external files, GitHub push/pull states and conflict handling, with filters for attention, drafts, pending history, pending GitHub work, conflicts and omitted files.
+- Added a Rust/Tauri file-sync overview contract so React renders structured sync state instead of inspecting Git or filesystem details directly.
+- Expanded local runtime sync detection for Git status paths, blocked/omitted files, paused GitHub access, draft documents and timestamped file metadata.
+- Improved DOCX and PDF export rendering for Markdown structure, including styled headings, paragraph spacing, inline formatting, links, tables, horizontal rules and embedded image assets.
+- Added export template controls for paragraph spacing, heading spacing and Mermaid diagram raster resolution.
+- Added support for Markdown, HTML and data-URL image assets during export, including JPEG, GIF and WebP handling on desktop PDF/DOCX paths.
+- Persisted AI provider usage records through the Rust runtime and added monthly usage summaries with provider and estimated-cost breakdowns.
+- Updated automated coverage for sync overview contracts, the file sync drawer, export template normalization, Mermaid export scaling and runtime usage summaries.
+
 ## 2.3.0 - 2026-06-07
 
 - Added compact AI base skills with Rust-managed manifests, modes, validators, diagnostics and a read-only Skills de IA settings surface for inspecting bundled capabilities.

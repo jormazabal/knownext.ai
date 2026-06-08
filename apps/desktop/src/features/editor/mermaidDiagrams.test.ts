@@ -3,6 +3,7 @@ import { defaultAiConfig } from "../../lib/api/config";
 import { mermaidDiagramTemplates, validateMermaidPolicy } from "./mermaidCatalog";
 import {
   buildMermaidMarkdown,
+  diagramResolutionScale,
   extractKnownextDiagramMetadata,
   findMermaidDiagramBlocks,
   resolveMermaidDiagramWidthRatio,
@@ -67,6 +68,12 @@ describe("mermaidDiagrams", () => {
   A[Inicio\nContexto] --> B[Resultado]`;
 
     expect(stripKnownextDiagramMetadata(code)).toContain("A[Inicio<br/>Contexto]");
+  });
+
+  it("maps export diagram resolution to raster scales", () => {
+    expect(diagramResolutionScale("low")).toBe(2);
+    expect(diagramResolutionScale("medium")).toBe(4);
+    expect(diagramResolutionScale("high")).toBe(8);
   });
 
   it("ships a guided template catalog for the supported Mermaid families", () => {

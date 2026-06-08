@@ -2,7 +2,7 @@
 
 KnowNext.ai is a local-first Tauri application for managing, editing, versioning, exporting, and consulting Markdown documentation by project.
 
-Version 2.3.0 runs as a self-contained native app on Windows and Android:
+Version 2.4.0 runs as a self-contained native app on Windows and Android:
 
 - Tauri v2 shell and commands.
 - Rust local runtime for persistence, documents, exports, AI orchestration, diagnostics, and project operations.
@@ -12,14 +12,14 @@ Version 2.3.0 runs as a self-contained native app on Windows and Android:
 - Frontend API boundary under `apps/desktop/src/lib/api`, backed by Tauri commands instead of HTTP.
 - Local JSON/file persistence with replaceable Rust services.
 
-There is no external product service, packaged auxiliary runtime, API port, or mobile workstation dependency in 2.3.0.
+There is no external product service, packaged auxiliary runtime, API port, or mobile workstation dependency in 2.4.0.
 
 ## Download
 
 The latest installers are published on GitHub Releases:
 
-- [Download KnowNext.ai for Windows](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_2.3.0_x64_en-US.msi)
-- [Download KnowNext.ai for Android arm64](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai-android-arm64-v2.3.0.apk)
+- [Download KnowNext.ai for Windows](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_2.4.0_x64_en-US.msi)
+- [Download KnowNext.ai for Android arm64](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai-android-arm64-v2.4.0.apk)
 - [View all releases](https://github.com/jormazabal/knownext.ai/releases)
 
 The Windows updater checks the signed Tauri manifest:

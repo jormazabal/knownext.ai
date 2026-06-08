@@ -5,6 +5,7 @@ import {
   changeProjectSyncMode,
   connectProjectGithub,
   enableProjectHistory,
+  getProjectFileSyncOverview,
   getProjectSyncStatus,
   publishProjectGithub,
   resolveProjectSyncConflict,
@@ -33,6 +34,9 @@ describe("sync API contracts", () => {
 
     await getProjectSyncStatus("project-1");
     expect(requestJson).toHaveBeenLastCalledWith("/api/projects/project-1/sync/status");
+
+    await getProjectFileSyncOverview("project-1");
+    expect(requestJson).toHaveBeenLastCalledWith("/api/projects/project-1/file-sync-overview");
 
     await scanProjectSync("project-1", { openDocuments, allowAutoApply: false });
     expect(requestJson).toHaveBeenLastCalledWith("/api/projects/project-1/sync/scan", {

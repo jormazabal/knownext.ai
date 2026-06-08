@@ -8,7 +8,7 @@ import { DocumentTabs } from "../features/documents/DocumentTabs";
 import { DocumentTree, type DocumentTreeAction, type ProjectTreeStatus } from "../features/documents/DocumentTree";
 import { InsertDiagramDialog } from "../features/documents/InsertDiagramDialog";
 import { InsertImageDialog } from "../features/documents/InsertImageDialog";
-import { ExternalChangesDrawer } from "../features/externalChanges/ExternalChangesDrawer";
+import { ExternalChangesDrawer, type OpenDocumentDraftState } from "../features/externalChanges/ExternalChangesDrawer";
 import { ImageViewer } from "../features/documents/ImageViewer";
 import { ReferenceDocumentViewer } from "../features/documentPreview/ReferenceDocumentViewer";
 import { MarkdownToolbar } from "../features/editor/MarkdownToolbar";
@@ -35,7 +35,7 @@ import { TitleBar } from "../components/window/TitleBar";
 import { getProjectImageContentUrl } from "../lib/api/projects";
 import { getDocumentTreeFileDragData } from "../lib/dragData";
 import { isMobileDeviceRuntime, isPhoneAppShell } from "../lib/runtime/platform";
-import type { ActivityEvent, AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiEditProposal, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiSkillApplication, AiSkillDiagnostic, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentSyncStatus, DocumentTreeNode, ExportFormat, ExternalChangeDecision, ExternalChangeSet, InsertImageReferenceResponse, LayoutConfig, Project, ProjectSyncState, ProjectSyncStatus, ProjectVersioningStatus, VersionRecord, WorkspaceTab } from "../types/domain";
+import type { ActivityEvent, AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiEditProposal, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiSkillApplication, AiSkillDiagnostic, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentSyncStatus, DocumentTreeNode, ExportFormat, ExternalChangeDecision, ExternalChangeSet, InsertImageReferenceResponse, LayoutConfig, Project, ProjectFileSyncOverview, ProjectSyncState, ProjectSyncStatus, ProjectVersioningStatus, VersionRecord, WorkspaceTab } from "../types/domain";
 
 const sidebarWidthConfig = {
   defaultWidth: 338,
@@ -100,6 +100,9 @@ type DesktopLayoutProps = {
   historyEnabled: boolean;
   versioningStatus: ProjectVersioningStatus | null;
   projectSyncStatus: ProjectSyncStatus | null;
+  fileSyncOverview: ProjectFileSyncOverview | null;
+  fileSyncOverviewError?: string | null;
+  openDocumentDraftStates: OpenDocumentDraftState[];
   externalChangeSet: ExternalChangeSet | null;
   externalChangeDecisions: Record<string, ExternalChangeDecision>;
   projectActivity: ActivityEvent[];
@@ -136,6 +139,8 @@ type DesktopLayoutProps = {
   onImportExternalChanges: () => void;
   onImportSafeExternalChanges: () => void;
   onOmitExternalChanges: () => void;
+  onSaveDocument: (documentId: string) => Promise<boolean>;
+  onDiscardDocumentDraft: (documentId: string) => Promise<boolean>;
   onRestoreVersion: (versionId: string) => Promise<CreateVersionResponse | null>;
   onSaveActiveDocument: () => Promise<boolean>;
   onDiscardActiveDocumentDraft: () => Promise<boolean>;
@@ -699,7 +704,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             <section className={["relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", hasOpenTab ? "bg-white" : "bg-panel"].join(" ")}>
               {hasOpenTab ? (
                 <>
-                  <div className={hasAiConversation || hasOpenImage || hasOpenReferenceDocument ? "min-h-0 flex-1 overflow-hidden pb-[54px]" : "min-h-0 flex-1 overflow-y-auto px-8 pb-[118px] pt-4"}>
+                  <div className={hasAiConversation || hasOpenImage || hasOpenReferenceDocument ? "min-h-0 flex-1 overflow-hidden pb-[54px]" : "min-h-0 flex-1 overflow-y-auto px-8 pt-4 mb-[50px]"}>
                     <div className={hasAiConversation || hasOpenImage || hasOpenReferenceDocument ? "h-full min-h-0 w-full" : "mx-auto max-w-[900px]"}>
                       {hasReleaseNotes ? (
                         <ReleaseNotesViewer markdown={props.releaseNotesMarkdown} />
@@ -949,9 +954,11 @@ export function DesktopLayout(props: DesktopLayoutProps) {
               <ExternalChangesDrawer
                 open={props.externalChangesOpen}
                 project={props.activeProject}
+                overview={props.fileSyncOverview}
+                overviewError={props.fileSyncOverviewError}
+                openDrafts={props.openDocumentDraftStates}
                 changeSet={props.externalChangeSet}
                 decisions={props.externalChangeDecisions}
-                activityEvents={props.projectActivity}
                 syncStatus={props.projectSyncStatus}
                 syncState={props.projectSyncState}
                 acknowledged={props.externalChangeSetAcknowledged}
@@ -959,12 +966,14 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 message={props.externalChangesMessage}
                 onDecisionChange={props.onExternalChangeDecision}
                 onImport={props.onImportExternalChanges}
-                onImportSafe={props.onImportSafeExternalChanges}
                 onOmitAll={props.onOmitExternalChanges}
                 onPushGithub={props.onPushProject}
                 onPullGithub={props.onPullProject}
                 onResolveGithubConflict={props.onResolveProjectGithubConflict}
                 onOpenGithubRepository={props.onOpenProjectGithub}
+                onOpenDocument={props.onOpenDocument}
+                onSaveDocument={props.onSaveDocument}
+                onDiscardDocumentDraft={props.onDiscardDocumentDraft}
                 onRefresh={props.onRefreshExternalChanges}
                 onClose={props.onCloseExternalChanges}
               />
@@ -1845,7 +1854,7 @@ function buildProjectTreeStatus(
   if (busy) {
     return {
       label: "Comprobando",
-      detail: "Revisando protección e historial",
+      detail: "Revisando guardado y sincronización",
       badge: "…",
       tone: "warning",
       showFooter: true,
@@ -1863,7 +1872,7 @@ function buildProjectTreeStatus(
       tone: "danger",
       showFooter: true,
       footerLabel: "Conflictos",
-      footerDetail: "Abre protección e historial para resolverlos.",
+      footerDetail: "Abre guardado y sincronización para resolverlos.",
     };
   }
 
@@ -1935,7 +1944,7 @@ function buildProjectTreeStatus(
       tone: "warning",
       showFooter: true,
       footerLabel: "Pendiente de sincronizar",
-      footerDetail: "Abre protección e historial para ver el resumen.",
+      footerDetail: "Abre guardado y sincronización para ver el resumen.",
     };
   }
 
@@ -1947,7 +1956,7 @@ function buildProjectTreeStatus(
       tone: "danger",
       showFooter: true,
       footerLabel: state === "offline" ? "GitHub sin conexión" : "Error de sincronización",
-      footerDetail: "Abre protección e historial para ver el detalle.",
+      footerDetail: "Abre guardado y sincronización para ver el detalle.",
     };
   }
 

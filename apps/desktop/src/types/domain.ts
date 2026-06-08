@@ -176,6 +176,57 @@ export type ProjectSyncStatus = {
   conflicts: SyncConflict[];
 };
 
+export type ProjectFileSyncPhaseState =
+  | "ok"
+  | "draft"
+  | "pending"
+  | "waiting"
+  | "conflict"
+  | "blocked"
+  | "omitted"
+  | "unavailable"
+  | "error";
+
+export type ProjectFileSyncPhaseStatus = {
+  state: ProjectFileSyncPhaseState;
+  label: string;
+  detail?: string | null;
+};
+
+export type ProjectFileSyncItem = {
+  id: string;
+  projectId: string;
+  path: string;
+  name: string;
+  kind: ExternalChangeKind;
+  modifiedAt?: string | null;
+  sizeBytes?: number | null;
+  localStatus: ProjectFileSyncPhaseStatus;
+  historyStatus: ProjectFileSyncPhaseStatus;
+  githubStatus: ProjectFileSyncPhaseStatus;
+  change?: {
+    itemId: string;
+    changeType: ExternalChangeType;
+    risk: ExternalChangeRisk;
+    decision: ExternalChangeDecision;
+  } | null;
+  conflictId?: string | null;
+};
+
+export type ProjectFileSyncOverview = {
+  projectId: string;
+  generatedAt: string;
+  summary: {
+    total: number;
+    attention: number;
+    historyPending: number;
+    githubPending: number;
+    conflicts: number;
+    omitted: number;
+  };
+  files: ProjectFileSyncItem[];
+};
+
 export type ExternalChangeItem = {
   id: string;
   path: string;
@@ -307,12 +358,15 @@ export type DiagnosticsConfig = {
 
 export type ExportFormat = "md" | "pdf" | "docx";
 export type ExportTextFormat = "normal" | "bold" | "underline" | "bold_underline";
+export type ExportDiagramResolution = "low" | "medium" | "high";
 
 export type ExportTextStyle = {
   fontFamily: string;
   fontSizePt: number;
   color: string;
   textFormat: ExportTextFormat;
+  spaceBeforePt?: number;
+  spaceAfterPt?: number;
 };
 
 export type ExportTemplateConfig = {
@@ -333,12 +387,14 @@ export type ExportTemplateConfig = {
   code: ExportTextStyle;
   paragraph: {
     lineSpacing: number;
+    spaceBeforePt: number;
     spaceAfterPt: number;
   };
   document: {
     includeTitle: boolean;
     linkColor: string;
     horizontalRuleColor: string;
+    diagramResolution: ExportDiagramResolution;
   };
   updatedAt: string;
 };

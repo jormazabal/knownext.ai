@@ -93,7 +93,7 @@ import {
 } from "../lib/api/documents";
 import { getUserNotes, saveUserNotes } from "../lib/api/notes";
 import { getExternalChanges, importExternalChanges, scanExternalChanges } from "../lib/api/externalChanges";
-import { autoRunProjectSync, changeProjectSyncMode, connectProjectGithub, enableProjectHistory, getProjectSyncStatus, publishProjectGithub, resolveProjectSyncConflict, scanProjectSync, verifyProjectGithubConnection } from "../lib/api/sync";
+import { autoRunProjectSync, changeProjectSyncMode, connectProjectGithub, enableProjectHistory, getProjectFileSyncOverview, getProjectSyncStatus, publishProjectGithub, resolveProjectSyncConflict, scanProjectSync, verifyProjectGithubConnection } from "../lib/api/sync";
 import { APP_VERSION } from "../lib/appVersion";
 import { RELEASE_NOTES_MARKDOWN } from "../lib/releaseNotes";
 import { getAuthStatus, logout as logoutGithub, pollGithubDeviceFlow, startGithubDeviceFlow } from "../lib/api/auth";
@@ -174,6 +174,7 @@ import type {
   OrphanDraft,
   Project,
   ProjectCapabilities,
+  ProjectFileSyncOverview,
   ProjectPayload,
   ProjectTabsConfig,
   ProjectVersioningStatus,
@@ -313,6 +314,8 @@ export function App() {
   const [projectSyncStatus, setProjectSyncStatus] = useState<ProjectSyncStatus | null>(null);
   const [projectActivity, setProjectActivity] = useState<ActivityEvent[]>([]);
   const [externalChangesMessage, setExternalChangesMessage] = useState<string | null>(null);
+  const [fileSyncOverview, setFileSyncOverview] = useState<ProjectFileSyncOverview | null>(null);
+  const [fileSyncOverviewError, setFileSyncOverviewError] = useState<string | null>(null);
   const [acknowledgedExternalChangeSets, setAcknowledgedExternalChangeSets] = useState<Record<string, string[]>>(readAcknowledgedExternalChangeSets);
   const [documentSyncStatuses, setDocumentSyncStatuses] = useState<Record<string, DocumentSyncStatus>>({});
   const [documentFooterDialog, setDocumentFooterDialog] = useState<DocumentFooterDialog | null>(null);
@@ -604,6 +607,8 @@ export function App() {
       setProjectSyncState("synced");
       setProjectSyncStatus(null);
       setProjectActivity([]);
+      setFileSyncOverview(null);
+      setFileSyncOverviewError(null);
       return;
     }
     if (externalChangesBusy) return;
@@ -891,6 +896,19 @@ export function App() {
     () => Object.entries(documentSessions).filter(([, session]) => session.isDirty).map(([documentId]) => documentId),
     [documentSessions],
   );
+  const openDocumentDraftStates = useMemo(
+    () => Object.entries(documentSessions)
+      .map(([documentId, session]) => ({
+        documentId,
+        path: session.document?.path ?? "",
+        name: session.document?.name ?? "Documento",
+        isDirty: session.isDirty,
+        hasRecoveredDraft: session.hasRecoveredDraft,
+        draftUpdatedAt: session.draftUpdatedAt ?? null,
+      }))
+      .filter((state) => state.path && (state.isDirty || state.hasRecoveredDraft)),
+    [documentSessions],
+  );
   const editorSessions = useMemo(
     () => tabs.map((tab) => ({
       documentId: tab.id,
@@ -1132,6 +1150,7 @@ export function App() {
       await refreshProjectCapabilityState(activeProject.id);
       await refreshExternalChangeSet(activeProject.id, { silent: true });
       await refreshProjectActivity(activeProject.id);
+      await refreshProjectFileSyncOverview(activeProject.id);
       setProjectSyncState(result.status);
       setExternalChangesMessage(result.message);
       if (!result.pendingRemoteSync) setExternalChangesOpen(false);
@@ -2006,6 +2025,7 @@ export function App() {
       }
       await refreshProjectCapabilityState(saved.projectId);
       await refreshProjectSyncStatus(saved.projectId, { autoRun: isAutomaticSyncMode(activeProject?.syncMode), silent: true });
+      if (externalChangesOpen) await refreshProjectFileSyncOverview(saved.projectId);
       try {
         const response = await getDocumentsSyncStatus([{ documentId, baseFingerprint: saved.baseFingerprint }]);
         setDocumentSyncStatuses((currentStatuses) => ({
@@ -2427,6 +2447,7 @@ export function App() {
       setProjectSyncState(status.state);
       setExternalChangesMessage(status.detail ?? status.label);
       setNotice({ title: "GitHub pausado", message: "Conecta GitHub para traer cambios remotos. El proyecto local sigue editable.", tone: "info" });
+      void refreshProjectFileSyncOverview(activeProject.id);
       return;
     }
     setSyncState("pulling");
@@ -2439,6 +2460,7 @@ export function App() {
       await refreshExternalChangeSet(activeProject.id, { silent: true });
       await refreshProjectSyncStatus(activeProject.id, { silent: true });
       await refreshProjectActivity(activeProject.id);
+      await refreshProjectFileSyncOverview(activeProject.id);
       setExternalChangesMessage(response.message);
     } catch (error) {
       showError(error, "No se pudo traer cambios del proveedor remoto.");
@@ -2458,6 +2480,17 @@ export function App() {
     }
   }
 
+  async function refreshProjectFileSyncOverview(projectId = activeProject?.id) {
+    if (!projectId) return;
+    try {
+      setFileSyncOverviewError(null);
+      setFileSyncOverview(await getProjectFileSyncOverview(projectId));
+    } catch (error) {
+      setFileSyncOverview(null);
+      setFileSyncOverviewError(getApiErrorMessage(error, "No se pudo cargar el estado de archivos."));
+    }
+  }
+
   async function handleRefreshProtectionState(projectId = activeProject?.id) {
     if (!projectId) return;
     setExternalChangesBusy(true);
@@ -2466,6 +2499,7 @@ export function App() {
         refreshExternalChangeSet(projectId, { refreshTreeOnChanges: true }),
         refreshProjectSyncStatus(projectId, { autoRun: isAutomaticSyncMode(activeProject?.syncMode), silent: true }),
         refreshProjectActivity(projectId),
+        refreshProjectFileSyncOverview(projectId),
       ]);
     } finally {
       setExternalChangesBusy(false);
@@ -2490,6 +2524,7 @@ export function App() {
       setProjectSyncState("local-pending");
       setExternalChangesMessage("Cambios guardados localmente. GitHub queda pendiente hasta recuperar acceso.");
       setNotice({ title: "GitHub pausado", message: "Los cambios quedan en historial local. Conecta GitHub para subirlos.", tone: "info" });
+      void refreshProjectFileSyncOverview(activeProject.id);
       return;
     }
     setSyncState("pushing");
@@ -2501,6 +2536,7 @@ export function App() {
       await refreshProjectSyncStatus(activeProject.id, { silent: true });
       await refreshExternalChangeSet(activeProject.id, { silent: true });
       await refreshProjectActivity(activeProject.id);
+      await refreshProjectFileSyncOverview(activeProject.id);
       setExternalChangesMessage(response.message);
       if (response.status === "synced") setExternalChangesOpen(false);
     } catch (error) {
@@ -2528,6 +2564,7 @@ export function App() {
       await refreshProjectSyncStatus(activeProject.id, { silent: true });
       await refreshExternalChangeSet(activeProject.id, { silent: true });
       await refreshProjectActivity(activeProject.id);
+      await refreshProjectFileSyncOverview(activeProject.id);
       setExternalChangesMessage(resolution === "keep-local" ? "GitHub queda sincronizado con este equipo." : "Este equipo queda sincronizado con GitHub.");
     } catch (error) {
       showError(error, resolution === "keep-local" ? "No se pudo sincronizar GitHub con este equipo." : "No se pudo actualizar este equipo desde GitHub.");
@@ -2592,12 +2629,13 @@ export function App() {
     }
   }
 
-  async function handleDiscardActiveDocumentDraft() {
-    if (!activeDocumentId) return false;
+  async function handleDiscardActiveDocumentDraft(documentId = activeDocumentId) {
+    if (!documentId) return false;
     try {
-      await discardDocumentDraft(activeDocumentId);
-      await loadDocumentSession(activeDocumentId, true);
+      await discardDocumentDraft(documentId);
+      await loadDocumentSession(documentId, true);
       await checkOpenDocumentSync();
+      if (activeProject && externalChangesOpen) await refreshProjectFileSyncOverview(activeProject.id);
       setNotice({ title: "Cambios descartados", message: "Se ha restaurado la última versión guardada del documento.", tone: "info" });
       return true;
     } catch (error) {
@@ -3165,7 +3203,9 @@ export function App() {
 
     try {
       const exportMarkdown = await resolveExportMarkdown(documentId, session);
-      const diagramAssets = format === "pdf" || format === "docx" ? await prepareMermaidDiagramAssets(exportMarkdown) : [];
+      const diagramAssets = format === "pdf" || format === "docx"
+        ? await prepareMermaidDiagramAssets(exportMarkdown, exportTemplateConfig.document.diagramResolution)
+        : [];
       if (!isTauriRuntime()) {
         const exportTarget = await selectBrowserExportTarget(documentName, format);
         if (!exportTarget) return;
@@ -3578,6 +3618,9 @@ export function App() {
         historyEnabled={historyEnabled}
         versioningStatus={versioningStatus}
         projectSyncStatus={projectSyncStatus}
+        fileSyncOverview={fileSyncOverview}
+        fileSyncOverviewError={fileSyncOverviewError}
+        openDocumentDraftStates={openDocumentDraftStates}
         externalChangeSet={externalChangeSet}
         externalChangeDecisions={externalChangeDecisions}
         projectActivity={projectActivity}
@@ -3615,13 +3658,18 @@ export function App() {
         onPushProject={() => void handlePushProject()}
         onResolveProjectGithubConflict={(resolution) => void handleResolveProjectGithubConflict(resolution)}
         onOpenProjectGithub={() => void handleOpenProjectGithub()}
-        onOpenExternalChanges={() => setExternalChangesOpen(true)}
+        onOpenExternalChanges={() => {
+          setExternalChangesOpen(true);
+          void handleRefreshProtectionState(activeProject?.id);
+        }}
         onCloseExternalChanges={() => setExternalChangesOpen(false)}
         onRefreshExternalChanges={() => void handleRefreshProtectionState(activeProject?.id)}
         onExternalChangeDecision={handleExternalChangeDecision}
         onImportExternalChanges={() => void handleImportExternalChanges()}
         onImportSafeExternalChanges={() => void handleImportExternalChanges({ safeOnly: true })}
         onOmitExternalChanges={handleOmitExternalChanges}
+        onSaveDocument={(documentId) => handleSave(documentId)}
+        onDiscardDocumentDraft={(documentId) => handleDiscardActiveDocumentDraft(documentId)}
         onRestoreVersion={handleRestoreActiveVersion}
         onSaveActiveDocument={() => handleSave()}
         onDiscardActiveDocumentDraft={handleDiscardActiveDocumentDraft}

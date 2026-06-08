@@ -560,16 +560,32 @@ describe("AppSettingsDialog", () => {
       }),
     }));
 
+    fireEvent.change(screen.getByLabelText("Antes Titulo 1"), { target: { value: "14" } });
+    expect(onExportTemplateChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      headings: expect.objectContaining({
+        h1: expect.objectContaining({ spaceBeforePt: 14 }),
+      }),
+    }));
+
     fireEvent.change(screen.getByLabelText("Interlineado"), { target: { value: "1.5" } });
     expect(onExportTemplateChange).toHaveBeenLastCalledWith(expect.objectContaining({
       paragraph: expect.objectContaining({ lineSpacing: 1.5 }),
+    }));
+    fireEvent.change(screen.getByLabelText("Espaciado anterior"), { target: { value: "4" } });
+    expect(onExportTemplateChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      paragraph: expect.objectContaining({ spaceBeforePt: 4 }),
+    }));
+
+    fireEvent.change(screen.getByLabelText("Resolucion diagramas"), { target: { value: "high" } });
+    expect(onExportTemplateChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      document: expect.objectContaining({ diagramResolution: "high" }),
     }));
     expect(screen.queryByRole("button", { name: "Guardar cambios" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Cancelar" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Restablecer plantilla" }));
 
-    expect(onExportTemplateChange).toHaveBeenCalledTimes(3);
+    expect(onExportTemplateChange).toHaveBeenCalledTimes(6);
     expect(onResetExportTemplate).toHaveBeenCalledTimes(1);
   });
 
