@@ -6282,11 +6282,15 @@ fn git_commit_all(root: &Path, title: &str) -> Result<(), String> {
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let message = if stderr.is_empty() { stdout } else { stderr };
-        if message.is_empty() || message.contains("nothing to commit") {
+        let combined = [stdout.as_str(), stderr.as_str()]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if combined.is_empty() || combined.contains("nothing to commit") {
             Ok(())
         } else {
-            Err(message)
+            Err(combined)
         }
     }
 }
@@ -6318,11 +6322,15 @@ fn git_commit_paths(root: &Path, title: &str, paths: &[&str]) -> Result<(), Stri
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let message = if stderr.is_empty() { stdout } else { stderr };
-        if message.is_empty() || message.contains("nothing to commit") {
+        let combined = [stdout.as_str(), stderr.as_str()]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if combined.is_empty() || combined.contains("nothing to commit") {
             Ok(())
         } else {
-            Err(message)
+            Err(combined)
         }
     }
 }
