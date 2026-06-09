@@ -112,8 +112,8 @@ export function getDocumentFooterActionCopy(action: DocumentFooterDialogAction, 
     };
   }
   return {
-    title: "Actualizar documento",
-    description: "Existe una versión más reciente en Git/GitHub. Se descargará y se mostrará la última versión del documento.",
+    title: "Revisar versión disponible",
+    description: "Existe una versión más reciente en Git/GitHub. Si continúas, se descargará y se mostrará la última versión del documento.",
     confirmLabel: "Actualizar",
     danger: false,
   };

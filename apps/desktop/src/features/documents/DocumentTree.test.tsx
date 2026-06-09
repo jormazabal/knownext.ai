@@ -625,7 +625,7 @@ describe("DocumentTree", () => {
     expect(container.querySelector(".overflow-y-auto")?.contains(screen.getByText("Archivos"))).toBe(false);
   });
 
-  it("makes the selected tree node visible when the current filter hides it", async () => {
+  it("keeps the selected tree filter active when the current document is hidden by it", async () => {
     const scrollIntoView = vi.fn();
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
     HTMLElement.prototype.scrollIntoView = scrollIntoView;
@@ -653,6 +653,7 @@ describe("DocumentTree", () => {
       await userEvent.click(screen.getByRole("button", { name: "Vista del árbol" }));
       await userEvent.click(screen.getByRole("button", { name: "Solo archivos" }));
       expect(screen.queryByText("requisitos-funcionales.md")).not.toBeInTheDocument();
+      expect(screen.getAllByText("Archivos").length).toBeGreaterThan(1);
 
       rerender(
         <DocumentTree
@@ -674,6 +675,12 @@ describe("DocumentTree", () => {
         />,
       );
 
+      expect(screen.queryByText("requisitos-funcionales.md")).not.toBeInTheDocument();
+      expect(screen.getAllByText("Archivos").length).toBeGreaterThan(1);
+      expect(scrollIntoView).not.toHaveBeenCalledWith({ block: "nearest" });
+
+      await userEvent.click(screen.getByRole("button", { name: "Vista del árbol" }));
+      await userEvent.click(screen.getByRole("button", { name: "Ver todo" }));
       await waitFor(() => expect(screen.getByText("requisitos-funcionales.md")).toBeInTheDocument());
       await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" }));
     } finally {

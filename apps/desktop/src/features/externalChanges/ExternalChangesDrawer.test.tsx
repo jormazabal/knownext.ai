@@ -107,6 +107,24 @@ describe("ExternalChangesDrawer", () => {
     expect(onOmitAll).toHaveBeenCalledTimes(1);
   });
 
+  it("shows GitHub pending work as versions instead of per-file upload copy", () => {
+    renderDrawer({
+      openDrafts: [],
+      syncStatus: {
+        ...syncStatus,
+        localAheadCount: 3,
+        localAheadPaths: ["Notas.md"],
+        remoteAheadCount: 0,
+        remoteAheadPaths: [],
+        diverged: false,
+      },
+    });
+
+    expect(screen.getByText(/3 version\(es\) pendientes de subir a GitHub/)).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Subir versiones a GitHub" }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: /Subir Notas\.md a GitHub/ })).not.toBeInTheDocument();
+  });
+
   it("keeps GitHub paused states quiet without remote actions", () => {
     const onPushGithub = vi.fn();
     const onPullGithub = vi.fn();
@@ -314,6 +332,11 @@ const syncStatus: ProjectSyncStatus = {
   lastSyncAt: null,
   lastLocalVersionHash: "abcdef12",
   lastRemoteHash: "12345678",
+  localAheadCount: 1,
+  remoteAheadCount: 0,
+  localAheadPaths: ["Notas.md"],
+  remoteAheadPaths: [],
+  diverged: false,
   conflicts: [],
 };
 

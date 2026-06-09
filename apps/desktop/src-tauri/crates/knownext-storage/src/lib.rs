@@ -3,6 +3,7 @@ use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -333,7 +334,7 @@ impl LocalApi {
                 ok(self.sync_status(project_id))
             }
             ("POST", ["api", "projects", project_id, "sync", "auto-run"]) => {
-                ok(self.sync_status(project_id))
+                ok(self.sync_auto_run(project_id))
             }
             ("POST", ["api", "projects", project_id, "history", "enable"]) => {
                 ok(self.enable_project_history(project_id)?)
@@ -523,11 +524,18 @@ impl LocalApi {
                     .and_then(Value::as_str)
                     .unwrap_or_else(|| document["markdown"].as_str().unwrap_or(""));
                 let name = document["name"].as_str().unwrap_or("document.md");
-                let diagram_assets = knownext_docs::diagram_assets_from_json(body.get("diagramAssets"));
+                let diagram_assets =
+                    knownext_docs::diagram_assets_from_json(body.get("diagramAssets"));
                 let image_assets = self.export_image_assets(document_id, markdown);
                 let export_template = self.read_export_template();
-                let (content_type, filename, bytes) =
-                    export_bytes(name, markdown, format, &diagram_assets, &image_assets, &export_template);
+                let (content_type, filename, bytes) = export_bytes(
+                    name,
+                    markdown,
+                    format,
+                    &diagram_assets,
+                    &image_assets,
+                    &export_template,
+                );
                 Ok(binary(200, content_type, Some(filename), bytes))
             }
             ["api", "projects", project_id, "assets", asset_id, "content"] => {
@@ -648,6 +656,27 @@ impl LocalApi {
             serde_json::to_string_pretty(value).map_err(|error| error.to_string())?,
         )
         .map_err(|error| error.to_string())
+    }
+
+    fn write_json_atomic(&self, path: &Path, value: &Value) -> Result<(), String> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let tmp_path = path.with_extension(format!(
+            "{}.tmp",
+            path.extension()
+                .and_then(|extension| extension.to_str())
+                .unwrap_or("json")
+        ));
+        std::fs::write(
+            &tmp_path,
+            serde_json::to_string_pretty(value).map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?;
+        if path.exists() {
+            let _ = std::fs::remove_file(path);
+        }
+        std::fs::rename(&tmp_path, path).map_err(|error| error.to_string())
     }
 
     fn runtime_logging_status(&self) -> Result<Value, String> {
@@ -1209,34 +1238,47 @@ impl LocalApi {
         let path = self.resolve_document_path(document_id)?;
         let markdown = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
         let (project_id, relative) = document_ref(document_id)?;
+        let disk_content_hash = markdown_content_hash(&markdown);
         let draft = self.read_draft(document_id);
         let draft_markdown = draft
             .as_ref()
             .and_then(|value| value["markdown"].as_str())
             .unwrap_or(&markdown);
+        let draft_content_hash = draft
+            .as_ref()
+            .map(|_| markdown_content_hash(draft_markdown));
+        let has_draft = draft_content_hash
+            .as_ref()
+            .map(|hash| hash != &disk_content_hash)
+            .unwrap_or(false);
+        if draft.is_some() && !has_draft {
+            self.delete_draft(document_id);
+        }
+        let active_markdown = if has_draft { draft_markdown } else { &markdown };
         let draft_updated_at = draft
             .as_ref()
             .and_then(|value| value["draftUpdatedAt"].as_str())
             .map(Value::from)
             .unwrap_or(Value::Null);
-        let has_draft =
-            draft.is_some() && normalize_markdown(draft_markdown) != normalize_markdown(&markdown);
         Ok(json!({
             "id": document_id,
             "name": path.file_name().and_then(|value| value.to_str()).unwrap_or("documento.md"),
             "path": relative,
             "projectId": project_id,
-            "markdown": draft_markdown,
+            "markdown": active_markdown,
             "diskMarkdown": markdown,
-            "wordCount": knownext_core::word_count(draft_markdown),
+            "wordCount": knownext_core::word_count(active_markdown),
             "updatedAt": knownext_core::now_iso(),
             "baseFingerprint": self.fingerprint(&path),
+            "diskContentHash": disk_content_hash,
+            "savedContentHash": disk_content_hash,
+            "draftContentHash": if has_draft { draft_content_hash.map(Value::from).unwrap_or(Value::Null) } else { Value::Null },
             "hasDraft": has_draft,
             "isDirty": has_draft,
             "diskChanged": false,
             "orphaned": false,
             "conflictStatus": if has_draft { "draft" } else { "none" },
-            "draftUpdatedAt": draft_updated_at
+            "draftUpdatedAt": if has_draft { draft_updated_at } else { Value::Null }
         }))
     }
 
@@ -1252,11 +1294,51 @@ impl LocalApi {
     }
 
     fn save_draft(&self, document_id: &str, payload: Value) -> Result<Value, String> {
+        let document_path = self.resolve_document_path(document_id)?;
+        let markdown = payload
+            .get("markdown")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let draft_content_hash = markdown_content_hash(markdown);
+        let disk_markdown = std::fs::read_to_string(&document_path).ok();
+        let disk_content_hash = disk_markdown.as_deref().map(markdown_content_hash);
+        if disk_content_hash
+            .as_ref()
+            .map(|hash| hash == &draft_content_hash)
+            .unwrap_or(false)
+        {
+            self.delete_draft(document_id);
+            return ok_value(json!({
+                "documentId": document_id,
+                "draftUpdatedAt": Value::Null,
+                "isDirty": false,
+                "hasDraft": false,
+                "diskContentHash": disk_content_hash,
+                "savedContentHash": disk_content_hash,
+                "draftContentHash": Value::Null
+            }));
+        }
         let path = self.draft_path(document_id);
-        self.write_json(&path, &json!({ "documentId": document_id, "markdown": payload.get("markdown").cloned().unwrap_or(Value::String(String::new())), "baseFingerprint": payload.get("baseFingerprint").cloned().unwrap_or(Value::Null), "draftUpdatedAt": knownext_core::now_iso() }))?;
-        ok_value(
-            json!({ "documentId": document_id, "draftUpdatedAt": knownext_core::now_iso(), "isDirty": true }),
-        )
+        let draft_updated_at = knownext_core::now_iso();
+        self.write_json_atomic(&path, &json!({
+            "documentId": document_id,
+            "markdown": markdown,
+            "baseFingerprint": payload.get("baseFingerprint").cloned().unwrap_or(Value::Null),
+            "baseContentHash": payload.get("baseContentHash").cloned().unwrap_or_else(|| disk_content_hash.clone().map(Value::from).unwrap_or(Value::Null)),
+            "diskContentHash": disk_content_hash,
+            "savedContentHash": disk_content_hash,
+            "draftContentHash": draft_content_hash,
+            "draftUpdatedAt": draft_updated_at
+        }))?;
+        ok_value(json!({
+            "documentId": document_id,
+            "draftUpdatedAt": draft_updated_at,
+            "isDirty": true,
+            "hasDraft": true,
+            "diskContentHash": disk_content_hash,
+            "savedContentHash": disk_content_hash,
+            "draftContentHash": draft_content_hash
+        }))
     }
 
     fn delete_draft(&self, document_id: &str) {
@@ -1486,7 +1568,19 @@ impl LocalApi {
             let exists = path.as_ref().map(|path| path.exists()).unwrap_or(false);
             let current_fingerprint = path.as_ref().filter(|path| path.exists()).map(|path| self.fingerprint(path)).unwrap_or(Value::Null);
             let base_fingerprint = item.get("baseFingerprint").cloned().unwrap_or(Value::Null);
-            let has_draft = self.read_draft(id).is_some();
+            let disk_markdown = path.as_ref().filter(|path| path.exists()).and_then(|path| std::fs::read_to_string(path).ok());
+            let disk_content_hash = disk_markdown.as_deref().map(markdown_content_hash);
+            let draft = self.read_draft(id);
+            let draft_markdown = draft.as_ref().and_then(|value| value["markdown"].as_str());
+            let draft_content_hash = draft_markdown.map(markdown_content_hash);
+            let has_draft = if exists {
+                draft_content_hash.as_ref().zip(disk_content_hash.as_ref()).map(|(draft_hash, disk_hash)| draft_hash != disk_hash).unwrap_or(false)
+            } else {
+                draft.is_some()
+            };
+            if exists && draft.is_some() && !has_draft {
+                self.delete_draft(id);
+            }
             let orphaned = !exists && has_draft;
             let disk_changed = exists && !base_fingerprint.is_null() && current_fingerprint != base_fingerprint;
             let conflict_status = if orphaned {
@@ -1498,7 +1592,7 @@ impl LocalApi {
             } else {
                 "none"
             };
-            json!({ "documentId": id, "exists": exists, "currentFingerprint": current_fingerprint, "diskChanged": disk_changed, "hasDraft": has_draft, "orphaned": orphaned, "conflictStatus": conflict_status, "versionState": "ok", "localChanged": has_draft || disk_changed, "remoteChanged": false, "localVersionHash": null, "remoteVersionHash": null, "message": null })
+            json!({ "documentId": id, "exists": exists, "currentFingerprint": current_fingerprint, "diskChanged": disk_changed, "hasDraft": has_draft, "orphaned": orphaned, "conflictStatus": conflict_status, "versionState": "ok", "localChanged": has_draft || disk_changed, "remoteChanged": false, "localVersionHash": null, "remoteVersionHash": null, "message": null, "diskContentHash": disk_content_hash, "savedContentHash": disk_content_hash, "draftContentHash": if has_draft { draft_content_hash.map(Value::from).unwrap_or(Value::Null) } else { Value::Null } })
         }).collect::<Vec<_>>();
         json!({ "documents": documents })
     }
@@ -1507,7 +1601,8 @@ impl LocalApi {
         let Ok(metadata) = std::fs::metadata(path) else {
             return Value::Null;
         };
-        json!({ "mtimeNs": null, "size": metadata.len(), "sha256": null })
+        let sha256 = std::fs::read(path).ok().map(|bytes| sha256_hex(&bytes));
+        json!({ "mtimeNs": null, "size": metadata.len(), "sha256": sha256 })
     }
 
     fn versions_path(&self, document_id: &str) -> PathBuf {
@@ -1537,8 +1632,7 @@ impl LocalApi {
         let root = self.project_root(project_id)?;
         if root.join(".git").exists() {
             let (_, relative) = document_ref(document_id)?;
-            git_add_path(&root, &relative)?;
-            git_commit_all(&root, title)?;
+            git_commit_paths(&root, title, &[relative.as_str()])?;
         }
         let hash =
             git_head_hash(&root)?.unwrap_or_else(|| id.chars().rev().take(8).collect::<String>());
@@ -1566,8 +1660,20 @@ impl LocalApi {
     fn restore_version(&self, document_id: &str, version_id: &str) -> Result<Value, String> {
         let content = self.version_content(document_id, version_id)?;
         self.save_document(document_id, json!({ "markdown": content["markdown"] }))?;
-        Ok(
-            json!({ "version": self.list_versions(document_id).into_iter().find(|item| item["id"].as_str() == Some(version_id)).map(|item| public_version(&item)).unwrap_or(Value::Null) }),
+        let (project_id, relative) = document_ref(document_id)?;
+        let source_hash = self
+            .list_versions(document_id)
+            .into_iter()
+            .find(|item| item["id"].as_str() == Some(version_id))
+            .and_then(|item| item["hash"].as_str().map(str::to_string))
+            .unwrap_or_else(|| version_id.to_string());
+        let name = relative.rsplit('/').next().unwrap_or(&relative);
+        self.create_version(
+            &project_id,
+            json!({
+                "documentId": document_id,
+                "title": format!("Restaura {name} desde {source_hash}")
+            }),
         )
     }
 
@@ -2245,37 +2351,84 @@ impl LocalApi {
                         );
                     }
                 };
-                let pending_push = local_hash.is_some()
-                    && (local_changes || remote_hash.as_ref() != local_hash.as_ref());
-                let pending_pull = remote_hash.is_some()
-                    && local_hash.is_some()
-                    && remote_hash.as_ref() != local_hash.as_ref()
-                    && !local_changes;
-                let state = if local_changes || pending_push {
+                let delta = match git_remote_delta(root, &token, &branch, remote_hash.is_some()) {
+                    Ok(delta) => delta,
+                    Err(message) => {
+                        let remote = classify_git_remote_error(&message);
+                        return github_remote_status(
+                            project_id,
+                            mode,
+                            remote.state,
+                            remote.label,
+                            &remote.detail,
+                            remote.access,
+                            true,
+                            local_changes,
+                            local_hash.clone(),
+                            remote_hash.clone(),
+                            local_hash.is_some() || local_changes,
+                            false,
+                        );
+                    }
+                };
+                let initial_remote_push = remote_hash.is_none() && local_hash.is_some();
+                let pending_push = delta.local_ahead_count > 0 || initial_remote_push;
+                let pending_pull = delta.remote_ahead_count > 0;
+                let diverged = delta.local_ahead_count > 0 && delta.remote_ahead_count > 0;
+                let state = if diverged {
+                    "conflict"
+                } else if local_changes || pending_push {
                     "local-pending"
                 } else if pending_pull {
                     "remote-available"
                 } else {
                     "local-history"
                 };
+                let detail = if diverged {
+                    "El historial local y GitHub tienen versiones distintas. Revisa antes de sincronizar."
+                } else if local_changes {
+                    "Hay cambios locales sin guardar en historial. GitHub esperará."
+                } else if pending_push {
+                    "Hay versiones locales pendientes de subir a GitHub."
+                } else if pending_pull {
+                    "GitHub tiene versiones pendientes de revisar."
+                } else {
+                    "El historial local está activo y la sincronización remota está disponible."
+                };
                 return json!({
                     "projectId": project_id,
                     "mode": mode,
                     "state": state,
                     "label": "GitHub conectado",
-                    "detail": if local_changes { "Hay cambios locales sin guardar en historial. GitHub esperará." } else { "El historial local está activo y la sincronización remota está disponible." },
+                    "detail": detail,
                     "remoteAccess": "available",
                     "remotePaused": false,
                     "remoteReason": null,
-                    "remoteAction": null,
+                    "remoteAction": if diverged { Value::from("review-conflicts") } else { Value::Null },
                     "localState": if local_changes { "dirty" } else if pending_push { "pending-push" } else { "clean" },
                     "pendingPush": pending_push,
                     "pendingPull": pending_pull,
-                    "hasConflicts": false,
+                    "hasConflicts": diverged,
                     "lastSyncAt": null,
                     "lastLocalVersionHash": local_hash,
                     "lastRemoteHash": remote_hash,
-                    "conflicts": []
+                    "localAheadCount": if initial_remote_push && delta.local_ahead_count == 0 { 1 } else { delta.local_ahead_count },
+                    "remoteAheadCount": delta.remote_ahead_count,
+                    "localAheadPaths": delta.local_ahead_paths,
+                    "remoteAheadPaths": delta.remote_ahead_paths,
+                    "diverged": diverged,
+                    "conflicts": if diverged { json!([{
+                        "id": format!("{project_id}:history-diverged"),
+                        "projectId": project_id,
+                        "path": "",
+                        "type": "diverged_history",
+                        "status": "open",
+                        "localHash": local_hash,
+                        "remoteHash": remote_hash,
+                        "message": "El historial local y GitHub tienen versiones distintas.",
+                        "createdAt": knownext_core::now_iso(),
+                        "updatedAt": knownext_core::now_iso()
+                    }]) } else { json!([]) }
                 });
             }
             return json!({
@@ -2295,6 +2448,11 @@ impl LocalApi {
                 "lastSyncAt": null,
                 "lastLocalVersionHash": local_hash,
                 "lastRemoteHash": null,
+                "localAheadCount": if local_hash.is_some() { 1 } else { 0 },
+                "remoteAheadCount": 0,
+                "localAheadPaths": [],
+                "remoteAheadPaths": [],
+                "diverged": false,
                 "conflicts": []
             });
         }
@@ -2315,8 +2473,46 @@ impl LocalApi {
             "lastSyncAt": null,
             "lastLocalVersionHash": local_hash,
             "lastRemoteHash": null,
+            "localAheadCount": 0,
+            "remoteAheadCount": 0,
+            "localAheadPaths": [],
+            "remoteAheadPaths": [],
+            "diverged": false,
             "conflicts": []
         })
+    }
+
+    fn sync_auto_run(&self, project_id: &str) -> Value {
+        let project = self
+            .list_projects()
+            .into_iter()
+            .find(|project| project["id"].as_str() == Some(project_id))
+            .unwrap_or_default();
+        if project["syncMode"].as_str() != Some("auto-github") {
+            return self.sync_status(project_id);
+        }
+
+        let status = self.sync_status(project_id);
+        if status["remotePaused"].as_bool().unwrap_or(false)
+            || status["hasConflicts"].as_bool().unwrap_or(false)
+            || status["pendingPull"].as_bool().unwrap_or(false)
+            || status["localState"].as_str() == Some("dirty")
+        {
+            return status;
+        }
+        if !status["pendingPush"].as_bool().unwrap_or(false) {
+            return status;
+        }
+
+        let pushed = self.sync_operation(project_id, "push");
+        if pushed["status"].as_str() == Some("synced") {
+            let mut next = self.sync_status(project_id);
+            next["lastSyncAt"] = Value::from(knownext_core::now_iso());
+            next["detail"] = Value::from("Versiones locales subidas a GitHub.");
+            next
+        } else {
+            self.sync_status(project_id)
+        }
     }
 
     fn file_sync_overview(&self, project_id: &str) -> Result<Value, String> {
@@ -2329,7 +2525,11 @@ impl LocalApi {
         let has_git = root.join(".git").exists();
         let sync_status = self.sync_status(project_id);
         let has_github = is_github_sync_mode(project["syncMode"].as_str().unwrap_or("none"))
-            || project.get("githubRepository").is_some_and(|repository| !repository.is_null());
+            || project
+                .get("githubRepository")
+                .is_some_and(|repository| !repository.is_null());
+        let local_ahead_paths = json_string_set(sync_status.get("localAheadPaths"));
+        let remote_ahead_paths = json_string_set(sync_status.get("remoteAheadPaths"));
         let status_items = if has_git {
             git_status_items(&root)?
         } else {
@@ -2367,7 +2567,11 @@ impl LocalApi {
                     Some("El archivo ya no existe en la carpeta local."),
                 )
             } else {
-                phase_status("ok", "Guardado local", Some("El archivo existe en la carpeta local."))
+                phase_status(
+                    "ok",
+                    "Guardado local",
+                    Some("El archivo existe en la carpeta local."),
+                )
             };
             let history_status = if !has_git {
                 phase_status(
@@ -2380,13 +2584,17 @@ impl LocalApi {
                     phase_status(
                         "omitted",
                         "Omitido",
-                        item["reason"].as_str().or(Some("Este archivo queda fuera del historial.")),
+                        item["reason"]
+                            .as_str()
+                            .or(Some("Este archivo queda fuera del historial.")),
                     )
                 } else if risk == Some("review") {
                     phase_status(
                         "pending",
                         "Revisión",
-                        item["reason"].as_str().or(Some("Revisa si debe entrar en el historial local.")),
+                        item["reason"]
+                            .as_str()
+                            .or(Some("Revisa si debe entrar en el historial local.")),
                     )
                 } else {
                     phase_status(
@@ -2396,27 +2604,37 @@ impl LocalApi {
                     )
                 }
             } else {
-                phase_status("ok", "En historial", Some("No hay cambios locales pendientes."))
+                phase_status(
+                    "ok",
+                    "En historial",
+                    Some("No hay cambios locales pendientes."),
+                )
             };
-            let conflict = sync_status["conflicts"]
-                .as_array()
-                .and_then(|conflicts| {
-                    conflicts.iter().find(|conflict| {
-                        conflict["status"].as_str() == Some("open")
-                            && conflict["path"].as_str() == Some(path.as_str())
-                    })
-                });
+            let conflict = sync_status["conflicts"].as_array().and_then(|conflicts| {
+                conflicts.iter().find(|conflict| {
+                    conflict["status"].as_str() == Some("open")
+                        && conflict["path"].as_str() == Some(path.as_str())
+                })
+            });
             let github_status = if !has_github {
-                phase_status("unavailable", "No conectado", Some("Este proyecto no usa GitHub."))
+                phase_status(
+                    "unavailable",
+                    "No conectado",
+                    Some("Este proyecto no usa GitHub."),
+                )
             } else if sync_status["remotePaused"].as_bool().unwrap_or(false) {
                 phase_status(
                     "waiting",
                     "Pausado",
-                    sync_status["detail"].as_str().or(Some("GitHub está pausado.")),
+                    sync_status["detail"]
+                        .as_str()
+                        .or(Some("GitHub está pausado.")),
                 )
             } else if conflict.is_some()
                 || (sync_status["state"].as_str() == Some("conflict")
-                    && sync_status["conflicts"].as_array().map_or(true, Vec::is_empty))
+                    && sync_status["conflicts"]
+                        .as_array()
+                        .map_or(true, Vec::is_empty))
             {
                 phase_status(
                     "conflict",
@@ -2429,21 +2647,17 @@ impl LocalApi {
                     "Esperando historial",
                     Some("Primero guarda el cambio en el historial local."),
                 )
-            } else if sync_status["pendingPush"].as_bool().unwrap_or(false)
-                || sync_status["state"].as_str() == Some("local-pending")
-            {
+            } else if local_ahead_paths.contains(&path) {
                 phase_status(
                     "pending",
                     "Pendiente",
-                    Some("El historial local está pendiente de subir a GitHub."),
+                    Some("Este archivo está en una versión local pendiente de subir."),
                 )
-            } else if sync_status["pendingPull"].as_bool().unwrap_or(false)
-                || sync_status["state"].as_str() == Some("remote-available")
-            {
+            } else if remote_ahead_paths.contains(&path) {
                 phase_status(
                     "pending",
                     "GitHub tiene cambios",
-                    Some("Hay cambios remotos pendientes de traer."),
+                    Some("Este archivo está en una versión remota pendiente de revisar."),
                 )
             } else {
                 phase_status("ok", "Sincronizado", Some("GitHub está al día."))
@@ -2504,7 +2718,9 @@ impl LocalApi {
             if matches!(github_state, "pending" | "waiting") {
                 github_pending += 1;
             }
-            if matches!(history_state, "conflict" | "error") || matches!(github_state, "conflict" | "error") {
+            if matches!(history_state, "conflict" | "error")
+                || matches!(github_state, "conflict" | "error")
+            {
                 conflicts += 1;
             }
             if history_state == "omitted" {
@@ -2569,6 +2785,14 @@ impl LocalApi {
                     .or_else(|| current_git_branch(&root))
                     .unwrap_or_else(|| "main".to_string());
             if direction == "push" {
+                if status["hasConflicts"].as_bool().unwrap_or(false) {
+                    return json!({ "status": "conflict", "message": "El historial local y GitHub tienen versiones distintas. Revisa antes de subir.", "projectId": project_id, "direction": direction, "remoteAccess": "available", "remotePaused": false });
+                }
+                if status["pendingPull"].as_bool().unwrap_or(false)
+                    && !status["pendingPush"].as_bool().unwrap_or(false)
+                {
+                    return json!({ "status": "remote-available", "message": "GitHub tiene versiones pendientes de revisar antes de subir.", "projectId": project_id, "direction": direction, "remoteAccess": "available", "remotePaused": false });
+                }
                 if !git_status_items(&root).unwrap_or_default().is_empty() {
                     return json!({ "status": "local-pending", "message": "Guarda primero los cambios en el historial local antes de subir a GitHub.", "projectId": project_id, "direction": direction, "remoteAccess": "available", "remotePaused": false });
                 }
@@ -2671,13 +2895,12 @@ impl LocalApi {
             );
         }
 
-        for item in &included {
-            if let Some(relative) = item["path"].as_str() {
-                git_add_path(&root, relative)?;
-            }
-        }
+        let included_paths = included
+            .iter()
+            .filter_map(|item| item["path"].as_str())
+            .collect::<Vec<_>>();
         let title = format!("Cambios externos importados ({})", included.len());
-        git_commit_all(&root, &title)?;
+        git_commit_paths(&root, &title, &included_paths)?;
         let _ = self.record_activity(
             project_id,
             json!({
@@ -3358,10 +3581,7 @@ impl LocalApi {
                 "runtimePermissions".to_string(),
                 config["ai"]["permissions"].clone(),
             );
-            object.insert(
-                "runtimeAi".to_string(),
-                config["ai"].clone(),
-            );
+            object.insert("runtimeAi".to_string(), config["ai"].clone());
         }
         let mut response = knownext_ai::answer_interaction(
             project_id,
@@ -3406,7 +3626,11 @@ impl LocalApi {
             events.extend(response_events);
         }
         let _ = self.write_json(&self.conversation_path(project_id), &conversation);
-        self.record_ai_usage_records(project_id, response["interactionId"].as_str().unwrap_or("ai"), &response);
+        self.record_ai_usage_records(
+            project_id,
+            response["interactionId"].as_str().unwrap_or("ai"),
+            &response,
+        );
         response
     }
     fn ai_user_conversation_event(&self, project_id: &str, body: &Value) -> Option<Value> {
@@ -3996,7 +4220,10 @@ impl LocalApi {
                 object.insert("projectId".to_string(), Value::from(project_id));
                 object.insert("interactionId".to_string(), Value::from(interaction_id));
                 if !object.contains_key("estimatedCost") {
-                    let model = object.get("model").and_then(Value::as_str).unwrap_or("gpt-5.4-mini");
+                    let model = object
+                        .get("model")
+                        .and_then(Value::as_str)
+                        .unwrap_or("gpt-5.4-mini");
                     object.insert(
                         "estimatedCost".to_string(),
                         Value::from(text_estimated_cost(
@@ -4067,10 +4294,9 @@ impl LocalApi {
             .filter(|entry| entry["month"].as_str() == Some(month.as_str()))
         {
             let model = entry["model"].as_str().unwrap_or("unknown").to_string();
-            let capability = normalize_usage_capability(
-                entry["capability"].as_str().unwrap_or("document_ai"),
-            )
-            .to_string();
+            let capability =
+                normalize_usage_capability(entry["capability"].as_str().unwrap_or("document_ai"))
+                    .to_string();
             accumulate_usage(by_model.entry(model).or_default(), entry);
             accumulate_usage(by_capability.entry(capability).or_default(), entry);
         }
@@ -4308,7 +4534,12 @@ fn value_u64(value: Option<&Value>) -> u64 {
     value.and_then(Value::as_u64).unwrap_or(0)
 }
 
-fn text_estimated_cost(model: &str, input_tokens: u64, cached_input_tokens: u64, output_tokens: u64) -> f64 {
+fn text_estimated_cost(
+    model: &str,
+    input_tokens: u64,
+    cached_input_tokens: u64,
+    output_tokens: u64,
+) -> f64 {
     let (input_per_million, output_per_million) = match model {
         "gpt-5.5" => (5.00, 30.00),
         "gpt-5.4" => (2.50, 15.00),
@@ -4350,8 +4581,12 @@ fn round_cost(value: f64) -> f64 {
 fn is_usage_month(value: &str) -> bool {
     value.len() == 7
         && value.as_bytes().get(4) == Some(&b'-')
-        && value[..4].chars().all(|character| character.is_ascii_digit())
-        && value[5..].chars().all(|character| character.is_ascii_digit())
+        && value[..4]
+            .chars()
+            .all(|character| character.is_ascii_digit())
+        && value[5..]
+            .chars()
+            .all(|character| character.is_ascii_digit())
 }
 
 fn month_from_iso(value: &str) -> Option<String> {
@@ -4638,7 +4873,12 @@ fn image_data_url_bytes(value: &str) -> Option<(String, Vec<u8>)> {
     let content_type = header
         .strip_prefix("data:")
         .and_then(|rest| rest.split(';').next())
-        .filter(|mime| matches!(*mime, "image/png" | "image/jpeg" | "image/gif" | "image/webp"))?;
+        .filter(|mime| {
+            matches!(
+                *mime,
+                "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+            )
+        })?;
     if !header.contains(";base64") {
         return None;
     }
@@ -5317,8 +5557,26 @@ fn github_remote_status(
         "lastSyncAt": null,
         "lastLocalVersionHash": local_hash,
         "lastRemoteHash": remote_hash,
+        "localAheadCount": if pending_push { 1 } else { 0 },
+        "remoteAheadCount": if pending_pull { 1 } else { 0 },
+        "localAheadPaths": [],
+        "remoteAheadPaths": [],
+        "diverged": false,
         "conflicts": []
     })
+}
+
+fn json_string_set(value: Option<&Value>) -> BTreeSet<String> {
+    value
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn remote_action_for_access(remote_access: &str) -> &'static str {
@@ -5664,6 +5922,91 @@ fn git_remote_head_hash(
         .map(|hash| hash.chars().take(8).collect()))
 }
 
+#[derive(Default)]
+struct GitRemoteDelta {
+    local_ahead_count: u64,
+    remote_ahead_count: u64,
+    local_ahead_paths: Vec<String>,
+    remote_ahead_paths: Vec<String>,
+}
+
+fn git_remote_delta(
+    root: &Path,
+    token: &str,
+    branch: &str,
+    remote_exists: bool,
+) -> Result<GitRemoteDelta, String> {
+    if !remote_exists {
+        return Ok(GitRemoteDelta::default());
+    }
+    git_fetch_origin(root, token, branch)?;
+    let (local_ahead_count, remote_ahead_count) =
+        git_rev_list_counts(root, &format!("origin/{branch}"))?;
+    Ok(GitRemoteDelta {
+        local_ahead_count,
+        remote_ahead_count,
+        local_ahead_paths: git_diff_names(root, &format!("origin/{branch}..HEAD"))?,
+        remote_ahead_paths: git_diff_names(root, &format!("HEAD..origin/{branch}"))?,
+    })
+}
+
+fn git_fetch_origin(root: &Path, token: &str, branch: &str) -> Result<(), String> {
+    let output = run_local_git(
+        local_git_command()
+            .arg("-C")
+            .arg(root)
+            .arg("-c")
+            .arg(format!(
+                "http.https://github.com/.extraheader={}",
+                git_auth_header(token)
+            ))
+            .args(["fetch", "origin", branch]),
+    )?;
+    command_ok(output)
+}
+
+fn git_rev_list_counts(root: &Path, upstream: &str) -> Result<(u64, u64), String> {
+    let output = run_local_git(local_git_command().arg("-C").arg(root).args([
+        "rev-list",
+        "--left-right",
+        "--count",
+        &format!("HEAD...{upstream}"),
+    ]))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut parts = stdout.split_whitespace();
+    let local = parts
+        .next()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
+    let remote = parts
+        .next()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
+    Ok((local, remote))
+}
+
+fn git_diff_names(root: &Path, range: &str) -> Result<Vec<String>, String> {
+    let output = run_local_git(local_git_command().arg("-C").arg(root).args([
+        "diff",
+        "--name-only",
+        range,
+    ]))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    let mut paths = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|line| line.trim().replace('\\', "/"))
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
+}
+
 fn git_push_origin(root: &Path, token: &str, branch: &str) -> Result<(), String> {
     let output = run_local_git(
         local_git_command()
@@ -5680,18 +6023,7 @@ fn git_push_origin(root: &Path, token: &str, branch: &str) -> Result<(), String>
 }
 
 fn git_pull_ff_only(root: &Path, token: &str, branch: &str) -> Result<(), String> {
-    let fetch = run_local_git(
-        local_git_command()
-            .arg("-C")
-            .arg(root)
-            .arg("-c")
-            .arg(format!(
-                "http.https://github.com/.extraheader={}",
-                git_auth_header(token)
-            ))
-            .args(["fetch", "origin", branch]),
-    )?;
-    command_ok(fetch)?;
+    git_fetch_origin(root, token, branch)?;
     let merge = run_local_git(local_git_command().arg("-C").arg(root).args([
         "merge",
         "--ff-only",
@@ -5931,6 +6263,7 @@ fn git_add_path(root: &Path, relative: &str) -> Result<(), String> {
     }
 }
 
+#[cfg(test)]
 fn git_commit_all(root: &Path, title: &str) -> Result<(), String> {
     let output = run_local_git(
         local_git_command()
@@ -5948,10 +6281,48 @@ fn git_commit_all(root: &Path, title: &str) -> Result<(), String> {
         Ok(())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        if stderr.contains("nothing to commit") {
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let message = if stderr.is_empty() { stdout } else { stderr };
+        if message.is_empty() || message.contains("nothing to commit") {
             Ok(())
         } else {
-            Err(stderr)
+            Err(message)
+        }
+    }
+}
+
+fn git_commit_paths(root: &Path, title: &str, paths: &[&str]) -> Result<(), String> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    for path in paths {
+        git_add_path(root, path)?;
+    }
+    let mut command = local_git_command();
+    command
+        .arg("-C")
+        .arg(root)
+        .args([
+            "-c",
+            "user.name=KnowNext.ai",
+            "-c",
+            "user.email=knownext.local@knownext.ai",
+        ])
+        .args(["commit", "-m", title, "--"]);
+    for path in paths {
+        command.arg(path);
+    }
+    let output = run_local_git(&mut command)?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let message = if stderr.is_empty() { stdout } else { stderr };
+        if message.is_empty() || message.contains("nothing to commit") {
+            Ok(())
+        } else {
+            Err(message)
         }
     }
 }
@@ -6245,7 +6616,10 @@ fn insert_markdown_reference_near_focus(
                     .map(str::to_string)
             })
             .and_then(|heading| insert_after_heading(markdown, &heading, reference))
-            .or_else(|| anchor_excerpt.and_then(|excerpt| insert_after_unique_excerpt(markdown, excerpt, reference)))
+            .or_else(|| {
+                anchor_excerpt
+                    .and_then(|excerpt| insert_after_unique_excerpt(markdown, excerpt, reference))
+            })
             .unwrap_or_else(|| append_markdown_reference(markdown, reference)),
         "at_cursor" => selection_focus
             .and_then(|value| value.get("nearTextBefore"))
@@ -6294,7 +6668,11 @@ fn insert_after_heading(markdown: &str, heading: &str, reference: &str) -> Optio
     }
     let (index, len) = match_range?;
     let insert_at = index + len;
-    Some(join_markdown_blocks(&normalized[..insert_at], reference, &normalized[insert_at..]))
+    Some(join_markdown_blocks(
+        &normalized[..insert_at],
+        reference,
+        &normalized[insert_at..],
+    ))
 }
 
 fn unique_excerpt_match(markdown: &str, excerpt: &str) -> Option<(usize, String)> {
@@ -6332,7 +6710,13 @@ fn read_atx_heading_text(line: &str) -> Option<String> {
     if !(1..=6).contains(&level) || !trimmed.chars().nth(level).is_some_and(char::is_whitespace) {
         return None;
     }
-    Some(trimmed[level..].trim().trim_end_matches('#').trim().to_string())
+    Some(
+        trimmed[level..]
+            .trim()
+            .trim_end_matches('#')
+            .trim()
+            .to_string(),
+    )
 }
 
 fn chunk_text(text: &str, max_chars: usize, overlap_chars: usize) -> Vec<String> {
@@ -6427,6 +6811,15 @@ fn normalize_markdown(markdown: &str) -> String {
         .to_string()
 }
 
+fn markdown_content_hash(markdown: &str) -> String {
+    sha256_hex(normalize_markdown(markdown).as_bytes())
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 fn merge(target: &mut Value, patch: &Value) {
     match (target, patch) {
         (Value::Object(target), Value::Object(patch)) => {
@@ -6513,17 +6906,20 @@ fn normalize_ai_diagram_config(diagrams: &mut Value) {
         "enabled" if visual_profile == "advanced" => "enabled",
         _ => "ask",
     });
-    diagrams["defaultWidth"] = Value::from(match diagrams["defaultWidth"].as_str().unwrap_or("wide") {
-        "compact" => "compact",
-        "auto" => "auto",
-        "full" => "full",
-        _ => "wide",
-    });
-    diagrams["aiGenerationMode"] = Value::from(match diagrams["aiGenerationMode"].as_str().unwrap_or("visual") {
-        "safe" => "safe",
-        "visual" if visual_profile != "compatible" => "visual",
-        _ => "safe",
-    });
+    diagrams["defaultWidth"] =
+        Value::from(match diagrams["defaultWidth"].as_str().unwrap_or("wide") {
+            "compact" => "compact",
+            "auto" => "auto",
+            "full" => "full",
+            _ => "wide",
+        });
+    diagrams["aiGenerationMode"] = Value::from(
+        match diagrams["aiGenerationMode"].as_str().unwrap_or("visual") {
+            "safe" => "safe",
+            "visual" if visual_profile != "compatible" => "visual",
+            _ => "safe",
+        },
+    );
 }
 
 fn normalize_ai_image_generation_config(image_generation: &mut Value) {
@@ -6620,6 +7016,9 @@ fn default_export_template() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static GIT_REMOTE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn api() -> LocalApi {
         let root = std::env::temp_dir().join(knownext_core::compact_id("knownext-test"));
@@ -6661,6 +7060,37 @@ mod tests {
             "markdown": markdown
         }), vec![]).unwrap();
         document.body["node"]["id"].as_str().unwrap().to_string()
+    }
+
+    fn authenticate_github(api: &LocalApi) {
+        let _ = api.write_json(
+            &api.auth_path(),
+            &json!({
+                "isAuthenticated": true,
+                "provider": "github",
+                "user": { "login": "octocat", "name": "Octocat", "avatarUrl": null },
+                "scopes": ["repo"],
+                "expiresAt": null
+            }),
+        );
+        let _ = api.write_json(
+            &api.credentials_path(),
+            &json!({
+                "github": {
+                    "provider": "github",
+                    "accessToken": "gho_contract_test",
+                    "scopes": ["repo"],
+                    "updatedAt": knownext_core::now_iso()
+                }
+            }),
+        );
+    }
+
+    fn update_project_github_default_ref(api: &LocalApi, project_id: &str, branch: &str) {
+        api.update_project_fields(project_id, |project| {
+            project["githubRepository"]["defaultRef"] = Value::from(branch);
+        })
+        .unwrap();
     }
 
     fn child_id_for_path(id: &str) -> String {
@@ -6959,6 +7389,7 @@ mod tests {
 
     #[test]
     fn github_sync_pushes_and_pulls_through_configured_git_remote() {
+        let _git_remote_test_lock = GIT_REMOTE_TEST_LOCK.lock().unwrap();
         let api = api();
         let root = std::env::temp_dir().join(knownext_core::compact_id("knownext-sync-local"));
         let remote =
@@ -7088,6 +7519,269 @@ mod tests {
             normalize_markdown(&std::fs::read_to_string(root.join("remote.md")).unwrap()),
             "# Remoto"
         );
+    }
+
+    #[test]
+    fn auto_run_pushes_local_versions_when_remote_is_clear() {
+        let _git_remote_test_lock = GIT_REMOTE_TEST_LOCK.lock().unwrap();
+        let api = api();
+        let root = std::env::temp_dir().join(knownext_core::compact_id("knownext-auto-local"));
+        let remote =
+            std::env::temp_dir().join(knownext_core::compact_id("knownext-auto-remote.git"));
+        let created = api
+            .handle(
+                "POST",
+                "/api/projects",
+                json!({
+                    "name": "Auto docs",
+                    "folderPath": root.to_string_lossy(),
+                    "versioningMode": "local-git",
+                    "syncMode": "auto-github",
+                    "githubRepository": {
+                        "owner": "octocat",
+                        "repo": "auto-docs",
+                        "defaultRef": "master",
+                        "rootPath": "",
+                        "permissions": ["pull", "push"]
+                    }
+                }),
+                vec![],
+            )
+            .unwrap();
+        let project_id = created.body["id"].as_str().unwrap();
+        std::fs::write(root.join("plan.md"), "# Plan\n").unwrap();
+        git_commit_paths(&root, "Initial local version", &["plan.md"]).unwrap();
+        let branch = current_git_branch(&root).unwrap_or_else(|| "master".to_string());
+        update_project_github_default_ref(&api, project_id, &branch);
+        run_git(Command::new("git").arg("init").arg("--bare").arg(&remote));
+        run_git(
+            Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["remote", "set-url", "origin"])
+                .arg(&remote),
+        );
+        authenticate_github(&api);
+
+        let result = api
+            .handle(
+                "POST",
+                &format!("/api/projects/{project_id}/sync/auto-run"),
+                Value::Null,
+                vec![],
+            )
+            .unwrap();
+
+        assert_eq!(result.body["pendingPush"], false);
+        assert_eq!(result.body["pendingPull"], false);
+        assert_eq!(result.body["detail"], "Versiones locales subidas a GitHub.");
+        let remote_hash = run_local_git(Command::new("git").arg("--git-dir").arg(&remote).args([
+            "rev-parse",
+            "--short=8",
+            &branch,
+        ]))
+        .unwrap();
+        assert!(remote_hash.status.success());
+    }
+
+    #[test]
+    fn auto_run_pauses_when_remote_has_versions_to_review() {
+        let _git_remote_test_lock = GIT_REMOTE_TEST_LOCK.lock().unwrap();
+        let api = api();
+        let root =
+            std::env::temp_dir().join(knownext_core::compact_id("knownext-auto-remote-ahead"));
+        let remote =
+            std::env::temp_dir().join(knownext_core::compact_id("knownext-auto-remote-ahead.git"));
+        let remote_work =
+            std::env::temp_dir().join(knownext_core::compact_id("knownext-auto-remote-work"));
+        let created = api
+            .handle(
+                "POST",
+                "/api/projects",
+                json!({
+                    "name": "Auto docs",
+                    "folderPath": root.to_string_lossy(),
+                    "versioningMode": "local-git",
+                    "syncMode": "auto-github",
+                    "githubRepository": {
+                        "owner": "octocat",
+                        "repo": "auto-docs",
+                        "defaultRef": "master",
+                        "rootPath": "",
+                        "permissions": ["pull", "push"]
+                    }
+                }),
+                vec![],
+            )
+            .unwrap();
+        let project_id = created.body["id"].as_str().unwrap();
+        std::fs::write(root.join("plan.md"), "# Plan\n").unwrap();
+        git_commit_paths(&root, "Initial local version", &["plan.md"]).unwrap();
+        let branch = current_git_branch(&root).unwrap_or_else(|| "master".to_string());
+        update_project_github_default_ref(&api, project_id, &branch);
+        run_git(Command::new("git").arg("init").arg("--bare").arg(&remote));
+        run_git(
+            Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["remote", "set-url", "origin"])
+                .arg(&remote),
+        );
+        authenticate_github(&api);
+        assert_eq!(
+            api.handle(
+                "POST",
+                &format!("/api/projects/{project_id}/sync/push"),
+                Value::Null,
+                vec![],
+            )
+            .unwrap()
+            .body["status"],
+            "synced"
+        );
+        run_git(
+            Command::new("git")
+                .arg("clone")
+                .arg("--branch")
+                .arg(&branch)
+                .arg(&remote)
+                .arg(&remote_work),
+        );
+        std::fs::write(remote_work.join("remote.md"), "# Remoto\n").unwrap();
+        run_git(
+            Command::new("git")
+                .arg("-C")
+                .arg(&remote_work)
+                .args(["add", "remote.md"]),
+        );
+        run_git(Command::new("git").arg("-C").arg(&remote_work).args([
+            "-c",
+            "user.name=Remote",
+            "-c",
+            "user.email=remote@example.test",
+            "commit",
+            "-m",
+            "Remote version",
+        ]));
+        run_git(
+            Command::new("git")
+                .arg("-C")
+                .arg(&remote_work)
+                .args(["push", "origin"])
+                .arg(&branch),
+        );
+
+        let result = api
+            .handle(
+                "POST",
+                &format!("/api/projects/{project_id}/sync/auto-run"),
+                Value::Null,
+                vec![],
+            )
+            .unwrap();
+
+        assert_eq!(result.body["state"], "remote-available");
+        assert_eq!(result.body["pendingPull"], true);
+        assert_eq!(result.body["remoteAheadPaths"][0], "remote.md");
+        assert!(!root.join("remote.md").exists());
+    }
+
+    #[test]
+    fn auto_run_reports_diverged_history_without_pushing() {
+        let _git_remote_test_lock = GIT_REMOTE_TEST_LOCK.lock().unwrap();
+        let api = api();
+        let root = std::env::temp_dir().join(knownext_core::compact_id("knownext-auto-diverged"));
+        let remote =
+            std::env::temp_dir().join(knownext_core::compact_id("knownext-auto-diverged.git"));
+        let remote_work =
+            std::env::temp_dir().join(knownext_core::compact_id("knownext-auto-diverged-work"));
+        let created = api
+            .handle(
+                "POST",
+                "/api/projects",
+                json!({
+                    "name": "Auto docs",
+                    "folderPath": root.to_string_lossy(),
+                    "versioningMode": "local-git",
+                    "syncMode": "auto-github",
+                    "githubRepository": {
+                        "owner": "octocat",
+                        "repo": "auto-docs",
+                        "defaultRef": "master",
+                        "rootPath": "",
+                        "permissions": ["pull", "push"]
+                    }
+                }),
+                vec![],
+            )
+            .unwrap();
+        let project_id = created.body["id"].as_str().unwrap();
+        std::fs::write(root.join("plan.md"), "# Plan\n").unwrap();
+        git_commit_paths(&root, "Initial local version", &["plan.md"]).unwrap();
+        let branch = current_git_branch(&root).unwrap_or_else(|| "master".to_string());
+        update_project_github_default_ref(&api, project_id, &branch);
+        run_git(Command::new("git").arg("init").arg("--bare").arg(&remote));
+        run_git(
+            Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["remote", "set-url", "origin"])
+                .arg(&remote),
+        );
+        authenticate_github(&api);
+        let _ = api.handle(
+            "POST",
+            &format!("/api/projects/{project_id}/sync/push"),
+            Value::Null,
+            vec![],
+        );
+        run_git(
+            Command::new("git")
+                .arg("clone")
+                .arg("--branch")
+                .arg(&branch)
+                .arg(&remote)
+                .arg(&remote_work),
+        );
+        std::fs::write(root.join("local.md"), "# Local\n").unwrap();
+        git_commit_paths(&root, "Local version", &["local.md"]).unwrap();
+        std::fs::write(remote_work.join("remote.md"), "# Remoto\n").unwrap();
+        run_git(
+            Command::new("git")
+                .arg("-C")
+                .arg(&remote_work)
+                .args(["add", "remote.md"]),
+        );
+        run_git(Command::new("git").arg("-C").arg(&remote_work).args([
+            "-c",
+            "user.name=Remote",
+            "-c",
+            "user.email=remote@example.test",
+            "commit",
+            "-m",
+            "Remote version",
+        ]));
+        run_git(
+            Command::new("git")
+                .arg("-C")
+                .arg(&remote_work)
+                .args(["push", "origin"])
+                .arg(&branch),
+        );
+
+        let result = api
+            .handle(
+                "POST",
+                &format!("/api/projects/{project_id}/sync/auto-run"),
+                Value::Null,
+                vec![],
+            )
+            .unwrap();
+
+        assert_eq!(result.body["state"], "conflict");
+        assert_eq!(result.body["diverged"], true);
+        assert_eq!(result.body["pendingPush"], true);
+        assert_eq!(result.body["pendingPull"], true);
     }
 
     #[test]
@@ -7265,6 +7959,111 @@ mod tests {
         assert_ne!(first_hash, second_hash);
         assert_eq!(second_version.body["version"]["hash"], second_hash);
         assert!(git_status_items(&root).unwrap().is_empty());
+    }
+
+    #[test]
+    fn creating_project_version_commits_only_the_document_path() {
+        let api = api();
+        let (project_id, root) = create_project(&api);
+        let document_id = create_document(&api, &project_id, "plan.md", "# Plan\n");
+        std::fs::write(root.join("other.md"), "# Otro\n").unwrap();
+        git_add_path(&root, "other.md").unwrap();
+
+        let _version = api
+            .handle(
+                "POST",
+                &format!("/api/projects/{project_id}/versions"),
+                json!({
+                    "documentId": document_id,
+                    "title": "Version plan"
+                }),
+                vec![],
+            )
+            .unwrap();
+
+        let output = run_local_git(Command::new("git").arg("-C").arg(&root).args([
+            "diff-tree",
+            "--root",
+            "--no-commit-id",
+            "--name-only",
+            "-r",
+            "HEAD",
+        ]))
+        .unwrap();
+        assert!(output.status.success());
+        let files = String::from_utf8_lossy(&output.stdout);
+        assert!(files.lines().any(|line| line == "plan.md"));
+        assert!(!files.lines().any(|line| line == "other.md"));
+        assert!(git_status_items(&root)
+            .unwrap()
+            .iter()
+            .any(|item| item["path"] == "other.md"));
+    }
+
+    #[test]
+    fn restoring_version_creates_new_version_for_only_active_document() {
+        let api = api();
+        let (project_id, root) = create_project(&api);
+        let document_id = create_document(&api, &project_id, "plan.md", "# Plan v1\n");
+        std::fs::write(root.join("related.md"), "# Relacionado v1\n").unwrap();
+        git_commit_paths(
+            &root,
+            "Initial multi file version",
+            &["plan.md", "related.md"],
+        )
+        .unwrap();
+        let first = api
+            .handle(
+                "POST",
+                &format!("/api/projects/{project_id}/versions"),
+                json!({
+                    "documentId": document_id,
+                    "title": "Version inicial"
+                }),
+                vec![],
+            )
+            .unwrap();
+        let first_version_id = first.body["version"]["id"].as_str().unwrap().to_string();
+
+        let encoded_document_id = child_id_for_path(&document_id);
+        let _ = api.handle(
+            "PUT",
+            &format!("/api/documents/{encoded_document_id}"),
+            json!({ "markdown": "# Plan v2\n" }),
+            vec![],
+        );
+        std::fs::write(root.join("related.md"), "# Relacionado v2\n").unwrap();
+        git_commit_paths(
+            &root,
+            "Second multi file version",
+            &["plan.md", "related.md"],
+        )
+        .unwrap();
+
+        let restored = api
+            .handle(
+                "POST",
+                &format!(
+                    "/api/documents/{encoded_document_id}/versions/{first_version_id}/restore"
+                ),
+                Value::Null,
+                vec![],
+            )
+            .unwrap();
+
+        assert_eq!(restored.status, 200);
+        assert_eq!(
+            normalize_markdown(&std::fs::read_to_string(root.join("plan.md")).unwrap()),
+            "# Plan v1"
+        );
+        assert_eq!(
+            normalize_markdown(&std::fs::read_to_string(root.join("related.md")).unwrap()),
+            "# Relacionado v2"
+        );
+        assert!(restored.body["version"]["title"]
+            .as_str()
+            .unwrap()
+            .starts_with("Restaura plan.md desde"));
     }
 
     #[test]
@@ -7500,8 +8299,14 @@ mod tests {
             .unwrap();
 
         assert_eq!(overview.body["summary"]["githubPending"], 1);
-        assert_eq!(overview.body["files"][0]["githubStatus"]["state"], "waiting");
-        assert_eq!(overview.body["files"][0]["githubStatus"]["label"], "Pausado");
+        assert_eq!(
+            overview.body["files"][0]["githubStatus"]["state"],
+            "waiting"
+        );
+        assert_eq!(
+            overview.body["files"][0]["githubStatus"]["label"],
+            "Pausado"
+        );
     }
 
     #[test]
@@ -8078,6 +8883,119 @@ mod tests {
     }
 
     #[test]
+    fn identical_draft_is_discarded_and_does_not_mark_document_changed() {
+        let api = api();
+        let (project_id, _root) = create_project(&api);
+        let document_id = create_document(&api, &project_id, "clean.md", "# Titulo\n\nTexto\n");
+        let loaded = api
+            .handle(
+                "GET",
+                &format!("/api/documents/{document_id}"),
+                Value::Null,
+                vec![],
+            )
+            .unwrap();
+        let base_fingerprint = loaded.body["baseFingerprint"].clone();
+        let disk_hash = loaded.body["diskContentHash"].as_str().unwrap().to_string();
+
+        let dirty_draft = api
+            .handle(
+                "PUT",
+                &format!("/api/documents/{document_id}/draft"),
+                json!({
+                    "markdown": "# Titulo\n\n**Texto**\n",
+                    "baseFingerprint": base_fingerprint
+                }),
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(dirty_draft.body["isDirty"], true);
+        assert_eq!(dirty_draft.body["hasDraft"], true);
+        assert_ne!(
+            dirty_draft.body["draftContentHash"].as_str().unwrap(),
+            disk_hash
+        );
+
+        let clean_draft = api
+            .handle(
+                "PUT",
+                &format!("/api/documents/{document_id}/draft"),
+                json!({
+                    "markdown": "# Titulo\n\nTexto\n\n",
+                    "baseFingerprint": loaded.body["baseFingerprint"].clone()
+                }),
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(clean_draft.body["isDirty"], false);
+        assert_eq!(clean_draft.body["hasDraft"], false);
+        assert!(clean_draft.body["draftContentHash"].is_null());
+
+        let reloaded = api
+            .handle(
+                "GET",
+                &format!("/api/documents/{document_id}"),
+                Value::Null,
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(reloaded.body["markdown"], "# Titulo\n\nTexto\n");
+        assert_eq!(reloaded.body["hasDraft"], false);
+        assert_eq!(reloaded.body["isDirty"], false);
+
+        let status = api
+            .handle(
+                "POST",
+                "/api/documents/sync-status",
+                json!({
+                    "documents": [{ "documentId": document_id, "baseFingerprint": reloaded.body["baseFingerprint"].clone() }]
+                }),
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(status.body["documents"][0]["hasDraft"], false);
+        assert_eq!(status.body["documents"][0]["localChanged"], false);
+    }
+
+    #[test]
+    fn fingerprint_sha256_detects_same_size_external_edits() {
+        let api = api();
+        let (project_id, root) = create_project(&api);
+        let document_id = create_document(&api, &project_id, "same-size.md", "abc\n");
+        let loaded = api
+            .handle(
+                "GET",
+                &format!("/api/documents/{document_id}"),
+                Value::Null,
+                vec![],
+            )
+            .unwrap();
+        let base_fingerprint = loaded.body["baseFingerprint"].clone();
+
+        std::fs::write(root.join("same-size.md"), "xyz\n").unwrap();
+        let status = api
+            .handle(
+                "POST",
+                "/api/documents/sync-status",
+                json!({
+                    "documents": [{ "documentId": document_id, "baseFingerprint": base_fingerprint }]
+                }),
+                vec![],
+            )
+            .unwrap();
+
+        assert_eq!(status.body["documents"][0]["diskChanged"], true);
+        assert_eq!(
+            status.body["documents"][0]["conflictStatus"],
+            "disk-changed"
+        );
+        assert_ne!(
+            status.body["documents"][0]["currentFingerprint"]["sha256"],
+            loaded.body["baseFingerprint"]["sha256"]
+        );
+    }
+
+    #[test]
     fn notes_and_config_persist_as_local_json() {
         let api = api();
         let notes = api
@@ -8128,10 +9046,7 @@ mod tests {
         assert_eq!(config.body["ai"]["rag"]["vectorStoreId"], "vs_legacy");
         assert_eq!(config.body["ai"]["rag"]["status"], "updated");
         assert_eq!(config.body["ai"]["imageGeneration"]["enabled"], true);
-        assert_eq!(
-            config.body["ai"]["imageGeneration"]["model"],
-            "gpt-image-2"
-        );
+        assert_eq!(config.body["ai"]["imageGeneration"]["model"], "gpt-image-2");
         assert_eq!(config.body["ai"]["imageGeneration"]["size"], "3840x2160");
         assert_eq!(config.body["ai"]["diagrams"]["visualProfile"], "compatible");
         assert_eq!(config.body["ai"]["diagrams"]["iconSet"], "none");
@@ -8162,7 +9077,10 @@ mod tests {
         assert_eq!(ai_status.body["imageGeneration"]["model"], "gpt-image-1.5");
         assert_eq!(ai_status.body["imageGeneration"]["size"], "auto");
         assert_eq!(ai_status.body["diagrams"]["visualProfile"], "advanced");
-        assert_eq!(ai_status.body["diagrams"]["imagePolicy"], "external_confirm");
+        assert_eq!(
+            ai_status.body["diagrams"]["imagePolicy"],
+            "external_confirm"
+        );
         assert_eq!(ai_status.body["diagrams"]["betaPolicy"], "enabled");
         assert_eq!(ai_status.body["agentic"]["webResearchEnabled"], false);
 
@@ -8190,7 +9108,10 @@ mod tests {
         assert_eq!(migrated.body["ai"]["vision"]["enabled"], true);
         assert_eq!(migrated.body["ai"]["transcription"]["enabled"], true);
         assert_eq!(migrated.body["ai"]["diagrams"]["enabled"], true);
-        assert_eq!(migrated.body["ai"]["diagrams"]["visualProfile"], "visual_local");
+        assert_eq!(
+            migrated.body["ai"]["diagrams"]["visualProfile"],
+            "visual_local"
+        );
         assert_eq!(migrated.body["ai"]["rag"]["enabled"], true);
         assert_eq!(migrated.body["ai"]["rag"]["vectorStoreId"], "vs_legacy");
         assert_eq!(migrated.body["ai"]["imageGeneration"]["enabled"], true);
@@ -8557,7 +9478,8 @@ mod tests {
     fn export_image_assets_resolves_relative_internal_and_data_images() {
         let api = api();
         let (project_id, root) = create_project(&api);
-        let document_id = create_document_with_parent(&api, &project_id, "", "visual.md", "# Visual\n");
+        let document_id =
+            create_document_with_parent(&api, &project_id, "", "visual.md", "# Visual\n");
         let png = base64::engine::general_purpose::STANDARD
             .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=")
             .unwrap();
@@ -8579,10 +9501,10 @@ mod tests {
             .source
             .starts_with("http://knownext-asset.localhost/")
             && asset.alt.as_deref() == Some("Interna")));
-        assert!(assets.iter().any(|asset| asset
-            .source
-            .starts_with("data:image/png;base64,")
-            && asset.alt.as_deref() == Some("Embebida")));
+        assert!(assets
+            .iter()
+            .any(|asset| asset.source.starts_with("data:image/png;base64,")
+                && asset.alt.as_deref() == Some("Embebida")));
         assert_eq!(
             knownext_asset_url_relative(&format!(
                 "http://knownext-asset.localhost/{}/assets%2Fpixel.png",
@@ -8935,16 +9857,20 @@ mod tests {
     fn ai_skills_contracts_are_global_and_readonly() {
         let api = api();
 
-        let list = api.handle("GET", "/api/ai/skills", Value::Null, vec![]).unwrap();
+        let list = api
+            .handle("GET", "/api/ai/skills", Value::Null, vec![])
+            .unwrap();
         assert_eq!(list.status, 200);
         let skills = list.body["skills"].as_array().unwrap();
-        assert!(skills
-            .iter()
-            .any(|skill| skill["id"] == "knownext.mermaid"
-                && skill["source"] == "base"
-                && skill["visibility"] == "readonly"
-                && skill["runtimeEnabled"] == true
-                && skill["modes"].as_array().unwrap().iter().any(|mode| mode["id"] == "diagram_structure")));
+        assert!(skills.iter().any(|skill| skill["id"] == "knownext.mermaid"
+            && skill["source"] == "base"
+            && skill["visibility"] == "readonly"
+            && skill["runtimeEnabled"] == true
+            && skill["modes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|mode| mode["id"] == "diagram_structure")));
 
         let detail = api
             .handle(
@@ -8956,7 +9882,11 @@ mod tests {
             .unwrap();
         assert_eq!(detail.status, 200);
         assert_eq!(detail.body["manifest"]["id"], "knownext.mermaid");
-        assert!(detail.body["mermaidCatalog"].as_array().unwrap().iter().any(|item| item["id"] == "architecture-beta"));
+        assert!(detail.body["mermaidCatalog"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == "architecture-beta"));
         assert!(detail.body["instructionsMarkdown"]
             .as_str()
             .unwrap()
@@ -8982,10 +9912,19 @@ mod tests {
             )
             .unwrap();
         assert_eq!(preview.status, 200);
-        assert!(preview.body["candidateSkills"].as_array().unwrap().iter().any(|skill| skill["id"] == "knownext.markdown"));
+        assert!(preview.body["candidateSkills"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|skill| skill["id"] == "knownext.markdown"));
 
         let missing = api
-            .handle("GET", "/api/ai/skills/knownext.missing", Value::Null, vec![])
+            .handle(
+                "GET",
+                "/api/ai/skills/knownext.missing",
+                Value::Null,
+                vec![],
+            )
             .unwrap();
         assert_eq!(missing.status, 404);
     }

@@ -2,6 +2,16 @@
 
 All KnowNext.ai releases use one monolithic application version for the frontend, Tauri shell, Rust runtime, Windows updater, and Android updater.
 
+## 2.4.1 - 2026-06-09
+
+- Made document save state hash-based so obsolete drafts are ignored, drafts that match disk are discarded, and reopening a document no longer revives formatting changes that were undone.
+- Clarified the document footer so unsaved edits only show save/discard actions, while GitHub synchronization is shown only after the document is saved and a version is actually pending.
+- Added post-save synchronization feedback so automatic local Git and GitHub sync shows `Sincronizando` instead of briefly offering a manual sync button.
+- Reworked the version history panel into a compact descending timeline with date separators and incremental loading.
+- Added document links to AI conversation bubbles so document-related messages can open the referenced file directly.
+- Fixed project tree type filters so `Ver todo`, `Solo Markdown`, `Solo imágenes` and `Solo archivos` stay active even when the current document is hidden by the selected filter.
+- Expanded sync and save coverage across Rust contracts, frontend session state, footer states, history ordering, AI document links and project tree filtering.
+
 ## 2.4.0 - 2026-06-08
 
 - Replaced the protection/history drawer with a compact `Guardado y sincronización` workspace that shows every project file in one operational list with Local, Historial local and GitHub status columns.

@@ -151,10 +151,7 @@ export function DocumentTree({
 
   useEffect(() => {
     if (!selectedNodeId) return;
-    if (filter !== "all" && containsNodeId(nodes, selectedNodeId) && !containsNodeId(visibleNodes, selectedNodeId)) {
-      setFilter("all");
-      return;
-    }
+    if (!containsNodeId(visibleNodes, selectedNodeId)) return;
 
     const frame = window.requestAnimationFrame(() => {
       const selectedRow = document.querySelector(`[data-tree-node-id="${escapeCssAttributeValue(selectedNodeId)}"]`);

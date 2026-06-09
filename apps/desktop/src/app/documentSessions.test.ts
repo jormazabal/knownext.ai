@@ -3,6 +3,7 @@ import {
   applyExternalMarkdownUpdate,
   applyLocalMarkdownEdit,
   createLoadedDocumentSession,
+  shouldDiscardPersistedDraft,
   shouldPersistDraft,
   updateSession,
   type DocumentSession,
@@ -32,6 +33,7 @@ describe("documentSessions", () => {
     expect(session.savedMarkdown).toBe("# Disk");
     expect(session.isDirty).toBe(true);
     expect(session.hasRecoveredDraft).toBe(true);
+    expect(session.pendingSaveReason).toBe("opened");
     expect(shouldPersistDraft(session)).toBe(false);
   });
 
@@ -56,6 +58,39 @@ describe("documentSessions", () => {
     expect(session.isDirty).toBe(false);
     expect(updated.isDirty).toBe(false);
     expect(shouldPersistDraft(updated)).toBe(false);
+  });
+
+  it("marks an initial editor normalization as a pending save opened from the document", () => {
+    const session = createLoadedDocumentSession({ ...baseDocument, hasDraft: false, isDirty: false, diskMarkdown: null });
+    const normalized = applyLocalMarkdownEdit(session, "# Draft\n\n***", "initial-normalization");
+
+    expect(normalized.isDirty).toBe(true);
+    expect(normalized.pendingSaveReason).toBe("opened");
+
+    const userEdited = applyLocalMarkdownEdit(normalized, "# Draft\n\n***\n\nUser text");
+
+    expect(userEdited.isDirty).toBe(true);
+    expect(userEdited.pendingSaveReason).toBeNull();
+  });
+
+  it("marks a persisted draft for discard when edits return to the saved markdown", () => {
+    const session = createLoadedDocumentSession({ ...baseDocument, hasDraft: false, isDirty: false, diskMarkdown: null });
+    const edited = {
+      ...applyLocalMarkdownEdit(session, "# Draft\n\n**Body**"),
+      hasRecoveredDraft: true,
+      draftUpdatedAt: "2026-06-08T20:00:00.000Z",
+      draftContentHash: "draft-hash",
+      lastDraftMarkdown: "# Draft\n\n**Body**",
+    };
+
+    const reverted = applyLocalMarkdownEdit(edited, "# Draft");
+
+    expect(reverted.isDirty).toBe(false);
+    expect(reverted.pendingSaveReason).toBeNull();
+    expect(reverted.hasRecoveredDraft).toBe(false);
+    expect(reverted.draftUpdatedAt).toBeNull();
+    expect(shouldPersistDraft(reverted)).toBe(false);
+    expect(shouldDiscardPersistedDraft(reverted)).toBe(true);
   });
 
   it("treats AI edits on an open document like local edits without remounting the editor", () => {

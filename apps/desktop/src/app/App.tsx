@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import type { DocumentTreeAction } from "../features/documents/DocumentTree";
-import type { MarkdownEditorExternalOperation, MarkdownEditorSelection } from "../features/editor/editorTypes";
+import type { MarkdownEditorChangeSource, MarkdownEditorExternalOperation, MarkdownEditorSelection } from "../features/editor/editorTypes";
 import { prepareMermaidDiagramAssets } from "../features/editor/mermaidDiagrams";
 import type { AiPromptExecutionOptions } from "../features/assistant/AiPromptInput";
 import { AiDeleteConfirmationDialog } from "../features/assistant/AiDeleteConfirmationDialog";
@@ -25,6 +25,8 @@ import {
   applyLocalMarkdownEdit,
   createEmptyDocumentSession,
   createLoadedDocumentSession,
+  markdownMatchesSaved,
+  shouldDiscardPersistedDraft,
   shouldPersistDraft,
   updateSession,
   type DocumentSession,
@@ -162,6 +164,7 @@ import type {
   DiagnosticsConfig,
   AssetImportResponse,
   DocumentSyncStatus,
+  DocumentPostSaveSyncState,
   DocumentRecord,
   DocumentTreeNode,
   ExportFormat,
@@ -213,6 +216,10 @@ type AppNotice = {
 };
 
 type DocumentFooterDialog = DocumentFooterDialogAction;
+type DocumentPostSaveSyncEntry = {
+  state: DocumentPostSaveSyncState;
+  sequence: number;
+};
 
 type UpdateState = UpdateDialogState;
 type NotesSaveState = "idle" | "saving" | "error";
@@ -318,14 +325,17 @@ export function App() {
   const [fileSyncOverviewError, setFileSyncOverviewError] = useState<string | null>(null);
   const [acknowledgedExternalChangeSets, setAcknowledgedExternalChangeSets] = useState<Record<string, string[]>>(readAcknowledgedExternalChangeSets);
   const [documentSyncStatuses, setDocumentSyncStatuses] = useState<Record<string, DocumentSyncStatus>>({});
+  const [documentPostSaveSyncStates, setDocumentPostSaveSyncStates] = useState<Record<string, DocumentPostSaveSyncEntry>>({});
   const [documentFooterDialog, setDocumentFooterDialog] = useState<DocumentFooterDialog | null>(null);
   const lastTraceLogRef = useRef<{ fingerprint: string; timestamp: number } | null>(null);
   const githubLoginPollingRef = useRef(false);
   const lastDocumentContextRef = useRef<{ id: string | null; path: string | null }>({ id: null, path: null });
   const documentSessionsRef = useRef(documentSessions);
+  const draftDiscardInFlightRef = useRef<Set<string>>(new Set());
   const autoAppliedAiEditProposalIdsRef = useRef<Set<string>>(new Set());
   const externalChangesLastCheckRef = useRef(0);
   const projectSyncLastCheckRef = useRef(0);
+  const documentPostSaveSyncSequenceRef = useRef(0);
   const resolvedTheme = useResolvedAppearanceTheme(appearanceConfig.themeMode);
 
   useEffect(() => {
@@ -775,6 +785,19 @@ export function App() {
   }, [documentSessions]);
 
   useEffect(() => {
+    const draftsToDiscard = Object.entries(documentSessions).filter(([, session]) => shouldDiscardPersistedDraft(session));
+    if (draftsToDiscard.length === 0) return;
+
+    const timeout = window.setTimeout(() => {
+      for (const [documentId] of draftsToDiscard) {
+        void discardPersistedDocumentDraft(documentId);
+      }
+    }, 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [documentSessions]);
+
+  useEffect(() => {
     if (!notesLoaded || notesMarkdown === notesSavedMarkdown) return;
 
     const timeout = window.setTimeout(() => {
@@ -860,6 +883,9 @@ export function App() {
     : activeReferenceDocumentId || activeImageId || activeDocumentId || (activeProject ? AI_CONVERSATION_TAB_ID : NOTES_WORKSPACE_TAB_ID);
   const activeSession = activeDocumentId ? documentSessions[activeDocumentId] : undefined;
   const activeDocumentSyncStatus = activeDocumentId ? documentSyncStatuses[activeDocumentId] ?? null : null;
+  const activeDocumentPendingSaveHint = activeSession?.isDirty && activeSession.pendingSaveReason === "opened"
+    ? "El documento se abrió con cambios recuperados o ajustes de formato. Guarda para aplicarlos o deshaz para mantener la versión anterior."
+    : null;
   const visibleAiContextSources = useMemo(
     () => getVisibleAiContextSources(aiContextSources, removingAiContextSourceIds),
     [aiContextSources, removingAiContextSourceIds],
@@ -1081,8 +1107,25 @@ export function App() {
       }));
   }
 
+  function setDocumentPostSaveSyncState(documentId: string, sequence: number, state: DocumentPostSaveSyncState) {
+    setDocumentPostSaveSyncStates((currentStates) => {
+      const currentState = currentStates[documentId];
+      if (currentState && currentState.sequence > sequence) return currentStates;
+      if (state === "idle") {
+        if (!currentState) return currentStates;
+        const remainingStates = { ...currentStates };
+        delete remainingStates[documentId];
+        return remainingStates;
+      }
+      return {
+        ...currentStates,
+        [documentId]: { state, sequence },
+      };
+    });
+  }
+
   async function refreshProjectSyncStatus(projectId = activeProject?.id, options: { autoRun?: boolean; silent?: boolean } = {}) {
-    if (!projectId) return;
+    if (!projectId) return null;
     try {
       const project = projects.find((candidate) => candidate.id === projectId) ?? (activeProject?.id === projectId ? activeProject : null);
       const payload = {
@@ -1095,8 +1138,10 @@ export function App() {
       setProjectSyncStatus(normalizedStatus);
       setProjectSyncState(normalizedStatus.state);
       setExternalChangesMessage(normalizedStatus.detail ?? normalizedStatus.label);
+      return normalizedStatus;
     } catch (error) {
       if (!options.silent) showError(error, "No se pudo comprobar la sincronización del proyecto.");
+      return null;
     }
   }
 
@@ -1351,13 +1396,13 @@ export function App() {
     setActiveTreeNodeId("");
   }
 
-  function handleMarkdownChange(documentId: string, nextMarkdown: string) {
+  function handleMarkdownChange(documentId: string, nextMarkdown: string, source: MarkdownEditorChangeSource = "user") {
     setDocumentSessions((currentSessions) => {
       const session = currentSessions[documentId];
       if (!session) return currentSessions;
       return {
         ...currentSessions,
-        [documentId]: applyLocalMarkdownEdit(session, nextMarkdown),
+        [documentId]: applyLocalMarkdownEdit(session, nextMarkdown, source),
       };
     });
   }
@@ -1979,6 +2024,8 @@ export function App() {
   async function handleSave(documentId = activeDocumentId, force = false) {
     const session = documentSessions[documentId];
     if (!documentId || !session?.document) return false;
+    const postSaveSyncSequence = ++documentPostSaveSyncSequenceRef.current;
+    setDocumentPostSaveSyncState(documentId, postSaveSyncSequence, "idle");
     setDocumentSessions((currentSessions) => updateSession(currentSessions, documentId, { saveState: "saving" }));
     try {
       const saved = await saveDocument(documentId, {
@@ -1997,11 +2044,15 @@ export function App() {
         saveState: "saved",
         lastDraftMarkdown: "",
         baseFingerprint: saved.baseFingerprint,
+        savedContentHash: saved.savedContentHash ?? saved.diskContentHash ?? null,
+        draftContentHash: null,
         conflictStatus: "none",
         diskChanged: false,
         orphaned: false,
         hasRecoveredDraft: false,
         draftUpdatedAt: null,
+        pendingDraftDiscard: false,
+        pendingSaveReason: null,
       }));
       window.setTimeout(() => {
         setDocumentSessions((currentSessions) => {
@@ -2010,11 +2061,15 @@ export function App() {
           return updateSession(currentSessions, documentId, { saveState: "idle" });
         });
       }, 1400);
+      let postSaveSyncFailed = false;
       if (versioningStatus?.enabled) {
+        setDocumentPostSaveSyncState(documentId, postSaveSyncSequence, "syncing-local");
         try {
           await createProjectVersion(saved.projectId, documentId, `Actualiza ${saved.name}`);
         } catch (error) {
           if (!isNoVersionChangesError(error)) {
+            postSaveSyncFailed = true;
+            setDocumentPostSaveSyncState(documentId, postSaveSyncSequence, "error");
             void recordTraceLog({
               source: "app.versioning.afterSave",
               message: "No se pudo crear la versión local tras guardar el documento.",
@@ -2024,7 +2079,16 @@ export function App() {
         }
       }
       await refreshProjectCapabilityState(saved.projectId);
-      await refreshProjectSyncStatus(saved.projectId, { autoRun: isAutomaticSyncMode(activeProject?.syncMode), silent: true });
+      const project = projects.find((candidate) => candidate.id === saved.projectId) ?? (activeProject?.id === saved.projectId ? activeProject : null);
+      const shouldAutoSyncRemote = project?.syncMode === "auto-github" && shouldRunAutomaticSync(project, authStatus);
+      if (!postSaveSyncFailed && shouldAutoSyncRemote) {
+        setDocumentPostSaveSyncState(documentId, postSaveSyncSequence, "syncing-remote");
+      }
+      const syncStatus = await refreshProjectSyncStatus(saved.projectId, { autoRun: isAutomaticSyncMode(project?.syncMode), silent: true });
+      if (!postSaveSyncFailed && shouldAutoSyncRemote && (!syncStatus || syncStatus.state === "error")) {
+        postSaveSyncFailed = true;
+        setDocumentPostSaveSyncState(documentId, postSaveSyncSequence, "error");
+      }
       if (externalChangesOpen) await refreshProjectFileSyncOverview(saved.projectId);
       try {
         const response = await getDocumentsSyncStatus([{ documentId, baseFingerprint: saved.baseFingerprint }]);
@@ -2038,8 +2102,12 @@ export function App() {
           suppressApiConnectionNotice: true,
         });
       }
+      if (!postSaveSyncFailed) {
+        setDocumentPostSaveSyncState(documentId, postSaveSyncSequence, "idle");
+      }
       return true;
     } catch (error) {
+      setDocumentPostSaveSyncState(documentId, postSaveSyncSequence, "idle");
       setDocumentSessions((currentSessions) => updateSession(currentSessions, documentId, { saveState: "idle" }));
       if (error instanceof ApiError && error.status === 409) {
         setDocumentSessions((currentSessions) => updateSession(currentSessions, documentId, {
@@ -2590,6 +2658,8 @@ export function App() {
       if (!saved) return;
     }
 
+    const manualSyncSequence = ++documentPostSaveSyncSequenceRef.current;
+    setDocumentPostSaveSyncState(activeDocumentId, manualSyncSequence, "idle");
     setProjectSyncState("syncing");
     try {
       const documentHasLocalChanges = Boolean(
@@ -3606,6 +3676,8 @@ export function App() {
         activeMarkdown={activeSession?.markdown ?? ""}
         activeDocumentDirty={activeSession?.isDirty ?? false}
         activeDocumentSyncStatus={activeDocumentSyncStatus}
+        activeDocumentPostSaveSyncState={documentPostSaveSyncStates[activeDocumentId]?.state ?? "idle"}
+        activeDocumentPendingSaveHint={activeDocumentPendingSaveHint}
         pendingEditorOperations={pendingEditorOperations}
         activeDocumentConflictStatus={activeSession?.conflictStatus ?? "none"}
         activeDocumentHasRecoveredDraft={activeSession?.hasRecoveredDraft ?? false}
@@ -3928,24 +4000,89 @@ export function App() {
 
   async function persistDraft(documentId: string, session: DocumentSession) {
     if (!shouldPersistDraft(session)) return true;
+    const requestMarkdown = session.markdown;
     try {
       const draft = await saveDocumentDraft(documentId, {
-        markdown: session.markdown,
+        markdown: requestMarkdown,
         baseFingerprint: session.baseFingerprint,
+        baseContentHash: session.savedContentHash ?? null,
       });
+      const latestSession = documentSessionsRef.current[documentId];
+      if (!latestSession || !markdownMatchesSaved(latestSession.markdown, requestMarkdown)) {
+        if (latestSession && !latestSession.isDirty) void discardPersistedDocumentDraft(documentId);
+        return true;
+      }
       setDocumentSessions((currentSessions) => {
         const currentSession = currentSessions[documentId];
         if (!currentSession) return currentSessions;
+        if (!markdownMatchesSaved(currentSession.markdown, requestMarkdown)) return currentSessions;
+        if (!draft.isDirty) {
+          return updateSession(currentSessions, documentId, {
+            lastDraftMarkdown: "",
+            draftUpdatedAt: null,
+            hasRecoveredDraft: false,
+            draftContentHash: null,
+            savedContentHash: draft.savedContentHash ?? draft.diskContentHash ?? currentSession.savedContentHash ?? null,
+            pendingDraftDiscard: false,
+            pendingSaveReason: null,
+          });
+        }
         return updateSession(currentSessions, documentId, {
-          lastDraftMarkdown: session.markdown,
+          lastDraftMarkdown: requestMarkdown,
           draftUpdatedAt: draft.draftUpdatedAt,
-          hasRecoveredDraft: true,
+          hasRecoveredDraft: Boolean(draft.hasDraft ?? true),
+          draftContentHash: draft.draftContentHash ?? currentSession.draftContentHash ?? null,
+          savedContentHash: draft.savedContentHash ?? draft.diskContentHash ?? currentSession.savedContentHash ?? null,
+          pendingDraftDiscard: false,
         });
       });
       return true;
     } catch (error) {
       showError(error, "No se pudo guardar el borrador interno del documento.");
       return false;
+    }
+  }
+
+  async function discardPersistedDocumentDraft(documentId: string) {
+    if (draftDiscardInFlightRef.current.has(documentId)) return true;
+    draftDiscardInFlightRef.current.add(documentId);
+    try {
+      await discardDocumentDraft(documentId);
+      setDocumentSessions((currentSessions) => {
+        const currentSession = currentSessions[documentId];
+        if (!currentSession || currentSession.isDirty) return currentSessions;
+        return updateSession(currentSessions, documentId, {
+          lastDraftMarkdown: "",
+          draftUpdatedAt: null,
+          hasRecoveredDraft: false,
+          draftContentHash: null,
+          pendingDraftDiscard: false,
+          pendingSaveReason: null,
+        });
+      });
+      setDocumentSyncStatuses((currentStatuses) => {
+        const status = currentStatuses[documentId];
+        if (!status) return currentStatuses;
+        return {
+          ...currentStatuses,
+          [documentId]: {
+            ...status,
+            hasDraft: false,
+            draftContentHash: null,
+            conflictStatus: status.diskChanged ? "disk-changed" : "none",
+            localChanged: Boolean(status.diskChanged),
+          },
+        };
+      });
+      return true;
+    } catch (error) {
+      showError(error, "No se pudo limpiar el borrador interno del documento.", {
+        source: "app.documentDraft.discard",
+        suppressApiConnectionNotice: true,
+      });
+      return false;
+    } finally {
+      draftDiscardInFlightRef.current.delete(documentId);
     }
   }
 
@@ -4020,9 +4157,15 @@ export function App() {
             patch.conflictStatus = "disk-changed";
           } else if (!session.isDirty && status.currentFingerprint) {
             patch.baseFingerprint = status.currentFingerprint;
+            patch.savedContentHash = status.savedContentHash ?? status.diskContentHash ?? session.savedContentHash ?? null;
+            patch.draftContentHash = status.hasDraft ? status.draftContentHash ?? session.draftContentHash ?? null : null;
             patch.diskChanged = false;
             patch.orphaned = false;
             patch.conflictStatus = status.hasDraft ? "draft" : "none";
+            patch.hasRecoveredDraft = status.hasDraft;
+            patch.draftUpdatedAt = status.hasDraft ? session.draftUpdatedAt : null;
+            patch.pendingDraftDiscard = false;
+            patch.pendingSaveReason = status.hasDraft ? "opened" : null;
           }
 
           if (Object.keys(patch).length > 0) {
@@ -4074,11 +4217,15 @@ export function App() {
           loadVersion: 0,
           lastDraftMarkdown: "",
           baseFingerprint: restored.document.baseFingerprint,
+          savedContentHash: restored.document.savedContentHash ?? restored.document.diskContentHash ?? null,
+          draftContentHash: null,
           conflictStatus: "none",
           diskChanged: false,
           orphaned: false,
           hasRecoveredDraft: false,
           draftUpdatedAt: null,
+          pendingDraftDiscard: false,
+          pendingSaveReason: null,
         },
       }));
       setRecoverableDraftsOpen(false);

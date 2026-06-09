@@ -130,8 +130,8 @@ export function ExternalChangesDrawer({
   const includedChanges = files.filter((file) => isIncludeDecision(file, decisions)).length;
   const omittedCount = files.filter(isOmittedFile).length;
   const canUseGithub = hasGithub(project) && !syncStatus?.remotePaused;
-  const canPushGithub = canUseGithub && Boolean(syncStatus?.pendingPush || syncStatus?.state === "local-pending") && includedChanges === 0;
-  const canPullGithub = canUseGithub && Boolean(syncStatus?.pendingPull || syncStatus?.state === "remote-available");
+  const canPushGithub = canUseGithub && Boolean(syncStatus?.pendingPush) && includedChanges === 0;
+  const canPullGithub = canUseGithub && Boolean(syncStatus?.pendingPull);
   const summary = getHeaderSummary(files, overviewError, busy, syncStatus, syncState, message);
 
   if (!open) return null;
@@ -463,7 +463,7 @@ function BulkActionBar({
         {canPushGithub ? (
           <button className="inline-flex h-8 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy} onClick={onPushGithub}>
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-            Subir a GitHub
+            Subir versiones a GitHub
           </button>
         ) : null}
         {canPullGithub ? (
@@ -739,7 +739,7 @@ function FileRowActions({
     return (
       <div className="flex justify-end gap-1">
         {openDocumentButton}
-        <ActionIconButton label={`Subir ${file.name} a GitHub`} tone="primary" disabled={busy} onClick={onPushGithub}>
+        <ActionIconButton label="Subir versiones a GitHub" tone="primary" disabled={busy} onClick={onPushGithub}>
           <Upload size={14} />
         </ActionIconButton>
       </div>
@@ -1031,6 +1031,32 @@ function getHeaderSummary(
       iconClass: "bg-brand-hover text-brand-orange",
       detail: `${drafts} borrador(es) pendientes de guardar.`,
       footer: "Guarda o descarta los borradores antes de sincronizar.",
+    };
+  }
+  if (syncStatus?.remotePaused) {
+    return {
+      icon: GitBranch,
+      iconClass: "bg-orange-50 text-brand-orange",
+      detail: syncStatus.remoteReason ? `GitHub pausado: ${syncStatus.remoteReason}` : "GitHub pausado.",
+      footer: syncStatus.detail ?? "Puedes seguir guardando versiones locales.",
+    };
+  }
+  if (syncStatus?.pendingPull) {
+    const count = syncStatus.remoteAheadCount ?? 1;
+    return {
+      icon: Download,
+      iconClass: "bg-brand-hover text-brand-orange",
+      detail: `GitHub tiene ${count} version(es) para revisar.`,
+      footer: "Actualiza desde GitHub cuando quieras revisar los cambios remotos.",
+    };
+  }
+  if (syncStatus?.pendingPush) {
+    const count = syncStatus.localAheadCount ?? 1;
+    return {
+      icon: Upload,
+      iconClass: "bg-brand-hover text-brand-orange",
+      detail: `${count} version(es) pendientes de subir a GitHub.`,
+      footer: "Sube el historial local para alinear GitHub.",
     };
   }
   if (attention > 0) {

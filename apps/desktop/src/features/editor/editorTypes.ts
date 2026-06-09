@@ -117,6 +117,8 @@ export type MarkdownEditorSelection = {
   blockHash?: string | null;
 };
 
+export type MarkdownEditorChangeSource = "user" | "initial-normalization";
+
 export const emptyMarkdownEditorFormatState: MarkdownEditorFormatState = {};
 
 export const emptyMarkdownEditorHistoryState: MarkdownEditorHistoryState = {

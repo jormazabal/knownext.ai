@@ -46,6 +46,10 @@ Use `docs/development/functional-validation-matrix.md` to record which areas are
 - In a disposable validation project or copied workspace, drag documents, folders, images, and attachments in the tree to move them between folders and to the project root; confirm the resulting filesystem paths, open tabs, and image/document references stay consistent.
 - Open `Guardado y sincronización` from the file tree toolbar and confirm it shows a single file list ordered by modification date, with Local, Historial local and GitHub status columns and no Actividad or Detalles tabs.
 - In `Guardado y sincronización`, verify filters for `Necesitan atención`, `Borradores`, `Historial pendiente`, `GitHub pendiente`, `Conflictos` and `Omitidos`, and confirm actions are available per file or as batch actions.
+- In an automatic GitHub project, edit and save one Markdown document; confirm KnowNext.ai creates a local version and, when GitHub has no remote changes, uploads the pending version to GitHub without marking unrelated files as pending.
+- In an automatic GitHub project with GitHub offline, unauthenticated, or unauthorized, save a document and confirm the change remains in local history with GitHub shown as paused and pending, without repeated error prompts.
+- In an automatic GitHub project where GitHub has remote changes, save or refresh sync status and confirm automatic sync pauses for review instead of pulling remote changes automatically.
+- Restore one document from a version that was created from a multi-file commit; confirm only the active document is restored and a new local version is created.
 - Add a Markdown file and a `.env` file directly in the project folder outside the app; scan guardado/sincronización and confirm the Markdown can be imported into local history while the private file remains omitted.
 - Import or attach an image and confirm it renders in the document/reference viewer when supported.
 - Import a single Markdown/PDF/DOCX/XLSX file and confirm the imported file opens immediately as the active editable document or supported preview.

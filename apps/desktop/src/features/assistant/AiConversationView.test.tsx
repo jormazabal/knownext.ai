@@ -1,4 +1,5 @@
 import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AiConfigStatus, AiConversationEvent, AiPendingIntent, Project } from "../../types/domain";
 import { AiConversationView } from "./AiConversationView";
@@ -61,6 +62,40 @@ describe("AiConversationView", () => {
     expect(screen.getByText("Acción pendiente")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Aplicar" })).toBeInTheDocument();
     expect(screen.queryByText("Redactar descripción en el documento activo.")).not.toBeInTheDocument();
+  });
+
+  it("links document-aware bubbles to the referenced document", async () => {
+    const openDocument = vi.fn();
+
+    render(
+      <AiConversationView
+        project={project}
+        config={config}
+        indexStatus={null}
+        pendingIntent={null}
+        onIntentAction={vi.fn()}
+        onOpenDocument={openDocument}
+        events={[
+          conversationEvent({
+            id: "assistant-1",
+            role: "assistant",
+            type: "assistant_message",
+            content: "He actualizado el documento.",
+            documentId: "project-1::Proyectos/COE/Sesiones coord. AI CoE.md",
+            path: "Proyectos/COE/Sesiones coord. AI CoE.md",
+          }),
+        ]}
+      />,
+    );
+
+    const link = screen.getByRole("button", { name: "Abrir documento Proyectos / COE / Sesiones coord. AI CoE.md" });
+
+    expect(link).toBeInTheDocument();
+    expect(link).toHaveTextContent("Proyectos / COE / Sesiones coord. AI CoE.md");
+
+    await userEvent.click(link);
+
+    expect(openDocument).toHaveBeenCalledWith("project-1::Proyectos/COE/Sesiones coord. AI CoE.md", "Sesiones coord. AI CoE.md");
   });
 
   it("does not repeat the document path when the event title already includes it", () => {
