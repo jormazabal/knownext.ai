@@ -17,6 +17,7 @@ type AiConversationViewProps = {
   onIntentAction: (action: AiIntentActionType, intentId: string) => void | Promise<void>;
   onApplyEditProposal?: (proposalId: string, operationIds?: string[]) => void | Promise<void>;
   onDiscardEditProposal?: (proposalId: string) => void;
+  onOpenDocument?: (documentId: string, name: string) => void;
 };
 
 export function AiConversationView({
@@ -32,6 +33,7 @@ export function AiConversationView({
   onIntentAction,
   onApplyEditProposal,
   onDiscardEditProposal,
+  onOpenDocument,
 }: AiConversationViewProps) {
   const groupedEvents = groupEventsByDay(events);
   const ragLabel = getRagLabel(config, indexStatus);
@@ -98,6 +100,7 @@ export function AiConversationView({
                         onIntentAction={onIntentAction}
                         onApplyEditProposal={onApplyEditProposal}
                         onDiscardEditProposal={onDiscardEditProposal}
+                        onOpenDocument={onOpenDocument}
                       />
                     ))}
                   </div>
@@ -131,6 +134,7 @@ function AiEventBubble({
   onIntentAction,
   onApplyEditProposal,
   onDiscardEditProposal,
+  onOpenDocument,
 }: {
   event: AiConversationEvent;
   pendingIntent: AiPendingIntent | null;
@@ -141,7 +145,10 @@ function AiEventBubble({
   onIntentAction: (action: AiIntentActionType, intentId: string) => void | Promise<void>;
   onApplyEditProposal?: (proposalId: string, operationIds?: string[]) => void | Promise<void>;
   onDiscardEditProposal?: (proposalId: string) => void;
+  onOpenDocument?: (documentId: string, name: string) => void;
 }) {
+  const documentLink = getEventDocumentLink(event);
+
   if (event.role === "user") {
     return (
       <div className="flex justify-end gap-2.5">
@@ -159,6 +166,7 @@ function AiEventBubble({
               ) : null}
             </div>
           ) : null}
+          <AiBubbleDocumentFooter link={documentLink} tone="user" onOpenDocument={onOpenDocument} />
         </div>
         <span className="mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-brand-orange text-white shadow-[0_8px_20px_rgb(var(--accent)/0.22)]">
           <User size={14} />
@@ -187,6 +195,7 @@ function AiEventBubble({
               onDiscard={onDiscardEditProposal}
             />
           ) : null}
+          <AiBubbleDocumentFooter link={documentLink} tone="assistant" onOpenDocument={onOpenDocument} />
         </div>
       </div>
     );
@@ -212,11 +221,68 @@ function AiEventBubble({
             ) : null}
             {event.summary ? <p className="mt-1 text-[10px] text-ink-secondary">{event.summary}</p> : null}
             {event.task ? <AiTaskCard task={event.task} compact /> : null}
+            <AiBubbleDocumentFooter link={documentLink} tone="system" onOpenDocument={onOpenDocument} />
           </div>
         </div>
       </div>
     </div>
   );
+}
+
+type EventDocumentLink = {
+  documentId: string;
+  path: string;
+  name: string;
+  folder: string;
+  label: string;
+};
+
+function AiBubbleDocumentFooter({
+  link,
+  tone,
+  onOpenDocument,
+}: {
+  link: EventDocumentLink | null;
+  tone: "user" | "assistant" | "system";
+  onOpenDocument?: (documentId: string, name: string) => void;
+}) {
+  if (!link || !onOpenDocument) return null;
+
+  const userTone = tone === "user";
+  return (
+    <div className={["mt-2 border-t pt-1.5", userTone ? "border-white/20" : "border-line/80"].join(" ")}>
+      <button
+        type="button"
+        className={[
+          "flex max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-[10px] font-medium transition",
+          userTone
+            ? "text-white/85 hover:bg-white/15 hover:text-white"
+            : "text-ink-secondary hover:bg-brand-hover hover:text-brand-orange",
+        ].join(" ")}
+        title={link.path}
+        aria-label={`Abrir documento ${link.label}`}
+        onClick={() => onOpenDocument(link.documentId, link.name)}
+      >
+        <FileText size={11} className="shrink-0" />
+        <span className="min-w-0 truncate">{link.label}</span>
+      </button>
+    </div>
+  );
+}
+
+function getEventDocumentLink(event: AiConversationEvent): EventDocumentLink | null {
+  if (!event.documentId || !event.path) return null;
+  const normalizedPath = event.path.replace(/\\/g, "/");
+  const parts = normalizedPath.split("/").filter(Boolean);
+  const name = parts.length > 0 ? parts[parts.length - 1] : normalizedPath;
+  const folder = parts.slice(0, -1).join(" / ");
+  return {
+    documentId: event.documentId,
+    path: normalizedPath,
+    name,
+    folder,
+    label: folder ? `${folder} / ${name}` : name,
+  };
 }
 
 function shouldRenderEventPath(event: AiConversationEvent) {

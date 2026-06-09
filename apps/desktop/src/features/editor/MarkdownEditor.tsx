@@ -24,7 +24,7 @@ import {
 } from "./underlineExtension";
 import { createMermaidDiagramPlugin, createMermaidDiagramViewPlugin } from "./mermaidNodeView";
 import { VisualMediaViewer, type VisualMediaViewerMedia } from "./VisualMediaViewer";
-import type { MarkdownEditorController, MarkdownEditorDiagramEditTarget, MarkdownEditorFormatState, MarkdownEditorHistoryState, MarkdownEditorImageEditTarget } from "./editorTypes";
+import type { MarkdownEditorChangeSource, MarkdownEditorController, MarkdownEditorDiagramEditTarget, MarkdownEditorFormatState, MarkdownEditorHistoryState, MarkdownEditorImageEditTarget } from "./editorTypes";
 import type { MarkdownEditorSelection } from "./editorTypes";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
@@ -33,7 +33,7 @@ import "./MarkdownEditor.css";
 type MarkdownEditorProps = {
   documentKey: string;
   markdown: string;
-  onChange: (markdown: string) => void;
+  onChange: (markdown: string, source?: MarkdownEditorChangeSource) => void;
   onControllerChange: (controller: MarkdownEditorController | null) => void;
   onFormatStateChange: (formatState: MarkdownEditorFormatState) => void;
   onHistoryStateChange: (historyState: MarkdownEditorHistoryState) => void;
@@ -45,7 +45,7 @@ type MarkdownEditorProps = {
 };
 
 type MarkdownEditorCallbacks = {
-  onChange: (markdown: string) => void;
+  onChange: (markdown: string, source?: MarkdownEditorChangeSource) => void;
   onControllerChange: (controller: MarkdownEditorController | null) => void;
   onFormatStateChange: (formatState: MarkdownEditorFormatState) => void;
   onHistoryStateChange: (historyState: MarkdownEditorHistoryState) => void;
@@ -139,6 +139,7 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
         normalizeRenderedImageBlocks(viewRef.current);
       });
       listener.markdownUpdated((_ctx, nextMarkdown) => {
+        const initialUpdate = skipInitialUpdate.current;
         if (skipInitialUpdate.current) {
           skipInitialUpdate.current = false;
           if (nextMarkdown === lastMarkdownRef.current) return;
@@ -146,7 +147,7 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
         if (nextMarkdown === lastMarkdownRef.current) return;
 
         lastMarkdownRef.current = nextMarkdown;
-        callbacksRef.current.onChange(nextMarkdown);
+        callbacksRef.current.onChange(nextMarkdown, initialUpdate ? "initial-normalization" : "user");
       });
     });
 

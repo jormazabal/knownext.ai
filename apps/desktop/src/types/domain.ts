@@ -111,6 +111,12 @@ export type ProjectSyncState =
   | "error"
   | "unsupported";
 
+export type DocumentPostSaveSyncState =
+  | "idle"
+  | "syncing-local"
+  | "syncing-remote"
+  | "error";
+
 export type RemoteAccessState =
   | "available"
   | "unauthenticated"
@@ -173,6 +179,11 @@ export type ProjectSyncStatus = {
   lastSyncAt?: string | null;
   lastLocalVersionHash?: string | null;
   lastRemoteHash?: string | null;
+  localAheadCount?: number;
+  remoteAheadCount?: number;
+  localAheadPaths?: string[];
+  remoteAheadPaths?: string[];
+  diverged?: boolean;
   conflicts: SyncConflict[];
 };
 
@@ -617,6 +628,9 @@ export type DocumentRecord = {
   projectId: string;
   markdown: string;
   diskMarkdown?: string | null;
+  diskContentHash?: string | null;
+  savedContentHash?: string | null;
+  draftContentHash?: string | null;
   wordCount: number;
   updatedAt: string;
   baseFingerprint?: DocumentFingerprint | null;
@@ -1403,12 +1417,17 @@ export type SaveDocumentPayload = {
 export type SaveDraftPayload = {
   markdown: string;
   baseFingerprint?: DocumentFingerprint | null;
+  baseContentHash?: string | null;
 };
 
 export type DraftResponse = {
   documentId: string;
-  draftUpdatedAt: string;
+  draftUpdatedAt?: string | null;
   isDirty: boolean;
+  hasDraft?: boolean;
+  diskContentHash?: string | null;
+  savedContentHash?: string | null;
+  draftContentHash?: string | null;
 };
 
 export type SyncStatusDocument = {
@@ -1428,6 +1447,9 @@ export type DocumentSyncStatus = {
   documentId: string;
   exists: boolean;
   currentFingerprint?: DocumentFingerprint | null;
+  diskContentHash?: string | null;
+  savedContentHash?: string | null;
+  draftContentHash?: string | null;
   diskChanged: boolean;
   hasDraft: boolean;
   orphaned: boolean;

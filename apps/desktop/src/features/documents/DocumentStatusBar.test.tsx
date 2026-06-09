@@ -28,9 +28,18 @@ describe("DocumentStatusBar", () => {
   it("shows save and discard actions when the active document has pending changes", () => {
     render(<DocumentStatusBar {...defaultProps} isDirty saveState="idle" />);
 
-    expect(screen.getByText("Cambios pendientes")).toBeInTheDocument();
+    expect(screen.queryByText("Cambios sin guardar")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Guardar" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /deshacer cambios/i })).toBeInTheDocument();
+  });
+
+  it("shows a simple save hint when pending changes came from opening the document", () => {
+    const hint = "El documento se abrió con cambios recuperados o ajustes de formato. Guarda para aplicarlos o deshaz para mantener la versión anterior.";
+
+    render(<DocumentStatusBar {...defaultProps} isDirty saveState="idle" pendingSaveHint={hint} />);
+
+    expect(screen.getByRole("img", { name: hint })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Guardar" })).toBeInTheDocument();
   });
 
   it("keeps document type and word count before the decision state", () => {
@@ -77,6 +86,104 @@ describe("DocumentStatusBar", () => {
     expect(screen.getByRole("button", { name: "Sincronizar" })).toBeInTheDocument();
   });
 
+  it("shows syncing instead of the synchronize action while a saved version is being written locally", () => {
+    render(
+      <DocumentStatusBar
+        {...defaultProps}
+        gitEnabled
+        postSaveSyncState="syncing-local"
+        documentSyncStatus={{
+          documentId: "doc-1",
+          exists: true,
+          diskChanged: false,
+          hasDraft: false,
+          orphaned: false,
+          conflictStatus: "none",
+          versionState: "local-ahead",
+          localChanged: true,
+          remoteChanged: false,
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Sincronizando")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sincronizar" })).not.toBeInTheDocument();
+  });
+
+  it("keeps syncing visible while an automatic GitHub push is running", () => {
+    render(
+      <DocumentStatusBar
+        {...defaultProps}
+        gitEnabled
+        postSaveSyncState="syncing-remote"
+        documentSyncStatus={{
+          documentId: "doc-1",
+          exists: true,
+          diskChanged: false,
+          hasDraft: false,
+          orphaned: false,
+          conflictStatus: "none",
+          versionState: "local-ahead",
+          localChanged: true,
+          remoteChanged: false,
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Sincronizando")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sincronizar" })).not.toBeInTheDocument();
+  });
+
+  it("shows the synchronize action only after a post-save synchronization error", () => {
+    render(
+      <DocumentStatusBar
+        {...defaultProps}
+        gitEnabled
+        postSaveSyncState="error"
+        documentSyncStatus={{
+          documentId: "doc-1",
+          exists: true,
+          diskChanged: false,
+          hasDraft: false,
+          orphaned: false,
+          conflictStatus: "none",
+          versionState: "local-ahead",
+          localChanged: true,
+          remoteChanged: false,
+        }}
+      />,
+    );
+
+    expect(screen.getByText("No se pudo sincronizar")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sincronizar" })).toBeInTheDocument();
+  });
+
+  it("hides synchronization while the active document has unsaved changes", () => {
+    render(
+      <DocumentStatusBar
+        {...defaultProps}
+        isDirty
+        gitEnabled
+        documentSyncStatus={{
+          documentId: "doc-1",
+          exists: true,
+          diskChanged: false,
+          hasDraft: true,
+          orphaned: false,
+          conflictStatus: "draft",
+          versionState: "local-ahead",
+          localChanged: true,
+          remoteChanged: false,
+        }}
+      />,
+    );
+
+    expect(screen.queryByText("Cambios sin guardar")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Guardar" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /deshacer cambios/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sincronizar" })).not.toBeInTheDocument();
+  });
+
   it("keeps saved local changes quiet when GitHub access is paused", () => {
     render(
       <DocumentStatusBar
@@ -103,7 +210,7 @@ describe("DocumentStatusBar", () => {
     expect(screen.queryByRole("button", { name: "Sincronizar" })).not.toBeInTheDocument();
   });
 
-  it("shows a red update action when a newer remote version is available", () => {
+  it("shows a review action when a newer remote version is available", () => {
     render(
       <DocumentStatusBar
         {...defaultProps}
@@ -122,12 +229,36 @@ describe("DocumentStatusBar", () => {
       />,
     );
 
-    expect(screen.getByText("Versión desactualizada")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Actualizar" })).toBeInTheDocument();
+    expect(screen.getByText("Versión disponible")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Revisar" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Sincronizar" })).not.toBeInTheDocument();
   });
 
-  it("shows save and update when a draft coexists with a newer remote version", () => {
+  it("shows a review action when local and remote versions diverged", () => {
+    render(
+      <DocumentStatusBar
+        {...defaultProps}
+        gitEnabled
+        documentSyncStatus={{
+          documentId: "doc-1",
+          exists: true,
+          diskChanged: false,
+          hasDraft: false,
+          orphaned: false,
+          conflictStatus: "none",
+          versionState: "diverged",
+          localChanged: true,
+          remoteChanged: true,
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Conflicto de versiones")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Revisar" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sincronizar" })).not.toBeInTheDocument();
+  });
+
+  it("keeps remote review hidden while a draft coexists with a newer remote version", () => {
     render(
       <DocumentStatusBar
         {...defaultProps}
@@ -147,8 +278,10 @@ describe("DocumentStatusBar", () => {
       />,
     );
 
-    expect(screen.getByText("Cambios pendientes · versión posterior disponible")).toBeInTheDocument();
+    expect(screen.queryByText("Cambios sin guardar")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Guardar" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Actualizar" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /deshacer cambios/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Revisar" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sincronizar" })).not.toBeInTheDocument();
   });
 });

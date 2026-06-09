@@ -17,6 +17,7 @@ import {
   emptyMarkdownEditorFormatState,
   type MarkdownEditorAction,
   type MarkdownEditorActionOptions,
+  type MarkdownEditorChangeSource,
   type MarkdownEditorController,
   type MarkdownEditorDiagramEditTarget,
   type MarkdownEditorExternalOperation,
@@ -35,7 +36,7 @@ import { TitleBar } from "../components/window/TitleBar";
 import { getProjectImageContentUrl } from "../lib/api/projects";
 import { getDocumentTreeFileDragData } from "../lib/dragData";
 import { isMobileDeviceRuntime, isPhoneAppShell } from "../lib/runtime/platform";
-import type { ActivityEvent, AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiEditProposal, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiSkillApplication, AiSkillDiagnostic, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentRecord, DocumentSyncStatus, DocumentTreeNode, ExportFormat, ExternalChangeDecision, ExternalChangeSet, InsertImageReferenceResponse, LayoutConfig, Project, ProjectFileSyncOverview, ProjectSyncState, ProjectSyncStatus, ProjectVersioningStatus, VersionRecord, WorkspaceTab } from "../types/domain";
+import type { ActivityEvent, AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiEditProposal, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiSkillApplication, AiSkillDiagnostic, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentPostSaveSyncState, DocumentRecord, DocumentSyncStatus, DocumentTreeNode, ExportFormat, ExternalChangeDecision, ExternalChangeSet, InsertImageReferenceResponse, LayoutConfig, Project, ProjectFileSyncOverview, ProjectSyncState, ProjectSyncStatus, ProjectVersioningStatus, VersionRecord, WorkspaceTab } from "../types/domain";
 
 const sidebarWidthConfig = {
   defaultWidth: 338,
@@ -88,6 +89,8 @@ type DesktopLayoutProps = {
   activeMarkdown: string;
   activeDocumentDirty: boolean;
   activeDocumentSyncStatus: DocumentSyncStatus | null;
+  activeDocumentPostSaveSyncState: DocumentPostSaveSyncState;
+  activeDocumentPendingSaveHint?: string | null;
   pendingEditorOperations: MarkdownEditorExternalOperation[];
   activeDocumentConflictStatus: DocumentConflictStatus;
   activeDocumentHasRecoveredDraft: boolean;
@@ -178,7 +181,7 @@ type DesktopLayoutProps = {
   onImportProjectImage: (parentId: string | null, file: File) => Promise<AssetImportResponse>;
   onBuildImageReference: (documentId: string, assetId: string, altText?: string | null) => Promise<InsertImageReferenceResponse>;
   onInsertImageIntoActiveDocument: (assetId: string) => void | Promise<void>;
-  onMarkdownChange: (documentId: string, markdown: string) => void;
+  onMarkdownChange: (documentId: string, markdown: string, source?: MarkdownEditorChangeSource) => void;
   onNotesMarkdownChange: (markdown: string) => void;
   onEditorOperationApplied: (operationId: string) => void;
   onEditorOperationFailed: (operation: MarkdownEditorExternalOperation) => void;
@@ -722,6 +725,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                           onIntentAction={props.onAiIntentAction}
                           onApplyEditProposal={props.onApplyAiEditProposal}
                           onDiscardEditProposal={props.onDiscardAiEditProposal}
+                          onOpenDocument={props.onOpenDocument}
                         />
                       ) : hasNotes ? (
                         props.notesLoaded ? (
@@ -800,7 +804,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                                 key={session.editorKey}
                                 documentKey={session.editorKey}
                                 markdown={materializeProjectImageReferences(session.markdown, props.activeProject?.id ?? "", session.document.path, props.tree)}
-                                onChange={(markdown) => props.onMarkdownChange(session.documentId, restoreProjectImageReferences(markdown, props.activeProject?.id ?? "", session.document!.path, props.tree))}
+                                onChange={(markdown, source) => props.onMarkdownChange(session.documentId, restoreProjectImageReferences(markdown, props.activeProject?.id ?? "", session.document!.path, props.tree), source)}
                                 onControllerChange={(controller) => handleEditorControllerChange(session.documentId, controller)}
                                 onFormatStateChange={(formatState) => {
                                   if (session.documentId === props.activeDocumentId) {
@@ -989,6 +993,8 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                   remotePaused={props.projectSyncStatus?.remotePaused}
                   remoteReason={props.projectSyncStatus?.remoteReason}
                   isSyncing={props.isSyncingProject || props.externalChangesBusy}
+                  postSaveSyncState={props.activeDocumentPostSaveSyncState}
+                  pendingSaveHint={props.activeDocumentPendingSaveHint}
                   onSave={props.onSave}
                   onSynchronize={props.onSynchronizeDocument}
                   onUpdateFromRemote={props.onUpdateDocumentFromRemote}

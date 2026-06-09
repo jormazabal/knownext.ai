@@ -1,5 +1,5 @@
-import { AlertCircle, CheckCircle2, FileCode2, RefreshCw, RotateCcw } from "lucide-react";
-import type { DocumentSyncStatus, RemoteAccessState } from "../../types/domain";
+import { AlertCircle, CheckCircle2, FileCode2, Info, RefreshCw, RotateCcw } from "lucide-react";
+import type { DocumentPostSaveSyncState, DocumentSyncStatus, RemoteAccessState } from "../../types/domain";
 
 type DocumentStatusBarProps = {
   isDirty: boolean;
@@ -12,6 +12,8 @@ type DocumentStatusBarProps = {
   remotePaused?: boolean;
   remoteReason?: string | null;
   isSyncing: boolean;
+  postSaveSyncState?: DocumentPostSaveSyncState;
+  pendingSaveHint?: string | null;
   onSave: () => void;
   onSynchronize: () => void;
   onUpdateFromRemote: () => void;
@@ -20,7 +22,7 @@ type DocumentStatusBarProps = {
 
 type FooterState = {
   tone: "ok" | "warning" | "danger";
-  label: string;
+  label?: string;
   detail?: string;
   showSave: boolean;
   showDiscard: boolean;
@@ -40,6 +42,8 @@ export function DocumentStatusBar({
   remotePaused,
   remoteReason,
   isSyncing,
+  postSaveSyncState = "idle",
+  pendingSaveHint,
   onSave,
   onSynchronize,
   onUpdateFromRemote,
@@ -54,6 +58,7 @@ export function DocumentStatusBar({
     remotePaused,
     remoteReason,
     isSyncing,
+    postSaveSyncState,
     canSave,
   });
   const StatusIcon = state.tone === "ok" ? CheckCircle2 : state.tone === "danger" ? AlertCircle : RefreshCw;
@@ -70,18 +75,20 @@ export function DocumentStatusBar({
       </div>
 
       <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5 sm:shrink-0 sm:gap-2">
-        <span
-          className={[
-            "flex max-w-[min(46vw,180px)] min-w-0 items-center gap-2 rounded-full px-2.5 py-1 font-medium sm:max-w-none",
-            state.tone === "ok" ? "bg-green-50 text-green-700" : "",
-            state.tone === "warning" ? "bg-orange-50 text-brand-orange" : "",
-            state.tone === "danger" ? "bg-red-50 text-red-700" : "",
-          ].join(" ")}
-          title={state.detail}
-        >
-          <StatusIcon size={14} className={state.busy ? "animate-spin" : ""} />
-          <span className="truncate">{state.label}</span>
-        </span>
+        {state.label ? (
+          <span
+            className={[
+              "flex max-w-[min(46vw,180px)] min-w-0 items-center gap-2 rounded-full px-2.5 py-1 font-medium sm:max-w-none",
+              state.tone === "ok" ? "bg-green-50 text-green-700" : "",
+              state.tone === "warning" ? "bg-orange-50 text-brand-orange" : "",
+              state.tone === "danger" ? "bg-red-50 text-red-700" : "",
+            ].join(" ")}
+            title={state.detail}
+          >
+            <StatusIcon size={14} className={state.busy ? "animate-spin" : ""} />
+            <span className="truncate">{state.label}</span>
+          </span>
+        ) : null}
 
         {state.showDiscard ? (
           <button
@@ -95,13 +102,25 @@ export function DocumentStatusBar({
           </button>
         ) : null}
         {state.showSave ? (
-          <button
-            className="h-7 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white shadow-subtle hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-70"
-            onClick={onSave}
-            disabled={saveState === "saving" || state.busy}
-          >
-            {saveState === "saving" ? "Guardando" : "Guardar"}
-          </button>
+          <span className="flex items-center gap-1">
+            {pendingSaveHint ? (
+              <span
+                className="flex h-7 w-7 items-center justify-center rounded-md border border-orange-100 bg-orange-50 text-brand-orange"
+                title={pendingSaveHint}
+                aria-label={pendingSaveHint}
+                role="img"
+              >
+                <Info size={13} />
+              </span>
+            ) : null}
+            <button
+              className="h-7 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white shadow-subtle hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-70"
+              onClick={onSave}
+              disabled={saveState === "saving" || state.busy}
+            >
+              {saveState === "saving" ? "Guardando" : "Guardar"}
+            </button>
+          </span>
         ) : null}
         {state.showSync ? (
           <button
@@ -118,7 +137,7 @@ export function DocumentStatusBar({
             onClick={onUpdateFromRemote}
             disabled={state.busy}
           >
-            Actualizar
+            Revisar
           </button>
         ) : null}
       </div>
@@ -135,6 +154,7 @@ function getFooterState({
   remotePaused,
   remoteReason,
   isSyncing,
+  postSaveSyncState,
   canSave,
 }: {
   isDirty: boolean;
@@ -145,9 +165,11 @@ function getFooterState({
   remotePaused?: boolean;
   remoteReason?: string | null;
   isSyncing: boolean;
+  postSaveSyncState: DocumentPostSaveSyncState;
   canSave: boolean;
 }): FooterState {
-  const busy = isSyncing || saveState === "saving";
+  const postSaveSyncing = postSaveSyncState === "syncing-local" || postSaveSyncState === "syncing-remote";
+  const busy = isSyncing || saveState === "saving" || postSaveSyncing;
   const versionState = documentSyncStatus?.versionState ?? (gitEnabled ? "ok" : "unversioned");
   const incomingAvailable = versionState === "remote-ahead" || versionState === "diverged";
   const localAhead = Boolean(gitEnabled && (documentSyncStatus?.localChanged || versionState === "local-ahead"));
@@ -161,41 +183,59 @@ function getFooterState({
         : remoteReason ?? "GitHub pausado";
   const syncAvailable = gitEnabled && localAhead && !githubPaused;
 
-  if (incomingAvailable && !githubPaused) {
-    const hasConflict = versionState === "diverged";
+  if (isDirty) {
     return {
-      tone: "danger",
-      label: isDirty
-        ? "Cambios pendientes · versión posterior disponible"
-        : hasConflict
-          ? "Conflicto de versiones"
-          : "Versión desactualizada",
-      detail: isDirty
-        ? "Hay una versión posterior de este documento. Actualizar puede descartar cambios pendientes."
-        : hasConflict
-          ? "Este documento cambió en local y en GitHub. Revisa antes de actualizar."
-          : "Hay una versión posterior disponible para este documento.",
-      showSave: canSave && isDirty,
-      showDiscard: canSave && isDirty,
+      tone: "warning",
+      label: canSave ? undefined : "Cambios sin guardar",
+      detail: canSave ? undefined : "Guarda el documento o descarta los cambios pendientes.",
+      showSave: canSave,
+      showDiscard: canSave,
       showSync: false,
-      showUpdate: true,
+      showUpdate: false,
       busy,
     };
   }
 
-  if (isDirty) {
+  if (postSaveSyncing) {
     return {
       tone: "warning",
-      label: syncAvailable ? "Cambios pendientes · sincronización disponible" : "Cambios pendientes",
-      detail: syncAvailable
-        ? "Puedes guardar el borrador o sincronizar la última versión guardada."
-        : githubPaused
-          ? "Puedes seguir guardando en local. GitHub se sincronizará cuando vuelva el acceso."
-          : "Guarda el documento para convertir el borrador en la versión local.",
-      showSave: canSave,
-      showDiscard: canSave,
-      showSync: syncAvailable,
+      label: "Sincronizando",
+      detail: postSaveSyncState === "syncing-remote"
+        ? "Subiendo la versión guardada a GitHub."
+        : "Guardando la versión local en el historial.",
+      showSave: false,
+      showDiscard: false,
+      showSync: false,
       showUpdate: false,
+      busy,
+    };
+  }
+
+  if (postSaveSyncState === "error") {
+    return {
+      tone: "danger",
+      label: "No se pudo sincronizar",
+      detail: "El documento está guardado localmente, pero la sincronización necesita reintentarse.",
+      showSave: false,
+      showDiscard: false,
+      showSync: gitEnabled,
+      showUpdate: false,
+      busy: false,
+    };
+  }
+
+  if (incomingAvailable && !githubPaused) {
+    const hasConflict = versionState === "diverged";
+    return {
+      tone: "danger",
+      label: hasConflict ? "Conflicto de versiones" : "Versión disponible",
+      detail: hasConflict
+        ? "Este documento cambió en local y en GitHub. Revisa antes de actualizar."
+        : "Hay una versión posterior disponible para este documento.",
+      showSave: false,
+      showDiscard: false,
+      showSync: false,
+      showUpdate: true,
       busy,
     };
   }
