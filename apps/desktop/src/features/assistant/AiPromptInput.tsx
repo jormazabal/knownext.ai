@@ -1,6 +1,6 @@
-import { AlertCircle, Brain, Check, ChevronDown, Clock3, File, FileText, Image, MessageSquare, Mic, MoreVertical, Plus, Search, SendHorizontal, SlidersHorizontal, Sparkles, Square, X, Zap, type LucideIcon } from "lucide-react";
+import { AlertCircle, AlertTriangle, Brain, Check, CheckCircle2, ChevronDown, ChevronRight, Clock3, File, FileText, Image, Loader2, MessageSquare, Mic, MoreVertical, Pause, Play, Plus, Search, SendHorizontal, SlidersHorizontal, Sparkles, Square, X, Zap, type LucideIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
-import type { AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiExecutionMode, AiReasoningDepth, AiSelectionFocus, AiTranscriptionLanguage, AiTranscriptionTarget } from "../../types/domain";
+import type { AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiExecutionMode, AiPromptIntent, AiReasoningDepth, AiResearchBrief, AiResearchJob, AiResearchReportLength, AiSelectionFocus, AiTranscriptionLanguage, AiTranscriptionTarget } from "../../types/domain";
 import { getDocumentTreeFileDragData, hasDocumentTreeFileDragData } from "../../lib/dragData";
 import { isPhoneAppShell } from "../../lib/runtime/platform";
 import { xsViewportQuery } from "../../lib/runtime/responsive";
@@ -9,6 +9,7 @@ import { useRealtimeTranscription } from "../transcription/useRealtimeTranscript
 export type AiPromptExecutionOptions = {
   executionMode: AiExecutionMode;
   reasoningDepth: AiReasoningDepth;
+  intent?: AiPromptIntent | null;
 };
 
 const promptControlClass =
@@ -24,7 +25,15 @@ type AiPromptInputProps = {
   appliedChangeSummary?: string | null;
   selectionFocus?: AiSelectionFocus | null;
   activeContextSources?: AiContextSource[];
+  researchBrief?: AiResearchBrief | null;
+  researchJob?: AiResearchJob | null;
+  researchJobs?: AiResearchJob[];
   onSubmit: (prompt: string, selectionFocus?: AiSelectionFocus | null, options?: AiPromptExecutionOptions) => void | Promise<void>;
+  onUpdateResearchBrief?: (brief: AiResearchBrief) => void;
+  onStartResearch?: (brief: AiResearchBrief) => void | Promise<void>;
+  onCancelResearchBrief?: () => void;
+  onCancelResearchJob?: (jobId: string) => void | Promise<void>;
+  onRetryResearchJob?: (jobId: string) => void | Promise<void>;
   onTranscriptionConfigChange?: (transcription: Partial<AiConfigStatus["transcription"]>) => void;
   onPreviewDocumentDictation?: (text: string) => void;
   onCommitDocumentDictation?: (text: string) => void;
@@ -50,7 +59,14 @@ export function AiPromptInput({
   appliedChangeSummary,
   selectionFocus,
   activeContextSources = [],
+  researchBrief = null,
+  researchJob = null,
   onSubmit,
+  onUpdateResearchBrief,
+  onStartResearch,
+  onCancelResearchBrief,
+  onCancelResearchJob,
+  onRetryResearchJob,
   onTranscriptionConfigChange,
   onPreviewDocumentDictation,
   onCommitDocumentDictation,
@@ -70,9 +86,12 @@ export function AiPromptInput({
   const [loading, setLoading] = useState(false);
   const [executionMode, setExecutionMode] = useState<AiExecutionMode>("quick");
   const [reasoningDepth, setReasoningDepth] = useState<AiReasoningDepth>("light");
+  const [intent, setIntent] = useState<AiPromptIntent | null>(null);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [depthMenuOpen, setDepthMenuOpen] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
+  const [contextMenuPreview, setContextMenuPreview] = useState<ContextMenuPreview | null>(null);
+  const [contextMenuSubmenu, setContextMenuSubmenu] = useState<ContextMenuSubmenu | null>(null);
   const [compactOptionsOpen, setCompactOptionsOpen] = useState(false);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [dragActive, setDragActive] = useState(false);
@@ -167,6 +186,8 @@ export function AiPromptInput({
       setContextMenuOpen(false);
       setSourcesOpen(false);
       setPreview(null);
+      setContextMenuPreview(null);
+      setContextMenuSubmenu(null);
     }
 
     function handleKeyDown(event: KeyboardEvent) {
@@ -174,6 +195,8 @@ export function AiPromptInput({
         setContextMenuOpen(false);
         setSourcesOpen(false);
         setPreview(null);
+        setContextMenuPreview(null);
+        setContextMenuSubmenu(null);
       }
     }
 
@@ -243,11 +266,45 @@ export function AiPromptInput({
     if (!prompt.trim() || !canPrompt || hasBlockingContext) return;
     setLoading(true);
     try {
-      await onSubmit(prompt.trim(), selectionFocus ?? null, { executionMode, reasoningDepth });
+      await onSubmit(prompt.trim(), selectionFocus ?? null, intent ? { executionMode, reasoningDepth, intent } : { executionMode, reasoningDepth });
       setPrompt("");
+      if (intent?.kind === "research") setIntent(null);
     } finally {
       setLoading(false);
     }
+  }
+
+  function chooseResearchIntent() {
+    setIntent({
+      kind: "research",
+      label: "Investigación",
+      research: {
+        sourceScope: "web_project",
+        resultTarget: "new_document",
+        confirmBeforeCreating: false,
+      },
+    });
+    setExecutionMode("reasoning");
+    setReasoningDepth("deep");
+    setContextMenuOpen(false);
+    textareaRef.current?.focus();
+  }
+
+  function chooseImageIntent() {
+    setIntent({ kind: "image", label: "Crear imagen" });
+    setContextMenuOpen(false);
+    textareaRef.current?.focus();
+  }
+
+  function chooseDiagramIntent() {
+    setIntent({ kind: "diagram", label: "Crear diagrama" });
+    setContextMenuOpen(false);
+    textareaRef.current?.focus();
+  }
+
+  function previewContextMenuOption(preview: ContextMenuPreview, submenu: ContextMenuSubmenu | null = null) {
+    setContextMenuPreview(preview);
+    setContextMenuSubmenu(submenu);
   }
 
   function handlePromptChange(value: string) {
@@ -449,15 +506,20 @@ export function AiPromptInput({
     event.preventDefault();
     event.stopPropagation();
     contextMenuPointerToggleRef.current = true;
+    setContextMenuPreview(null);
+    setContextMenuSubmenu(null);
     setContextMenuOpen((open) => !open);
   }
 
   function toggleContextMenuFromClick(event: ReactMouseEvent<HTMLButtonElement>) {
+    if (!canManageContext) return;
     if (contextMenuPointerToggleRef.current) {
       contextMenuPointerToggleRef.current = false;
       event.preventDefault();
       return;
     }
+    setContextMenuPreview(null);
+    setContextMenuSubmenu(null);
     setContextMenuOpen((open) => !open);
   }
 
@@ -517,6 +579,17 @@ export function AiPromptInput({
           ) : null}
         </div>
       ) : null}
+      {researchBrief || researchJob ? (
+        <ResearchPreparationCard
+          brief={researchBrief}
+          job={researchJob}
+          onChange={onUpdateResearchBrief}
+          onStart={onStartResearch}
+          onCancelBrief={onCancelResearchBrief}
+          onCancelJob={onCancelResearchJob}
+          onRetryJob={onRetryResearchJob}
+        />
+      ) : null}
       <div
         className={[
           "knownext-ai-prompt pointer-events-auto relative flex min-h-11 w-[min(760px,100%)] flex-col rounded-[28px] border bg-white px-2.5 py-1.5 shadow-[0_10px_28px_rgba(17,24,39,0.12)] transition",
@@ -538,6 +611,22 @@ export function AiPromptInput({
         }}
         onDrop={handleDrop}
       >
+        {intent ? (
+          <div className="flex items-center gap-1 px-1 pb-1 pt-0.5">
+            <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-orange-200 bg-brand-hover px-2.5 py-1 text-[10px] font-semibold text-brand-orange">
+              <Sparkles size={12} />
+              <span className="truncate">{intent.label}</span>
+              <button
+                type="button"
+                className="grid h-4 w-4 place-items-center rounded-full hover:bg-white"
+                aria-label="Quitar capacidad IA"
+                onClick={() => setIntent(null)}
+              >
+                <X size={10} />
+              </button>
+            </span>
+          </div>
+        ) : null}
         {visibleSelectionFocus || activeContextSources.length > 0 ? (
           <div className="knownext-ai-context-strip pointer-events-auto flex max-h-[52px] w-full flex-wrap items-center gap-1 overflow-hidden px-1 pb-1.5 pt-0.5">
             {visibleSelectionFocus ? (
@@ -610,11 +699,43 @@ export function AiPromptInput({
               <Plus size={19} strokeWidth={1.8} />
             </button>
             {contextMenuOpen ? (
-              <div className="absolute bottom-full left-0 z-40 mb-2 grid w-64 gap-1 rounded-[16px] border border-line bg-white p-1.5 text-[11px] text-ink-primary shadow-menu">
-                <p className="px-2 pb-0.5 pt-0.5 text-[10px] text-ink-secondary">Añadir contexto</p>
-                <ContextMenuButton icon={FileText} title="Archivo del proyecto" detail="Escribe @ para buscar documentos" onClick={focusProjectReferenceSearch} />
-                <ContextMenuButton icon={File} title="Adjuntar archivo" detail="PDF, Office, CSV, Markdown e imagen" onClick={() => void pickLocalContextFiles()} />
-                <ContextMenuButton icon={Image} title="Pegar imagen" detail="Usa Ctrl+V dentro del prompt" onClick={focusPromptForPaste} />
+              <div className="absolute bottom-full left-0 z-40 mb-2 flex items-end gap-2">
+                <div className="grid w-60 gap-1 rounded-[16px] border border-line bg-white p-1.5 text-[11px] text-ink-primary shadow-menu">
+                  <ContextMenuSectionTitle label="Contexto" />
+                  <ContextMenuButton icon={FileText} title="Archivo del proyecto" detail="Busca documentos con @ y añádelos como contexto de la conversación." group="Añadir contexto" onPreview={previewContextMenuOption} onClick={focusProjectReferenceSearch} />
+                  <ContextMenuButton icon={File} title="Adjuntar archivo" detail="Usa PDF, Office, CSV, Markdown o imágenes como material temporal del prompt." group="Añadir contexto" onPreview={previewContextMenuOption} onClick={() => void pickLocalContextFiles()} />
+                  <ContextMenuButton icon={Image} title="Pegar imagen" detail="Pega una captura o imagen con Ctrl+V dentro del prompt." group="Añadir contexto" onPreview={previewContextMenuOption} onClick={focusPromptForPaste} />
+                  <ContextMenuDivider />
+                  <ContextMenuSectionTitle label="Capacidades" />
+                  <ContextMenuButton icon={Search} title="Investigación" detail="Prepara un plan, busca fuentes web y crea un informe nuevo revisable." group="Capacidad" onPreview={previewContextMenuOption} onClick={chooseResearchIntent} />
+                  <ContextMenuSubmenuButton
+                    icon={Sparkles}
+                    title="Crear"
+                    detail="Genera imágenes o diagramas para usar en el proyecto."
+                    active={contextMenuSubmenu === "create"}
+                    onPreview={previewContextMenuOption}
+                    onOpen={() => previewContextMenuOption({ icon: Sparkles, title: "Crear", detail: "Genera imágenes o diagramas para usar en el proyecto.", group: "Capacidad" }, "create")}
+                    onToggle={() => {
+                      if (contextMenuSubmenu === "create") {
+                        setContextMenuSubmenu(null);
+                        setContextMenuPreview(null);
+                        return;
+                      }
+                      previewContextMenuOption({ icon: Sparkles, title: "Crear", detail: "Genera imágenes o diagramas para usar en el proyecto.", group: "Capacidad" }, "create");
+                    }}
+                  />
+                </div>
+                {contextMenuSubmenu ? (
+                  <div className="flex items-end gap-2">
+                    <ContextMenuSubmenuPanel
+                      submenu={contextMenuSubmenu}
+                      onPreview={previewContextMenuOption}
+                      onImage={chooseImageIntent}
+                      onDiagram={chooseDiagramIntent}
+                    />
+                    {contextMenuPreview ? <ContextMenuPreviewCard preview={contextMenuPreview} /> : null}
+                  </div>
+                ) : contextMenuPreview ? <ContextMenuPreviewCard preview={contextMenuPreview} /> : null}
               </div>
             ) : null}
             <input
@@ -670,6 +791,12 @@ export function AiPromptInput({
                 ? "Crea un proyecto para activar la asistencia de documentación."
                 : !providerReady
                 ? "Configura OpenAI en Ajustes > IA para activar la asistencia."
+                : intent?.kind === "research"
+                ? "Describe qué quieres investigar..."
+                : intent?.kind === "image"
+                ? "Describe la imagen que quieres crear..."
+                : intent?.kind === "diagram"
+                ? "Describe el diagrama que necesitas..."
                 : documentId
                 ? "Pregunta algo sobre este documento..."
                 : "Pregunta algo sobre la documentación del proyecto..."
@@ -1079,17 +1206,754 @@ function ContextSourceChip({ source, onOpen, onRemove }: { source: AiContextSour
   );
 }
 
-function ContextMenuButton({ icon: Icon, title, detail, onClick }: { icon: typeof FileText; title: string; detail: string; onClick: () => void }) {
+const researchCandidateSourceOptions = [10, 50, 200, 500] as const;
+const researchReportLengthOptions: Array<{ value: AiResearchReportLength; label: string; detail: string }> = [
+  { value: "brief", label: "Breve", detail: "800-1.500 palabras" },
+  { value: "standard", label: "Estándar", detail: "2.000-4.000 palabras" },
+  { value: "wide", label: "Amplio", detail: "5.000-8.000 palabras" },
+  { value: "exhaustive", label: "Exhaustivo", detail: "9.000-15.000 palabras" },
+];
+
+function ResearchPreparationCard({
+  brief,
+  job,
+  onChange,
+  onStart,
+  onCancelBrief,
+  onCancelJob,
+  onRetryJob,
+}: {
+  brief: AiResearchBrief | null;
+  job: AiResearchJob | null;
+  onChange?: (brief: AiResearchBrief) => void;
+  onStart?: (brief: AiResearchBrief) => void | Promise<void>;
+  onCancelBrief?: () => void;
+  onCancelJob?: (jobId: string) => void | Promise<void>;
+  onRetryJob?: (jobId: string) => void | Promise<void>;
+}) {
+  const activeBrief = brief ?? job?.brief ?? null;
+  const running = Boolean(job && !isResearchTerminalStatus(job.status));
+  const ready = Boolean(job && isResearchReadyStatus(job.status));
+  const failed = Boolean(job && isResearchFailedStatus(job.status));
+  const cancelled = job?.status === "cancelled";
+  const progress = Math.max(0, Math.min(100, job?.progress ?? (running ? 20 : ready || failed || cancelled ? 100 : 0)));
+  const plan = activeBrief ? getResearchPlan(activeBrief) : null;
+  const [editingPlan, setEditingPlan] = useState(false);
+  const [draftPlan, setDraftPlan] = useState(plan);
+  const [secondsLeft, setSecondsLeft] = useState(60);
+  const [countdownPaused, setCountdownPaused] = useState(false);
+  const [confirmCancelJob, setConfirmCancelJob] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const autoStartedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    setEditingPlan(false);
+    setDraftPlan(plan);
+    setSecondsLeft(60);
+    setCountdownPaused(false);
+    setConfirmCancelJob(false);
+    autoStartedRef.current = null;
+  }, [activeBrief?.id, plan?.updatedAt]);
+
+  useEffect(() => {
+    if (!activeBrief || job || editingPlan || countdownPaused || !plan || autoStartedRef.current === activeBrief.id) return;
+    if (secondsLeft <= 0) {
+      autoStartedRef.current = activeBrief.id;
+      void onStart?.(withResearchPlan(activeBrief, draftPlan ?? plan));
+      return;
+    }
+    const timeout = window.setTimeout(() => setSecondsLeft((current) => Math.max(0, current - 1)), 1_000);
+    return () => window.clearTimeout(timeout);
+  }, [activeBrief, countdownPaused, draftPlan, editingPlan, job, onStart, plan, secondsLeft]);
+
+  useEffect(() => {
+    if (!running) return;
+    const interval = window.setInterval(() => setNowMs(Date.now()), 1_000);
+    return () => window.clearInterval(interval);
+  }, [running]);
+
+  const stalled = Boolean(job && running && isResearchStalled(job, nowMs));
+  const activityLine = job ? researchProgressLine(job, { nowMs, stalled }) : "";
+  const title = "Investigación";
+  const footerText = job
+    ? researchFooterText(job, stalled)
+    : editingPlan
+      ? "La cuenta atrás está pausada mientras editas el plan."
+      : "Puedes cambiar el plan o dejar que empiece automáticamente.";
+
+  if (!activeBrief && !job) return null;
+
+  function updateDraftPlan(patch: Partial<NonNullable<typeof draftPlan>>) {
+    setDraftPlan((current) => current ? { ...current, ...patch, updatedAt: new Date().toISOString() } : current);
+  }
+
+  function commitDraftPlan() {
+    if (!activeBrief || !draftPlan || !onChange) return;
+    onChange(withResearchPlan(activeBrief, draftPlan));
+    setEditingPlan(false);
+  }
+
+  function startNow() {
+    if (!activeBrief || !plan) return;
+    autoStartedRef.current = activeBrief.id;
+    void onStart?.(withResearchPlan(activeBrief, draftPlan ?? plan));
+  }
+
+  function requestCancelJob() {
+    if (!job || !running) return;
+    setConfirmCancelJob(true);
+  }
+
+  function confirmCancelRunningJob() {
+    if (!job) return;
+    setConfirmCancelJob(false);
+    void onCancelJob?.(job.id);
+  }
+
   return (
-    <button type="button" className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left hover:bg-brand-hover" onClick={onClick}>
-      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-panel text-brand-orange">
-        <Icon size={14} />
+    <div className="pointer-events-auto absolute bottom-full left-1/2 mb-3 max-h-[min(640px,calc(100vh-136px))] w-[min(760px,calc(100vw-72px))] -translate-x-1/2 overflow-hidden rounded-[18px] border border-orange-100 bg-white shadow-[0_18px_55px_rgba(17,24,39,0.16)]">
+      <div className="border-b border-line bg-panel/50 px-4 py-3">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-hover text-brand-orange">
+              <Search size={17} />
+            </span>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-[14px] font-semibold text-ink-primary">{title}</p>
+                {activeBrief ? <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-ink-secondary ring-1 ring-line">Documento nuevo</span> : null}
+              </div>
+              <p className="mt-1 text-[11px] leading-4 text-ink-secondary">{job?.progressMessage ?? job?.message ?? "Revisa el guion. Puedes editarlo o dejar que empiece automáticamente."}</p>
+            </div>
+          </div>
+          {job ? (
+            <span className={["shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold", ready ? "bg-emerald-50 text-emerald-700" : failed ? "bg-red-50 text-red-700" : "bg-brand-hover text-brand-orange"].join(" ")}>
+              {researchStatusLabel(job.status)}
+            </span>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="max-h-[calc(min(640px,calc(100vh-136px))-132px)] overflow-y-auto px-4 py-3">
+        {activeBrief && plan && !job ? (
+          editingPlan && draftPlan ? (
+            <div className="grid gap-3">
+              <label className="grid gap-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">Objetivo principal</span>
+                <textarea className="min-h-[66px] resize-none rounded-xl border border-line bg-white px-3 py-2 text-[12px] leading-5 text-ink-primary outline-none transition focus:border-brand-orange focus:ring-2 focus:ring-orange-100" value={draftPlan.primaryObjective ?? draftPlan.objective} onChange={(event) => updateDraftPlan({ primaryObjective: event.target.value, objective: event.target.value })} />
+              </label>
+              <label className="grid gap-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">3 objetivos secundarios</span>
+                <textarea className="min-h-[108px] resize-none rounded-xl border border-line bg-white px-3 py-2 text-[12px] leading-5 text-ink-primary outline-none transition focus:border-brand-orange focus:ring-2 focus:ring-orange-100" value={(draftPlan.secondaryObjectives ?? []).join("\n")} onChange={(event) => updateDraftPlan({ secondaryObjectives: splitResearchPlanLines(event.target.value).slice(0, 3) })} />
+              </label>
+              <label className="grid gap-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">5 aspectos a investigar</span>
+                <textarea className="min-h-[132px] resize-none rounded-xl border border-line bg-white px-3 py-2 text-[12px] leading-5 text-ink-primary outline-none transition focus:border-brand-orange focus:ring-2 focus:ring-orange-100" value={(draftPlan.researchAspects ?? draftPlan.outline).join("\n")} onChange={(event) => updateDraftPlan({ researchAspects: splitResearchPlanLines(event.target.value).slice(0, 5) })} />
+              </label>
+              <label className="grid gap-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">Estilo recomendado</span>
+                <input className="h-9 rounded-xl border border-line bg-white px-3 text-[12px] text-ink-primary outline-none transition focus:border-brand-orange focus:ring-2 focus:ring-orange-100" value={draftPlan.recommendedReportStyle ?? ""} onChange={(event) => updateDraftPlan({ recommendedReportStyle: event.target.value })} />
+              </label>
+              <div className="grid gap-3 md:grid-cols-2">
+                <ResearchPlanSegmentedControl
+                  label="Fuentes candidatas"
+                  value={String(normalizeResearchCandidateSourceLimit(draftPlan.candidateSourceLimit ?? draftPlan.proposedCandidateSourceLimit))}
+                  options={researchCandidateSourceOptions.map((value) => ({ value: String(value), label: String(value) }))}
+                  onChange={(value) => updateDraftPlan({ candidateSourceLimit: Number(value) })}
+                />
+                <ResearchPlanSegmentedControl
+                  label="Extensión del informe"
+                  value={draftPlan.reportLength ?? draftPlan.proposedReportLength ?? "standard"}
+                  options={researchReportLengthOptions.map((option) => ({ value: option.value, label: option.label, detail: option.detail }))}
+                  onChange={(value) => updateDraftPlan({ reportLength: value as AiResearchReportLength })}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3 text-[12px] leading-5 text-ink-primary">
+              <p>
+                <span className="font-semibold text-brand-orange">Plan propuesto.</span>{" "}
+                <span className="font-semibold">{plan.title}</span>
+              </p>
+              <p>
+                <span className="font-semibold">Objetivo principal:</span> {plan.primaryObjective ?? plan.objective}
+              </p>
+              <p>
+                <span className="font-semibold">Objetivos secundarios:</span>{" "}
+                {(plan.secondaryObjectives ?? []).slice(0, 3).map((item, index) => `${index + 1}. ${item}`).join(" · ")}
+              </p>
+              <p>
+                <span className="font-semibold">Aspectos a investigar:</span>{" "}
+                {(plan.researchAspects ?? plan.outline).slice(0, 5).map((item, index) => `${index + 1}. ${item}`).join(" · ")}
+              </p>
+              <p>
+                <span className="font-semibold">Estilo:</span> {plan.recommendedReportStyle ?? "Informe profesional, trazable y orientado a conclusiones."}{" "}
+                <span className="font-semibold">Salida:</span> Documento nuevo.{" "}
+                <span className="font-semibold">Recursos:</span> {researchVisualToggleLabel(plan)}.
+              </p>
+              {plan.constraints ? (
+                <p>
+                  <span className="font-semibold">Criterios:</span> {plan.constraints}
+                </p>
+              ) : null}
+              {plan.planningRationale ? (
+                <p className="text-ink-secondary">
+                  <span className="font-semibold text-brand-orange">Propuesta:</span> {plan.planningRationale}
+                </p>
+              ) : null}
+              <div className="grid gap-3 pt-1 sm:grid-cols-2">
+                <ResearchPlanSegmentedControl
+                  label="Fuentes candidatas"
+                  value={String(normalizeResearchCandidateSourceLimit((draftPlan ?? plan).candidateSourceLimit ?? (draftPlan ?? plan).proposedCandidateSourceLimit))}
+                  options={researchCandidateSourceOptions.map((value) => ({ value: String(value), label: String(value) }))}
+                  onChange={(value) => updateDraftPlan({ candidateSourceLimit: Number(value) })}
+                />
+                <ResearchPlanSegmentedControl
+                  label="Extensión del informe"
+                  value={(draftPlan ?? plan).reportLength ?? (draftPlan ?? plan).proposedReportLength ?? "standard"}
+                  options={researchReportLengthOptions.map((option) => ({ value: option.value, label: option.label, detail: option.detail }))}
+                  onChange={(value) => updateDraftPlan({ reportLength: value as AiResearchReportLength })}
+                />
+              </div>
+            </div>
+          )
+        ) : null}
+
+        {job ? (
+        <div className="mt-3 space-y-2">
+          <div className="flex items-center gap-2 rounded-xl border border-line bg-panel/60 px-3 py-2">
+            {running ? <Loader2 size={14} className="shrink-0 animate-spin text-brand-orange" /> : ready ? <CheckCircle2 size={14} className="shrink-0 text-emerald-600" /> : failed ? <AlertTriangle size={14} className="shrink-0 text-red-600" /> : <Search size={14} className="shrink-0 text-ink-secondary" />}
+            <p className="min-w-0 truncate text-[12px] text-ink-primary">{activityLine}</p>
+          </div>
+          <ResearchMetricChips job={job} />
+          <div className="h-1.5 overflow-hidden rounded-full bg-panel">
+            <div className="h-full rounded-full bg-brand-orange transition-all" style={{ width: `${progress}%` }} />
+          </div>
+          {failed ? <p className="rounded-lg bg-red-50 px-2 py-1.5 text-[10px] text-red-700">{researchErrorMessage(job.error) || job.message}</p> : null}
+        </div>
+        ) : null}
+      </div>
+
+      <div className="flex items-center justify-between gap-3 border-t border-line bg-white px-4 py-3">
+        <p className="min-w-0 truncate text-[11px] text-ink-secondary">{footerText}</p>
+        <div className="flex shrink-0 gap-2">
+          {job && running ? <button className="h-9 rounded-xl border border-line px-4 text-[12px] font-semibold text-ink-secondary transition hover:bg-brand-hover" onClick={requestCancelJob}>Cancelar</button> : null}
+          {!job && activeBrief ? <button className="h-9 rounded-xl border border-line px-4 text-[12px] font-semibold text-ink-secondary transition hover:bg-brand-hover" onClick={onCancelBrief}>Cancelar</button> : null}
+          {!job && activeBrief && !editingPlan ? <button className="h-9 rounded-xl border border-line px-4 text-[12px] font-semibold text-ink-secondary transition hover:bg-brand-hover" onClick={() => setEditingPlan(true)}>Cambiar</button> : null}
+          {!job && activeBrief && editingPlan ? <button className="h-9 rounded-xl border border-line px-4 text-[12px] font-semibold text-ink-secondary transition hover:bg-brand-hover" onClick={commitDraftPlan}>Guardar cambios</button> : null}
+          {!job && activeBrief && !editingPlan ? <ResearchCountdownButton secondsLeft={secondsLeft} totalSeconds={60} paused={countdownPaused} onToggle={() => setCountdownPaused((paused) => !paused)} /> : null}
+          {!job && activeBrief ? <button className="h-9 rounded-xl bg-brand-orange px-4 text-[12px] font-semibold text-white shadow-[0_8px_18px_rgba(243,112,33,0.22)] transition hover:bg-brand-dark" onClick={startNow}>Iniciar ahora</button> : null}
+          {job && failed ? <button className="h-9 rounded-xl bg-brand-orange px-4 text-[12px] font-semibold text-white shadow-[0_8px_18px_rgba(243,112,33,0.22)] transition hover:bg-brand-dark" onClick={() => void onRetryJob?.(job.id)}>Reintentar</button> : null}
+          {job && isResearchTerminalStatus(job.status) ? <button className="h-9 rounded-xl border border-line px-4 text-[12px] font-semibold text-ink-secondary transition hover:bg-brand-hover" onClick={onCancelBrief}>Cerrar</button> : null}
+        </div>
+      </div>
+      {confirmCancelJob ? (
+        <ResearchCancelConfirmationDialog
+          onCancel={() => setConfirmCancelJob(false)}
+          onConfirm={confirmCancelRunningJob}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function researchStatusLabel(status: AiResearchJob["status"]) {
+  const labels: Record<AiResearchJob["status"], string> = {
+    draft: "Borrador",
+    planning: "Planificando",
+    query_planning: "Preparando plan",
+    searching: "Buscando",
+    ranking: "Seleccionando",
+    reading: "Leyendo",
+    extracting: "Extrayendo",
+    contrasting: "Contrastando",
+    gap_analysis: "Revisando lagunas",
+    synthesizing: "Sintetizando",
+    drafting: "Redactando",
+    reviewing: "Revisando",
+    verifying: "Verificando",
+    publishing: "Creando borrador",
+    ready: "Lista",
+    ready_pass: "Lista",
+    ready_warning: "Lista con avisos",
+    failed: "Error",
+    failed_quality: "Calidad insuficiente",
+    failed_provider: "Error técnico",
+    failed_publish: "Error al crear borrador",
+    failed_runtime: "Error interno",
+    cancelled: "Cancelada",
+  };
+  return labels[status];
+}
+
+function ResearchCountdownButton({
+  secondsLeft,
+  totalSeconds,
+  paused,
+  onToggle,
+}: {
+  secondsLeft: number;
+  totalSeconds: number;
+  paused: boolean;
+  onToggle: () => void;
+}) {
+  const progress = Math.max(0, Math.min(1, secondsLeft / Math.max(1, totalSeconds)));
+  const degrees = Math.round(progress * 360);
+  const Icon = paused ? Play : Pause;
+  return (
+    <button
+      type="button"
+      className="group inline-flex h-9 items-center gap-2 rounded-xl border border-orange-100 bg-brand-hover/70 pl-1.5 pr-3 text-[11px] font-semibold text-brand-orange transition hover:bg-brand-hover"
+      onClick={onToggle}
+      aria-label={paused ? "Reanudar cuenta atrás" : "Pausar cuenta atrás"}
+      data-tooltip={paused ? "Reanudar inicio automático" : "Pausar inicio automático"}
+    >
+      <span
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-full"
+        style={{ background: `conic-gradient(#F37021 ${degrees}deg, #FFE2D1 ${degrees}deg)` }}
+        aria-hidden="true"
+      >
+        <span className="grid h-[22px] w-[22px] place-items-center rounded-full bg-white">
+          <Icon size={11} strokeWidth={2.4} />
+        </span>
+      </span>
+      <span>{secondsLeft} s</span>
+    </button>
+  );
+}
+
+function ResearchCancelConfirmationDialog({
+  onCancel,
+  onConfirm,
+}: {
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="absolute inset-0 z-50 grid place-items-center bg-white/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="research-cancel-title">
+      <div className="w-[min(360px,100%)] rounded-2xl border border-line bg-white p-4 shadow-[0_18px_45px_rgba(17,24,39,0.18)]">
+        <div className="flex items-start gap-3">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-red-50 text-red-600">
+            <AlertTriangle size={17} />
+          </span>
+          <div className="min-w-0">
+            <p id="research-cancel-title" className="text-[14px] font-semibold text-ink-primary">Cancelar investigación</p>
+            <p className="mt-1 text-[12px] leading-5 text-ink-secondary">Se detendrá el proceso y no se creará ningún documento parcial.</p>
+          </div>
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" className="h-9 rounded-xl border border-line px-4 text-[12px] font-semibold text-ink-secondary transition hover:bg-brand-hover" onClick={onCancel}>
+            Volver
+          </button>
+          <button type="button" className="h-9 rounded-xl bg-red-600 px-4 text-[12px] font-semibold text-white transition hover:bg-red-700" onClick={onConfirm}>
+            Cancelar investigación
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function isResearchReadyStatus(status: AiResearchJob["status"]) {
+  return status === "ready" || status === "ready_pass" || status === "ready_warning";
+}
+
+function isResearchFailedStatus(status: AiResearchJob["status"]) {
+  return status === "failed" || status === "failed_quality" || status === "failed_provider" || status === "failed_publish" || status === "failed_runtime";
+}
+
+function isResearchTerminalStatus(status: AiResearchJob["status"]) {
+  return isResearchReadyStatus(status) || isResearchFailedStatus(status) || status === "cancelled";
+}
+
+function researchProgressLine(job: AiResearchJob, options?: { nowMs?: number; stalled?: boolean }) {
+  const elapsed = formatResearchElapsed(job.startedAt ?? job.createdAt, options?.nowMs ?? Date.now());
+  if (options?.stalled) {
+    const message = latestResearchActivityMessage(job) || job.progressMessage || job.message || researchStatusLabel(job.status);
+    return `${elapsed} · Sin actividad reciente. Último paso: ${message}`;
+  }
+  if (isResearchReadyStatus(job.status)) {
+    return job.documentPath ? `${elapsed} · Borrador creado: ${job.documentPath}` : `${elapsed} · Investigación completada. Borrador creado.`;
+  }
+  if (isResearchFailedStatus(job.status)) {
+    return `${elapsed} · ${researchErrorMessage(job.error) || job.message || "No se pudo completar la investigación."}`;
+  }
+  if (job.status === "cancelled") return `${elapsed} · Investigación cancelada.`;
+  return `${elapsed} · ${latestResearchActivityMessage(job) || job.progressMessage || job.message || researchStatusLabel(job.status)}`;
+}
+
+function latestResearchActivityMessage(job: AiResearchJob) {
+  const activity = job.activity ?? [];
+  return activity.length > 0 ? activity[activity.length - 1]?.message?.trim() || "" : "";
+}
+
+function researchFooterText(job: AiResearchJob, stalled: boolean) {
+  if (stalled) return "No hay actividad reciente. Puedes esperar o cancelar.";
+  if (isResearchReadyStatus(job.status)) return job.documentPath ? `Borrador creado para revisar: ${job.documentPath}` : "Borrador creado para revisar.";
+  if (isResearchFailedStatus(job.status)) return "No se creó ningún documento.";
+  if (job.status === "cancelled") return "Investigación cancelada. No se creó ningún documento parcial.";
+  return "La investigación está trabajando. Puedes cancelarla; no se creará documento parcial.";
+}
+
+function isResearchStalled(job: AiResearchJob, nowMs: number) {
+  const heartbeat = job.heartbeatAt ?? job.lastActivityAt ?? job.updatedAt;
+  const heartbeatMs = heartbeat ? Date.parse(heartbeat) : Number.NaN;
+  if (!Number.isFinite(heartbeatMs)) return false;
+  return nowMs - heartbeatMs > 120_000;
+}
+
+function formatResearchElapsed(startedAt: string | null | undefined, nowMs: number) {
+  const startedMs = startedAt ? Date.parse(startedAt) : Number.NaN;
+  const elapsedSeconds = Number.isFinite(startedMs) ? Math.max(0, Math.floor((nowMs - startedMs) / 1_000)) : 0;
+  const minutes = Math.floor(elapsedSeconds / 60);
+  const seconds = elapsedSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function ResearchMetricChips({ job }: { job: AiResearchJob }) {
+  const counts = job.artifactCounts;
+  const usage = job.usage;
+  const chips: string[] = [];
+  if (counts) {
+    const sourceTotal = counts.candidateSources || job.strategy?.candidateSourceLimit || job.brief.candidateSourceLimit || job.brief.maxSources || 0;
+    const sourceCurrent = counts.readSources || counts.selectedSources || counts.rankedSources || counts.candidateSources;
+    if (sourceCurrent > 0 || sourceTotal > 0) chips.push(`Fuentes ${sourceCurrent}${sourceTotal ? `/${sourceTotal}` : ""}`);
+    if (counts.evidence > 0) chips.push(`Evidencias ${counts.evidence}`);
+    if (counts.tables > 0) chips.push(`Tablas ${counts.tables}`);
+    if (counts.diagrams > 0) chips.push(`Diagramas ${counts.diagrams}`);
+    if (counts.images > 0) chips.push(`Imágenes ${counts.images}`);
+  }
+  if (usage) {
+    if (usage.totalTokens > 0) chips.push(`Tokens ${formatCompactNumber(usage.totalTokens)}`);
+    if (typeof usage.estimatedCostEur === "number" && usage.estimatedCostEur > 0) chips.push(`Coste aprox. ${formatEuro(usage.estimatedCostEur)}`);
+  }
+  if (chips.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {chips.slice(0, 7).map((chip) => (
+        <span key={chip} className="rounded-full border border-orange-100 bg-brand-hover/70 px-2 py-0.5 text-[10px] font-semibold text-brand-orange">
+          {chip}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function formatCompactNumber(value: number) {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1).replace(".", ",")}M`;
+  if (value >= 1_000) return `${Math.round(value / 100) / 10}`.replace(".", ",") + "k";
+  return String(value);
+}
+
+function formatEuro(value: number) {
+  return new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+}
+
+function getResearchPlan(brief: AiResearchBrief): NonNullable<AiResearchBrief["plan"]> {
+  const now = new Date().toISOString();
+  const candidateSourceLimit = normalizeResearchCandidateSourceLimit(brief.candidateSourceLimit ?? brief.maxSources ?? brief.plan?.candidateSourceLimit ?? brief.plan?.proposedCandidateSourceLimit);
+  const reportLength = normalizeResearchReportLength(brief.plan?.reportLength ?? brief.plan?.proposedReportLength);
+  const fallbackAspects = normalizeResearchPlanList(brief.questions, [
+    `Delimitar el objetivo real de la investigación sobre ${brief.topic}`,
+    "Localizar fuentes web fiables y recientes",
+    "Contrastar coincidencias y contradicciones entre fuentes",
+    "Separar hechos verificados, incertidumbres y recomendaciones",
+    "Definir conclusiones accionables y limitaciones del informe",
+  ], 5);
+  const fallbackSecondary = normalizeResearchPlanList([], [
+    `Aclarar el contexto y alcance de ${brief.topic}`,
+    "Verificar la información con fuentes independientes",
+    "Convertir los hallazgos en recomendaciones útiles",
+  ], 3);
+  return brief.plan ?? {
+    title: brief.topic || "Investigación",
+    objective: brief.objective || `Investigar de forma contrastada: ${brief.topic}`,
+    primaryObjective: brief.objective || `Investigar de forma contrastada: ${brief.topic}`,
+    secondaryObjectives: fallbackSecondary,
+    researchAspects: fallbackAspects,
+    objectiveCoverage: [
+      { objectiveIndex: 0, aspectIndexes: [0, 1] },
+      { objectiveIndex: 1, aspectIndexes: [1, 2, 3] },
+      { objectiveIndex: 2, aspectIndexes: [3, 4] },
+    ],
+    recommendedReportStyle: "Informe profesional con conclusiones accionables",
+    proposedCandidateSourceLimit: candidateSourceLimit,
+    candidateSourceLimit,
+    proposedReportLength: reportLength,
+    reportLength,
+    planningRationale: `${candidateSourceLimit} fuentes candidatas y extensión ${researchReportLengthLabel(reportLength).toLowerCase()} por el alcance previsto.`,
+    outline: fallbackAspects,
+    constraints: "Priorizar fuentes fiables, conclusiones accionables y limitaciones explícitas.",
+    sourceScope: "web_project",
+    reportSkillId: "knownext.research_report",
+    auxiliarySkillIds: [],
+    outputSummary: "Web activa · contexto del proyecto si se aporta · tablas y citas siempre disponibles",
+    visualPlan: researchVisualToggleLabel({ diagramsEnabled: brief.reportProfile?.diagramsEnabled ?? false, imagesEnabled: brief.reportProfile?.imagesEnabled ?? false } as NonNullable<AiResearchBrief["plan"]>),
+    diagramsEnabled: brief.reportProfile?.diagramsEnabled ?? false,
+    imagesEnabled: brief.reportProfile?.imagesEnabled ?? false,
+    estimatedDurationLabel: brief.depth === "quick" ? "3-5 min" : brief.depth === "deep" ? "8-15 min" : "6-10 min",
+    autoStartAfterSeconds: 60,
+    createdAt: brief.createdAt || now,
+    updatedAt: brief.updatedAt || now,
+  };
+}
+
+function withResearchPlan(brief: AiResearchBrief, plan: NonNullable<AiResearchBrief["plan"]>): AiResearchBrief {
+  const now = new Date().toISOString();
+  const primaryObjective = (plan.primaryObjective ?? plan.objective).trim();
+  const secondaryObjectives = normalizeResearchPlanList(plan.secondaryObjectives ?? [], [
+    `Aclarar el contexto y alcance de ${brief.topic}`,
+    "Verificar la información con fuentes independientes",
+    "Convertir los hallazgos en recomendaciones útiles",
+  ], 3);
+  const researchAspects = normalizeResearchPlanList(plan.researchAspects ?? plan.outline, [
+    `Delimitar el objetivo real de la investigación sobre ${brief.topic}`,
+    "Localizar fuentes web fiables y recientes",
+    "Contrastar coincidencias y contradicciones entre fuentes",
+    "Separar hechos verificados, incertidumbres y recomendaciones",
+    "Definir conclusiones accionables y limitaciones del informe",
+  ], 5);
+  const candidateSourceLimit = normalizeResearchCandidateSourceLimit(plan.candidateSourceLimit ?? plan.proposedCandidateSourceLimit ?? brief.candidateSourceLimit ?? brief.maxSources);
+  const reportLength = normalizeResearchReportLength(plan.reportLength ?? plan.proposedReportLength);
+  const nextPlan = {
+    ...plan,
+    objective: primaryObjective,
+    primaryObjective,
+    secondaryObjectives,
+    researchAspects,
+    outline: researchAspects,
+    sourceScope: "web_project" as const,
+    proposedCandidateSourceLimit: normalizeResearchCandidateSourceLimit(plan.proposedCandidateSourceLimit ?? candidateSourceLimit),
+    candidateSourceLimit,
+    proposedReportLength: normalizeResearchReportLength(plan.proposedReportLength ?? reportLength),
+    reportLength,
+    updatedAt: now,
+  };
+  return {
+    ...brief,
+    topic: plan.title,
+    objective: primaryObjective,
+    questions: researchAspects,
+    sourceScope: "web_project",
+    maxSources: candidateSourceLimit,
+    candidateSourceLimit,
+    plan: nextPlan,
+    updatedAt: now,
+  };
+}
+
+function normalizeResearchCandidateSourceLimit(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 50;
+  return researchCandidateSourceOptions.reduce((closest, option) => (
+    Math.abs(option - numeric) < Math.abs(closest - numeric) ? option : closest
+  ), researchCandidateSourceOptions[0]);
+}
+
+function normalizeResearchReportLength(value: unknown): AiResearchReportLength {
+  return researchReportLengthOptions.some((option) => option.value === value)
+    ? value as AiResearchReportLength
+    : "standard";
+}
+
+function researchReportLengthLabel(value: AiResearchReportLength) {
+  return researchReportLengthOptions.find((option) => option.value === value)?.label ?? "Estándar";
+}
+
+function normalizeResearchPlanList(values: string[], fallback: string[], count: number) {
+  const items = [...values, ...fallback].map((value) => value.trim()).filter(Boolean);
+  return items.slice(0, count);
+}
+
+function researchVisualToggleLabel(plan: Pick<NonNullable<AiResearchBrief["plan"]>, "diagramsEnabled" | "imagesEnabled">) {
+  if (plan.diagramsEnabled && plan.imagesEnabled) return "Diagramas e imágenes permitidos";
+  if (plan.diagramsEnabled) return "Diagramas permitidos";
+  if (plan.imagesEnabled) return "Imágenes permitidas";
+  return "Sin recursos visuales";
+}
+
+function splitResearchPlanLines(value: string) {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function researchErrorMessage(error: AiResearchJob["error"]) {
+  if (!error) return "";
+  if (typeof error === "string") return error;
+  return error.message;
+}
+
+function ResearchPlanSegmentedControl({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: Array<{ value: string; label: string; detail?: string }>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="rounded-xl border border-line bg-panel/50 p-2">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">{label}</p>
+      <div className="mt-2 grid gap-1" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
+        {options.map((option) => {
+          const selected = option.value === value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              className={["min-h-8 rounded-lg px-2 py-1 text-[10px] font-semibold transition", selected ? "bg-brand-orange text-white shadow-[0_6px_14px_rgba(243,112,33,0.2)]" : "bg-white text-ink-secondary ring-1 ring-line hover:bg-brand-hover hover:text-brand-orange"].join(" ")}
+              title={option.detail}
+              onClick={() => onChange(option.value)}
+            >
+              <span className="block truncate">{option.label}</span>
+            </button>
+          );
+        })}
+      </div>
+      {options.find((option) => option.value === value)?.detail ? (
+        <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{options.find((option) => option.value === value)?.detail}</p>
+      ) : null}
+    </div>
+  );
+}
+
+type ContextMenuPreview = {
+  icon: LucideIcon;
+  title: string;
+  detail: string;
+  group: string;
+};
+type ContextMenuSubmenu = "create";
+
+function ContextMenuSectionTitle({ label }: { label: string }) {
+  return (
+    <p className="px-2 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">
+      {label}
+    </p>
+  );
+}
+
+function ContextMenuDivider() {
+  return <div className="my-1 h-px bg-line" />;
+}
+
+function ContextMenuSubmenuButton({
+  icon: Icon,
+  title,
+  detail,
+  active,
+  onPreview,
+  onOpen,
+  onToggle,
+}: {
+  icon: LucideIcon;
+  title: string;
+  detail: string;
+  active: boolean;
+  onPreview: (preview: ContextMenuPreview, submenu?: ContextMenuSubmenu | null) => void;
+  onOpen: () => void;
+  onToggle: () => void;
+}) {
+  const preview = { icon: Icon, title, detail, group: "Capacidad" };
+  return (
+    <button
+      type="button"
+      className={["group flex h-8 w-full items-center gap-2 rounded-xl px-2 text-left transition focus-visible:outline-none", active ? "bg-brand-hover text-brand-orange" : "hover:bg-brand-hover focus-visible:bg-brand-hover"].join(" ")}
+      onMouseEnter={() => {
+        onPreview(preview);
+        onOpen();
+      }}
+      onFocus={() => {
+        onPreview(preview);
+        onOpen();
+      }}
+      onClick={onToggle}
+    >
+      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-panel text-brand-orange transition group-hover:bg-white">
+        <Icon size={13} />
+      </span>
+      <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-ink-primary">{title}</span>
+      <ChevronRight size={13} className="shrink-0 text-ink-secondary group-hover:text-brand-orange" />
+    </button>
+  );
+}
+
+function ContextMenuSubmenuPanel({
+  submenu,
+  onPreview,
+  onImage,
+  onDiagram,
+}: {
+  submenu: ContextMenuSubmenu;
+  onPreview: (preview: ContextMenuPreview, submenu?: ContextMenuSubmenu | null) => void;
+  onImage: () => void;
+  onDiagram: () => void;
+}) {
+  return (
+    <div className="w-64 rounded-[16px] border border-orange-100 bg-white/95 p-1.5 text-left shadow-menu ring-1 ring-orange-50 backdrop-blur">
+      <ContextMenuSectionTitle label="Crear" />
+      <ContextMenuButton icon={Image} title="Crear imagen" detail="Genera un asset visual para el proyecto usando la intención indicada." group="Creación" onPreview={(preview) => onPreview(preview, submenu)} onClick={onImage} />
+      <ContextMenuButton icon={Sparkles} title="Crear diagrama" detail="Prepara Mermaid o un diagrama insertable alineado con el documento." group="Creación" onPreview={(preview) => onPreview(preview, submenu)} onClick={onDiagram} />
+    </div>
+  );
+}
+
+function ContextMenuButton({
+  icon: Icon,
+  title,
+  detail,
+  group,
+  onPreview,
+  onClick,
+}: {
+  icon: LucideIcon;
+  title: string;
+  detail: string;
+  group?: string;
+  onPreview?: (preview: ContextMenuPreview, submenu?: ContextMenuSubmenu | null) => void;
+  onClick: () => void;
+}) {
+  const preview = { icon: Icon, title, detail, group: group ?? "Opción" };
+  const compact = Boolean(onPreview);
+  return (
+    <button
+      type="button"
+      className={["group flex w-full items-center gap-2 rounded-xl px-2 text-left transition hover:bg-brand-hover focus-visible:bg-brand-hover focus-visible:outline-none", compact ? "h-8" : "py-2"].join(" ")}
+      onMouseEnter={() => onPreview?.(preview)}
+      onFocus={() => onPreview?.(preview)}
+      onClick={onClick}
+    >
+      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-panel text-brand-orange transition group-hover:bg-white">
+        <Icon size={13} />
       </span>
       <span className="min-w-0">
-        <span className="block text-[11px] font-semibold text-ink-primary">{title}</span>
-        <span className="block truncate text-[10px] text-ink-secondary">{detail}</span>
+        <span className="block truncate text-[11px] font-semibold text-ink-primary">{title}</span>
+        {!compact ? <span className="block truncate text-[10px] text-ink-secondary">{detail}</span> : null}
       </span>
     </button>
+  );
+}
+
+function ContextMenuPreviewCard({ preview }: { preview: ContextMenuPreview }) {
+  const Icon = preview.icon;
+  return (
+    <div className="hidden w-64 rounded-[16px] border border-orange-100 bg-white/95 p-3 text-left shadow-menu ring-1 ring-orange-50 backdrop-blur md:block">
+      <div className="flex items-start gap-2">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-hover text-brand-orange">
+          <Icon size={16} />
+        </span>
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-orange">{preview.group}</p>
+          <p className="mt-0.5 text-[12px] font-semibold text-ink-primary">{preview.title}</p>
+        </div>
+      </div>
+      <p className="mt-2 text-[11px] leading-4 text-ink-secondary">{preview.detail}</p>
+    </div>
   );
 }
 

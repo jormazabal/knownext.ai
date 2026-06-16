@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Activity, ArrowRight, Brain, Check, ChevronDown, Copy, Download, Eye, FileText, FolderOpen, Gauge, Globe2, Grid2X2, Image as ImageIcon, Info, KeyRound, Languages, ListChecks, Mic, Monitor, Moon, Paintbrush, RefreshCw, RotateCcw, Server, Settings, ShieldCheck, Sparkles, Sun, Trash2, Type as TypeIcon, Underline, Workflow, Wrench, X } from "lucide-react";
+import { Activity, ArrowRight, Brain, Check, ChevronDown, Copy, Download, Eye, FileText, FolderOpen, Gauge, Grid2X2, Image as ImageIcon, Info, KeyRound, Languages, ListChecks, Mic, Monitor, Moon, Paintbrush, RefreshCw, RotateCcw, Server, Settings, ShieldCheck, Sparkles, Sun, Trash2, Type as TypeIcon, Underline, Workflow, Wrench, X } from "lucide-react";
 import { AiModelSelector, type AiModelSelectorOption, type AiModelSelectorTone } from "../../components/ai/AiModelSelector";
 import { AiSkillsSettings } from "./AiSkillsSettings";
 import { defaultAiConfig } from "../../lib/api/config";
 import { accentPalettes } from "../../lib/theme/appearance";
-import type { AiConfigStatus, AiImageGenerationModelId, AiIndexStatusResponse, AiModelId, AiTranscriptionLanguage, AiVisionModelId, AppearanceAccentColor, AppearanceConfig, AppearanceThemeMode, DiagnosticsConfig, ExportTemplateConfig, ExportTemplateUpdate, ExportTextFormat } from "../../types/domain";
+import type { AiConfigStatus, AiImageGenerationModelId, AiIndexStatusResponse, AiModelId, AiResearchPresetId, AiTranscriptionLanguage, AiVisionModelId, AppearanceAccentColor, AppearanceConfig, AppearanceThemeMode, DiagnosticsConfig, ExportTemplateConfig, ExportTemplateUpdate, ExportTextFormat } from "../../types/domain";
 import type { TraceLogStatus } from "../../lib/runtime/logging";
 import type { RuntimeServicesStatus } from "../../lib/runtime/services";
 
@@ -589,7 +589,6 @@ function CapabilitiesSettings({
       agentic: {
         ...currentAi.agentic,
         ...nextAgentic,
-        webResearchEnabled: false,
       },
     });
   }
@@ -853,35 +852,27 @@ function CapabilitiesSettings({
 
       <CapabilitySection icon={<Gauge size={22} />} title={text.capabilityAgenticTitle} description={text.capabilityAgenticDescription}>
         <div className="overflow-hidden rounded-md border border-line bg-white">
-          <div className="grid gap-3 border-b border-line px-3 py-3 lg:grid-cols-[minmax(190px,0.8fr)_minmax(220px,1fr)_repeat(4,minmax(86px,0.55fr))]">
-            <CompactSelect label={text.agenticModeHint} value={settingsAi.agentic.depth} onChange={(value) => updateAgentic({ depth: value as AiConfigStatus["agentic"]["depth"] })}>
-                <option value="quick">Rápido</option>
-                <option value="guided">Guiado</option>
-                <option value="deep">Profundo guiado</option>
-                <option value="bounded_autonomous">Autónomo acotado</option>
-            </CompactSelect>
-            <CompactPermissionSwitch
-                icon={<ShieldCheck size={14} />}
-                label={text.agenticConfirmHeading}
-                description={text.agenticConfirmDescription}
-                enabled={settingsAi.agentic.confirmBeforeApplying}
-                onToggle={() => updateAgentic({ confirmBeforeApplying: !settingsAi.agentic.confirmBeforeApplying })}
-                compact
-            />
-            <LimitField label={text.agenticMaxSteps} value={settingsAi.agentic.maxSteps} min={1} max={12} step={1} onChange={(value) => updateAgentic({ maxSteps: value })} />
-            <LimitField label={text.agenticMaxDocuments} value={settingsAi.agentic.maxDocuments} min={1} max={30} step={1} onChange={(value) => updateAgentic({ maxDocuments: value })} />
-            <LimitField label={text.agenticMaxSources} value={settingsAi.agentic.maxSources} min={1} max={20} step={1} onChange={(value) => updateAgentic({ maxSources: value })} />
+          <div className="grid gap-3 px-3 py-3 md:grid-cols-[minmax(140px,0.45fr)_minmax(220px,1fr)_minmax(220px,1fr)]">
             <LimitField label={text.agenticMaxCost} value={settingsAi.agentic.maxEstimatedCostEur} min={0.1} max={25} step={0.1} onChange={(value) => updateAgentic({ maxEstimatedCostEur: value })} />
+            <CompactPermissionSwitch
+              icon={<Workflow size={14} />}
+              label={text.researchPresetDiagrams}
+              description={text.researchPresetDiagramsDescription}
+              enabled={settingsAi.agentic.researchDiagramsEnabled}
+              onToggle={() => updateAgentic({ researchDiagramsEnabled: !settingsAi.agentic.researchDiagramsEnabled })}
+              compact
+            />
+            <CompactPermissionSwitch
+              icon={<ImageIcon size={14} />}
+              label={text.researchPresetImages}
+              description={text.researchPresetImagesDescription}
+              enabled={settingsAi.agentic.researchImagesEnabled}
+              onToggle={() => updateAgentic({ researchImagesEnabled: !settingsAi.agentic.researchImagesEnabled })}
+              compact
+            />
           </div>
-          <div className="grid gap-3 px-3 py-2 md:grid-cols-[minmax(0,1fr)_minmax(240px,0.8fr)]">
+          <div className="border-t border-line bg-panel/40 px-3 py-2">
             <p className="text-[10px] leading-4 text-ink-secondary">{text.agenticLimitsImpact}</p>
-            <div className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-panel px-3 py-2">
-              <div className="min-w-0">
-                <p className="text-[11px] font-semibold text-ink-primary">{text.agenticWebResearchHeading}</p>
-                <p className="mt-0.5 truncate text-[10px] text-ink-secondary">{text.agenticWebResearchDescription}</p>
-              </div>
-              <ServiceStatusBadge value={text.unavailableValue} tone="warning" />
-            </div>
           </div>
         </div>
       </CapabilitySection>
@@ -1442,12 +1433,15 @@ function normalizeAiStatus(ai: Partial<AiConfigStatus> | null | undefined): AiCo
     },
     agentic: {
       depth: normalizeAgenticDepth(agentic?.depth),
-      webResearchEnabled: false,
+      webResearchEnabled: agentic?.webResearchEnabled ?? defaultAiConfig.agentic.webResearchEnabled,
       confirmBeforeApplying: agentic?.confirmBeforeApplying ?? defaultAiConfig.agentic.confirmBeforeApplying,
       maxSteps: clampSettingsNumber(agentic?.maxSteps, 1, 12, defaultAiConfig.agentic.maxSteps),
       maxDocuments: clampSettingsNumber(agentic?.maxDocuments, 1, 30, defaultAiConfig.agentic.maxDocuments),
       maxEstimatedCostEur: clampSettingsNumber(agentic?.maxEstimatedCostEur, 0.1, 25, defaultAiConfig.agentic.maxEstimatedCostEur),
-      maxSources: clampSettingsNumber(agentic?.maxSources, 1, 20, defaultAiConfig.agentic.maxSources),
+      maxSources: clampSettingsNumber(agentic?.maxSources, 1, 500, defaultAiConfig.agentic.maxSources),
+      researchDiagramsEnabled: normalizeResearchGlobalToggle(agentic, "researchDiagramsEnabled", "diagramsEnabled", defaultAiConfig.agentic.researchDiagramsEnabled),
+      researchImagesEnabled: normalizeResearchGlobalToggle(agentic, "researchImagesEnabled", "imagesEnabled", defaultAiConfig.agentic.researchImagesEnabled),
+      researchPresets: normalizeResearchPresets(agentic?.researchPresets),
     },
     transcription: normalizeTranscription(transcription),
     diagrams: normalizeDiagramSettings(diagrams),
@@ -1615,6 +1609,49 @@ function normalizeAgenticDepth(depth: unknown): AiConfigStatus["agentic"]["depth
   return ["quick", "guided", "deep", "bounded_autonomous"].includes(String(depth))
     ? depth as AiConfigStatus["agentic"]["depth"]
     : defaultAiConfig.agentic.depth;
+}
+
+function normalizeResearchGlobalToggle(
+  agentic: (Partial<AiConfigStatus["agentic"]> & Record<string, unknown>) | undefined,
+  field: "researchDiagramsEnabled" | "researchImagesEnabled",
+  presetField: "diagramsEnabled" | "imagesEnabled",
+  fallback: boolean,
+) {
+  if (typeof agentic?.[field] === "boolean") return agentic[field] as boolean;
+  const presets = agentic?.researchPresets;
+  if (presets && typeof presets === "object") {
+    const values = Object.values(presets as Record<string, Record<string, unknown>>)
+      .map((preset) => preset?.[presetField])
+      .filter((value): value is boolean => typeof value === "boolean");
+    if (values.length > 0) return values.some(Boolean);
+  }
+  return fallback;
+}
+
+function normalizeResearchPresets(presets: unknown): AiConfigStatus["agentic"]["researchPresets"] {
+  const source = presets && typeof presets === "object" ? presets as Partial<AiConfigStatus["agentic"]["researchPresets"]> : {};
+  return {
+    quick: normalizeResearchPreset(source.quick, defaultAiConfig.agentic.researchPresets.quick),
+    deep: normalizeResearchPreset(source.deep, defaultAiConfig.agentic.researchPresets.deep),
+    compare: normalizeResearchPreset(source.compare, defaultAiConfig.agentic.researchPresets.compare),
+    currentDocument: normalizeResearchPreset(source.currentDocument, defaultAiConfig.agentic.researchPresets.currentDocument),
+  };
+}
+
+function normalizeResearchPreset(
+  preset: (Partial<AiConfigStatus["agentic"]["researchPresets"][AiResearchPresetId]> & Record<string, unknown>) | undefined,
+  fallback: AiConfigStatus["agentic"]["researchPresets"][AiResearchPresetId],
+): AiConfigStatus["agentic"]["researchPresets"][AiResearchPresetId] {
+  const legacyDiagrams = preset && "diagrams" in preset ? String(preset.diagrams) !== "none" : undefined;
+  const legacyImages = preset && "images" in preset ? String(preset.images) !== "none" : undefined;
+  const explicitCandidate = typeof preset?.candidateSourceLimit === "number" ? preset.candidateSourceLimit : undefined;
+  const legacyMaxSources = preset && typeof preset.maxSources === "number" ? preset.maxSources : undefined;
+  const legacySourceLimit = explicitCandidate === fallback.candidateSourceLimit ? legacyMaxSources ?? explicitCandidate : explicitCandidate ?? legacyMaxSources ?? fallback.candidateSourceLimit;
+  return {
+    candidateSourceLimit: clampSettingsNumber(legacySourceLimit, 1, 500, fallback.candidateSourceLimit),
+    diagramsEnabled: typeof preset?.diagramsEnabled === "boolean" ? preset.diagramsEnabled : legacyDiagrams ?? fallback.diagramsEnabled,
+    imagesEnabled: typeof preset?.imagesEnabled === "boolean" ? preset.imagesEnabled : legacyImages ?? fallback.imagesEnabled,
+  };
 }
 
 function normalizeTranscription(transcription: Partial<AiConfigStatus["transcription"]> | undefined): AiConfigStatus["transcription"] {
@@ -3781,10 +3818,10 @@ const settingsCopy = {
     insertImagesIntoDocuments: "Insertar imágenes en documentos",
     useDocumentContextForImages: "Usar contexto documental en imágenes",
     deleteDocuments: "Eliminar documentos y carpetas",
-    agenticHeading: "Tareas agénticas",
-    agenticDescription: "Modo reservado para flujos de varios pasos con planificación, ejecución y confirmación estructurada.",
-    agenticUnavailableTitle: "Tareas agénticas no disponibles",
-    agenticUnavailableDescription: "La IA documental responde sobre el documento activo y el contexto añadido al prompt, pero la investigación web y los flujos autónomos de varios pasos aún no están disponibles.",
+    agenticHeading: "Investigación",
+    agenticDescription: "Investigaciones con planificación, fuentes, citas y creación de documentos revisables.",
+    agenticUnavailableTitle: "Investigación no disponible",
+    agenticUnavailableDescription: "La investigación necesita OpenAI configurado para consultar fuentes web y crear informes verificables.",
     agenticModeHint: "Control desde el prompt",
     webResearchHeading: "Investigación web",
     webResearchDescription: "No disponible hasta que la app pueda consultar fuentes externas con citas, trazabilidad y control de coste.",
@@ -3793,7 +3830,56 @@ const settingsCopy = {
     agenticMaxSteps: "Pasos",
     agenticMaxDocuments: "Documentos",
     agenticMaxSources: "Fuentes",
-    agenticMaxCost: "Coste máx.",
+    agenticMaxCost: "Coste máximo por investigación",
+    researchPresetsHeading: "Tipos de investigación",
+    researchPresetsDescription: "Define cómo se comporta cada opción del menú + > Investigar. Las fuentes son candidatas evaluables; cada tipo puede tener su propio volumen.",
+    researchGlobalLimitsApply: "Aplican límites globales",
+    researchPresetQuick: "Rápida",
+    researchPresetQuickDescription: "Síntesis breve para responder una duda o decisión concreta.",
+    researchPresetDeep: "Profunda",
+    researchPresetDeepDescription: "Informe completo con metodología, contraste, citas y limitaciones.",
+    researchPresetCompare: "Comparar fuentes",
+    researchPresetCompareDescription: "Contrasta versiones, discrepancias y fiabilidad entre fuentes.",
+    researchPresetCurrentDocument: "Sobre este documento",
+    researchPresetCurrentDocumentDescription: "Usa el documento activo como base prioritaria.",
+    researchPresetDepth: "Profundidad",
+    researchPresetSources: "Fuentes",
+    researchPresetMaxSources: "Máx. fuentes",
+    researchPresetCandidateSources: "Máx. fuentes candidatas",
+    researchPresetAutoStart: "Auto inicio",
+    researchPresetDuration: "Tiempo estimado",
+    researchWebAlwaysOn: "Web activa",
+    researchPresetDiagramsDescription: "Permite que el agente incluya diagramas cuando aclaren el informe.",
+    researchPresetImagesDescription: "Permite que el agente genere o use imágenes cuando aporten valor.",
+    researchPresetLength: "Extensión",
+    researchPresetStyle: "Estilo",
+    researchPresetTables: "Tablas",
+    researchPresetDiagrams: "Diagramas",
+    researchPresetImages: "Imágenes",
+    researchPresetCitations: "Citas",
+    researchLengthBrief: "Breve",
+    researchLengthStandard: "Estándar",
+    researchLengthLong: "Largo",
+    researchLengthDeep: "Profundo",
+    researchStyleExecutive: "Ejecutivo",
+    researchStyleTechnical: "Técnico",
+    researchStyleComparison: "Comparativo",
+    researchStyleRegulatory: "Normativo",
+    researchStyleStateOfArt: "Estado del arte",
+    researchVisualNone: "No",
+    researchVisualIfUseful: "Si aporta valor",
+    researchVisualRequired: "Requerido",
+    researchImagesNone: "No",
+    researchImagesExisting: "Assets existentes",
+    researchImagesGenerate: "Generar si aporta valor",
+    researchCitationsNormal: "Normal",
+    researchCitationsStrict: "Estricto",
+    researchDepthQuick: "Rápida",
+    researchDepthStandard: "Estándar",
+    researchDepthDeep: "Profunda",
+    researchScopeProject: "Proyecto",
+    researchScopeWeb: "Web",
+    researchScopeWebProject: "Web + proyecto",
     ragHeading: "Indexar documentación del proyecto",
     ragDescription: "Índice local automático usado para añadir contexto documental a las respuestas IA.",
     ragUnavailableTitle: "Índice local pendiente",
@@ -3900,7 +3986,7 @@ const settingsCopy = {
     capabilityAudioDescription: "Convierte voz en texto para usarla como prompt o incorporarla a documentos.",
     capabilityPermissionsTitle: "4. Acciones permitidas",
     capabilityPermissionsDescription: "Define hasta qué punto la IA puede modificar y gestionar el contenido del proyecto.",
-    capabilityAgenticTitle: "5. Tareas agénticas",
+    capabilityAgenticTitle: "5. Investigación",
     capabilityAgenticDescription: "Estado de las capacidades de planificación, investigación web y ejecución autónoma.",
     qualityLow: "Baja",
     qualityMedium: "Media",
@@ -3934,8 +4020,8 @@ const settingsCopy = {
     agenticDepthDeep: "Profundo guiado",
     agenticDepthBoundedAutonomous: "Autónomo acotado",
     agenticWebResearchHeading: "Investigación web",
-    agenticWebResearchDescription: "No disponible hasta que la app pueda investigar en web con fuentes y trazabilidad.",
-    agenticLimitsImpact: "Pasos controla cuántas iteraciones puede hacer; documentos limita cuántos archivos del proyecto puede revisar; fuentes limita referencias externas o añadidas; coste máx. corta la tarea si la estimación supera ese importe.",
+    agenticWebResearchDescription: "Permite consultar fuentes online con trazabilidad y control de coste.",
+    agenticLimitsImpact: "La investigación usa siempre web cuando OpenAI está configurado. Las fuentes candidatas y la extensión se proponen en el plan de cada investigación.",
     capabilitiesPlaceholderDescription: "Esta sección agrupa las capacidades avanzadas de IA. Por ahora mantiene una vista de resumen; los controles detallados siguen disponibles en IA documental.",
     capabilitiesEditInAi: "Configurar en IA documental",
   },
@@ -4247,10 +4333,10 @@ const settingsCopy = {
     insertImagesIntoDocuments: "Insert images in documents",
     useDocumentContextForImages: "Use document context for images",
     deleteDocuments: "Delete documents and folders",
-    agenticHeading: "Agentic tasks",
-    agenticDescription: "Reserved for multi-step flows with structured planning, execution, and confirmation.",
-    agenticUnavailableTitle: "Agentic tasks unavailable",
-    agenticUnavailableDescription: "Documentation AI can answer about the active document and explicitly attached prompt context, but web research and autonomous multi-step flows are not available yet.",
+    agenticHeading: "Research",
+    agenticDescription: "Research with planning, sources, citations, and reviewable document creation.",
+    agenticUnavailableTitle: "Research unavailable",
+    agenticUnavailableDescription: "Research requires OpenAI configuration to consult web sources and create verifiable reports.",
     agenticModeHint: "Controlled from prompt",
     webResearchHeading: "Web research",
     webResearchDescription: "Unavailable until the app can consult external sources with citations, traceability, and cost control.",
@@ -4259,7 +4345,56 @@ const settingsCopy = {
     agenticMaxSteps: "Steps",
     agenticMaxDocuments: "Documents",
     agenticMaxSources: "Sources",
-    agenticMaxCost: "Max cost",
+    agenticMaxCost: "Max cost per research",
+    researchPresetsHeading: "Research types",
+    researchPresetsDescription: "Define how each + > Research option behaves. Sources are evaluable candidates; each type can use its own volume.",
+    researchGlobalLimitsApply: "Global limits apply",
+    researchPresetQuick: "Quick",
+    researchPresetQuickDescription: "Short synthesis for a concrete question or decision.",
+    researchPresetDeep: "Deep",
+    researchPresetDeepDescription: "Full report with methodology, contrast, citations, and limitations.",
+    researchPresetCompare: "Compare sources",
+    researchPresetCompareDescription: "Contrasts versions, discrepancies, and source reliability.",
+    researchPresetCurrentDocument: "About this document",
+    researchPresetCurrentDocumentDescription: "Uses the active document as the priority basis.",
+    researchPresetDepth: "Depth",
+    researchPresetSources: "Sources",
+    researchPresetMaxSources: "Max sources",
+    researchPresetCandidateSources: "Max candidate sources",
+    researchPresetAutoStart: "Auto start",
+    researchPresetDuration: "Estimated time",
+    researchWebAlwaysOn: "Web on",
+    researchPresetDiagramsDescription: "Allows the agent to include diagrams when they clarify the report.",
+    researchPresetImagesDescription: "Allows the agent to generate or use images when they add value.",
+    researchPresetLength: "Length",
+    researchPresetStyle: "Style",
+    researchPresetTables: "Tables",
+    researchPresetDiagrams: "Diagrams",
+    researchPresetImages: "Images",
+    researchPresetCitations: "Citations",
+    researchLengthBrief: "Brief",
+    researchLengthStandard: "Standard",
+    researchLengthLong: "Long",
+    researchLengthDeep: "Deep",
+    researchStyleExecutive: "Executive",
+    researchStyleTechnical: "Technical",
+    researchStyleComparison: "Comparative",
+    researchStyleRegulatory: "Regulatory",
+    researchStyleStateOfArt: "State of the art",
+    researchVisualNone: "No",
+    researchVisualIfUseful: "If useful",
+    researchVisualRequired: "Required",
+    researchImagesNone: "No",
+    researchImagesExisting: "Existing assets",
+    researchImagesGenerate: "Generate if useful",
+    researchCitationsNormal: "Normal",
+    researchCitationsStrict: "Strict",
+    researchDepthQuick: "Quick",
+    researchDepthStandard: "Standard",
+    researchDepthDeep: "Deep",
+    researchScopeProject: "Project",
+    researchScopeWeb: "Web",
+    researchScopeWebProject: "Web + project",
     ragHeading: "Index project documentation",
     ragDescription: "Automatic local index used to add document context to AI answers.",
     ragUnavailableTitle: "Local index pending",
@@ -4400,8 +4535,8 @@ const settingsCopy = {
     agenticDepthDeep: "Deep guided",
     agenticDepthBoundedAutonomous: "Bounded autonomous",
     agenticWebResearchHeading: "Web research",
-    agenticWebResearchDescription: "Unavailable until the app can research the web with sources and traceability.",
-    agenticLimitsImpact: "Steps controls how many iterations it may run; documents limits how many project files it may inspect; sources limits external or attached references; max cost stops the task if the estimate exceeds that amount.",
+    agenticWebResearchDescription: "Allow online source lookup with traceability and cost control.",
+    agenticLimitsImpact: "Research always uses web when OpenAI is configured. Candidate sources and report length are proposed in each research plan.",
     capabilitiesPlaceholderDescription: "This section groups advanced AI capabilities. For now it keeps a summary view; detailed controls remain available in Documentation AI.",
     capabilitiesEditInAi: "Configure in Documentation AI",
   },

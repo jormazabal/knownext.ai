@@ -10,6 +10,19 @@ import type {
   AiInteractionRequest,
   AiInteractionResponse,
   AiPendingIntent,
+  AiResearchBrief,
+  AiResearchBriefRequest,
+  AiResearchActivityResponse,
+  AiResearchCoverageResponse,
+  AiResearchExportRequest,
+  AiResearchExportResponse,
+  AiResearchJob,
+  AiResearchJobListResponse,
+  AiResearchJobRequest,
+  AiResearchPolicy,
+  AiResearchQualityReport,
+  AiResearchRevisionRequest,
+  AiResearchSourcesResponse,
   AiUsageSummaryResponse,
   AiPromptRequest,
   AiPromptResponse,
@@ -20,6 +33,7 @@ const AI_PROMPT_TIMEOUT_MS = 60_000;
 const AI_INTERACTION_TIMEOUT_MS = 180_000;
 const AI_INDEX_TIMEOUT_MS = 120_000;
 const AI_CONTEXT_UPLOAD_TIMEOUT_MS = 120_000;
+const AI_RESEARCH_TIMEOUT_MS = 300_000;
 
 export async function promptAssistant(request: AiPromptRequest): Promise<AiPromptResponse> {
   if (request.documentId) {
@@ -46,6 +60,106 @@ export async function sendAiInteraction(request: AiInteractionRequest): Promise<
     method: "POST",
     body: JSON.stringify(request),
     timeoutMs: AI_INTERACTION_TIMEOUT_MS,
+  });
+}
+
+export async function prepareAiResearchBrief(projectId: string, request: AiResearchBriefRequest): Promise<AiResearchBrief> {
+  return requestJson<AiResearchBrief>(`/api/projects/${projectId}/ai/research/brief`, {
+    method: "POST",
+    body: JSON.stringify(request),
+    timeoutMs: AI_INTERACTION_TIMEOUT_MS,
+  });
+}
+
+export async function startAiResearchJob(projectId: string, request: AiResearchJobRequest): Promise<AiResearchJob> {
+  return requestJson<AiResearchJob>(`/api/projects/${projectId}/ai/research/jobs`, {
+    method: "POST",
+    body: JSON.stringify(request),
+    timeoutMs: AI_INTERACTION_TIMEOUT_MS,
+  });
+}
+
+export async function listAiResearchJobs(projectId: string): Promise<AiResearchJobListResponse> {
+  return requestJson<AiResearchJobListResponse>(`/api/projects/${projectId}/ai/research/jobs`);
+}
+
+export async function getAiResearchJob(projectId: string, jobId: string): Promise<AiResearchJob> {
+  return requestJson<AiResearchJob>(`/api/projects/${projectId}/ai/research/jobs/${encodeURIComponent(jobId)}`);
+}
+
+export async function cancelAiResearchJob(projectId: string, jobId: string): Promise<AiResearchJob> {
+  return requestJson<AiResearchJob>(`/api/projects/${projectId}/ai/research/jobs/${encodeURIComponent(jobId)}/cancel`, {
+    method: "POST",
+  });
+}
+
+export async function retryAiResearchJob(projectId: string, jobId: string): Promise<AiResearchJob> {
+  return requestJson<AiResearchJob>(`/api/projects/${projectId}/ai/research/jobs/${encodeURIComponent(jobId)}/retry`, {
+    method: "POST",
+    timeoutMs: AI_INTERACTION_TIMEOUT_MS,
+  });
+}
+
+export async function getAiResearchSources(projectId: string, jobId: string): Promise<AiResearchSourcesResponse> {
+  return requestJson<AiResearchSourcesResponse>(`/api/projects/${projectId}/ai/research/jobs/${encodeURIComponent(jobId)}/sources`);
+}
+
+export async function getAiResearchQuality(projectId: string, jobId: string): Promise<AiResearchQualityReport> {
+  return requestJson<AiResearchQualityReport>(`/api/projects/${projectId}/ai/research/jobs/${encodeURIComponent(jobId)}/quality`);
+}
+
+export async function getAiResearchActivity(projectId: string, jobId: string): Promise<AiResearchActivityResponse> {
+  return requestJson<AiResearchActivityResponse>(`/api/projects/${projectId}/ai/research/jobs/${encodeURIComponent(jobId)}/activity`);
+}
+
+export async function getAiResearchCoverage(projectId: string, jobId: string): Promise<AiResearchCoverageResponse> {
+  return requestJson<AiResearchCoverageResponse>(`/api/projects/${projectId}/ai/research/jobs/${encodeURIComponent(jobId)}/coverage`);
+}
+
+export async function refineAiResearchJob(projectId: string, jobId: string, request: AiResearchRevisionRequest): Promise<AiResearchJob> {
+  return requestJson<AiResearchJob>(`/api/projects/${projectId}/ai/research/jobs/${encodeURIComponent(jobId)}/refine`, {
+    method: "POST",
+    body: JSON.stringify(request),
+    timeoutMs: AI_INTERACTION_TIMEOUT_MS,
+  });
+}
+
+export async function updateAiResearchSources(projectId: string, jobId: string): Promise<AiResearchJob> {
+  return requestJson<AiResearchJob>(`/api/projects/${projectId}/ai/research/jobs/${encodeURIComponent(jobId)}/update-sources`, {
+    method: "POST",
+    timeoutMs: AI_INTERACTION_TIMEOUT_MS,
+  });
+}
+
+export async function acceptAiResearchJob(projectId: string, jobId: string): Promise<AiResearchJob> {
+  return requestJson<AiResearchJob>(`/api/projects/${projectId}/ai/research/jobs/${encodeURIComponent(jobId)}/accept`, {
+    method: "POST",
+  });
+}
+
+export async function reviewAiResearchJob(projectId: string, jobId: string, comments: string): Promise<AiResearchJob> {
+  return requestJson<AiResearchJob>(`/api/projects/${projectId}/ai/research/jobs/${encodeURIComponent(jobId)}/review`, {
+    method: "POST",
+    body: JSON.stringify({ comments }),
+  });
+}
+
+export async function exportAiResearchJob(projectId: string, jobId: string, request: AiResearchExportRequest): Promise<AiResearchExportResponse> {
+  return requestJson<AiResearchExportResponse>(`/api/projects/${projectId}/ai/research/jobs/${encodeURIComponent(jobId)}/export`, {
+    method: "POST",
+    body: JSON.stringify(request),
+    timeoutMs: AI_RESEARCH_TIMEOUT_MS,
+  });
+}
+
+export async function getAiResearchPolicy(projectId: string): Promise<AiResearchPolicy> {
+  return requestJson<AiResearchPolicy>(`/api/projects/${projectId}/ai/research/policy`);
+}
+
+export async function saveAiResearchPolicy(projectId: string, policy: AiResearchPolicy): Promise<AiResearchPolicy> {
+  return requestJson<AiResearchPolicy>(`/api/projects/${projectId}/ai/research/policy`, {
+    method: "PUT",
+    body: JSON.stringify(policy),
   });
 }
 

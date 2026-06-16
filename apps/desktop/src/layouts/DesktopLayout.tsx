@@ -12,6 +12,7 @@ import { ExternalChangesDrawer, type OpenDocumentDraftState } from "../features/
 import { ImageViewer } from "../features/documents/ImageViewer";
 import { ReferenceDocumentViewer } from "../features/documentPreview/ReferenceDocumentViewer";
 import { MarkdownToolbar } from "../features/editor/MarkdownToolbar";
+import { MarkdownSourceViewer } from "../features/editor/MarkdownSourceViewer";
 import {
   emptyMarkdownEditorHistoryState,
   emptyMarkdownEditorFormatState,
@@ -36,7 +37,7 @@ import { TitleBar } from "../components/window/TitleBar";
 import { getProjectImageContentUrl } from "../lib/api/projects";
 import { getDocumentTreeFileDragData } from "../lib/dragData";
 import { isMobileDeviceRuntime, isPhoneAppShell } from "../lib/runtime/platform";
-import type { ActivityEvent, AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiEditProposal, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiSelectionFocus, AiSkillApplication, AiSkillDiagnostic, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentPostSaveSyncState, DocumentRecord, DocumentSyncStatus, DocumentTreeNode, ExportFormat, ExternalChangeDecision, ExternalChangeSet, InsertImageReferenceResponse, LayoutConfig, Project, ProjectFileSyncOverview, ProjectSyncState, ProjectSyncStatus, ProjectVersioningStatus, VersionRecord, WorkspaceTab } from "../types/domain";
+import type { ActivityEvent, AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiEditProposal, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiResearchBrief, AiResearchJob, AiSelectionFocus, AiSkillApplication, AiSkillDiagnostic, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentPostSaveSyncState, DocumentRecord, DocumentSyncStatus, DocumentTreeNode, ExportFormat, ExternalChangeDecision, ExternalChangeSet, InsertImageReferenceResponse, LayoutConfig, Project, ProjectFileSyncOverview, ProjectSyncState, ProjectSyncStatus, ProjectVersioningStatus, VersionRecord, WorkspaceTab } from "../types/domain";
 
 const sidebarWidthConfig = {
   defaultWidth: 338,
@@ -71,6 +72,9 @@ type DesktopLayoutProps = {
   aiBubble: { id: string; answer: string; usedSkills?: string[]; skillApplications?: AiSkillApplication[]; skillDiagnostics?: AiSkillDiagnostic[] } | null;
   aiAppliedChange: { documentId: string; summary: string } | null;
   aiSelectionFocus: AiSelectionFocus | null;
+  aiResearchBrief: AiResearchBrief | null;
+  aiResearchJob: AiResearchJob | null;
+  aiResearchJobs: AiResearchJob[];
   aiContextSources: AiContextSource[];
   tree: DocumentTreeNode[];
   tabs: WorkspaceTab[];
@@ -148,6 +152,11 @@ type DesktopLayoutProps = {
   onSaveActiveDocument: () => Promise<boolean>;
   onDiscardActiveDocumentDraft: () => Promise<boolean>;
   onSendAiPrompt: (prompt: string, selectionFocus?: AiSelectionFocus | null, options?: AiPromptExecutionOptions) => void | Promise<void>;
+  onUpdateAiResearchBrief: (brief: AiResearchBrief) => void;
+  onStartAiResearch: (brief: AiResearchBrief) => void | Promise<void>;
+  onCancelAiResearchBrief: () => void;
+  onCancelAiResearchJob: (jobId: string) => void | Promise<void>;
+  onRetryAiResearchJob: (jobId: string) => void | Promise<void>;
   onAiTranscriptionChange: (transcription: Partial<AiConfigStatus["transcription"]>) => void;
   onClearAiSelectionFocus: () => void;
   onSearchAiContextDocuments: (query: string) => Promise<AiContextSearchResult[]>;
@@ -226,6 +235,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   const [imageZoomPercent, setImageZoomPercent] = useState(100);
   const [imageFitToWindow, setImageFitToWindow] = useState(true);
   const [markdownZoomPercent, setMarkdownZoomPercent] = useState(100);
+  const [markdownSourceVisible, setMarkdownSourceVisible] = useState(false);
   const [activeImageAsset, setActiveImageAsset] = useState<AssetMetadata | null>(null);
   const activeWorkspaceTab = props.tabs.find((tab) => tab.id === props.activeTabId);
   const hasOpenDocument = activeWorkspaceTab?.kind === "document" && Boolean(props.activeDocumentId);
@@ -688,9 +698,10 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 historyOpen={props.historyOpen}
                 historyEnabled={props.historyEnabled}
                 historyDisabledReason={getHistoryDisabledReason(props.activeProject, props.versioningStatus)}
-                editorReady={activeEditorController !== null && !activeHistoryPreview}
+                editorReady={activeEditorController !== null && !activeHistoryPreview && !markdownSourceVisible}
                 extendedUnderlineEnabled={props.markdownExtendedUnderlineEnabled}
                 markdownZoomPercent={markdownZoomPercent}
+                markdownSourceVisible={markdownSourceVisible}
                 activeActions={editorFormatState}
                 editorHistoryState={activeEditorHistoryState}
                 imageInsertionEnabled={!hasNotes}
@@ -698,6 +709,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 onRunEditorAction={handleRunEditorAction}
                 onExportDocument={(format) => props.onExportDocument(props.activeDocumentId, format)}
                 onMarkdownZoomChange={(nextZoom) => setMarkdownZoomPercent(clamp(Math.round(nextZoom), 80, 150))}
+                onToggleMarkdownSource={() => setMarkdownSourceVisible((visible) => !visible)}
                 onToggleHistory={props.onToggleHistory}
               />
               )}
@@ -729,28 +741,32 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                         />
                       ) : hasNotes ? (
                         props.notesLoaded ? (
-                          <Suspense fallback={<div className="pt-6 text-[11px] text-ink-secondary">Cargando editor...</div>}>
-                            <MarkdownEditor
-                              key={props.notesEditorKey}
-                              documentKey={props.notesEditorKey}
-                              markdown={props.notesMarkdown}
-                              onChange={props.onNotesMarkdownChange}
-                              onControllerChange={(controller) => handleEditorControllerChange("user-notes", controller)}
-                              onFormatStateChange={(formatState) => {
-                                if (hasNotes) {
-                                  setEditorFormatState((currentFormatState) => keepStableFormatState(currentFormatState, formatState));
-                                }
-                              }}
-                              onHistoryStateChange={(historyState) => {
-                                setEditorHistoryStates((currentHistoryStates) =>
-                                  keepStableHistoryStateForDocument(currentHistoryStates, "user-notes", historyState),
-                                );
-                              }}
-                              onSelectionChange={(selection) => props.onDocumentSelectionChange("user-notes", selection)}
-                              selectionFocus={toMarkdownEditorSelection(props.aiSelectionFocus, "user-notes")}
-                              zoomPercent={markdownZoomPercent}
-                            />
-                          </Suspense>
+                          markdownSourceVisible ? (
+                            <MarkdownSourceViewer markdown={props.notesMarkdown} zoomPercent={markdownZoomPercent} ariaLabel="Markdown puro de Notas" />
+                          ) : (
+                            <Suspense fallback={<div className="pt-6 text-[11px] text-ink-secondary">Cargando editor...</div>}>
+                              <MarkdownEditor
+                                key={props.notesEditorKey}
+                                documentKey={props.notesEditorKey}
+                                markdown={props.notesMarkdown}
+                                onChange={props.onNotesMarkdownChange}
+                                onControllerChange={(controller) => handleEditorControllerChange("user-notes", controller)}
+                                onFormatStateChange={(formatState) => {
+                                  if (hasNotes) {
+                                    setEditorFormatState((currentFormatState) => keepStableFormatState(currentFormatState, formatState));
+                                  }
+                                }}
+                                onHistoryStateChange={(historyState) => {
+                                  setEditorHistoryStates((currentHistoryStates) =>
+                                    keepStableHistoryStateForDocument(currentHistoryStates, "user-notes", historyState),
+                                  );
+                                }}
+                                onSelectionChange={(selection) => props.onDocumentSelectionChange("user-notes", selection)}
+                                selectionFocus={toMarkdownEditorSelection(props.aiSelectionFocus, "user-notes")}
+                                zoomPercent={markdownZoomPercent}
+                              />
+                            </Suspense>
+                          )
                         ) : (
                           <div className="pt-6 text-[11px] text-ink-secondary">Cargando notas...</div>
                         )
@@ -799,30 +815,34 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                           onDrop={session.documentId === props.activeDocumentId ? handleEditorImageDrop : undefined}
                         >
                           {session.document ? (
-                            <Suspense fallback={<div className="pt-6 text-[11px] text-ink-secondary">Cargando editor...</div>}>
-                              <MarkdownEditor
-                                key={session.editorKey}
-                                documentKey={session.editorKey}
-                                markdown={materializeProjectImageReferences(session.markdown, props.activeProject?.id ?? "", session.document.path, props.tree)}
-                                onChange={(markdown, source) => props.onMarkdownChange(session.documentId, restoreProjectImageReferences(markdown, props.activeProject?.id ?? "", session.document!.path, props.tree), source)}
-                                onControllerChange={(controller) => handleEditorControllerChange(session.documentId, controller)}
-                                onFormatStateChange={(formatState) => {
-                                  if (session.documentId === props.activeDocumentId) {
-                                    setEditorFormatState((currentFormatState) => keepStableFormatState(currentFormatState, formatState));
-                                  }
-                                }}
-                                onHistoryStateChange={(historyState) => {
-                                  setEditorHistoryStates((currentHistoryStates) =>
-                                    keepStableHistoryStateForDocument(currentHistoryStates, session.documentId, historyState),
-                                  );
-                                }}
-                                onSelectionChange={(selection) => props.onDocumentSelectionChange(session.documentId, selection)}
-                                onImageEditRequest={setImageEditTarget}
-                                onDiagramEditRequest={setDiagramEditTarget}
-                                selectionFocus={toMarkdownEditorSelection(props.aiSelectionFocus, session.documentId)}
-                                zoomPercent={markdownZoomPercent}
-                              />
-                            </Suspense>
+                            markdownSourceVisible && session.documentId === props.activeDocumentId ? (
+                              <MarkdownSourceViewer markdown={session.markdown} zoomPercent={markdownZoomPercent} ariaLabel={`Markdown puro de ${session.document.name}`} />
+                            ) : (
+                              <Suspense fallback={<div className="pt-6 text-[11px] text-ink-secondary">Cargando editor...</div>}>
+                                <MarkdownEditor
+                                  key={session.editorKey}
+                                  documentKey={session.editorKey}
+                                  markdown={materializeProjectImageReferences(session.markdown, props.activeProject?.id ?? "", session.document.path, props.tree)}
+                                  onChange={(markdown, source) => props.onMarkdownChange(session.documentId, restoreProjectImageReferences(markdown, props.activeProject?.id ?? "", session.document!.path, props.tree), source)}
+                                  onControllerChange={(controller) => handleEditorControllerChange(session.documentId, controller)}
+                                  onFormatStateChange={(formatState) => {
+                                    if (session.documentId === props.activeDocumentId) {
+                                      setEditorFormatState((currentFormatState) => keepStableFormatState(currentFormatState, formatState));
+                                    }
+                                  }}
+                                  onHistoryStateChange={(historyState) => {
+                                    setEditorHistoryStates((currentHistoryStates) =>
+                                      keepStableHistoryStateForDocument(currentHistoryStates, session.documentId, historyState),
+                                    );
+                                  }}
+                                  onSelectionChange={(selection) => props.onDocumentSelectionChange(session.documentId, selection)}
+                                  onImageEditRequest={setImageEditTarget}
+                                  onDiagramEditRequest={setDiagramEditTarget}
+                                  selectionFocus={toMarkdownEditorSelection(props.aiSelectionFocus, session.documentId)}
+                                  zoomPercent={markdownZoomPercent}
+                                />
+                              </Suspense>
+                            )
                           ) : (
                             <div className="pt-6 text-[11px] text-ink-secondary">Cargando documento...</div>
                           )}
@@ -861,7 +881,15 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 appliedChangeSummary={props.aiAppliedChange?.documentId === activeEditorId ? props.aiAppliedChange.summary : null}
                 selectionFocus={props.aiSelectionFocus?.documentId === activeEditorId ? props.aiSelectionFocus : null}
                 activeContextSources={props.aiContextSources}
+                researchBrief={props.aiResearchBrief}
+                researchJob={props.aiResearchJob}
+                researchJobs={props.aiResearchJobs}
                 onSubmit={props.onSendAiPrompt}
+                onUpdateResearchBrief={props.onUpdateAiResearchBrief}
+                onStartResearch={props.onStartAiResearch}
+                onCancelResearchBrief={props.onCancelAiResearchBrief}
+                onCancelResearchJob={props.onCancelAiResearchJob}
+                onRetryResearchJob={props.onRetryAiResearchJob}
                 onTranscriptionConfigChange={props.onAiTranscriptionChange}
                 onPreviewDocumentDictation={handlePreviewDocumentDictation}
                 onCommitDocumentDictation={handleCommitDocumentDictation}

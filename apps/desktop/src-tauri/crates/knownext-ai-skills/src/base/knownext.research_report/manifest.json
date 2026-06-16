@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 2,
+  "id": "knownext.research_report",
+  "name": "Informe de investigación",
+  "version": "1.0.0",
+  "source": "base",
+  "description": "Coordina informes de investigación verificables con estructura profesional, fuentes, citas, limitaciones y recursos visuales.",
+  "categories": ["research", "document", "report"],
+  "capabilities": ["research", "markdown", "citations", "report_format", "diagram_generation", "image_generation"],
+  "outputActions": ["create_research_report", "create_document", "answer"],
+  "requires": ["knownext.markdown"],
+  "validators": ["research.report.structure", "research.report.citations", "research.report.visuals", "governance.privacy"],
+  "orchestratesSkills": ["knownext.markdown", "knownext.mermaid"],
+  "auxiliarySkillCategories": ["markdown", "diagrams", "images", "style", "citations", "sector_report"],
+  "requiredCapabilities": ["research", "markdown", "citations", "report_format"],
+  "runtimeEnabled": true,
+  "modes": [
+    {
+      "id": "ejecutivo",
+      "name": "Ejecutivo",
+      "description": "Informe breve orientado a decisión, con hallazgos, riesgos y recomendaciones.",
+      "whenToUse": ["Investigación rápida", "Resumen para dirección", "El usuario quiere conclusiones accionables sin detalle excesivo."],
+      "whenNotToUse": ["Se requiere trazabilidad extensa", "Hay que comparar muchas fuentes o normativa."],
+      "supportedActions": ["create_research_report", "create_document", "answer"],
+      "requiresCapabilities": ["research", "markdown", "citations"],
+      "validators": ["research.report.structure", "research.report.citations"],
+      "riskLevel": "medium",
+      "contextBudget": 1800
+    },
+    {
+      "id": "profundo",
+      "name": "Profundo",
+      "description": "Informe completo con metodología, contraste, fuentes, limitaciones y recomendaciones.",
+      "whenToUse": ["Investigación profunda", "Estado del arte", "Decisiones que necesitan trazabilidad."],
+      "whenNotToUse": ["Solo se necesita una respuesta breve."],
+      "supportedActions": ["create_research_report", "create_document", "answer"],
+      "requiresCapabilities": ["research", "markdown", "citations"],
+      "validators": ["research.report.structure", "research.report.citations", "research.report.visuals"],
+      "riskLevel": "medium",
+      "contextBudget": 3200
+    },
+    {
+      "id": "comparativo",
+      "name": "Comparativo",
+      "description": "Compara alternativas, fuentes o enfoques, destacando diferencias, contradicciones y fiabilidad.",
+      "whenToUse": ["Comparar fuentes", "Comparar opciones", "Detectar contradicciones."],
+      "whenNotToUse": ["El objetivo es una explicación lineal sin alternativas."],
+      "supportedActions": ["create_research_report", "create_document", "answer"],
+      "requiresCapabilities": ["research", "markdown", "citations"],
+      "validators": ["research.report.structure", "research.report.citations", "markdown.table.syntax"],
+      "riskLevel": "medium",
+      "contextBudget": 2800
+    },
+    {
+      "id": "normativo",
+      "name": "Normativo",
+      "description": "Informe centrado en obligaciones, criterios regulatorios, riesgos y alcance de cumplimiento.",
+      "whenToUse": ["Investigación normativa", "Cumplimiento", "Riesgos legales o regulatorios."],
+      "whenNotToUse": ["No hay fuentes normativas ni marco aplicable."],
+      "supportedActions": ["create_research_report", "create_document", "answer"],
+      "requiresCapabilities": ["research", "markdown", "citations"],
+      "validators": ["research.report.structure", "research.report.citations", "governance.privacy"],
+      "riskLevel": "high",
+      "contextBudget": 3400
+    },
+    {
+      "id": "tecnico",
+      "name": "Técnico",
+      "description": "Informe orientado a arquitectura, implementación, impactos, decisiones técnicas y diagramas.",
+      "whenToUse": ["Análisis técnico", "Arquitectura", "Diseño de solución", "Impacto de implementación."],
+      "whenNotToUse": ["La audiencia solo necesita un resumen ejecutivo."],
+      "supportedActions": ["create_research_report", "create_document", "answer"],
+      "requiresCapabilities": ["research", "markdown", "citations"],
+      "validators": ["research.report.structure", "research.report.citations", "research.report.visuals"],
+      "riskLevel": "medium",
+      "contextBudget": 3200
+    }
+  ]
+}

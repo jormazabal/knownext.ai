@@ -2,6 +2,19 @@
 
 All KnowNext.ai releases use one monolithic application version for the frontend, Tauri shell, Rust runtime, Windows updater, and Android updater.
 
+## 2.5.0 - 2026-06-16
+
+- Added the professional `Investigación` flow: a single prompt capability prepares a reviewable plan, proposes candidate sources and report length, runs a Rust-orchestrated research job, and creates a new reviewable Markdown report.
+- Added the base `Informe de investigación` AI skill and a `knownext-research` Rust crate for planning, query batches, source ranking, evidence extraction, coverage, synthesis, verification and publication.
+- Improved research UX with live activity, elapsed time, source/evidence/token/cost metrics, a 60-second pausable countdown, cancellation confirmation, automatic report opening, and context budgeting so large investigations avoid provider context-window failures.
+- Simplified AI research settings to product-level controls for maximum cost, diagrams and images while keeping web research as the required research source.
+- Reworked the AI prompt `+` menu into compact context/capability groups with hover descriptions and stable submenus for research, image creation and diagram creation.
+- Improved AI conversation history with compact metadata below bubbles, document links, copy actions, Slack-style time separators and incremental loading of older messages.
+- Refined the document workspace with source/visual Markdown toggling, better heading and image spacing, tighter list indentation, aligned bullets and numbered labels, and protected permanent IA/Notas tabs.
+- Improved the project tree interaction model: single click focuses an item, double click opens documents or folders, chevrons expand/collapse with one click, and context menus stay visible near viewport edges.
+- Fixed Android update checks so Android can report unavailable/no-update states without showing a raw fetch error.
+- Expanded frontend, Rust and manual release coverage for research, AI conversations, editor rendering, tree interactions, updater behavior and mobile runtime expectations.
+
 ## 2.4.1 - 2026-06-09
 
 - Made document save state hash-based so obsolete drafts are ignored, drafts that match disk are discarded, and reopening a document no longer revives formatting changes that were undone.

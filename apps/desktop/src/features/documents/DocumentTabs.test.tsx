@@ -167,6 +167,8 @@ describe("DocumentTabs", () => {
     render(
       <DocumentTabs
         tabs={[
+          { kind: "ai-conversation", id: "project-ai-conversation", name: "IA", readonly: true },
+          { kind: "notes", id: "user-notes", name: "Notas", utilityTabId: "notes" },
           ...tabs,
           { kind: "reference-document", id: "ref-budget", name: "Presupuesto.xlsx", path: "Presupuesto.xlsx", format: "xlsx", readonly: true },
         ]}

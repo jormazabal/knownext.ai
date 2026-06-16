@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use base64::Engine;
 use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
@@ -7,6 +9,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use time::{format_description::well_known::Rfc3339, Duration as TimeDuration, OffsetDateTime};
 
@@ -57,6 +60,8 @@ struct AiUsageAccumulator {
 }
 
 type ApiResult = Result<LocalApiResponse, String>;
+
+const AI_CONVERSATION_MAX_EVENTS: usize = 2_000;
 
 impl LocalApi {
     pub fn new(app_data_dir: PathBuf, version: String, profile: String) -> Self {
@@ -460,6 +465,68 @@ impl LocalApi {
             ("POST", ["api", "projects", project_id, "ai", "interactions"]) => {
                 ok(self.ai_interaction(project_id, body))
             }
+            ("POST", ["api", "projects", project_id, "ai", "research", "brief"]) => {
+                ok(self.ai_research_brief(project_id, body))
+            }
+            ("GET", ["api", "projects", project_id, "ai", "research", "policy"]) => {
+                ok(self.ai_research_policy(project_id))
+            }
+            ("PUT", ["api", "projects", project_id, "ai", "research", "policy"]) => {
+                ok(self.save_ai_research_policy(project_id, body))
+            }
+            ("GET", ["api", "projects", project_id, "ai", "research", "jobs"]) => {
+                ok(self.ai_research_jobs_response(project_id))
+            }
+            ("POST", ["api", "projects", project_id, "ai", "research", "jobs"]) => {
+                ok(self.ai_research_start(project_id, body)?)
+            }
+            ("GET", ["api", "projects", project_id, "ai", "research", "jobs", job_id]) => {
+                ok(self.ai_research_job(project_id, job_id))
+            }
+            (
+                "GET",
+                ["api", "projects", project_id, "ai", "research", "jobs", job_id, "sources"],
+            ) => ok(self.ai_research_sources(project_id, job_id)),
+            (
+                "GET",
+                ["api", "projects", project_id, "ai", "research", "jobs", job_id, "quality"],
+            ) => ok(self.ai_research_quality(project_id, job_id)),
+            (
+                "GET",
+                ["api", "projects", project_id, "ai", "research", "jobs", job_id, "activity"],
+            ) => ok(self.ai_research_activity(project_id, job_id)),
+            (
+                "GET",
+                ["api", "projects", project_id, "ai", "research", "jobs", job_id, "coverage"],
+            ) => ok(self.ai_research_coverage(project_id, job_id)),
+            (
+                "POST",
+                ["api", "projects", project_id, "ai", "research", "jobs", job_id, "cancel"],
+            ) => ok(self.ai_research_cancel(project_id, job_id)),
+            (
+                "POST",
+                ["api", "projects", project_id, "ai", "research", "jobs", job_id, "retry"],
+            ) => ok(self.ai_research_retry(project_id, job_id)?),
+            (
+                "POST",
+                ["api", "projects", project_id, "ai", "research", "jobs", job_id, "refine"],
+            ) => ok(self.ai_research_refine(project_id, job_id, body)?),
+            (
+                "POST",
+                ["api", "projects", project_id, "ai", "research", "jobs", job_id, "update-sources"],
+            ) => ok(self.ai_research_update_sources(project_id, job_id)?),
+            (
+                "POST",
+                ["api", "projects", project_id, "ai", "research", "jobs", job_id, "accept"],
+            ) => ok(self.ai_research_accept(project_id, job_id)),
+            (
+                "POST",
+                ["api", "projects", project_id, "ai", "research", "jobs", job_id, "review"],
+            ) => ok(self.ai_research_review(project_id, job_id, body)),
+            (
+                "POST",
+                ["api", "projects", project_id, "ai", "research", "jobs", job_id, "export"],
+            ) => ok(self.ai_research_export(project_id, job_id, body)?),
             ("GET", ["api", "projects", project_id, "ai", "conversation"]) => {
                 ok(self.ai_conversation(project_id))
             }
@@ -633,6 +700,16 @@ impl LocalApi {
         self.app_data_dir
             .join("ai-index")
             .join(format!("{project_id}.json"))
+    }
+    fn research_jobs_path(&self, project_id: &str) -> PathBuf {
+        self.app_data_dir
+            .join("ai-research")
+            .join(format!("{project_id}.json"))
+    }
+    fn research_policy_path(&self, project_id: &str) -> PathBuf {
+        self.app_data_dir
+            .join("ai-research")
+            .join(format!("{project_id}.policy.json"))
     }
     fn image_index_path(&self, project_id: &str) -> PathBuf {
         self.app_data_dir
@@ -3571,6 +3648,17 @@ impl LocalApi {
     fn ai_conversation(&self, project_id: &str) -> Value {
         self.read_json(&self.conversation_path(project_id), json!({ "events": [] }))
     }
+    fn append_ai_conversation_events(&self, project_id: &str, next_events: Vec<Value>) {
+        if next_events.is_empty() {
+            return;
+        }
+        let mut conversation = self.ai_conversation(project_id);
+        if let Some(events) = conversation["events"].as_array_mut() {
+            events.extend(next_events);
+            trim_ai_conversation_events(events);
+        }
+        let _ = self.write_json(&self.conversation_path(project_id), &conversation);
+    }
     fn ai_interaction(&self, project_id: &str, body: Value) -> Value {
         let user_event = self.ai_user_conversation_event(project_id, &body);
         let context_sources = self.resolve_ai_context_sources(project_id, &body);
@@ -3621,11 +3709,7 @@ impl LocalApi {
                 .unwrap_or_default(),
         );
         response["conversationEvents"] = Value::Array(response_events.clone());
-        let mut conversation = self.ai_conversation(project_id);
-        if let Some(events) = conversation["events"].as_array_mut() {
-            events.extend(response_events);
-        }
-        let _ = self.write_json(&self.conversation_path(project_id), &conversation);
+        self.append_ai_conversation_events(project_id, response_events);
         self.record_ai_usage_records(
             project_id,
             response["interactionId"].as_str().unwrap_or("ai"),
@@ -3633,13 +3717,1355 @@ impl LocalApi {
         );
         response
     }
+    fn ai_research_jobs(&self, project_id: &str) -> Value {
+        self.read_json(&self.research_jobs_path(project_id), json!({ "jobs": [] }))
+    }
+    fn ai_research_jobs_response(&self, project_id: &str) -> Value {
+        let mut store = self.ai_research_jobs(project_id);
+        if let Some(jobs) = store["jobs"].as_array_mut() {
+            jobs.sort_by(|a, b| {
+                b["createdAt"]
+                    .as_str()
+                    .unwrap_or("")
+                    .cmp(a["createdAt"].as_str().unwrap_or(""))
+            });
+            jobs.truncate(50);
+        }
+        store
+    }
+    fn write_ai_research_job(&self, project_id: &str, job: &Value) {
+        let mut normalized_job = job.clone();
+        refresh_research_runtime_fields(&mut normalized_job);
+        let mut store = self.ai_research_jobs(project_id);
+        if let Some(jobs) = store["jobs"].as_array_mut() {
+            let job_id = normalized_job["id"].as_str().unwrap_or("");
+            if let Some(existing) = jobs
+                .iter_mut()
+                .find(|item| item["id"].as_str() == Some(job_id))
+            {
+                *existing = normalized_job;
+            } else {
+                jobs.push(normalized_job);
+            }
+        }
+        let _ = self.write_json_atomic(&self.research_jobs_path(project_id), &store);
+    }
+    fn ai_research_policy(&self, project_id: &str) -> Value {
+        let now = knownext_core::now_iso();
+        let config = self.read_config();
+        let agentic = &config["ai"]["agentic"];
+        let default = json!({
+            "projectId": project_id,
+            "allowedSourceScopes": ["web_project", "web", "project"],
+            "blockedDomains": [],
+            "preferredLanguage": "es",
+            "defaultDepth": agentic["depth"].as_str().filter(|value| matches!(*value, "quick" | "standard" | "deep")).unwrap_or("deep"),
+            "maxEstimatedCostEur": agentic["maxEstimatedCostEur"].as_f64().unwrap_or(1.0),
+            "maxSources": agentic["maxSources"].as_u64().unwrap_or(6),
+            "confirmBeforeCreating": agentic["confirmBeforeApplying"].as_bool().unwrap_or(true),
+            "allowPrivateProjectDocuments": true,
+            "minimumSources": 2,
+            "requireCitations": true,
+            "updatedAt": now
+        });
+        let mut policy = self.read_json(&self.research_policy_path(project_id), default);
+        policy["projectId"] = Value::from(project_id);
+        policy
+    }
+    fn save_ai_research_policy(&self, project_id: &str, mut body: Value) -> Value {
+        body["projectId"] = Value::from(project_id);
+        body["updatedAt"] = Value::from(knownext_core::now_iso());
+        let _ = self.write_json_atomic(&self.research_policy_path(project_id), &body);
+        body
+    }
+    fn ai_research_brief(&self, project_id: &str, body: Value) -> Value {
+        if let Some(user_event) = self.ai_user_conversation_event(project_id, &body) {
+            self.append_ai_conversation_events(project_id, vec![user_event]);
+        }
+        let now = knownext_core::now_iso();
+        let config = self.read_config();
+        let agentic = &config["ai"]["agentic"];
+        let policy = self.ai_research_policy(project_id);
+        let prompt = body
+            .get("prompt")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        let topic = body
+            .pointer("/intent/research/topic")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or(prompt)
+            .trim();
+        let topic = if topic.is_empty() {
+            "Investigación sin título"
+        } else {
+            topic
+        };
+        let max_cost = body
+            .pointer("/intent/research/maxEstimatedCostEur")
+            .and_then(Value::as_f64)
+            .or_else(|| policy["maxEstimatedCostEur"].as_f64())
+            .or_else(|| agentic["maxEstimatedCostEur"].as_f64())
+            .unwrap_or(1.0)
+            .clamp(0.1, 25.0);
+        let web_enabled = config["ai"]["agentic"]["webResearchEnabled"]
+            .as_bool()
+            .unwrap_or(false);
+        let depth = "deep".to_string();
+        let template_id = "state_of_art".to_string();
+        let source_scope = "web_project".to_string();
+        let proposed_candidate_source_limit =
+            research_proposed_candidate_source_limit(topic, prompt, &body);
+        let proposed_report_length =
+            research_proposed_report_length(topic, prompt, proposed_candidate_source_limit);
+        let candidate_source_limit = body
+            .pointer("/intent/research/candidateSourceLimit")
+            .and_then(Value::as_u64)
+            .or_else(|| {
+                body.pointer("/intent/research/maxSources")
+                    .and_then(Value::as_u64)
+            })
+            .or_else(|| {
+                body.pointer("/intent/research/plan/candidateSourceLimit")
+                    .and_then(Value::as_u64)
+            })
+            .unwrap_or(proposed_candidate_source_limit)
+            .clamp(1, 500);
+        let report_length = body
+            .pointer("/intent/research/reportLength")
+            .and_then(Value::as_str)
+            .or_else(|| {
+                body.pointer("/intent/research/plan/reportLength")
+                    .and_then(Value::as_str)
+            })
+            .map(normalize_research_report_length)
+            .unwrap_or(proposed_report_length);
+        let diagrams_enabled = agentic["researchDiagramsEnabled"]
+            .as_bool()
+            .unwrap_or_else(|| legacy_research_visual_enabled(agentic, "diagramsEnabled", true));
+        let images_enabled = agentic["researchImagesEnabled"]
+            .as_bool()
+            .unwrap_or_else(|| legacy_research_visual_enabled(agentic, "imagesEnabled", true));
+        let strategy = knownext_research::strategy_for_mode_and_length(
+            "deep",
+            candidate_source_limit as usize,
+            report_length,
+        );
+        let duration_label = strategy["estimatedTimeRange"]
+            .as_str()
+            .unwrap_or("10-30 min")
+            .to_string();
+        let language = body
+            .pointer("/intent/research/language")
+            .and_then(Value::as_str)
+            .or_else(|| policy["preferredLanguage"].as_str())
+            .unwrap_or("es");
+        let tone = body
+            .pointer("/intent/research/tone")
+            .and_then(Value::as_str)
+            .unwrap_or("professional");
+        let primary_objective = research_objective_for_request(topic);
+        let secondary_objectives = research_secondary_objectives_for_request(topic);
+        let research_aspects = research_aspects_for_request(topic);
+        let recommended_report_style =
+            research_recommended_style_for_request(topic, report_length).to_string();
+        let constraints = if !web_enabled && matches!(source_scope.as_str(), "web" | "web_project")
+        {
+            "La investigación necesita búsqueda web activa y una API key configurada. Configura OpenAI para poder ejecutarla.".to_string()
+        } else {
+            "Usar web como fuente principal, añadir contexto del proyecto solo si el usuario lo aporta y marcar como no concluyente cualquier afirmación sin soporte suficiente.".to_string()
+        };
+        let planning_rationale = format!(
+            "Se proponen {} fuentes candidatas y extensión {} por el alcance y complejidad del objetivo.",
+            candidate_source_limit,
+            research_report_length_label(report_length)
+        );
+        let plan = json!({
+            "title": research_title_for_request(topic),
+            "objective": primary_objective,
+            "primaryObjective": primary_objective,
+            "secondaryObjectives": secondary_objectives,
+            "researchAspects": research_aspects,
+            "objectiveCoverage": research_objective_coverage(),
+            "recommendedReportStyle": recommended_report_style,
+            "proposedCandidateSourceLimit": proposed_candidate_source_limit,
+            "candidateSourceLimit": candidate_source_limit,
+            "proposedReportLength": proposed_report_length,
+            "reportLength": report_length,
+            "planningRationale": planning_rationale,
+            "outline": research_aspects,
+            "constraints": constraints,
+            "sourceScope": source_scope.clone(),
+            "reportSkillId": "knownext.research_report",
+            "auxiliarySkillIds": research_auxiliary_skill_ids(diagrams_enabled, images_enabled),
+            "outputSummary": "Web activa · contexto del proyecto si se aporta · tablas y citas siempre disponibles",
+            "visualPlan": research_visual_plan(diagrams_enabled, images_enabled),
+            "diagramsEnabled": diagrams_enabled,
+            "imagesEnabled": images_enabled,
+            "estimatedDurationLabel": duration_label.clone(),
+            "autoStartAfterSeconds": knownext_research::AUTO_START_AFTER_SECONDS,
+            "createdAt": now,
+            "updatedAt": now
+        });
+        json!({
+            "id": knownext_core::compact_id("research-brief"),
+            "projectId": project_id,
+            "topic": topic,
+            "objective": plan["objective"],
+            "questions": plan["outline"],
+            "depth": depth,
+            "sourceScope": source_scope,
+            "maxSources": candidate_source_limit,
+            "candidateSourceLimit": candidate_source_limit,
+            "maxEstimatedCostEur": max_cost,
+            "resultTarget": "new_document",
+            "confirmBeforeCreating": false,
+            "destinationFolderId": Value::Null,
+            "destinationFolderPath": Value::Null,
+            "templateId": template_id,
+            "reportLength": report_length,
+            "tone": tone,
+            "language": language,
+            "plan": plan,
+            "reportProfile": {
+                "diagramsEnabled": diagrams_enabled,
+                "imagesEnabled": images_enabled
+            },
+            "createdAt": now,
+            "updatedAt": now
+        })
+    }
+    fn ai_research_job(&self, project_id: &str, job_id: &str) -> Value {
+        self.ai_research_jobs(project_id)["jobs"]
+            .as_array()
+            .and_then(|jobs| {
+                jobs.iter()
+                    .find(|job| job["id"].as_str() == Some(job_id))
+                    .cloned()
+            })
+            .unwrap_or_else(|| {
+                let now = knownext_core::now_iso();
+                json!({
+                    "id": job_id,
+                    "projectId": project_id,
+                    "brief": Value::Null,
+                    "status": "failed",
+                    "phases": [],
+                    "currentPhase": "failed",
+                    "phase": "failed",
+                    "progress": 100,
+                    "progressMessage": "Investigación no encontrada.",
+                    "message": "Investigación no encontrada.",
+                    "sources": [],
+                    "evidence": [],
+                    "qualityReport": Value::Null,
+                    "reviewState": Value::Null,
+                    "metrics": Value::Null,
+                    "documentId": Value::Null,
+                    "createdDocumentId": Value::Null,
+                    "documentPath": Value::Null,
+                    "markdown": Value::Null,
+                    "researchFindings": [],
+                    "tree": Value::Null,
+                    "usedSkills": [],
+                    "skillApplications": [],
+                    "skillDiagnostics": [],
+                    "generatedImages": [],
+                    "error": { "code": "not_found", "message": "Investigación no encontrada.", "retryable": false },
+                    "retryOfJobId": Value::Null,
+                    "startedAt": Value::Null,
+                    "finishedAt": now,
+                    "createdAt": now,
+                    "updatedAt": now
+                })
+            })
+    }
+    fn ai_research_cancel(&self, project_id: &str, job_id: &str) -> Value {
+        let mut job = self.ai_research_job(project_id, job_id);
+        let now = knownext_core::now_iso();
+        job["status"] = Value::from("cancelled");
+        job["currentPhase"] = Value::from("cancelled");
+        job["phase"] = Value::from("cancelled");
+        job["progress"] = Value::from(100);
+        job["progressMessage"] = Value::from("Investigación cancelada.");
+        job["message"] = Value::from("Investigación cancelada.");
+        job["finishedAt"] = Value::from(now.clone());
+        job["updatedAt"] = Value::from(now);
+        self.write_ai_research_job(project_id, &job);
+        job
+    }
+    fn ai_research_start(&self, project_id: &str, body: Value) -> Result<Value, String> {
+        let brief = body
+            .get("brief")
+            .cloned()
+            .unwrap_or_else(|| self.ai_research_brief(project_id, body.clone()));
+        let now = knownext_core::now_iso();
+        let job = json!({
+            "id": knownext_core::compact_id("research"),
+            "projectId": project_id,
+            "brief": brief,
+            "status": "planning",
+            "phases": ["planning", "searching", "reading", "extracting", "contrasting", "drafting", "reviewing"],
+            "currentPhase": "planning",
+            "phase": "planning",
+            "progress": 5,
+            "progressMessage": "Preparando investigación.",
+            "message": "Preparando investigación.",
+            "heartbeatAt": now,
+            "lastActivityAt": now,
+            "sources": [],
+            "evidence": [],
+            "strategy": Value::Null,
+            "queryBatches": [],
+            "sourceCandidates": [],
+            "rankedSources": [],
+            "sourceReads": [],
+            "coverage": Value::Null,
+            "findings": [],
+            "draftMarkdown": Value::Null,
+            "activity": [knownext_research::activity_event("planning", "info", "Investigación creada.")],
+            "artifactCounts": {
+                "candidateSources": 0,
+                "rankedSources": 0,
+                "selectedSources": 0,
+                "readSources": 0,
+                "evidence": 0,
+                "findings": 0,
+                "citedSources": 0,
+                "tables": 0,
+                "diagrams": 0,
+                "images": 0
+            },
+            "usage": {
+                "providerCalls": 0,
+                "inputTokens": 0,
+                "cachedInputTokens": 0,
+                "outputTokens": 0,
+                "reasoningTokens": 0,
+                "totalTokens": 0,
+                "estimatedCostEur": Value::Null,
+                "currency": "EUR",
+                "updatedAt": Value::Null
+            },
+            "budget": Value::Null,
+            "qualityReport": Value::Null,
+            "reviewState": { "status": "draft_ai", "comments": Value::Null, "reviewedAt": Value::Null },
+            "metrics": { "durationMs": Value::Null, "estimatedCostEur": Value::Null, "sourceCount": 0, "evidenceCount": 0, "supportedClaimRatio": Value::Null },
+            "documentId": Value::Null,
+            "createdDocumentId": Value::Null,
+            "documentPath": Value::Null,
+            "markdown": Value::Null,
+            "researchFindings": [],
+            "tree": Value::Null,
+            "usedSkills": [],
+            "skillApplications": [],
+            "skillDiagnostics": [],
+            "generatedImages": [],
+            "error": Value::Null,
+            "retryOfJobId": body.get("retryOfJobId").cloned().unwrap_or(Value::Null),
+            "request": body,
+            "startedAt": Value::Null,
+            "finishedAt": Value::Null,
+            "createdAt": now,
+            "updatedAt": now
+        });
+        self.write_ai_research_job(project_id, &job);
+
+        let api = self.clone();
+        let project_id = project_id.to_string();
+        let job_id = job["id"].as_str().unwrap_or("").to_string();
+        thread::spawn(move || {
+            if let Err(error) = api.ai_research_execute_job(&project_id, &job_id) {
+                api.fail_ai_research_job_with_status(
+                    &project_id,
+                    &job_id,
+                    "failed_runtime",
+                    "research_runtime_error",
+                    &format!("La investigación se ha detenido por un error interno: {error}"),
+                    true,
+                );
+            }
+        });
+
+        Ok(job)
+    }
+
+    fn ai_research_execute_job(&self, project_id: &str, job_id: &str) -> Result<(), String> {
+        let started_at = knownext_core::now_iso();
+        self.update_ai_research_job(project_id, job_id, |job| {
+            job["startedAt"] = Value::from(started_at.clone());
+            job["status"] = Value::from("planning");
+            job["currentPhase"] = Value::from("planning");
+            job["phase"] = Value::from("planning");
+            job["progress"] = Value::from(10);
+            job["progressMessage"] = Value::from("Validando configuración y alcance.");
+            job["message"] = Value::from("Validando configuración y alcance.");
+        });
+
+        let job = self.ai_research_job(project_id, job_id);
+        if job["status"].as_str() == Some("cancelled") {
+            return Ok(());
+        }
+        let config = self.read_config();
+        if !config["ai"]["agentic"]["webResearchEnabled"]
+            .as_bool()
+            .unwrap_or(false)
+        {
+            self.fail_ai_research_job_with_status(
+                project_id,
+                job_id,
+                "failed_provider",
+                "web_research_disabled",
+                "Activa la investigación web en Ajustes > IA para ejecutar investigaciones con fuentes online.",
+                true,
+            );
+            return Ok(());
+        }
+        if self.openai_key().as_deref().unwrap_or("").trim().is_empty() {
+            self.fail_ai_research_job_with_status(
+                project_id,
+                job_id,
+                "failed_provider",
+                "openai_key_missing",
+                "Configura una API key de OpenAI en Ajustes > IA para ejecutar investigaciones.",
+                true,
+            );
+            return Ok(());
+        }
+
+        let job = self.ai_research_job(project_id, job_id);
+        let request = job.get("request").cloned().unwrap_or_else(|| json!({}));
+        let context_sources = self.resolve_ai_context_sources(project_id, &request);
+        let strategy = knownext_research::strategy_for_brief(&job["brief"]);
+        let max_cost = job["brief"]["maxEstimatedCostEur"].as_f64().unwrap_or(1.0);
+        let max_steps = config["ai"]["agentic"]["maxSteps"]
+            .as_u64()
+            .and_then(|value| usize::try_from(value).ok())
+            .unwrap_or(20);
+        let budget = knownext_research::budget_for_strategy(&strategy, max_cost, max_steps);
+        self.update_ai_research_job(project_id, job_id, |job| {
+            job["strategy"] = strategy.clone();
+            job["budget"] = budget.clone();
+        });
+
+        self.set_ai_research_phase(
+            project_id,
+            job_id,
+            "query_planning",
+            15,
+            "Preparando consultas de investigación.",
+        );
+        if self.is_ai_research_cancelled(project_id, job_id) {
+            return Ok(());
+        }
+        let query_batches = knownext_research::query_batches(&job["brief"]["plan"], &strategy);
+        self.update_ai_research_job(project_id, job_id, |job| {
+            job["queryBatches"] = json!(query_batches);
+            job["budget"] = knownext_research::increment_budget_step(&job["budget"], 1);
+        });
+
+        let job = self.ai_research_job(project_id, job_id);
+        self.set_ai_research_phase(project_id, job_id, "searching", 25, "Buscando fuentes.");
+        let candidate_limit = strategy["candidateSourceLimit"]
+            .as_u64()
+            .and_then(|value| usize::try_from(value).ok())
+            .unwrap_or(50)
+            .clamp(1, 500);
+        let mut source_candidates: Vec<Value> = Vec::new();
+        let query_batches = job["queryBatches"].as_array().cloned().unwrap_or_default();
+        let query_batch_total = query_batches.len().max(1);
+        for (batch_index, batch) in query_batches.into_iter().enumerate() {
+            if self.is_ai_research_cancelled(project_id, job_id) {
+                return Ok(());
+            }
+            let remaining = candidate_limit.saturating_sub(source_candidates.len());
+            if remaining == 0 {
+                break;
+            }
+            let aspect = batch["aspect"]
+                .as_str()
+                .unwrap_or("el objetivo definido")
+                .chars()
+                .take(90)
+                .collect::<String>();
+            self.set_ai_research_phase(
+                project_id,
+                job_id,
+                "searching",
+                25 + ((batch_index as u64 * 8) / query_batch_total as u64),
+                &format!(
+                    "Investigando {} de {}: {aspect}.",
+                    batch_index + 1,
+                    query_batch_total
+                ),
+            );
+            let step = knownext_ai::run_research_step(
+                self.openai_key().as_deref(),
+                self.ai_model().as_str(),
+                "search",
+                &json!({
+                    "brief": job["brief"],
+                    "plan": job["brief"]["plan"],
+                    "strategy": strategy,
+                    "queryBatch": batch,
+                    "contextSources": compact_research_context_sources(&context_sources)
+                }),
+                true,
+            );
+            if step["status"].as_str() != Some("ready") {
+                self.fail_ai_research_job_with_status(
+                    project_id,
+                    job_id,
+                    "failed_provider",
+                    "provider_error",
+                    step["message"]
+                        .as_str()
+                        .unwrap_or("No se pudieron buscar fuentes."),
+                    true,
+                );
+                return Ok(());
+            }
+            source_candidates.extend(knownext_research::normalize_source_candidates(
+                &step["body"],
+                &batch,
+                remaining,
+            ));
+            self.update_ai_research_job(project_id, job_id, |job| {
+                job["sourceCandidates"] = json!(source_candidates.clone());
+                job["budget"] = knownext_research::increment_budget_step(&job["budget"], 1);
+            });
+            let found = source_candidates.len();
+            self.set_ai_research_phase(
+                project_id,
+                job_id,
+                "searching",
+                30,
+                &format!("Fuentes candidatas encontradas: {found} de {candidate_limit}."),
+            );
+            self.record_ai_usage_records(project_id, job_id, &step);
+        }
+        if source_candidates.is_empty() {
+            self.fail_ai_research_job_with_status(
+                project_id,
+                job_id,
+                "failed_quality",
+                "no_sources",
+                "No se han encontrado fuentes web verificables para la investigación.",
+                true,
+            );
+            return Ok(());
+        }
+
+        self.set_ai_research_phase(
+            project_id,
+            job_id,
+            "ranking",
+            35,
+            "Seleccionando fuentes relevantes.",
+        );
+        let ranked_sources = knownext_research::rank_sources(&source_candidates, candidate_limit);
+        let read_budget = strategy["sourceReadBudget"]
+            .as_u64()
+            .and_then(|value| usize::try_from(value).ok())
+            .unwrap_or(12);
+        let selected_sources =
+            knownext_research::select_sources_for_reading(&ranked_sources, read_budget);
+        self.update_ai_research_job(project_id, job_id, |job| {
+            job["rankedSources"] = json!(ranked_sources.clone());
+            job["sources"] = json!(selected_sources.clone());
+            job["budget"] = knownext_research::increment_budget_step(&job["budget"], 1);
+        });
+
+        self.set_ai_research_phase(
+            project_id,
+            job_id,
+            "reading",
+            45,
+            &format!("Leyendo {} fuentes seleccionadas.", selected_sources.len()),
+        );
+        let mut source_reads = self.read_ai_research_sources(&selected_sources);
+        source_reads.extend(project_context_source_reads(&context_sources));
+        self.update_ai_research_job(project_id, job_id, |job| {
+            job["sourceReads"] = json!(source_reads.clone());
+            job["budget"] = knownext_research::increment_budget_step(&job["budget"], 1);
+        });
+        let read_count = self.ai_research_job(project_id, job_id)["sourceReads"]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter(|item| item["status"].as_str() == Some("read"))
+                    .count()
+            })
+            .unwrap_or(0);
+        self.set_ai_research_phase(
+            project_id,
+            job_id,
+            "reading",
+            52,
+            &format!(
+                "Fuentes leídas: {read_count} de {}.",
+                selected_sources.len()
+            ),
+        );
+        if self.is_ai_research_cancelled(project_id, job_id) {
+            return Ok(());
+        }
+
+        self.set_ai_research_phase(
+            project_id,
+            job_id,
+            "extracting",
+            58,
+            "Extrayendo evidencias.",
+        );
+        let source_read_batches = research_source_read_batches(&source_reads);
+        let mut evidence: Vec<Value> = Vec::new();
+        let source_read_batch_total = source_read_batches.len().max(1);
+        for (batch_index, source_read_batch) in source_read_batches.into_iter().enumerate() {
+            if self.is_ai_research_cancelled(project_id, job_id) {
+                return Ok(());
+            }
+            self.set_ai_research_phase(
+                project_id,
+                job_id,
+                "extracting",
+                58 + ((batch_index as u64 * 4) / source_read_batch_total as u64),
+                &format!(
+                    "Extrayendo evidencias del lote {} de {}.",
+                    batch_index + 1,
+                    source_read_batch_total
+                ),
+            );
+            let evidence_step = knownext_ai::run_research_step(
+                self.openai_key().as_deref(),
+                self.ai_model().as_str(),
+                "evidence",
+                &json!({
+                    "brief": research_brief_for_worker(&job["brief"]),
+                    "plan": research_plan_for_worker(&job["brief"]["plan"]),
+                    "strategy": strategy,
+                    "sourceReads": source_read_batch
+                }),
+                false,
+            );
+            if evidence_step["status"].as_str() != Some("ready") {
+                self.fail_ai_research_job_with_status(
+                    project_id,
+                    job_id,
+                    "failed_provider",
+                    "provider_error",
+                    evidence_step["message"]
+                        .as_str()
+                        .unwrap_or("No se pudieron extraer evidencias."),
+                    true,
+                );
+                return Ok(());
+            }
+            evidence.extend(
+                evidence_step["body"]["evidence"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|item| item["sourceId"].as_str().is_some()),
+            );
+            self.record_ai_usage_records(project_id, job_id, &evidence_step);
+        }
+        self.update_ai_research_job(project_id, job_id, |job| {
+            job["evidence"] = json!(evidence.clone());
+            job["budget"] = knownext_research::increment_budget_step(&job["budget"], 1);
+        });
+        let evidence_count = self.ai_research_job(project_id, job_id)["evidence"]
+            .as_array()
+            .map(Vec::len)
+            .unwrap_or(0);
+        self.set_ai_research_phase(
+            project_id,
+            job_id,
+            "extracting",
+            62,
+            &format!("Evidencias extraídas: {evidence_count}."),
+        );
+        self.set_ai_research_phase(project_id, job_id, "gap_analysis", 66, "Revisando lagunas.");
+        let coverage =
+            knownext_research::coverage_report(&job["brief"]["plan"], &evidence, &strategy);
+        self.update_ai_research_job(project_id, job_id, |job| {
+            job["coverage"] = coverage.clone();
+            job["budget"] = knownext_research::increment_budget_step(&job["budget"], 1);
+        });
+        if self.is_ai_research_cancelled(project_id, job_id) {
+            return Ok(());
+        }
+
+        self.set_ai_research_phase(
+            project_id,
+            job_id,
+            "synthesizing",
+            75,
+            "Contrastando hallazgos.",
+        );
+        let synthesize_step = knownext_ai::run_research_step(
+            self.openai_key().as_deref(),
+            self.ai_model().as_str(),
+            "synthesize",
+            &json!({
+                "brief": research_brief_for_worker(&job["brief"]),
+                "plan": research_plan_for_worker(&job["brief"]["plan"]),
+                "strategy": strategy,
+                "coverage": coverage,
+                "evidence": compact_research_evidence(&evidence, 90, 500)
+            }),
+            false,
+        );
+        if synthesize_step["status"].as_str() != Some("ready") {
+            self.fail_ai_research_job_with_status(
+                project_id,
+                job_id,
+                "failed_provider",
+                "provider_error",
+                synthesize_step["message"]
+                    .as_str()
+                    .unwrap_or("No se pudieron sintetizar hallazgos."),
+                true,
+            );
+            return Ok(());
+        }
+        let findings = synthesize_step["body"]["findings"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|item| {
+                item["evidenceIds"]
+                    .as_array()
+                    .map(|ids| !ids.is_empty())
+                    .unwrap_or(false)
+            })
+            .collect::<Vec<_>>();
+        self.update_ai_research_job(project_id, job_id, |job| {
+            job["findings"] = json!(findings.clone());
+            job["researchFindings"] = synthesize_step["body"]["researchFindings"].clone();
+            job["budget"] = knownext_research::increment_budget_step(&job["budget"], 1);
+        });
+        let finding_count = self.ai_research_job(project_id, job_id)["findings"]
+            .as_array()
+            .map(Vec::len)
+            .unwrap_or(0);
+        self.set_ai_research_phase(
+            project_id,
+            job_id,
+            "synthesizing",
+            79,
+            &format!("Hallazgos contrastados: {finding_count}."),
+        );
+        self.record_ai_usage_records(project_id, job_id, &synthesize_step);
+
+        self.set_ai_research_phase(project_id, job_id, "drafting", 84, "Redactando informe.");
+        let allowed_visuals = job["brief"]["reportProfile"].clone();
+        let write_step = knownext_ai::run_research_step(
+            self.openai_key().as_deref(),
+            self.ai_model().as_str(),
+            "write",
+            &json!({
+                "brief": research_brief_for_worker(&job["brief"]),
+                "plan": research_plan_for_worker(&job["brief"]["plan"]),
+                "strategy": strategy,
+                "findings": compact_research_findings(&findings, 60, 900),
+                "evidence": compact_research_evidence_for_findings(&evidence, &findings, 70, 500),
+                "allowedVisuals": allowed_visuals,
+                "recommendedReportStyle": job["brief"]["plan"]["recommendedReportStyle"]
+            }),
+            false,
+        );
+        if write_step["status"].as_str() != Some("ready") {
+            self.fail_ai_research_job_with_status(
+                project_id,
+                job_id,
+                "failed_provider",
+                "provider_error",
+                write_step["message"]
+                    .as_str()
+                    .unwrap_or("No se pudo redactar el informe."),
+                true,
+            );
+            return Ok(());
+        }
+        let draft_markdown = write_step["body"]["markdown"]
+            .as_str()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        self.update_ai_research_job(project_id, job_id, |job| {
+            job["draftMarkdown"] = Value::from(draft_markdown.clone());
+            job["budget"] = knownext_research::increment_budget_step(&job["budget"], 1);
+        });
+        self.set_ai_research_phase(
+            project_id,
+            job_id,
+            "drafting",
+            89,
+            &format!(
+                "Informe redactado: {} palabras.",
+                draft_markdown.split_whitespace().count()
+            ),
+        );
+        self.record_ai_usage_records(project_id, job_id, &write_step);
+
+        self.set_ai_research_phase(
+            project_id,
+            job_id,
+            "verifying",
+            92,
+            "Verificando citas y cobertura.",
+        );
+        let mut job = self.ai_research_job(project_id, job_id);
+        let diagnostics =
+            validate_research_draft(&draft_markdown, &job["brief"], &job["sourceReads"]);
+        let quality_report = knownext_research::quality_report(
+            job["sources"].as_array().map(Vec::as_slice).unwrap_or(&[]),
+            job["evidence"].as_array().map(Vec::as_slice).unwrap_or(&[]),
+            &job["coverage"],
+            job["findings"].as_array().map(Vec::as_slice).unwrap_or(&[]),
+            &diagnostics,
+        );
+        let final_status = knownext_research::final_status_from_quality(&quality_report);
+        self.update_ai_research_job(project_id, job_id, |job| {
+            job["qualityReport"] = quality_report.clone();
+            job["skillDiagnostics"] = json!(diagnostics);
+        });
+        if final_status == "failed_quality" {
+            self.fail_ai_research_job_with_status(
+                project_id,
+                job_id,
+                "failed_quality",
+                "quality_failed",
+                "La investigación no alcanza la calidad mínima de fuentes, evidencias o citas. No se ha creado documento.",
+                true,
+            );
+            return Ok(());
+        }
+
+        self.set_ai_research_phase(
+            project_id,
+            job_id,
+            "publishing",
+            97,
+            "Preparando nombre del borrador.",
+        );
+        let mut markdown = draft_markdown;
+        let publish_result = (|| -> Result<(String, String, Vec<Value>, Vec<Value>), String> {
+            let generated_visuals = self.generate_ai_research_visual_assets(
+                project_id,
+                &job,
+                &write_step["body"],
+                &mut markdown,
+            )?;
+            self.set_ai_research_phase(
+                project_id,
+                job_id,
+                "publishing",
+                98,
+                "Guardando archivo Markdown.",
+            );
+            let topic = job["brief"]["topic"].as_str().unwrap_or("Investigación");
+            let file_name = safe_research_markdown_file_name(topic, job_id);
+            let parent = job["brief"]["destinationFolderId"].as_str();
+            let parent_relative = self.node_relative(project_id, parent)?;
+            let relative =
+                self.unique_project_relative(project_id, parent_relative.as_deref(), &file_name)?;
+            let path = self.resolve_project_relative(project_id, &relative)?;
+            if let Some(parent_path) = path.parent() {
+                std::fs::create_dir_all(parent_path).map_err(|error| error.to_string())?;
+            }
+            if self.ai_research_job(project_id, job_id)["status"].as_str() == Some("cancelled") {
+                return Err("Investigación cancelada.".to_string());
+            }
+            write_string_atomic(&path, &markdown)?;
+            self.set_ai_research_phase(
+                project_id,
+                job_id,
+                "publishing",
+                99,
+                "Actualizando árbol del proyecto.",
+            );
+            let tree = self.project_tree(project_id)?;
+            self.set_ai_research_phase(
+                project_id,
+                job_id,
+                "publishing",
+                99,
+                "Registrando borrador.",
+            );
+            let document_id = doc_id(project_id, &relative);
+            Ok((relative, document_id, generated_visuals, tree))
+        })();
+        let (relative, document_id, generated_visuals, tree) = match publish_result {
+            Ok(result) => result,
+            Err(_error)
+                if self.ai_research_job(project_id, job_id)["status"].as_str()
+                    == Some("cancelled") =>
+            {
+                return Ok(());
+            }
+            Err(error) => {
+                self.fail_ai_research_job_with_status(
+                    project_id,
+                    job_id,
+                    "failed_publish",
+                    "publish_failed",
+                    &format!(
+                        "La investigación terminó, pero no se pudo crear el borrador: {error}"
+                    ),
+                    true,
+                );
+                return Ok(());
+            }
+        };
+        let finished_at = knownext_core::now_iso();
+        let duration_ms = iso_duration_ms(
+            job["startedAt"].as_str().unwrap_or(started_at.as_str()),
+            &finished_at,
+        );
+
+        job["status"] = Value::from(final_status);
+        job["currentPhase"] = Value::from(final_status);
+        job["phase"] = Value::from(final_status);
+        job["progress"] = Value::from(100);
+        job["progressMessage"] = Value::from("Investigación completada.");
+        job["message"] =
+            Value::from("Investigación completada. Se ha creado un borrador revisable.");
+        job["qualityReport"] = quality_report;
+        job["reviewState"] =
+            json!({ "status": "draft_ai", "comments": Value::Null, "reviewedAt": Value::Null });
+        job["metrics"] = json!({
+            "durationMs": duration_ms,
+            "estimatedCostEur": Value::Null,
+            "sourceCount": job["sources"].as_array().map(|items| items.len()).unwrap_or(0),
+            "evidenceCount": job["evidence"].as_array().map(|items| items.len()).unwrap_or(0),
+            "supportedClaimRatio": supported_claim_ratio(&job["evidence"])
+        });
+        job["documentId"] = Value::from(document_id.clone());
+        job["createdDocumentId"] = Value::from(document_id.clone());
+        job["documentPath"] = Value::from(relative.clone());
+        job["markdown"] = Value::from(markdown);
+        if !generated_visuals.is_empty() {
+            job["generatedImages"] = Value::Array(generated_visuals);
+        }
+        job["tree"] = json!(tree);
+        job["usedSkills"] = json!(["knownext.research_report"]);
+        job["skillApplications"] = json!([]);
+        job["finishedAt"] = Value::from(finished_at.clone());
+        job["updatedAt"] = Value::from(finished_at);
+        append_research_activity(&mut job, final_status, "info", "Borrador creado.");
+        self.write_ai_research_job(project_id, &job);
+        self.append_ai_research_event(project_id, &job);
+        Ok(())
+    }
+
+    fn generate_ai_research_visual_assets(
+        &self,
+        project_id: &str,
+        job: &Value,
+        result: &Value,
+        markdown: &mut String,
+    ) -> Result<Vec<Value>, String> {
+        if !job["brief"]["reportProfile"]["imagesEnabled"]
+            .as_bool()
+            .unwrap_or(false)
+        {
+            return Ok(Vec::new());
+        }
+        let visual_requests = result["visualRequests"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        if visual_requests.is_empty() {
+            return Ok(Vec::new());
+        }
+        let config = self.read_config();
+        let ai = &config["ai"];
+        if !ai["imageGeneration"]["enabled"].as_bool().unwrap_or(false)
+            || !ai["permissions"]["generateImages"]
+                .as_bool()
+                .unwrap_or(false)
+            || !ai["permissions"]["createImageAssets"]
+                .as_bool()
+                .unwrap_or(false)
+        {
+            return Ok(vec![json!({
+                "status": "blocked",
+                "message": "El informe solicitó imágenes, pero la generación o creación de assets está desactivada."
+            })]);
+        }
+
+        let mut generated = Vec::new();
+        let image_config = &ai["imageGeneration"];
+        let parent = self.image_generation_parent(project_id, None, image_config);
+        for request in visual_requests.into_iter().take(3) {
+            if request["kind"].as_str() != Some("image") {
+                continue;
+            }
+            let prompt = request["prompt"].as_str().unwrap_or("").trim();
+            if prompt.is_empty() {
+                continue;
+            }
+            let image =
+                knownext_ai::generate_image(self.openai_key().as_deref(), image_config, prompt);
+            if image["status"].as_str() != Some("completed") {
+                generated.push(json!({
+                    "status": "error",
+                    "title": request["title"],
+                    "message": image["message"]
+                }));
+                continue;
+            }
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(image["dataBase64"].as_str().unwrap_or("").as_bytes())
+                .map_err(|error| {
+                    format!("No se pudo decodificar la imagen de investigación: {error}")
+                })?;
+            if bytes.is_empty() {
+                continue;
+            }
+            let format = image["format"]
+                .as_str()
+                .unwrap_or_else(|| image_config["outputFormat"].as_str().unwrap_or("png"));
+            let title = request["title"].as_str().unwrap_or("imagen-investigacion");
+            let name = image_file_name(title, format);
+            let relative = self.unique_project_relative(project_id, parent.as_deref(), &name)?;
+            let path = self.resolve_project_relative(project_id, &relative)?;
+            if let Some(parent_path) = path.parent() {
+                std::fs::create_dir_all(parent_path).map_err(|error| error.to_string())?;
+            }
+            std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
+            let alt_text = request["altText"]
+                .as_str()
+                .unwrap_or("Imagen generada para el informe");
+            generated.push(json!({
+                "status": "completed",
+                "title": title,
+                "path": relative,
+                "altText": alt_text,
+                "prompt": prompt
+            }));
+        }
+
+        let completed = generated
+            .iter()
+            .filter(|item| item["status"].as_str() == Some("completed"))
+            .collect::<Vec<_>>();
+        if !completed.is_empty() {
+            markdown.push_str("\n\n## Recursos visuales generados\n\n");
+            for item in completed {
+                let path = item["path"].as_str().unwrap_or("");
+                let alt = item["altText"].as_str().unwrap_or("Imagen generada");
+                markdown.push_str(&format!("![{alt}]({path})\n\n"));
+            }
+        }
+        Ok(generated)
+    }
+
+    fn update_ai_research_job<F>(&self, project_id: &str, job_id: &str, update: F) -> Value
+    where
+        F: FnOnce(&mut Value),
+    {
+        let mut job = self.ai_research_job(project_id, job_id);
+        update(&mut job);
+        job["updatedAt"] = Value::from(knownext_core::now_iso());
+        self.write_ai_research_job(project_id, &job);
+        job
+    }
+    fn is_ai_research_cancelled(&self, project_id: &str, job_id: &str) -> bool {
+        self.ai_research_job(project_id, job_id)["status"].as_str() == Some("cancelled")
+    }
+    fn read_ai_research_sources(&self, sources: &[Value]) -> Vec<Value> {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(12))
+            .build()
+            .unwrap_or_else(|_| Client::new());
+        sources
+            .iter()
+            .map(|source| {
+                let source_id = source["id"].as_str().unwrap_or("").to_string();
+                let url = source["url"].as_str().unwrap_or("").trim().to_string();
+                let fallback = source["snapshotExcerpt"]
+                    .as_str()
+                    .filter(|value| !value.trim().is_empty())
+                    .or_else(|| {
+                        source["usedFragments"]
+                            .as_array()
+                            .and_then(|items| items.first())
+                            .and_then(Value::as_str)
+                    })
+                    .unwrap_or("")
+                    .to_string();
+                let (status, text) = if url.starts_with("http://") || url.starts_with("https://") {
+                    match client
+                        .get(&url)
+                        .header(USER_AGENT, "KnowNext.ai research reader")
+                        .header(ACCEPT, "text/html,text/plain,application/xhtml+xml")
+                        .send()
+                    {
+                        Ok(response) if response.status().is_success() => match response.text() {
+                            Ok(body) => ("read", clean_web_text(&body)),
+                            Err(_) if !fallback.is_empty() => ("read", fallback.clone()),
+                            Err(_) => ("unavailable", String::new()),
+                        },
+                        _ if !fallback.is_empty() => ("read", fallback.clone()),
+                        _ => ("unavailable", String::new()),
+                    }
+                } else if !fallback.is_empty() {
+                    ("read", fallback.clone())
+                } else {
+                    ("unavailable", String::new())
+                };
+                json!({
+                    "sourceId": source_id,
+                    "title": source["title"].clone(),
+                    "url": source["url"].clone(),
+                    "path": source["path"].clone(),
+                    "kind": source["kind"].clone(),
+                    "status": status,
+                    "readAt": knownext_core::now_iso(),
+                    "content": text.chars().take(8_000).collect::<String>(),
+                    "excerpt": fallback.chars().take(1_200).collect::<String>(),
+                    "objectiveIndex": source["objectiveIndex"].clone(),
+                    "aspectIndex": source["aspectIndex"].clone()
+                })
+            })
+            .collect()
+    }
+    fn set_ai_research_phase(
+        &self,
+        project_id: &str,
+        job_id: &str,
+        phase: &str,
+        progress: u64,
+        message: &str,
+    ) -> Value {
+        self.update_ai_research_job(project_id, job_id, |job| {
+            if job["status"].as_str() == Some("cancelled") {
+                return;
+            }
+            job["status"] = Value::from(phase);
+            job["currentPhase"] = Value::from(phase);
+            job["phase"] = Value::from(phase);
+            job["progress"] = Value::from(progress.min(99));
+            job["progressMessage"] = Value::from(message);
+            job["message"] = Value::from(message);
+            append_research_activity(job, phase, "info", message);
+        })
+    }
+    fn fail_ai_research_job_with_status(
+        &self,
+        project_id: &str,
+        job_id: &str,
+        status: &str,
+        code: &str,
+        message: &str,
+        retryable: bool,
+    ) -> Value {
+        self.update_ai_research_job(project_id, job_id, |job| {
+            if job["status"].as_str() == Some("cancelled") {
+                return;
+            }
+            let now = knownext_core::now_iso();
+            job["status"] = Value::from(status);
+            job["currentPhase"] = Value::from(status);
+            job["phase"] = Value::from(status);
+            job["progress"] = Value::from(100);
+            job["progressMessage"] = Value::from(message);
+            job["message"] = Value::from(message);
+            job["error"] = json!({ "code": code, "message": message, "retryable": retryable });
+            job["finishedAt"] = Value::from(now);
+            append_research_activity(job, status, "error", message);
+        })
+    }
+    fn ai_research_retry(&self, project_id: &str, job_id: &str) -> Result<Value, String> {
+        let job = self.ai_research_job(project_id, job_id);
+        let mut request = job.get("request").cloned().unwrap_or_else(|| {
+            json!({
+                "brief": job["brief"].clone(),
+                "activeMarkdown": "",
+                "contextSourceIds": []
+            })
+        });
+        if let Some(object) = request.as_object_mut() {
+            object.insert("brief".to_string(), job["brief"].clone());
+            object.insert("retryOfJobId".to_string(), Value::from(job_id));
+        }
+        self.ai_research_start(project_id, request)
+    }
+    fn ai_research_refine(
+        &self,
+        project_id: &str,
+        job_id: &str,
+        body: Value,
+    ) -> Result<Value, String> {
+        let job = self.ai_research_job(project_id, job_id);
+        let action = body
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or("expand");
+        let instruction = body
+            .get("instruction")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let mut brief = job["brief"].clone();
+        let suffix = match action {
+            "reduce" => {
+                "Reducir y sintetizar el resultado anterior, manteniendo fuentes y limitaciones."
+            }
+            "technical_focus" => "Añadir mayor enfoque técnico y trazabilidad de decisiones.",
+            "add_recommendations" => "Ampliar recomendaciones accionables y riesgos.",
+            "update_sources" => "Actualizar fuentes y contrastar cambios recientes.",
+            "new_version" => "Crear una nueva versión revisada desde la investigación anterior.",
+            _ => "Ampliar la investigación con mayor profundidad.",
+        };
+        let current_objective = brief["objective"].as_str().unwrap_or("").trim();
+        brief["objective"] = Value::from(format!(
+            "{current_objective}\n\nRefinamiento: {suffix} {instruction}"
+        ));
+        brief["updatedAt"] = Value::from(knownext_core::now_iso());
+        let mut request = job.get("request").cloned().unwrap_or_else(|| json!({}));
+        if let Some(object) = request.as_object_mut() {
+            object.insert("brief".to_string(), brief);
+            object.insert("retryOfJobId".to_string(), Value::from(job_id));
+        }
+        self.ai_research_start(project_id, request)
+    }
+    fn ai_research_update_sources(&self, project_id: &str, job_id: &str) -> Result<Value, String> {
+        self.ai_research_refine(project_id, job_id, json!({ "action": "update_sources" }))
+    }
+    fn ai_research_sources(&self, project_id: &str, job_id: &str) -> Value {
+        let job = self.ai_research_job(project_id, job_id);
+        json!({
+            "sources": job["sources"].clone(),
+            "evidence": job["evidence"].clone(),
+            "sourceCandidates": job["sourceCandidates"].clone(),
+            "rankedSources": job["rankedSources"].clone(),
+            "sourceReads": job["sourceReads"].clone()
+        })
+    }
+    fn ai_research_quality(&self, project_id: &str, job_id: &str) -> Value {
+        let job = self.ai_research_job(project_id, job_id);
+        if job["qualityReport"].is_object() {
+            return job["qualityReport"].clone();
+        }
+        knownext_research::quality_report(
+            job["sources"].as_array().map(Vec::as_slice).unwrap_or(&[]),
+            job["evidence"].as_array().map(Vec::as_slice).unwrap_or(&[]),
+            &job["coverage"],
+            job["findings"].as_array().map(Vec::as_slice).unwrap_or(&[]),
+            job["skillDiagnostics"]
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or(&[]),
+        )
+    }
+    fn ai_research_activity(&self, project_id: &str, job_id: &str) -> Value {
+        let job = self.ai_research_job(project_id, job_id);
+        json!({
+            "jobId": job_id,
+            "activity": job["activity"].clone()
+        })
+    }
+    fn ai_research_coverage(&self, project_id: &str, job_id: &str) -> Value {
+        let job = self.ai_research_job(project_id, job_id);
+        json!({
+            "jobId": job_id,
+            "coverage": job["coverage"].clone()
+        })
+    }
+    fn ai_research_accept(&self, project_id: &str, job_id: &str) -> Value {
+        self.update_ai_research_job(project_id, job_id, |job| {
+            job["reviewState"] = json!({
+                "status": "accepted",
+                "comments": Value::Null,
+                "reviewedAt": knownext_core::now_iso()
+            });
+        })
+    }
+    fn ai_research_review(&self, project_id: &str, job_id: &str, body: Value) -> Value {
+        let comments = body
+            .get("comments")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        self.update_ai_research_job(project_id, job_id, |job| {
+            job["reviewState"] = json!({
+                "status": "revision_requested",
+                "comments": comments,
+                "reviewedAt": knownext_core::now_iso()
+            });
+        })
+    }
+    fn ai_research_export(
+        &self,
+        project_id: &str,
+        job_id: &str,
+        body: Value,
+    ) -> Result<Value, String> {
+        let job = self.ai_research_job(project_id, job_id);
+        let format = body
+            .get("format")
+            .and_then(Value::as_str)
+            .unwrap_or("markdown");
+        let markdown = job["markdown"].as_str().unwrap_or("").to_string();
+        if markdown.trim().is_empty() {
+            return Err("La investigación no tiene contenido exportable.".to_string());
+        }
+        let topic = job["brief"]["topic"].as_str().unwrap_or("investigacion");
+        let file_name = match format {
+            "pdf" => research_export_file_name(topic, "pdf"),
+            "docx" => research_export_file_name(topic, "docx"),
+            "package" => research_export_file_name(topic, "json"),
+            _ => research_export_file_name(topic, "md"),
+        };
+        let export = json!({
+            "format": format,
+            "filename": file_name,
+            "markdown": if format == "markdown" { Value::from(markdown) } else { Value::Null },
+            "path": Value::Null,
+            "message": if format == "markdown" {
+                "Exportación Markdown preparada."
+            } else {
+                "La exportación avanzada queda preparada en contrato; usa Markdown hasta activar conversión local."
+            }
+        });
+        let _ = project_id;
+        Ok(export)
+    }
+    fn append_ai_research_event(&self, project_id: &str, job: &Value) {
+        self.append_ai_conversation_events(
+            project_id,
+            vec![json!({
+                "id": knownext_core::compact_id("ai-event"),
+                "projectId": project_id,
+                "type": "document_created",
+                "role": "assistant",
+                "content": job["message"],
+                "createdAt": knownext_core::now_iso(),
+                "documentId": job["documentId"],
+                "path": job["documentPath"],
+                "paths": if job["documentPath"].is_string() { json!([job["documentPath"].clone()]) } else { json!([]) },
+                "summary": job["brief"]["topic"],
+                "sourcesUsed": job["sources"],
+                "usedSkills": job["usedSkills"],
+                "skillApplications": job["skillApplications"],
+                "skillDiagnostics": job["skillDiagnostics"]
+            })],
+        );
+    }
     fn ai_user_conversation_event(&self, project_id: &str, body: &Value) -> Option<Value> {
         let prompt = body.get("prompt").and_then(Value::as_str)?.trim();
         if prompt.is_empty() {
             return None;
         }
         Some(json!({
-            "id": body.get("clientMessageId").and_then(Value::as_str).filter(|value| !value.trim().is_empty()).unwrap_or("client-message"),
+            "id": body.get("clientMessageId").and_then(Value::as_str).filter(|value| !value.trim().is_empty()).map(str::to_string).unwrap_or_else(|| knownext_core::compact_id("client-message")),
             "projectId": project_id,
             "type": "user_message",
             "role": "user",
@@ -4235,8 +5661,48 @@ impl LocalApi {
                     );
                 }
             }
+            self.accumulate_ai_research_usage(project_id, interaction_id, &entry);
             self.record_ai_usage(entry);
         }
+    }
+
+    fn accumulate_ai_research_usage(&self, project_id: &str, job_id: &str, entry: &Value) {
+        let exists = self.ai_research_jobs(project_id)["jobs"]
+            .as_array()
+            .map(|jobs| jobs.iter().any(|job| job["id"].as_str() == Some(job_id)))
+            .unwrap_or(false);
+        if !exists {
+            return;
+        }
+        let now = knownext_core::now_iso();
+        self.update_ai_research_job(project_id, job_id, |job| {
+            let current = job["usage"].clone();
+            let provider_calls = current["providerCalls"].as_u64().unwrap_or(0) + 1;
+            let input_tokens =
+                current["inputTokens"].as_u64().unwrap_or(0) + value_u64(entry.get("inputTokens"));
+            let cached_input_tokens = current["cachedInputTokens"].as_u64().unwrap_or(0)
+                + value_u64(entry.get("cachedInputTokens"));
+            let output_tokens = current["outputTokens"].as_u64().unwrap_or(0)
+                + value_u64(entry.get("outputTokens"));
+            let reasoning_tokens = current["reasoningTokens"].as_u64().unwrap_or(0)
+                + value_u64(entry.get("reasoningTokens"));
+            let total_tokens =
+                current["totalTokens"].as_u64().unwrap_or(0) + value_u64(entry.get("totalTokens"));
+            let estimated_cost = current["estimatedCostEur"].as_f64().unwrap_or(0.0)
+                + entry["estimatedCost"].as_f64().unwrap_or(0.0);
+            job["usage"] = json!({
+                "providerCalls": provider_calls,
+                "inputTokens": input_tokens,
+                "cachedInputTokens": cached_input_tokens,
+                "outputTokens": output_tokens,
+                "reasoningTokens": reasoning_tokens,
+                "totalTokens": total_tokens,
+                "estimatedCostEur": round_cost(estimated_cost),
+                "currency": "EUR",
+                "updatedAt": now
+            });
+            job["budget"]["estimatedCostEur"] = Value::from(round_cost(estimated_cost));
+        });
     }
 
     fn record_ai_usage(&self, mut entry: Value) {
@@ -4515,7 +5981,7 @@ fn usage_capability_label(capability: &str) -> &'static str {
         "image_generation" => "Imágenes",
         "vision" => "Visión",
         "audio" => "Audio",
-        "agentic_tasks" => "Tareas agénticas",
+        "agentic_tasks" => "Investigación",
         _ => "IA documental",
     }
 }
@@ -6247,6 +7713,14 @@ fn external_change_set(project_id: &str, items: Vec<Value>, message: Option<Stri
     })
 }
 
+fn trim_ai_conversation_events(events: &mut Vec<Value>) {
+    if events.len() <= AI_CONVERSATION_MAX_EVENTS {
+        return;
+    }
+    let excess = events.len() - AI_CONVERSATION_MAX_EVENTS;
+    events.drain(0..excess);
+}
+
 fn git_add_path(root: &Path, relative: &str) -> Result<(), String> {
     let output = run_local_git(
         local_git_command()
@@ -6515,6 +7989,690 @@ fn safe_name(value: &str) -> String {
         .collect()
 }
 
+fn research_title_for_request(topic: &str) -> String {
+    format!("Investigación - {topic}")
+}
+
+fn research_objective_for_request(topic: &str) -> String {
+    format!("Investigar de forma contrastada {topic}, separando hallazgos verificados, incertidumbres y recomendaciones.")
+}
+
+fn research_secondary_objectives_for_request(topic: &str) -> Vec<Value> {
+    vec![
+        format!("Delimitar el alcance real, contexto y criterios de análisis de {topic}."),
+        "Contrastar información con fuentes web independientes y detectar contradicciones relevantes.".to_string(),
+        "Convertir la evidencia en conclusiones útiles, limitaciones explícitas y recomendaciones accionables.".to_string(),
+    ]
+    .into_iter()
+    .map(Value::from)
+    .collect()
+}
+
+fn research_aspects_for_request(topic: &str) -> Vec<Value> {
+    vec![
+        format!("Alcance, contexto, términos clave y criterios de decisión sobre {topic}."),
+        "Fuentes fiables, recientes e independientes que aportan evidencia verificable."
+            .to_string(),
+        "Datos, comparativas o argumentos que sostienen los hallazgos principales.".to_string(),
+        "Contradicciones, lagunas, sesgos y puntos que deben quedar como no concluyentes."
+            .to_string(),
+        "Implicaciones prácticas, recomendaciones y límites del informe final.".to_string(),
+    ]
+    .into_iter()
+    .map(Value::from)
+    .collect()
+}
+
+fn research_recommended_style_for_request(_topic: &str, report_length: &str) -> &'static str {
+    match report_length {
+        "brief" => "Informe ejecutivo conciso, orientado a decisión.",
+        "wide" => "Informe amplio, analítico y verificable, con estructura clara y anexos si aportan valor.",
+        "exhaustive" => "Informe exhaustivo, trazable y detallado, con análisis de contradicciones, anexos y recomendaciones.",
+        _ => "Informe profesional verificable, con síntesis, evidencias, limitaciones y recomendaciones.",
+    }
+}
+
+fn research_report_length_label(report_length: &str) -> &'static str {
+    match report_length {
+        "brief" => "breve",
+        "wide" => "amplia",
+        "exhaustive" => "exhaustiva",
+        _ => "estándar",
+    }
+}
+
+fn normalize_research_report_length(value: &str) -> &'static str {
+    match value {
+        "brief" => "brief",
+        "wide" => "wide",
+        "exhaustive" => "exhaustive",
+        _ => "standard",
+    }
+}
+
+fn research_proposed_candidate_source_limit(topic: &str, prompt: &str, body: &Value) -> u64 {
+    let words = prompt
+        .split_whitespace()
+        .chain(topic.split_whitespace())
+        .count();
+    let context_count = body
+        .get("contextSources")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0)
+        + body
+            .get("attachments")
+            .and_then(Value::as_array)
+            .map(Vec::len)
+            .unwrap_or(0);
+    let has_active_context = body
+        .get("activeMarkdown")
+        .and_then(Value::as_str)
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
+        || body
+            .get("documentId")
+            .and_then(Value::as_str)
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false);
+    let complexity = words + context_count * 12 + usize::from(has_active_context) * 8;
+    match complexity {
+        0..=18 => 50,
+        19..=55 => 200,
+        _ => 500,
+    }
+}
+
+fn research_proposed_report_length(
+    topic: &str,
+    prompt: &str,
+    candidate_source_limit: u64,
+) -> &'static str {
+    let words = prompt
+        .split_whitespace()
+        .chain(topic.split_whitespace())
+        .count();
+    match (candidate_source_limit, words) {
+        (0..=10, _) => "brief",
+        (11..=50, 0..=20) => "brief",
+        (11..=50, _) => "standard",
+        (51..=200, 0..=35) => "standard",
+        (51..=200, _) => "wide",
+        (_, 0..=55) => "wide",
+        _ => "exhaustive",
+    }
+}
+
+fn legacy_research_visual_enabled(agentic: &Value, field: &str, fallback: bool) -> bool {
+    agentic["researchPresets"]
+        .as_object()
+        .map(|presets| {
+            presets
+                .values()
+                .any(|preset| preset[field].as_bool().unwrap_or(false))
+        })
+        .unwrap_or(fallback)
+}
+
+fn research_objective_coverage() -> Value {
+    json!([
+        { "objectiveIndex": 0, "aspectIndexes": [0, 1] },
+        { "objectiveIndex": 1, "aspectIndexes": [1, 2, 3] },
+        { "objectiveIndex": 2, "aspectIndexes": [3, 4] }
+    ])
+}
+
+fn research_auxiliary_skill_ids(diagrams_enabled: bool, images_enabled: bool) -> Vec<Value> {
+    let mut skills = vec![Value::from("knownext.markdown")];
+    if diagrams_enabled {
+        skills.push(Value::from("knownext.mermaid"));
+    }
+    if images_enabled {
+        skills.push(Value::from("knownext.image_generation"));
+    }
+    skills
+}
+
+fn research_visual_plan(diagrams_enabled: bool, images_enabled: bool) -> String {
+    let mut parts = Vec::new();
+    if diagrams_enabled {
+        parts.push(
+            "Diagramas permitidos si aclaran relaciones, procesos o arquitectura".to_string(),
+        );
+    }
+    if images_enabled {
+        parts.push("Imágenes permitidas si aportan claridad real al informe".to_string());
+    }
+    if parts.is_empty() {
+        "Sin diagramas ni imágenes habilitadas para este tipo de investigación.".to_string()
+    } else {
+        parts.join(". ")
+    }
+}
+
+fn append_research_activity(job: &mut Value, phase: &str, level: &str, message: &str) {
+    let event = knownext_research::activity_event(phase, level, message);
+    let now = event["createdAt"].as_str().unwrap_or("").to_string();
+    if let Some(activity) = job["activity"].as_array_mut() {
+        activity.push(event);
+        if activity.len() > 200 {
+            let overflow = activity.len().saturating_sub(200);
+            activity.drain(0..overflow);
+        }
+    } else {
+        job["activity"] = Value::Array(vec![event]);
+    }
+    if !now.is_empty() {
+        job["heartbeatAt"] = Value::from(now.clone());
+        job["lastActivityAt"] = Value::from(now);
+    }
+}
+
+fn refresh_research_runtime_fields(job: &mut Value) {
+    job["artifactCounts"] = research_artifact_counts(job);
+}
+
+fn research_artifact_counts(job: &Value) -> Value {
+    let source_candidates = job["sourceCandidates"]
+        .as_array()
+        .map(Vec::len)
+        .unwrap_or(0);
+    let ranked_sources = job["rankedSources"].as_array().map(Vec::len).unwrap_or(0);
+    let selected_sources = job["sources"].as_array().map(Vec::len).unwrap_or(0);
+    let read_sources = job["sourceReads"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter(|item| item["status"].as_str() == Some("read"))
+                .count()
+        })
+        .unwrap_or(0);
+    let evidence = job["evidence"].as_array().map(Vec::len).unwrap_or(0);
+    let findings = job["findings"].as_array().map(Vec::len).unwrap_or(0);
+    let cited_sources = job["qualityReport"]["citedSourceCount"]
+        .as_u64()
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or_else(|| {
+            job["evidence"]
+                .as_array()
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item["sourceId"].as_str())
+                        .collect::<BTreeSet<_>>()
+                        .len()
+                })
+                .unwrap_or(0)
+        });
+    let markdown = job["markdown"]
+        .as_str()
+        .or_else(|| job["draftMarkdown"].as_str())
+        .unwrap_or("");
+    let images = job["generatedImages"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter(|item| item["status"].as_str() == Some("completed"))
+                .count()
+        })
+        .unwrap_or(0);
+    json!({
+        "candidateSources": source_candidates,
+        "rankedSources": ranked_sources,
+        "selectedSources": selected_sources,
+        "readSources": read_sources,
+        "evidence": evidence,
+        "findings": findings,
+        "citedSources": cited_sources,
+        "tables": count_markdown_tables(markdown),
+        "diagrams": count_mermaid_blocks(markdown),
+        "images": images
+    })
+}
+
+fn count_mermaid_blocks(markdown: &str) -> usize {
+    markdown
+        .lines()
+        .filter(|line| line.trim().eq_ignore_ascii_case("```mermaid"))
+        .count()
+}
+
+fn count_markdown_tables(markdown: &str) -> usize {
+    let lines = markdown.lines().collect::<Vec<_>>();
+    lines
+        .windows(2)
+        .filter(|pair| is_markdown_table_row(pair[0]) && is_markdown_table_separator(pair[1]))
+        .count()
+}
+
+fn is_markdown_table_row(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.contains('|') && trimmed.matches('|').count() >= 2
+}
+
+fn is_markdown_table_separator(line: &str) -> bool {
+    let trimmed = line.trim().trim_matches('|').trim();
+    !trimmed.is_empty()
+        && trimmed
+            .split('|')
+            .all(|cell| cell.trim().chars().all(|ch| matches!(ch, '-' | ':' | ' ')))
+}
+
+fn clean_web_text(value: &str) -> String {
+    let mut text = String::with_capacity(value.len().min(20_000));
+    let mut in_tag = false;
+    for ch in value.chars() {
+        match ch {
+            '<' => {
+                in_tag = true;
+                text.push(' ');
+            }
+            '>' => in_tag = false,
+            _ if !in_tag => text.push(ch),
+            _ => {}
+        }
+    }
+    text.split_whitespace()
+        .take(4_000)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn project_context_source_reads(context_sources: &Value) -> Vec<Value> {
+    context_sources
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .enumerate()
+        .map(|(index, source)| {
+            let content = source
+                .get("markdown")
+                .and_then(Value::as_str)
+                .or_else(|| source.get("content").and_then(Value::as_str))
+                .or_else(|| source.get("text").and_then(Value::as_str))
+                .unwrap_or("")
+                .chars()
+                .take(8_000)
+                .collect::<String>();
+            let id = source
+                .get("id")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| knownext_core::compact_id("project-source"));
+            json!({
+                "sourceId": id,
+                "title": source.get("title").or_else(|| source.get("name")).cloned().unwrap_or_else(|| Value::from("Documento del proyecto")),
+                "url": Value::Null,
+                "path": source.get("path").cloned().unwrap_or(Value::Null),
+                "kind": "project_document",
+                "status": if content.trim().is_empty() { "unavailable" } else { "read" },
+                "readAt": knownext_core::now_iso(),
+                "content": content,
+                "excerpt": source.get("excerpt").and_then(Value::as_str).unwrap_or("").chars().take(1_200).collect::<String>(),
+                "objectiveIndex": index % 3,
+                "aspectIndex": index % 5
+            })
+        })
+        .collect()
+}
+
+fn research_brief_for_worker(brief: &Value) -> Value {
+    json!({
+        "id": brief["id"].clone(),
+        "topic": brief["topic"].clone(),
+        "objective": brief["objective"].clone(),
+        "questions": brief["questions"].clone(),
+        "candidateSourceLimit": brief["candidateSourceLimit"].clone(),
+        "reportLength": brief["reportLength"].clone(),
+        "language": brief["language"].clone(),
+        "tone": brief["tone"].clone(),
+        "reportProfile": brief["reportProfile"].clone()
+    })
+}
+
+fn research_plan_for_worker(plan: &Value) -> Value {
+    json!({
+        "title": plan["title"].clone(),
+        "primaryObjective": plan["primaryObjective"].clone(),
+        "secondaryObjectives": plan["secondaryObjectives"].clone(),
+        "researchAspects": plan["researchAspects"].clone(),
+        "objectiveCoverage": plan["objectiveCoverage"].clone(),
+        "recommendedReportStyle": plan["recommendedReportStyle"].clone(),
+        "candidateSourceLimit": plan["candidateSourceLimit"].clone(),
+        "reportLength": plan["reportLength"].clone(),
+        "constraints": plan["constraints"].clone()
+    })
+}
+
+fn compact_research_context_sources(context_sources: &Value) -> Value {
+    let items = context_sources
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .take(12)
+        .map(|source| {
+            let text = source
+                .get("markdown")
+                .and_then(Value::as_str)
+                .or_else(|| source.get("content").and_then(Value::as_str))
+                .or_else(|| source.get("text").and_then(Value::as_str))
+                .or_else(|| source.get("excerpt").and_then(Value::as_str))
+                .unwrap_or("");
+            json!({
+                "id": source["id"].clone(),
+                "title": source.get("title").or_else(|| source.get("name")).cloned().unwrap_or(Value::Null),
+                "path": source["path"].clone(),
+                "excerpt": text.chars().take(1_500).collect::<String>()
+            })
+        })
+        .collect::<Vec<_>>();
+    Value::Array(items)
+}
+
+fn research_source_read_batches(source_reads: &[Value]) -> Vec<Vec<Value>> {
+    let compact = source_reads
+        .iter()
+        .filter(|source| source["status"].as_str() == Some("read"))
+        .map(|source| compact_research_source_read(source, 2_400))
+        .collect::<Vec<_>>();
+    let mut batches = Vec::new();
+    let mut current = Vec::new();
+    let mut current_chars = 0usize;
+    for source in compact {
+        let source_chars = source.to_string().chars().count();
+        if !current.is_empty() && (current.len() >= 6 || current_chars + source_chars > 18_000) {
+            batches.push(current);
+            current = Vec::new();
+            current_chars = 0;
+        }
+        current_chars += source_chars;
+        current.push(source);
+    }
+    if !current.is_empty() {
+        batches.push(current);
+    }
+    batches
+}
+
+fn compact_research_source_read(source: &Value, max_content_chars: usize) -> Value {
+    let content = source
+        .get("content")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| source.get("excerpt").and_then(Value::as_str))
+        .unwrap_or("");
+    json!({
+        "sourceId": source["sourceId"].clone(),
+        "title": source["title"].clone(),
+        "url": source["url"].clone(),
+        "path": source["path"].clone(),
+        "kind": source["kind"].clone(),
+        "status": source["status"].clone(),
+        "readAt": source["readAt"].clone(),
+        "content": content.chars().take(max_content_chars).collect::<String>(),
+        "excerpt": source.get("excerpt").and_then(Value::as_str).unwrap_or("").chars().take(600).collect::<String>(),
+        "objectiveIndex": source["objectiveIndex"].clone(),
+        "aspectIndex": source["aspectIndex"].clone()
+    })
+}
+
+fn compact_research_evidence(
+    evidence: &[Value],
+    max_items: usize,
+    max_excerpt_chars: usize,
+) -> Vec<Value> {
+    evidence
+        .iter()
+        .take(max_items)
+        .map(|item| {
+            let excerpt = item
+                .get("excerpt")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .chars()
+                .take(max_excerpt_chars)
+                .collect::<String>();
+            json!({
+                "id": item["id"].clone(),
+                "sourceId": item["sourceId"].clone(),
+                "claim": item["claim"].clone(),
+                "excerpt": excerpt,
+                "confidence": item["confidence"].clone(),
+                "objectiveIndex": item["objectiveIndex"].clone(),
+                "aspectIndex": item["aspectIndex"].clone(),
+                "consultedAt": item["consultedAt"].clone(),
+                "sourceKind": item["sourceKind"].clone()
+            })
+        })
+        .collect()
+}
+
+fn compact_research_findings(
+    findings: &[Value],
+    max_items: usize,
+    max_summary_chars: usize,
+) -> Vec<Value> {
+    findings
+        .iter()
+        .take(max_items)
+        .map(|item| {
+            let summary = item
+                .get("summary")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .chars()
+                .take(max_summary_chars)
+                .collect::<String>();
+            json!({
+                "id": item["id"].clone(),
+                "title": item["title"].clone(),
+                "summary": summary,
+                "evidenceIds": item["evidenceIds"].clone(),
+                "objectiveIndex": item["objectiveIndex"].clone(),
+                "aspectIndex": item["aspectIndex"].clone(),
+                "confidence": item["confidence"].clone()
+            })
+        })
+        .collect()
+}
+
+fn compact_research_evidence_for_findings(
+    evidence: &[Value],
+    findings: &[Value],
+    max_items: usize,
+    max_excerpt_chars: usize,
+) -> Vec<Value> {
+    let mut used_ids = BTreeSet::new();
+    for finding in findings {
+        if let Some(ids) = finding["evidenceIds"].as_array() {
+            for id in ids.iter().filter_map(Value::as_str) {
+                used_ids.insert(id.to_string());
+            }
+        }
+    }
+    let selected = evidence
+        .iter()
+        .filter(|item| {
+            item["id"]
+                .as_str()
+                .map(|id| used_ids.contains(id))
+                .unwrap_or(false)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let selected = if selected.is_empty() {
+        evidence.to_vec()
+    } else {
+        selected
+    };
+    compact_research_evidence(&selected, max_items, max_excerpt_chars)
+}
+
+fn validate_research_draft(markdown: &str, brief: &Value, source_reads: &Value) -> Vec<Value> {
+    let mut diagnostics = Vec::new();
+    if markdown.trim().is_empty() {
+        diagnostics.push(json!({ "level": "error", "message": "El informe está vacío." }));
+    }
+    for required in ["Fuentes consultadas", "Limitaciones"] {
+        if !markdown.contains(required) {
+            diagnostics.push(json!({
+                "level": "error",
+                "message": format!("El informe debe incluir la sección {required}.")
+            }));
+        }
+    }
+    if source_reads
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .all(|item| item["status"].as_str() == Some("unavailable"))
+        })
+        .unwrap_or(true)
+    {
+        diagnostics.push(json!({
+            "level": "error",
+            "message": "No hay fuentes leídas o extractos suficientes para verificar el informe."
+        }));
+    }
+    if brief["reportProfile"]["diagramsEnabled"]
+        .as_bool()
+        .unwrap_or(false)
+    {
+        for code in extract_mermaid_code_blocks(markdown) {
+            if !mermaid_looks_valid(&code) {
+                diagnostics.push(json!({
+                    "level": "error",
+                    "message": "Hay un bloque Mermaid que no parece válido."
+                }));
+            }
+        }
+    }
+    diagnostics
+}
+
+fn extract_mermaid_code_blocks(markdown: &str) -> Vec<String> {
+    let mut blocks = Vec::new();
+    let mut current = Vec::new();
+    let mut in_mermaid = false;
+    for line in markdown.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```mermaid") {
+            in_mermaid = true;
+            current.clear();
+            continue;
+        }
+        if in_mermaid && trimmed.starts_with("```") {
+            in_mermaid = false;
+            blocks.push(current.join("\n"));
+            current.clear();
+            continue;
+        }
+        if in_mermaid {
+            current.push(line.to_string());
+        }
+    }
+    blocks
+}
+
+fn mermaid_looks_valid(code: &str) -> bool {
+    let first = code
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("");
+    matches!(
+        first,
+        "flowchart TD"
+            | "flowchart LR"
+            | "graph TD"
+            | "graph LR"
+            | "sequenceDiagram"
+            | "classDiagram"
+            | "stateDiagram-v2"
+            | "erDiagram"
+            | "journey"
+            | "gantt"
+            | "pie"
+    )
+}
+
+fn supported_claim_ratio(evidence: &Value) -> Value {
+    let Some(items) = evidence.as_array() else {
+        return Value::Null;
+    };
+    if items.is_empty() {
+        return Value::Null;
+    }
+    let supported = items
+        .iter()
+        .filter(|item| {
+            matches!(item["confidence"].as_str(), Some("high" | "medium"))
+                || item["confidence"]
+                    .as_f64()
+                    .map(|value| value >= 0.55)
+                    .unwrap_or(false)
+        })
+        .count();
+    Value::from((supported as f64) / (items.len() as f64))
+}
+
+fn iso_duration_ms(started_at: &str, finished_at: &str) -> Value {
+    let started = OffsetDateTime::parse(started_at, &Rfc3339);
+    let finished = OffsetDateTime::parse(finished_at, &Rfc3339);
+    match (started, finished) {
+        (Ok(started), Ok(finished)) => {
+            Value::from((finished - started).whole_milliseconds().max(0) as i64)
+        }
+        _ => Value::Null,
+    }
+}
+
+fn research_export_file_name(topic: &str, extension: &str) -> String {
+    let cleaned = markdown_file_name(&format!("Investigación - {topic}.md"));
+    let stem = cleaned.strip_suffix(".md").unwrap_or(cleaned.as_str());
+    format!("{stem}.{extension}")
+}
+
+fn safe_research_markdown_file_name(topic: &str, job_id: &str) -> String {
+    let suffix = job_id
+        .chars()
+        .rev()
+        .take(8)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
+    let base = topic
+        .trim()
+        .chars()
+        .map(|ch| match ch {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '-',
+            ch if ch.is_control() => '-',
+            ch => ch,
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim_matches([' ', '.', '-'])
+        .chars()
+        .take(30)
+        .collect::<String>()
+        .trim_matches([' ', '.', '-'])
+        .to_string();
+    let stem = if base.is_empty() {
+        "Investigación".to_string()
+    } else {
+        format!("Investigación - {base}")
+    };
+    markdown_file_name(&format!("{stem} {suffix}.md"))
+}
+
 fn markdown_file_name(value: &str) -> String {
     let cleaned = value
         .trim()
@@ -6536,6 +8694,28 @@ fn markdown_file_name(value: &str) -> String {
         name
     } else {
         format!("{name}.md")
+    }
+}
+
+fn write_string_atomic(path: &Path, content: &str) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "La ruta de destino no tiene carpeta contenedora.".to_string())?;
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("knownext-research");
+    let tmp_path = parent.join(format!(
+        ".{stem}.{}.tmp",
+        knownext_core::compact_id("write")
+    ));
+    std::fs::write(&tmp_path, content).map_err(|error| error.to_string())?;
+    match std::fs::rename(&tmp_path, path) {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            let _ = std::fs::remove_file(&tmp_path);
+            Err(error.to_string())
+        }
     }
 }
 
@@ -6858,6 +9038,7 @@ fn normalize_config(config: &mut Value) {
 }
 
 fn normalize_ai_config(ai: &mut Value) {
+    let original_agentic = ai.get("agentic").cloned().unwrap_or(Value::Null);
     if !ai.is_object() {
         *ai = default_ai_config();
     } else {
@@ -6876,7 +9057,70 @@ fn normalize_ai_config(ai: &mut Value) {
             _ => "not-indexed",
         },
     );
-    ai["agentic"]["webResearchEnabled"] = Value::Bool(false);
+    ai["agentic"]["webResearchEnabled"] = Value::Bool(
+        ai["agentic"]["webResearchEnabled"]
+            .as_bool()
+            .unwrap_or(true),
+    );
+    normalize_ai_research_presets(&mut ai["agentic"]["researchPresets"]);
+    ai["agentic"]["researchDiagramsEnabled"] = Value::Bool(
+        original_agentic["researchDiagramsEnabled"]
+            .as_bool()
+            .unwrap_or_else(|| {
+                legacy_research_visual_enabled(&original_agentic, "diagramsEnabled", true)
+            }),
+    );
+    ai["agentic"]["researchImagesEnabled"] = Value::Bool(
+        original_agentic["researchImagesEnabled"]
+            .as_bool()
+            .unwrap_or_else(|| {
+                legacy_research_visual_enabled(&original_agentic, "imagesEnabled", true)
+            }),
+    );
+}
+
+fn normalize_ai_research_presets(presets: &mut Value) {
+    let defaults = default_ai_config()["agentic"]["researchPresets"].clone();
+    if !presets.is_object() {
+        *presets = defaults;
+    }
+    let current = presets.clone();
+    let mut normalized = serde_json::Map::new();
+    for key in ["quick", "deep", "compare", "currentDocument"] {
+        let preset = &current[key];
+        let default_preset = default_ai_config()["agentic"]["researchPresets"][key].clone();
+        let default_candidate = default_preset["candidateSourceLimit"]
+            .as_u64()
+            .unwrap_or(50);
+        let explicit_candidate = preset["candidateSourceLimit"].as_u64();
+        let legacy_max_sources = preset["maxSources"].as_u64();
+        let candidate_source_limit = if explicit_candidate == Some(default_candidate) {
+            legacy_max_sources.or(explicit_candidate)
+        } else {
+            explicit_candidate.or(legacy_max_sources)
+        }
+        .unwrap_or(default_candidate)
+        .clamp(1, 500);
+        let legacy_diagrams = preset["diagrams"].as_str().map(|value| value != "none");
+        let legacy_images = preset["images"].as_str().map(|value| value != "none");
+        let diagrams_enabled = preset["diagramsEnabled"]
+            .as_bool()
+            .or(legacy_diagrams)
+            .unwrap_or(default_preset["diagramsEnabled"].as_bool().unwrap_or(false));
+        let images_enabled = preset["imagesEnabled"]
+            .as_bool()
+            .or(legacy_images)
+            .unwrap_or(default_preset["imagesEnabled"].as_bool().unwrap_or(false));
+        normalized.insert(
+            key.to_string(),
+            json!({
+                "candidateSourceLimit": candidate_source_limit,
+                "diagramsEnabled": diagrams_enabled,
+                "imagesEnabled": images_enabled
+            }),
+        );
+    }
+    *presets = Value::Object(normalized);
 }
 
 fn normalize_ai_diagram_config(diagrams: &mut Value) {
@@ -6993,7 +9237,23 @@ fn default_ai_config() -> Value {
         "rag": { "enabled": true, "vectorStoreId": null, "lastIndexedAt": null, "status": "not-indexed", "error": null },
         "vision": { "enabled": true, "model": "gpt-5.4-mini", "imageIndexingEnabled": false, "maxImagesPerPrompt": 4, "maxImageSizeMb": 12, "detail": "auto", "storeVisualDescriptions": true },
         "imageGeneration": { "enabled": true, "model": "gpt-image-2", "size": "auto", "quality": "auto", "outputFormat": "png", "defaultFolder": "document_folder", "customFolderPath": "assets/generated", "maxImagesPerPrompt": 1, "confirmBeforeDocumentInsert": false, "confirmBeforeUsingMultipleSources": true, "storePromptMetadata": true },
-        "agentic": { "depth": "guided", "webResearchEnabled": false, "confirmBeforeApplying": true, "maxSteps": 4, "maxDocuments": 6, "maxEstimatedCostEur": 1, "maxSources": 6 },
+        "agentic": {
+            "depth": "guided",
+            "webResearchEnabled": true,
+            "confirmBeforeApplying": true,
+            "maxSteps": 4,
+            "maxDocuments": 6,
+            "maxEstimatedCostEur": 1,
+            "maxSources": 500,
+            "researchDiagramsEnabled": true,
+            "researchImagesEnabled": true,
+            "researchPresets": {
+                "quick": { "candidateSourceLimit": 50, "diagramsEnabled": false, "imagesEnabled": false },
+                "deep": { "candidateSourceLimit": 500, "diagramsEnabled": true, "imagesEnabled": true },
+                "compare": { "candidateSourceLimit": 200, "diagramsEnabled": true, "imagesEnabled": false },
+                "currentDocument": { "candidateSourceLimit": 10, "diagramsEnabled": true, "imagesEnabled": false }
+            }
+        },
         "transcription": { "enabled": true, "model": "gpt-4o-mini-transcribe", "defaultTarget": "prompt", "defaultLanguage": "auto", "favoriteLanguages": ["es", "en"] },
         "diagrams": { "enabled": true, "visualProfile": "visual_local", "iconSet": "lucide", "imagePolicy": "project_assets", "betaPolicy": "ask", "defaultWidth": "wide", "aiGenerationMode": "visual" }
     })
@@ -7028,6 +9288,134 @@ mod tests {
 
     static GIT_REMOTE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
+    #[test]
+    fn research_file_name_is_short_and_has_stable_suffix() {
+        let topic = "investigación ".repeat(40);
+        let file_name = safe_research_markdown_file_name(&topic, "research-1234567890abcdef");
+
+        assert!(file_name.ends_with("90abcdef.md"));
+        assert!(file_name.len() <= 100);
+        assert!(!file_name.contains(':'));
+        assert!(!file_name.contains('\\'));
+    }
+
+    #[test]
+    fn research_runtime_fields_count_artifacts() {
+        let mut job = json!({
+            "sourceCandidates": [{ "id": "c1" }, { "id": "c2" }],
+            "rankedSources": [{ "id": "r1" }],
+            "sources": [{ "id": "s1" }],
+            "sourceReads": [{ "status": "read" }, { "status": "unavailable" }],
+            "evidence": [{ "sourceId": "s1" }, { "sourceId": "s2" }],
+            "findings": [{ "id": "f1" }],
+            "qualityReport": { "citedSourceCount": 2 },
+            "draftMarkdown": "| A | B |\n| - | - |\n| 1 | 2 |\n\n```mermaid\ngraph TD\n```\n",
+            "generatedImages": [{ "status": "completed" }, { "status": "blocked" }]
+        });
+
+        refresh_research_runtime_fields(&mut job);
+
+        assert_eq!(job["artifactCounts"]["candidateSources"], 2);
+        assert_eq!(job["artifactCounts"]["readSources"], 1);
+        assert_eq!(job["artifactCounts"]["evidence"], 2);
+        assert_eq!(job["artifactCounts"]["tables"], 1);
+        assert_eq!(job["artifactCounts"]["diagrams"], 1);
+        assert_eq!(job["artifactCounts"]["images"], 1);
+    }
+
+    #[test]
+    fn research_source_reads_are_compacted_into_bounded_batches() {
+        let long_content = "contenido ".repeat(2_000);
+        let source_reads = (0..13)
+            .map(|index| {
+                json!({
+                    "sourceId": format!("source-{index}"),
+                    "title": format!("Fuente {index}"),
+                    "url": format!("https://example.com/{index}"),
+                    "path": null,
+                    "kind": "web",
+                    "status": "read",
+                    "readAt": knownext_core::now_iso(),
+                    "content": long_content,
+                    "excerpt": "extracto ".repeat(500),
+                    "objectiveIndex": index % 3,
+                    "aspectIndex": index % 5
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let batches = research_source_read_batches(&source_reads);
+
+        assert_eq!(batches.len(), 3);
+        assert!(batches.iter().all(|batch| batch.len() <= 6));
+        assert!(batches.iter().flatten().all(|source| source["content"]
+            .as_str()
+            .unwrap()
+            .chars()
+            .count()
+            <= 2_400));
+        assert!(batches.iter().flatten().all(|source| source["excerpt"]
+            .as_str()
+            .unwrap()
+            .chars()
+            .count()
+            <= 600));
+    }
+
+    #[test]
+    fn research_writer_receives_only_referenced_compact_evidence() {
+        let evidence = (0..5)
+            .map(|index| {
+                json!({
+                    "id": format!("evidence-{index}"),
+                    "sourceId": format!("source-{index}"),
+                    "claim": format!("Afirmación {index}"),
+                    "excerpt": "extracto largo ".repeat(200),
+                    "confidence": "medium",
+                    "objectiveIndex": index % 3,
+                    "aspectIndex": index % 5,
+                    "consultedAt": knownext_core::now_iso(),
+                    "sourceKind": "web"
+                })
+            })
+            .collect::<Vec<_>>();
+        let findings = vec![json!({
+            "id": "finding-1",
+            "title": "Hallazgo",
+            "summary": "Resumen",
+            "evidenceIds": ["evidence-1", "evidence-3"]
+        })];
+
+        let compact = compact_research_evidence_for_findings(&evidence, &findings, 10, 120);
+
+        assert_eq!(compact.len(), 2);
+        assert_eq!(compact[0]["id"], "evidence-1");
+        assert_eq!(compact[1]["id"], "evidence-3");
+        assert!(compact
+            .iter()
+            .all(|item| item["excerpt"].as_str().unwrap().chars().count() <= 120));
+    }
+
+    #[test]
+    fn research_context_sources_are_compacted_before_search() {
+        let sources = json!((0..20)
+            .map(|index| json!({
+                "id": format!("ctx-{index}"),
+                "title": format!("Contexto {index}"),
+                "path": format!("docs/{index}.md"),
+                "markdown": "contenido local ".repeat(500)
+            }))
+            .collect::<Vec<_>>());
+
+        let compact = compact_research_context_sources(&sources);
+        let items = compact.as_array().unwrap();
+
+        assert_eq!(items.len(), 12);
+        assert!(items
+            .iter()
+            .all(|item| item["excerpt"].as_str().unwrap().chars().count() <= 1_500));
+    }
+
     fn api() -> LocalApi {
         let root = std::env::temp_dir().join(knownext_core::compact_id("knownext-test"));
         LocalApi::new(root, "2.0.4".to_string(), "desktop".to_string())
@@ -7049,6 +9437,38 @@ mod tests {
             )
             .unwrap();
         (created.body["id"].as_str().unwrap().to_string(), root)
+    }
+
+    fn wait_for_research_status(
+        api: &LocalApi,
+        project_id: &str,
+        job_id: &str,
+        status: &str,
+    ) -> Value {
+        for _ in 0..40 {
+            let job = api.ai_research_job(project_id, job_id);
+            if job["status"].as_str() == Some(status) {
+                return job;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        api.ai_research_job(project_id, job_id)
+    }
+
+    #[test]
+    fn ai_conversation_retention_keeps_latest_events() {
+        let mut events = (0..(AI_CONVERSATION_MAX_EVENTS + 5))
+            .map(|index| json!({ "id": format!("event-{index}") }))
+            .collect::<Vec<_>>();
+
+        trim_ai_conversation_events(&mut events);
+
+        assert_eq!(events.len(), AI_CONVERSATION_MAX_EVENTS);
+        assert_eq!(events[0]["id"], "event-5");
+        assert_eq!(
+            events.last().unwrap()["id"],
+            format!("event-{}", AI_CONVERSATION_MAX_EVENTS + 4)
+        );
     }
 
     fn create_document(api: &LocalApi, project_id: &str, name: &str, markdown: &str) -> String {
@@ -9060,7 +11480,7 @@ mod tests {
         assert_eq!(config.body["ai"]["diagrams"]["iconSet"], "none");
         assert_eq!(config.body["ai"]["diagrams"]["imagePolicy"], "disabled");
         assert_eq!(config.body["ai"]["diagrams"]["aiGenerationMode"], "safe");
-        assert_eq!(config.body["ai"]["agentic"]["webResearchEnabled"], false);
+        assert_eq!(config.body["ai"]["agentic"]["webResearchEnabled"], true);
         assert_eq!(config.body["ai"]["permissions"]["generateImages"], true);
 
         let ai_status = api
@@ -9090,7 +11510,7 @@ mod tests {
             "external_confirm"
         );
         assert_eq!(ai_status.body["diagrams"]["betaPolicy"], "enabled");
-        assert_eq!(ai_status.body["agentic"]["webResearchEnabled"], false);
+        assert_eq!(ai_status.body["agentic"]["webResearchEnabled"], true);
 
         api.write_json(
             &api.config_path(),
@@ -9128,7 +11548,7 @@ mod tests {
             "gpt-image-2"
         );
         assert_eq!(migrated.body["ai"]["imageGeneration"]["size"], "2048x2048");
-        assert_eq!(migrated.body["ai"]["agentic"]["webResearchEnabled"], false);
+        assert_eq!(migrated.body["ai"]["agentic"]["webResearchEnabled"], true);
         let persisted = api.read_json(&api.config_path(), json!({}));
         assert_eq!(persisted["schemaVersion"], 3);
         assert_eq!(persisted["ai"]["rag"]["enabled"], true);
@@ -9862,6 +12282,407 @@ mod tests {
     }
 
     #[test]
+    fn ai_research_brief_and_failure_contracts_are_local_runtime_backed() {
+        let api = api();
+        let (project_id, _root) = create_project(&api);
+        let document_id = create_document(
+            &api,
+            &project_id,
+            "contexto.md",
+            "# Contexto\nContenido local.",
+        );
+        let _source = api
+            .handle(
+                "POST",
+                &format!("/api/projects/{project_id}/ai/context/project-documents"),
+                json!({ "documentId": document_id }),
+                vec![],
+            )
+            .unwrap();
+
+        let brief = api
+            .handle(
+                "POST",
+                &format!("/api/projects/{project_id}/ai/research/brief"),
+                json!({
+                    "prompt": "Investiga la normativa aplicable",
+                    "contextSourceIds": [document_id]
+                }),
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(brief.status, 200);
+        assert_eq!(brief.body["projectId"], project_id);
+        assert_eq!(brief.body["depth"], "deep");
+        assert_eq!(brief.body["sourceScope"], "web_project");
+        assert_eq!(brief.body["resultTarget"], "new_document");
+        assert_eq!(
+            brief.body["plan"]["reportSkillId"],
+            "knownext.research_report"
+        );
+        assert_eq!(brief.body["reportProfile"]["diagramsEnabled"], true);
+        assert_eq!(brief.body["reportProfile"]["imagesEnabled"], true);
+        assert!(brief.body["plan"]["auxiliarySkillIds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|skill| skill == "knownext.markdown"));
+        assert_eq!(
+            brief.body["plan"]["secondaryObjectives"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+        assert_eq!(
+            brief.body["plan"]["researchAspects"]
+                .as_array()
+                .unwrap()
+                .len(),
+            5
+        );
+        assert_eq!(brief.body["questions"].as_array().unwrap().len(), 5);
+
+        let missing_key_job = api
+            .handle(
+                "POST",
+                &format!("/api/projects/{project_id}/ai/research/jobs"),
+                json!({
+                    "brief": brief.body,
+                    "contextSourceIds": [document_id]
+                }),
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(missing_key_job.status, 200);
+        assert_eq!(missing_key_job.body["status"], "planning");
+        assert_eq!(missing_key_job.body["progress"], 5);
+        let missing_key_job_id = missing_key_job.body["id"].as_str().unwrap();
+        let failed_job = wait_for_research_status(&api, &project_id, missing_key_job_id, "failed");
+        assert_eq!(failed_job["error"]["code"], "openai_key_missing");
+
+        let list = api
+            .handle(
+                "GET",
+                &format!("/api/projects/{project_id}/ai/research/jobs"),
+                Value::Null,
+                vec![],
+            )
+            .unwrap();
+        assert!(list.body["jobs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|job| job["id"] == failed_job["id"]));
+
+        let retry = api
+            .handle(
+                "POST",
+                &format!("/api/projects/{project_id}/ai/research/jobs/{missing_key_job_id}/retry"),
+                Value::Null,
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(retry.body["retryOfJobId"], missing_key_job_id);
+
+        let cancel = api
+            .handle(
+                "POST",
+                &format!(
+                    "/api/projects/{project_id}/ai/research/jobs/{}/cancel",
+                    retry.body["id"].as_str().unwrap()
+                ),
+                Value::Null,
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(cancel.body["status"], "cancelled");
+
+        let sources = api
+            .handle(
+                "GET",
+                &format!(
+                    "/api/projects/{project_id}/ai/research/jobs/{missing_key_job_id}/sources"
+                ),
+                Value::Null,
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(sources.body["sources"].as_array().unwrap().len(), 0);
+        let quality = api
+            .handle(
+                "GET",
+                &format!(
+                    "/api/projects/{project_id}/ai/research/jobs/{missing_key_job_id}/quality"
+                ),
+                Value::Null,
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(quality.body["status"], "fail");
+    }
+
+    #[test]
+    fn ai_research_job_blocks_web_when_research_web_is_disabled() {
+        let api = api();
+        let (project_id, _root) = create_project(&api);
+        let config = api
+            .handle(
+                "PUT",
+                "/api/config/ai",
+                json!({
+                    "provider": "openai",
+                    "model": "gpt-5.4-mini",
+                    "permissions": default_ai_config()["permissions"].clone(),
+                    "rag": default_ai_config()["rag"].clone(),
+                    "vision": default_ai_config()["vision"].clone(),
+                    "imageGeneration": default_ai_config()["imageGeneration"].clone(),
+                    "agentic": {
+                        "depth": "guided",
+                        "webResearchEnabled": false,
+                        "confirmBeforeApplying": true,
+                        "maxSteps": 4,
+                        "maxDocuments": 6,
+                        "maxEstimatedCostEur": 1,
+                        "maxSources": 6,
+                        "researchPresets": default_ai_config()["agentic"]["researchPresets"].clone()
+                    },
+                    "transcription": default_ai_config()["transcription"].clone(),
+                    "diagrams": default_ai_config()["diagrams"].clone()
+                }),
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(config.body["agentic"]["webResearchEnabled"], false);
+        let brief = api
+            .handle(
+                "POST",
+                &format!("/api/projects/{project_id}/ai/research/brief"),
+                json!({ "prompt": "Investiga fuentes online" }),
+                vec![],
+            )
+            .unwrap();
+        let job = api
+            .handle(
+                "POST",
+                &format!("/api/projects/{project_id}/ai/research/jobs"),
+                json!({ "brief": brief.body }),
+                vec![],
+            )
+            .unwrap();
+        let failed = wait_for_research_status(
+            &api,
+            &project_id,
+            job.body["id"].as_str().unwrap(),
+            "failed_provider",
+        );
+        assert_eq!(failed["error"]["code"], "web_research_disabled");
+    }
+
+    #[test]
+    fn ai_research_brief_builds_reviewable_plan_with_sources_and_length() {
+        let api = api();
+        let (project_id, _root) = create_project(&api);
+
+        let brief = api
+            .handle(
+                "POST",
+                &format!("/api/projects/{project_id}/ai/research/brief"),
+                json!({
+                    "prompt": "Comprar un Mazda MX-5",
+                    "intent": { "research": { "sourceScope": "web_project" } }
+                }),
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(brief.body["depth"], "deep");
+        assert_eq!(brief.body["sourceScope"], "web_project");
+        assert_eq!(brief.body["templateId"], "state_of_art");
+        assert_eq!(brief.body["confirmBeforeCreating"], false);
+        assert_eq!(brief.body["candidateSourceLimit"], 50);
+        assert_eq!(brief.body["reportLength"], "brief");
+        assert_eq!(brief.body["plan"]["sourceScope"], "web_project");
+        assert_eq!(brief.body["plan"]["autoStartAfterSeconds"], 60);
+        assert_eq!(brief.body["plan"]["proposedCandidateSourceLimit"], 50);
+        assert_eq!(brief.body["plan"]["candidateSourceLimit"], 50);
+        assert_eq!(brief.body["plan"]["proposedReportLength"], "brief");
+        assert_eq!(brief.body["plan"]["reportLength"], "brief");
+        assert!(brief.body["plan"]["planningRationale"]
+            .as_str()
+            .unwrap()
+            .contains("50 fuentes candidatas"));
+        assert_eq!(
+            brief.body["plan"]["reportSkillId"],
+            "knownext.research_report"
+        );
+        assert!(brief.body["plan"]["outputSummary"]
+            .as_str()
+            .unwrap()
+            .contains("Web activa"));
+        assert!(brief.body["plan"]["visualPlan"]
+            .as_str()
+            .unwrap()
+            .contains("Diagramas"));
+        assert_eq!(
+            brief.body["plan"]["secondaryObjectives"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+        assert_eq!(
+            brief.body["plan"]["researchAspects"]
+                .as_array()
+                .unwrap()
+                .len(),
+            5
+        );
+        assert!(brief.body["plan"]["researchAspects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item
+                .as_str()
+                .unwrap_or("")
+                .contains("Comprar un Mazda MX-5")));
+
+        let edited = api
+            .handle(
+                "POST",
+                &format!("/api/projects/{project_id}/ai/research/brief"),
+                json!({
+                    "prompt": "Necesito comparar muchas alternativas, riesgos, costes, mantenimiento, regulacion, mercado y recomendaciones para una decision de compra compleja",
+                    "intent": { "research": { "candidateSourceLimit": 500, "reportLength": "exhaustive" } }
+                }),
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(edited.body["candidateSourceLimit"], 500);
+        assert_eq!(edited.body["reportLength"], "exhaustive");
+        assert_eq!(edited.body["plan"]["candidateSourceLimit"], 500);
+        assert_eq!(edited.body["plan"]["reportLength"], "exhaustive");
+    }
+
+    #[test]
+    fn ai_research_brief_records_user_request_in_conversation() {
+        let api = api();
+        let (project_id, _root) = create_project(&api);
+        let document_id =
+            create_document(&api, &project_id, "notas.md", "# Notas\nContenido base.");
+
+        let brief = api
+            .handle(
+                "POST",
+                &format!("/api/projects/{project_id}/ai/research/brief"),
+                json!({
+                    "prompt": "Investiga los puntos pendientes de estas notas",
+                    "activeMarkdown": "# Notas\nContenido base.",
+                    "documentId": document_id,
+                    "clientMessageId": "client-research-notes",
+                    "clientContext": {
+                        "lastDocumentId": document_id,
+                        "lastDocumentPath": "notas.md"
+                    },
+                    "intent": { "research": { "depth": "deep", "sourceScope": "web_project", "templateId": "state_of_art" } }
+                }),
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(brief.status, 200);
+
+        let conversation = api
+            .handle(
+                "GET",
+                &format!("/api/projects/{project_id}/ai/conversation"),
+                Value::Null,
+                vec![],
+            )
+            .unwrap();
+        let events = conversation.body["events"].as_array().unwrap();
+        let user_event = events
+            .iter()
+            .find(|event| event["id"] == "client-research-notes")
+            .expect("research prompt should be stored as a user conversation event");
+        assert_eq!(user_event["type"], "user_message");
+        assert_eq!(user_event["role"], "user");
+        assert_eq!(
+            user_event["content"],
+            "Investiga los puntos pendientes de estas notas"
+        );
+        assert_eq!(user_event["documentId"], document_id);
+        assert_eq!(user_event["path"], "notas.md");
+    }
+
+    #[test]
+    fn ai_research_brief_migrates_legacy_research_visual_config() {
+        let api = api();
+        let (project_id, _root) = create_project(&api);
+        let mut config = default_ai_config();
+        config["agentic"]["maxSources"] = Value::from(6);
+        config["agentic"]["researchDiagramsEnabled"] = Value::Null;
+        config["agentic"]["researchImagesEnabled"] = Value::Null;
+        config["agentic"]["researchPresets"]["deep"]["sourceScope"] = Value::from("project");
+        config["agentic"]["researchPresets"]["deep"]["candidateSourceLimit"] = Value::from(500);
+        config["agentic"]["researchPresets"]["deep"]["estimatedDurationLabel"] =
+            Value::from("20 min");
+        config["agentic"]["researchPresets"]["deep"]["autoStartAfterSeconds"] = Value::from(5);
+        config["agentic"]["researchPresets"]["deep"]["reportLength"] = Value::from("long");
+        config["agentic"]["researchPresets"]["deep"]["reportStyle"] = Value::from("technical");
+        config["agentic"]["researchPresets"]["deep"]["tables"] = Value::from("required");
+        config["agentic"]["researchPresets"]["deep"]["diagrams"] = Value::from("required");
+        config["agentic"]["researchPresets"]["deep"]["images"] = Value::from("existing_assets");
+        config["agentic"]["researchPresets"]["deep"]["citationLevel"] = Value::from("strict");
+        let saved = api.handle("PUT", "/api/config/ai", config, vec![]).unwrap();
+        assert!(saved.body["agentic"]["researchPresets"]["deep"]["sourceScope"].is_null());
+        assert_eq!(
+            saved.body["agentic"]["researchPresets"]["deep"]["diagramsEnabled"],
+            true
+        );
+        assert_eq!(
+            saved.body["agentic"]["researchPresets"]["deep"]["imagesEnabled"],
+            true
+        );
+        assert_eq!(saved.body["agentic"]["researchDiagramsEnabled"], true);
+        assert_eq!(saved.body["agentic"]["researchImagesEnabled"], true);
+
+        let brief = api
+            .handle(
+                "POST",
+                &format!("/api/projects/{project_id}/ai/research/brief"),
+                json!({
+                    "prompt": "Investiga un contrato de mantenimiento",
+                    "intent": { "research": { "depth": "deep", "sourceScope": "web_project", "templateId": "state_of_art" } }
+                }),
+                vec![],
+            )
+            .unwrap();
+
+        assert_eq!(brief.body["depth"], "deep");
+        assert_eq!(brief.body["sourceScope"], "web_project");
+        assert_eq!(brief.body["maxSources"], 50);
+        assert_eq!(brief.body["candidateSourceLimit"], 50);
+        assert_eq!(brief.body["plan"]["sourceScope"], "web_project");
+        assert_eq!(brief.body["plan"]["estimatedDurationLabel"], "4-10 min");
+        assert_eq!(brief.body["plan"]["autoStartAfterSeconds"], 60);
+        assert_eq!(brief.body["reportProfile"]["diagramsEnabled"], true);
+        assert_eq!(brief.body["reportProfile"]["imagesEnabled"], true);
+        assert_eq!(
+            brief.body["plan"]["secondaryObjectives"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+        assert_eq!(
+            brief.body["plan"]["researchAspects"]
+                .as_array()
+                .unwrap()
+                .len(),
+            5
+        );
+    }
+
+    #[test]
     fn ai_skills_contracts_are_global_and_readonly() {
         let api = api();
 
@@ -9879,6 +12700,17 @@ mod tests {
                 .unwrap()
                 .iter()
                 .any(|mode| mode["id"] == "diagram_structure")));
+        assert!(skills
+            .iter()
+            .any(|skill| skill["id"] == "knownext.research_report"
+                && skill["source"] == "base"
+                && skill["visibility"] == "readonly"
+                && skill["runtimeEnabled"] == true
+                && skill["modes"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|mode| mode["id"] == "profundo")));
 
         let detail = api
             .handle(
@@ -9899,6 +12731,29 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("architecture-beta"));
+
+        let research_detail = api
+            .handle(
+                "GET",
+                "/api/ai/skills/knownext.research_report",
+                Value::Null,
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(research_detail.status, 200);
+        assert_eq!(
+            research_detail.body["manifest"]["id"],
+            "knownext.research_report"
+        );
+        assert!(research_detail.body["manifest"]["orchestratesSkills"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|skill| skill == "knownext.markdown"));
+        assert!(research_detail.body["instructionsMarkdown"]
+            .as_str()
+            .unwrap()
+            .contains("Skills Auxiliares"));
 
         let validation = api
             .handle(

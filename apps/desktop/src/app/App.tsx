@@ -63,13 +63,19 @@ import {
   getAiConversation,
   getAiIndexStatus,
   getAiPendingIntent,
+  getAiResearchJob,
   getAiUsageSummary,
+  cancelAiResearchJob,
+  listAiResearchJobs,
+  prepareAiResearchBrief,
   previewAiContextSource,
   removeAiContextSource,
   rebuildAiIndex,
+  retryAiResearchJob,
   saveOpenAiKey,
   searchAiContextDocuments,
   sendAiInteraction,
+  startAiResearchJob,
   uploadLocalAiContextFiles,
   uploadAiContextFiles,
 } from "../lib/api/ai";
@@ -154,6 +160,8 @@ import type {
   AiIntentActionType,
   AiPendingDelete,
   AiPendingIntent,
+  AiResearchBrief,
+  AiResearchJob,
   AiSelectionFocus,
   AiSkillApplication,
   AiSkillDiagnostic,
@@ -226,6 +234,10 @@ type NotesSaveState = "idle" | "saving" | "error";
 const AI_CONVERSATION_TAB_ID = "project-ai-conversation" as const;
 const ACKNOWLEDGED_EXTERNAL_CHANGES_STORAGE_KEY = "knownext.acknowledgedExternalChanges";
 
+function isPermanentWorkspaceTabId(tabId: string) {
+  return tabId === AI_CONVERSATION_TAB_ID || tabId === NOTES_WORKSPACE_TAB_ID;
+}
+
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
@@ -270,6 +282,12 @@ export function App() {
   const [aiBubble, setAiBubble] = useState<{ id: string; answer: string; usedSkills?: string[]; skillApplications?: AiSkillApplication[]; skillDiagnostics?: AiSkillDiagnostic[] } | null>(null);
   const [aiAppliedChange, setAiAppliedChange] = useState<{ documentId: string; summary: string } | null>(null);
   const [aiSelectionFocus, setAiSelectionFocus] = useState<AiSelectionFocus | null>(null);
+  const [aiResearchBrief, setAiResearchBrief] = useState<AiResearchBrief | null>(null);
+  const [aiResearchJob, setAiResearchJob] = useState<AiResearchJob | null>(null);
+  const [aiResearchJobs, setAiResearchJobs] = useState<AiResearchJob[]>([]);
+  const [aiResearchContextSourceIds, setAiResearchContextSourceIds] = useState<string[]>([]);
+  const [aiResearchActiveMarkdown, setAiResearchActiveMarkdown] = useState("");
+  const openedResearchDocumentIdsRef = useRef<Set<string>>(new Set());
   const [pendingEditorOperations, setPendingEditorOperations] = useState<MarkdownEditorExternalOperation[]>([]);
   const [tabsByProject, setTabsByProject] = useState<Record<string, ProjectTabsConfig>>({});
   const [treeOpenPathsByProject, setTreeOpenPathsByProject] = useState<TreeOpenPathsByProject>({});
@@ -674,13 +692,40 @@ export function App() {
     if (!configLoaded || !activeProject) {
       setAiConversationEvents([]);
       setAiContextSources([]);
+      setAiResearchJobs([]);
+      setAiResearchJob(null);
       setRemovingAiContextSourceIds(new Set());
       setAiIndexStatus(null);
       return;
     }
     setRemovingAiContextSourceIds(new Set());
     void refreshAiState(activeProject.id);
+    void refreshAiResearchJobs(activeProject.id);
   }, [activeProject?.id, configLoaded]);
+
+  useEffect(() => {
+    if (!activeProject || !aiResearchJob || isAiResearchTerminalStatus(aiResearchJob.status)) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const job = await getAiResearchJob(activeProject.id, aiResearchJob.id);
+        if (cancelled) return;
+        setAiResearchJob(job);
+        setAiResearchJobs((current) => upsertAiResearchJob(current, job));
+        if (isAiResearchTerminalStatus(job.status)) {
+          handleResearchJobSettled(job);
+        }
+      } catch {
+        // Keep the last visible state; the next poll or manual action can recover.
+      }
+    };
+    const interval = window.setInterval(() => void poll(), 1_500);
+    void poll();
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [activeProject?.id, aiResearchJob?.id, aiResearchJob?.status]);
 
   useEffect(() => {
     if (!activeProject) return;
@@ -1220,7 +1265,7 @@ export function App() {
   }
 
   function handleCloseTab(tabId: string) {
-    if (tabId === NOTES_WORKSPACE_TAB_ID) return;
+    if (isPermanentWorkspaceTabId(tabId)) return;
 
     if (tabId === RELEASE_NOTES_WORKSPACE_TAB_ID) {
       const nextOpenUtilityTabs = removeReleaseNotesTab(openUtilityTabs);
@@ -1260,11 +1305,9 @@ export function App() {
   }
 
   function handleCloseTabs(tabIds: string[]) {
-    const uniqueTabIds = Array.from(new Set(tabIds));
+    const uniqueTabIds = Array.from(new Set(tabIds)).filter((tabId) => !isPermanentWorkspaceTabId(tabId));
     const dirtyDocumentIdsToConfirm: string[] = [];
     uniqueTabIds.forEach((tabId) => {
-      if (tabId === NOTES_WORKSPACE_TAB_ID) return;
-
       if (tabId === RELEASE_NOTES_WORKSPACE_TAB_ID || imageTabs.some((tab) => tab.id === tabId) || referenceDocumentTabs.some((tab) => tab.id === tabId)) {
         handleCloseTab(tabId);
         return;
@@ -1460,6 +1503,31 @@ export function App() {
 
     setAiBubble(null);
     try {
+      if (options?.intent?.kind === "research") {
+        const contextSourceIds = promptContextSourceIds;
+        const researchDocumentId = hasNotesContext ? null : hasDocumentContext ? activeDocumentId : null;
+        const researchDocumentPath = hasNotesContext ? null : hasDocumentContext ? activeSession?.document?.path ?? null : null;
+        const brief = await prepareAiResearchBrief(activeProject.id, {
+          prompt,
+          activeMarkdown: interactionMarkdown,
+          documentId: researchDocumentId,
+          clientContext: {
+            lastDocumentId: researchDocumentId,
+            lastDocumentPath: researchDocumentPath,
+            diagramConfig: aiConfig.diagrams,
+          },
+          clientMessageId: `client-${Date.now()}`,
+          contextSourceIds,
+          intent: options.intent,
+        });
+        setAiResearchBrief(brief);
+        setAiResearchJob(null);
+        setAiResearchContextSourceIds(contextSourceIds);
+        setAiResearchActiveMarkdown(interactionMarkdown);
+        handleSelectTab(AI_CONVERSATION_TAB_ID);
+        void getAiConversation(activeProject.id).then((conversation) => setAiConversationEvents(conversation.events)).catch(() => undefined);
+        return;
+      }
       const response = await sendAiInteraction({
         projectId: activeProject.id,
         documentId: interactionDocumentId,
@@ -1471,6 +1539,7 @@ export function App() {
           lastDocumentPath: lastDocumentContextRef.current.path,
           diagramConfig: aiConfig.diagrams,
         },
+        intent: options?.intent ?? null,
         executionMode: options?.executionMode ?? "quick",
         reasoningDepth: options?.reasoningDepth ?? "light",
         mode: interactionDocumentId ? "document" : "project",
@@ -1487,6 +1556,78 @@ export function App() {
   async function handleSearchAiContextDocuments(query: string): Promise<AiContextSearchResult[]> {
     if (!activeProject) return [];
     return searchAiContextDocuments(activeProject.id, query);
+  }
+
+  async function refreshAiResearchJobs(projectId = activeProject?.id) {
+    if (!projectId) return;
+    try {
+      const response = await listAiResearchJobs(projectId);
+      setAiResearchJobs(response.jobs);
+      const activeJob = response.jobs.find((job) => !isAiResearchTerminalStatus(job.status));
+      if (activeJob) setAiResearchJob(activeJob);
+    } catch {
+      // Research history is auxiliary; keep the rest of the AI surface usable.
+    }
+  }
+
+  function handleResearchJobSettled(job: AiResearchJob) {
+    if (!activeProject) return;
+    if (job.tree) setProjectTree(activeProject.id, job.tree);
+    const documentId = job.documentId ?? job.createdDocumentId ?? null;
+    if (isAiResearchReadyStatus(job.status) && documentId && !openedResearchDocumentIdsRef.current.has(documentId)) {
+      openedResearchDocumentIdsRef.current.add(documentId);
+      const name = job.documentPath?.split("/").pop() || "Investigación.md";
+      handleOpenDocument(documentId, name);
+      void getAiConversation(activeProject.id).then((conversation) => setAiConversationEvents(conversation.events)).catch(() => undefined);
+      void refreshAiUsageSummary();
+    }
+  }
+
+  async function handleStartAiResearch(brief: AiResearchBrief) {
+    if (!activeProject) return;
+    setAiResearchBrief(null);
+    try {
+      const job = await startAiResearchJob(activeProject.id, {
+        brief,
+        activeMarkdown: aiResearchActiveMarkdown,
+        contextSourceIds: aiResearchContextSourceIds,
+      });
+      setAiResearchJob(job);
+      setAiResearchJobs((current) => upsertAiResearchJob(current, job));
+    } catch (error) {
+      showError(error, "No se pudo ejecutar la investigación.", { source: "app.aiResearch.start" });
+      setAiResearchJob((current) => current ? {
+        ...current,
+        status: "failed",
+        currentPhase: "failed",
+        message: getApiErrorMessage(error, "No se pudo ejecutar la investigación."),
+        error: getApiErrorMessage(error, "No se pudo ejecutar la investigación."),
+        updatedAt: new Date().toISOString(),
+      } : current);
+    }
+  }
+
+  async function handleCancelAiResearchJob(jobId: string) {
+    if (!activeProject) return;
+    try {
+      const job = await cancelAiResearchJob(activeProject.id, jobId);
+      setAiResearchJob(job);
+      setAiResearchJobs((current) => upsertAiResearchJob(current, job));
+    } catch (error) {
+      showError(error, "No se pudo cancelar la investigación.", { source: "app.aiResearch.cancel" });
+    }
+  }
+
+  async function handleRetryAiResearchJob(jobId: string) {
+    if (!activeProject) return;
+    try {
+      const job = await retryAiResearchJob(activeProject.id, jobId);
+      setAiResearchBrief(null);
+      setAiResearchJob(job);
+      setAiResearchJobs((current) => upsertAiResearchJob(current, job));
+    } catch (error) {
+      showError(error, "No se pudo reintentar la investigación.", { source: "app.aiResearch.retry" });
+    }
   }
 
   async function handleAddProjectDocumentContext(documentId: string) {
@@ -3658,6 +3799,9 @@ export function App() {
         aiBubble={aiBubble}
         aiAppliedChange={aiAppliedChange}
         aiSelectionFocus={aiSelectionFocus}
+        aiResearchBrief={aiResearchBrief}
+        aiResearchJob={aiResearchJob}
+        aiResearchJobs={aiResearchJobs}
         aiContextSources={visibleAiContextSources}
         tree={tree}
         tabs={workspaceTabs}
@@ -3746,6 +3890,14 @@ export function App() {
         onSaveActiveDocument={() => handleSave()}
         onDiscardActiveDocumentDraft={handleDiscardActiveDocumentDraft}
         onSendAiPrompt={handleSendAiPrompt}
+        onUpdateAiResearchBrief={setAiResearchBrief}
+        onStartAiResearch={(brief) => void handleStartAiResearch(brief)}
+        onCancelAiResearchBrief={() => {
+          setAiResearchBrief(null);
+          setAiResearchJob(null);
+        }}
+        onCancelAiResearchJob={(jobId) => void handleCancelAiResearchJob(jobId)}
+        onRetryAiResearchJob={(jobId) => void handleRetryAiResearchJob(jobId)}
         onAiTranscriptionChange={handleAiTranscriptionChange}
         onClearAiSelectionFocus={() => setAiSelectionFocus(null)}
         onSearchAiContextDocuments={handleSearchAiContextDocuments}
@@ -4926,6 +5078,23 @@ function markdownContainsExcerpt(markdown: string, excerpt: string) {
   const normalizedMarkdown = normalizeLooseText(markdown);
   const normalizedExcerpt = normalizeLooseText(excerpt);
   return Boolean(normalizedExcerpt && normalizedMarkdown.includes(normalizedExcerpt));
+}
+
+function upsertAiResearchJob(jobs: AiResearchJob[], job: AiResearchJob): AiResearchJob[] {
+  const next = [job, ...jobs.filter((item) => item.id !== job.id)];
+  return next.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")).slice(0, 50);
+}
+
+function isAiResearchReadyStatus(status: AiResearchJob["status"]) {
+  return status === "ready" || status === "ready_pass" || status === "ready_warning";
+}
+
+function isAiResearchFailedStatus(status: AiResearchJob["status"]) {
+  return status === "failed" || status === "failed_quality" || status === "failed_provider" || status === "failed_publish" || status === "failed_runtime";
+}
+
+function isAiResearchTerminalStatus(status: AiResearchJob["status"]) {
+  return isAiResearchReadyStatus(status) || isAiResearchFailedStatus(status) || status === "cancelled";
 }
 
 function normalizeLooseText(value: string) {

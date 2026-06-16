@@ -86,8 +86,8 @@ export function AiResponseBubble({
                   <summary className="cursor-pointer text-[10px] font-semibold text-brand-orange hover:text-brand-dark">Diagnostico</summary>
                   <div className="mt-1 space-y-1">
                     {diagnostics.slice(0, 4).map((diagnostic) => (
-                      <p key={`${diagnostic.skillId}-${diagnostic.status}-${diagnostic.title}`} className="text-[10px] leading-4 text-ink-secondary">
-                        <span className="font-semibold text-ink-primary">{diagnostic.modeId ? `${skillLabel(diagnostic.skillId)} / ${modeLabel(diagnostic.modeId)}` : skillLabel(diagnostic.skillId)}:</span> {diagnostic.title}
+                      <p key={`${diagnostic.skillId ?? "verifier"}-${diagnostic.status ?? diagnostic.level ?? "info"}-${diagnostic.title ?? diagnostic.message ?? ""}`} className="text-[10px] leading-4 text-ink-secondary">
+                        <span className="font-semibold text-ink-primary">{diagnostic.modeId ? `${skillLabel(diagnostic.skillId ?? "verifier")} / ${modeLabel(diagnostic.modeId)}` : skillLabel(diagnostic.skillId ?? "verifier")}:</span> {diagnostic.title ?? diagnostic.message}
                         {diagnostic.phase ? <span> · {diagnostic.phase}</span> : null}
                       </p>
                     ))}
@@ -131,6 +131,7 @@ export function AiResponseBubble({
 
 function skillLabel(skillId: string) {
   const explicit: Record<string, string> = {
+    "knownext.research_report": "Informe de investigación",
     "knownext.mermaid": "Mermaid",
     "knownext.markdown": "Markdown",
     "knownext.document.review": "Revision de documentos",
@@ -150,6 +151,11 @@ function modeLabel(modeId: string) {
     diagram_planning: "planificacion",
     diagram_data: "datos",
     diagram_technical: "tecnico",
+    ejecutivo: "ejecutivo",
+    profundo: "profundo",
+    comparativo: "comparativo",
+    normativo: "normativo",
+    tecnico: "tecnico",
     table: "tabla",
     structure: "estructura",
     clarity: "claridad",

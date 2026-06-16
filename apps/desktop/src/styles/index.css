@@ -877,6 +877,33 @@ input[type="range"]::-moz-range-thumb {
   zoom: var(--knownext-markdown-zoom, 1);
 }
 
+.knownext-markdown-source-viewer {
+  min-height: 144px;
+  padding-bottom: 16px;
+  color: rgb(var(--app-text));
+  zoom: var(--knownext-markdown-zoom, 1);
+}
+
+.knownext-markdown-source-viewer pre {
+  margin: 0;
+  overflow: visible;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.knownext-markdown-source-viewer code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+}
+
 .knownext-editor .ProseMirror * {
   border-color: rgb(var(--app-border));
 }
@@ -992,7 +1019,7 @@ input[type="range"]::-moz-range-thumb {
 
 .knownext-editor h2,
 .knownext-editor .ProseMirror h2 {
-  margin: 0.9em 0 0.33em;
+  margin: 1.45em 0 0.38em;
   color: rgb(var(--app-text));
   font-family: Inter, ui-sans-serif, system-ui, "Segoe UI", Arial, sans-serif !important;
   font-size: 18px !important;
@@ -1078,17 +1105,18 @@ input[type="range"]::-moz-range-thumb {
 .knownext-editor .ProseMirror ul,
 .knownext-editor .ProseMirror ol {
   margin: 6px 0 10px;
-  padding-left: 22px !important;
   list-style-position: outside;
 }
 
 .knownext-editor ul,
 .knownext-editor .ProseMirror ul {
+  padding-left: 16px !important;
   list-style-type: disc;
 }
 
 .knownext-editor ol,
 .knownext-editor .ProseMirror ol {
+  padding-left: 16px !important;
   list-style-type: decimal;
 }
 
@@ -1131,7 +1159,7 @@ input[type="range"]::-moz-range-thumb {
 
 .knownext-editor .ProseMirror li.list-item > .label-wrapper .label {
   display: inline-flex;
-  width: 20px;
+  width: 24px;
   height: 17px;
   min-height: 17px;
   padding: 0 !important;
@@ -1140,15 +1168,20 @@ input[type="range"]::-moz-range-thumb {
   color: rgb(var(--app-muted));
   font-size: 11px;
   line-height: 1.55;
+  font-variant-numeric: tabular-nums;
 }
 
 .knownext-editor .ProseMirror li.list-item > .label-wrapper .label.bullet {
   justify-content: center;
 }
 
+.knownext-editor .ProseMirror li.list-item > .label-wrapper .label:not(.bullet) {
+  transform: translateX(-6px);
+}
+
 .knownext-editor .ProseMirror li.list-item > .label-wrapper .label.bullet svg {
-  width: 10px;
-  height: 10px;
+  width: 11px;
+  height: 11px;
   fill: currentColor;
 }
 
@@ -1234,7 +1267,7 @@ input[type="range"]::-moz-range-thumb {
 .knownext-editor .ProseMirror img {
   display: block;
   max-width: 100%;
-  margin: 14px auto;
+  margin: 18px auto 20px;
   border: 1px solid rgb(var(--app-border));
   border-radius: 6px;
   background: rgb(var(--app-surface));
@@ -1251,6 +1284,7 @@ input[type="range"]::-moz-range-thumb {
   display: flex;
   justify-content: center;
   max-width: 100%;
+  margin: 18px 0 20px;
 }
 
 .knownext-editor .milkdown-image-block > .image-wrapper {

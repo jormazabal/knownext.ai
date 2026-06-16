@@ -489,6 +489,13 @@ export type AiImageGenerationConfig = {
 
 export type AiModelId = "gpt-5.5" | "gpt-5.4" | "gpt-5.4-mini" | "gpt-5.4-nano";
 export type AiAgenticDepth = "quick" | "guided" | "deep" | "bounded_autonomous";
+export type AiResearchPresetId = "quick" | "deep" | "compare" | "currentDocument";
+export type AiResearchReportLength = "brief" | "standard" | "wide" | "exhaustive";
+export type AiResearchPresetConfig = {
+  candidateSourceLimit: number;
+  diagramsEnabled: boolean;
+  imagesEnabled: boolean;
+};
 export type AiTranscriptionTarget = "prompt" | "document";
 export type AiTranscriptionLanguage = "auto" | "es" | "en" | "fr" | "de" | "it" | "pt" | "ca" | "eu" | "gl";
 export type AiTranscriptionModelId = "gpt-4o-mini-transcribe";
@@ -501,6 +508,9 @@ export type AiAgenticConfig = {
   maxDocuments: number;
   maxEstimatedCostEur: number;
   maxSources: number;
+  researchDiagramsEnabled: boolean;
+  researchImagesEnabled: boolean;
+  researchPresets: Record<AiResearchPresetId, AiResearchPresetConfig>;
 };
 
 export type AiTranscriptionConfig = {
@@ -826,6 +836,391 @@ export type AiPendingIntentStatus = "awaiting_decision" | "awaiting_web_permissi
 export type AiPendingIntentAction = "replace_document" | "edit_document" | "create_document" | "project_operation" | "research_then_write";
 export type AiIntentActionType = "allow_web_research" | "apply" | "cancel";
 export type AiDocumentFocusType = "selection" | "cursor" | "block" | "document" | "project";
+export type AiPromptIntentKind = "research" | "image" | "diagram";
+export type AiResearchDepth = "quick" | "standard" | "deep";
+export type AiResearchSourceScope = "web" | "project" | "web_project";
+export type AiResearchResultTarget = "new_document" | "chat";
+export type AiResearchStatus =
+  | "draft"
+  | "planning"
+  | "query_planning"
+  | "searching"
+  | "ranking"
+  | "reading"
+  | "extracting"
+  | "contrasting"
+  | "gap_analysis"
+  | "synthesizing"
+  | "drafting"
+  | "verifying"
+  | "publishing"
+  | "reviewing"
+  | "ready"
+  | "ready_pass"
+  | "ready_warning"
+  | "failed"
+  | "failed_quality"
+  | "failed_provider"
+  | "failed_publish"
+  | "failed_runtime"
+  | "cancelled";
+export type AiResearchTemplateId = "executive_report" | "technical_analysis" | "comparison" | "state_of_art" | "regulatory_research" | "recommendations";
+export type AiResearchOutputTarget = AiResearchResultTarget;
+export type AiPromptIntent = {
+  kind: AiPromptIntentKind;
+  label: string;
+  research?: Partial<AiResearchBrief> | null;
+};
+export type AiResearchPlan = {
+  title: string;
+  objective: string;
+  outline: string[];
+  constraints: string;
+  sourceScope: AiResearchSourceScope;
+  primaryObjective?: string;
+  secondaryObjectives?: string[];
+  researchAspects?: string[];
+  objectiveCoverage?: Array<{
+    objectiveIndex: number;
+    aspectIndexes: number[];
+  }>;
+  recommendedReportStyle?: string;
+  proposedCandidateSourceLimit?: number;
+  candidateSourceLimit?: number;
+  proposedReportLength?: AiResearchReportLength;
+  reportLength?: AiResearchReportLength;
+  planningRationale?: string | null;
+  diagramsEnabled?: boolean;
+  imagesEnabled?: boolean;
+  reportSkillId?: string;
+  auxiliarySkillIds?: string[];
+  outputSummary?: string | null;
+  visualPlan?: string | null;
+  estimatedDurationLabel: string;
+  autoStartAfterSeconds: number;
+  createdAt: string;
+  updatedAt: string;
+};
+export type AiResearchReportProfile = {
+  diagramsEnabled: boolean;
+  imagesEnabled: boolean;
+};
+export type AiResearchStrategy = {
+  mode: AiResearchPresetId;
+  candidateSourceLimit: number;
+  reportLength?: AiResearchReportLength;
+  targetWordRange?: [number, number];
+  targetSectionCount?: [number, number];
+  maxHeadingDepth?: number;
+  allowAppendices?: boolean;
+  sourceReadBudget: number;
+  citationTarget: number;
+  searchRounds: number;
+  maxQueriesPerRound: number;
+  minIndependentSources: number;
+  minSourcesPerObjective: number;
+  contradictionCheck: "light" | "standard" | "strict";
+  gapReview: boolean;
+  reportDetail: "executive" | "complete" | "deep" | "comparative" | "document_review";
+  estimatedTimeRange: string;
+};
+export type AiResearchBudget = {
+  maxEstimatedCostEur?: number;
+  estimatedCostEur?: number;
+  maxSteps?: number;
+  usedSteps?: number;
+  maxSearchRounds?: number;
+  usedSearchRounds?: number;
+  maxSourceReads?: number;
+  usedSourceReads?: number;
+  exhausted?: boolean;
+};
+export type AiResearchQueryBatch = {
+  id: string;
+  round: number;
+  objectiveIndex?: number | null;
+  aspectIndex?: number | null;
+  queries: string[];
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  createdAt: string;
+  completedAt?: string | null;
+};
+export type AiResearchSourceState = "candidate" | "deduplicated" | "ranked" | "selected_for_reading" | "read" | "used_as_evidence" | "cited" | "rejected" | "unavailable";
+export type AiResearchSourceCandidate = AiResearchSource & {
+  state?: AiResearchSourceState;
+  status?: AiResearchSourceState;
+  query?: string | null;
+  objectiveIndex?: number | null;
+  aspectIndex?: number | null;
+  score?: number | null;
+  rankReason?: string | null;
+  rejectionReason?: string | null;
+};
+export type AiResearchSourceRead = {
+  id?: string;
+  sourceId: string;
+  status: "read" | "unavailable" | "rejected";
+  title: string;
+  url?: string | null;
+  path?: string | null;
+  kind?: AiResearchSource["kind"] | null;
+  content?: string | null;
+  excerpt: string;
+  readAt: string;
+  error?: string | null;
+};
+export type AiResearchFinding = {
+  id: string;
+  title: string;
+  summary: string;
+  evidenceIds: string[];
+  objectiveIndex?: number | null;
+  aspectIndex?: number | null;
+  confidence: "high" | "medium" | "low" | number;
+};
+export type AiResearchCoverage = {
+  status: "pass" | "warning" | "fail";
+  objectiveCoverage?: Array<{ objectiveIndex: number; evidenceCount: number; sourceCount: number; status: "pass" | "warning" | "fail" }>;
+  aspectCoverage?: Array<{ aspectIndex: number; evidenceCount: number; sourceCount: number; status: "pass" | "warning" | "fail" }>;
+  coveredObjectives?: number;
+  requiredObjectives?: number;
+  objectives?: Array<{ objectiveIndex: number; sourceCount: number; covered: boolean }>;
+  aspects?: Array<{ aspectIndex: number; sourceCount: number; covered: boolean }>;
+  gaps: string[];
+  generatedAt?: string;
+};
+export type AiResearchActivityEvent = {
+  id: string;
+  phase: AiResearchStatus;
+  level: "info" | "warning" | "error";
+  message: string;
+  detail?: string | null;
+  metricKey?: string | null;
+  countCurrent?: number | null;
+  countTotal?: number | null;
+  createdAt: string;
+};
+export type AiResearchArtifactCounts = {
+  candidateSources: number;
+  rankedSources: number;
+  selectedSources: number;
+  readSources: number;
+  evidence: number;
+  findings: number;
+  citedSources: number;
+  tables: number;
+  diagrams: number;
+  images: number;
+};
+export type AiResearchUsage = {
+  providerCalls: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  totalTokens: number;
+  estimatedCostEur?: number | null;
+  currency: "EUR";
+  updatedAt?: string | null;
+};
+export type AiResearchBrief = {
+  id: string;
+  projectId: string;
+  topic: string;
+  objective: string;
+  questions: string[];
+  depth: AiResearchDepth;
+  sourceScope: AiResearchSourceScope;
+  maxSources: number;
+  candidateSourceLimit?: number;
+  reportLength?: AiResearchReportLength;
+  maxEstimatedCostEur: number;
+  resultTarget: AiResearchResultTarget;
+  confirmBeforeCreating: boolean;
+  destinationFolderId?: string | null;
+  destinationFolderPath?: string | null;
+  templateId?: AiResearchTemplateId | null;
+  tone?: "professional" | "executive" | "technical" | "concise" | null;
+  language?: "es" | "en" | "auto" | null;
+  plan?: AiResearchPlan | null;
+  reportProfile?: AiResearchReportProfile | null;
+  createdAt: string;
+  updatedAt: string;
+};
+export type AiResearchEvidence = {
+  id: string;
+  sourceId: string;
+  claim: string;
+  excerpt: string;
+  confidence: "high" | "medium" | "low" | number;
+  objectiveIndex?: number | null;
+  aspectIndex?: number | null;
+  consultedAt?: string | null;
+  sourceKind?: AiResearchSource["kind"] | null;
+};
+export type AiResearchSource = {
+  id: string;
+  title: string;
+  url?: string | null;
+  path?: string | null;
+  kind: "web" | "project_document" | "external_file" | "local_file";
+  consultedAt: string;
+  confidence: "high" | "medium" | "low" | number;
+  usedFragments: string[];
+  status?: "pending" | "read" | "used" | "rejected" | "unavailable" | AiResearchSourceState;
+  snapshotExcerpt?: string | null;
+  score?: number | null;
+  rankReason?: string | null;
+};
+export type AiResearchQualityReport = {
+  id?: string;
+  jobId?: string;
+  status: "pass" | "warning" | "fail";
+  coverage: "high" | "medium" | "low" | AiResearchCoverage;
+  supportedClaims?: number;
+  supportedFindings?: number;
+  unsupportedClaims: string[] | number;
+  unsupportedFindings?: number;
+  contradictions: string[];
+  limitations: string[];
+  sourceCount: number;
+  citedSourceCount?: number;
+  evidenceCount?: number;
+  independentSourceCount?: number;
+  generatedAt?: string;
+};
+export type AiResearchError = {
+  code: string;
+  message: string;
+  retryable: boolean;
+};
+export type AiResearchReviewState = {
+  status: "draft_ai" | "accepted" | "revision_requested";
+  comments?: string | null;
+  reviewedAt?: string | null;
+};
+export type AiResearchMetrics = {
+  durationMs?: number | null;
+  estimatedCostEur?: number | null;
+  sourceCount: number;
+  evidenceCount: number;
+  supportedClaimRatio?: number | null;
+};
+export type AiResearchTemplate = {
+  id: AiResearchTemplateId;
+  label: string;
+  description: string;
+  depth: AiResearchDepth;
+  sourceScope: AiResearchSourceScope;
+};
+export type AiResearchPolicy = {
+  projectId: string;
+  allowedSourceScopes: AiResearchSourceScope[];
+  blockedDomains: string[];
+  preferredLanguage: "es" | "en" | "auto";
+  defaultDepth: AiResearchDepth;
+  maxEstimatedCostEur: number;
+  maxSources: number;
+  confirmBeforeCreating: boolean;
+  allowPrivateProjectDocuments: boolean;
+  minimumSources: number;
+  requireCitations: boolean;
+  updatedAt: string;
+};
+export type AiResearchRevisionRequest = {
+  action: "expand" | "reduce" | "technical_focus" | "add_recommendations" | "update_sources" | "new_version";
+  instruction?: string;
+  outputTarget?: AiResearchOutputTarget;
+};
+export type AiResearchExportRequest = {
+  format: "markdown" | "pdf" | "docx" | "package";
+};
+export type AiResearchJob = {
+  id: string;
+  projectId: string;
+  brief: AiResearchBrief;
+  strategy?: AiResearchStrategy | null;
+  budget?: AiResearchBudget | null;
+  status: AiResearchStatus;
+  phases: AiResearchStatus[];
+  currentPhase: AiResearchStatus;
+  phase?: AiResearchStatus;
+  progress?: number;
+  progressMessage?: string;
+  message: string;
+  heartbeatAt?: string | null;
+  lastActivityAt?: string | null;
+  sources: AiResearchSource[];
+  sourceCandidates?: AiResearchSourceCandidate[];
+  rankedSources?: AiResearchSourceCandidate[];
+  sourceReads?: AiResearchSourceRead[];
+  evidence: AiResearchEvidence[];
+  queryBatches?: AiResearchQueryBatch[];
+  coverage?: AiResearchCoverage | null;
+  findings?: AiResearchFinding[];
+  activity?: AiResearchActivityEvent[];
+  artifactCounts?: AiResearchArtifactCounts | null;
+  usage?: AiResearchUsage | null;
+  qualityReport?: AiResearchQualityReport | null;
+  reviewState?: AiResearchReviewState | null;
+  metrics?: AiResearchMetrics | null;
+  documentId?: string | null;
+  createdDocumentId?: string | null;
+  documentPath?: string | null;
+  markdown?: string | null;
+  draftMarkdown?: string | null;
+  researchFindings?: string[];
+  tree?: DocumentTreeNode[] | null;
+  usedSkills?: string[];
+  skillApplications?: AiSkillApplication[];
+  skillDiagnostics?: AiSkillDiagnostic[];
+  generatedImages?: AiGeneratedImage[] | Array<Record<string, unknown>>;
+  error?: string | AiResearchError | null;
+  retryOfJobId?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+export type AiResearchJobListResponse = {
+  jobs: AiResearchJob[];
+};
+export type AiResearchSourcesResponse = {
+  sources: AiResearchSource[];
+  sourceCandidates?: AiResearchSourceCandidate[];
+  rankedSources?: AiResearchSourceCandidate[];
+  sourceReads?: AiResearchSourceRead[];
+  evidence: AiResearchEvidence[];
+};
+export type AiResearchActivityResponse = {
+  jobId?: string;
+  activity: AiResearchActivityEvent[];
+};
+export type AiResearchCoverageResponse = {
+  jobId?: string;
+  coverage: AiResearchCoverage | null;
+};
+export type AiResearchExportResponse = {
+  format: AiResearchExportRequest["format"];
+  filename: string;
+  markdown?: string | null;
+  path?: string | null;
+  message: string;
+};
+export type AiResearchBriefRequest = {
+  prompt: string;
+  activeMarkdown?: string | null;
+  documentId?: string | null;
+  clientContext?: AiClientContext | null;
+  clientMessageId?: string;
+  contextSourceIds?: string[];
+  intent?: AiPromptIntent | null;
+};
+export type AiResearchJobRequest = {
+  brief: AiResearchBrief;
+  activeMarkdown?: string | null;
+  contextSourceIds?: string[];
+};
 export type AiEditProposalStatus = "proposed" | "applied" | "discarded" | "stale";
 export type AiEditOperationAction =
   | "replace_selection"
@@ -888,6 +1283,7 @@ export type AiInteractionRequest = {
   selectionFocus?: AiSelectionFocus | null;
   clientContext?: AiClientContext | null;
   intentAction?: AiIntentActionRequest | null;
+  intent?: AiPromptIntent | null;
   executionMode?: AiExecutionMode;
   reasoningDepth?: AiReasoningDepth;
   mode: AiInteractionMode;
@@ -952,10 +1348,12 @@ export type AiContextSourceRef = {
 };
 
 export type AiSkillDiagnostic = {
-  skillId: string;
-  status: AiSkillDiagnosticStatus;
-  title: string;
-  notes: string[];
+  skillId?: string;
+  status?: AiSkillDiagnosticStatus;
+  title?: string;
+  notes?: string[];
+  level?: AiSkillDiagnosticSeverity;
+  message?: string;
   phase?: AiSkillDiagnosticPhase;
   severity?: AiSkillDiagnosticSeverity;
   modeId?: string;
@@ -1011,6 +1409,9 @@ export type AiSkillManifest = {
   outputActions: string[];
   requires: string[];
   validators: string[];
+  orchestratesSkills?: string[];
+  auxiliarySkillCategories?: string[];
+  requiredCapabilities?: string[];
   runtimeEnabled?: boolean;
   modes?: AiSkillMode[];
 };

@@ -36,6 +36,7 @@ export type UpdateDownloadProgress = {
 
 type AndroidUpdaterBridge = {
   getPackageInfo: () => string;
+  fetchUpdateManifest: (requestJson: string) => string;
   canRequestPackageInstalls: () => boolean;
   openInstallPermissionSettings: () => void;
   downloadAndInstall: (requestJson: string) => string;
@@ -68,6 +69,12 @@ type AndroidUpdateManifest = {
   notes?: string;
   notesUrl?: string;
   artifacts: AndroidUpdateArtifact[];
+};
+
+type AndroidManifestFetchResponse = {
+  ok?: boolean;
+  body?: string;
+  message?: string;
 };
 
 type PendingAndroidUpdate = {
@@ -158,7 +165,7 @@ export async function installUpdate(onProgress?: (progress: UpdateDownloadProgre
 async function checkForAndroidUpdate(): Promise<UpdateCheckResult> {
   const bridge = requireAndroidUpdaterBridge();
   const packageInfo = readAndroidPackageInfo(bridge);
-  const manifest = await fetchAndroidManifest();
+  const manifest = await fetchAndroidManifest(bridge);
   validateAndroidManifest(manifest, packageInfo);
   const artifact = selectAndroidArtifact(manifest, packageInfo);
 
@@ -182,12 +189,35 @@ async function checkForAndroidUpdate(): Promise<UpdateCheckResult> {
   };
 }
 
-async function fetchAndroidManifest(): Promise<AndroidUpdateManifest> {
-  const response = await fetch(androidUpdateManifestUrl, { cache: "no-store" });
-  if (!response.ok) {
-    throw new Error(`No se pudo leer el manifiesto Android (${response.status}).`);
+async function fetchAndroidManifest(bridge: AndroidUpdaterBridge): Promise<AndroidUpdateManifest> {
+  const payload = JSON.stringify({ url: androidUpdateManifestUrl });
+  const rawResponse = bridge.fetchUpdateManifest(payload);
+  const nativeResponse = parseAndroidManifestFetchResponse(rawResponse);
+  if (!nativeResponse.ok || !nativeResponse.body) {
+    throw new Error(nativeResponse.message ?? "No se pudo leer el manifiesto Android.");
   }
-  return parseAndroidManifest(await response.json());
+
+  let parsedManifest: unknown;
+  try {
+    parsedManifest = JSON.parse(nativeResponse.body);
+  } catch {
+    throw new Error("El manifiesto Android no es JSON válido.");
+  }
+
+  return parseAndroidManifest(parsedManifest);
+}
+
+function parseAndroidManifestFetchResponse(value: string): AndroidManifestFetchResponse {
+  try {
+    const response = JSON.parse(value) as AndroidManifestFetchResponse;
+    return {
+      ok: Boolean(response.ok),
+      body: typeof response.body === "string" ? response.body : undefined,
+      message: typeof response.message === "string" ? response.message : undefined,
+    };
+  } catch {
+    return { ok: false, message: "Android devolvió una respuesta de actualización no válida." };
+  }
 }
 
 function parseAndroidManifest(value: unknown): AndroidUpdateManifest {
@@ -330,7 +360,18 @@ async function installAndroidUpdate(update: PendingAndroidUpdate, onProgress?: (
 }
 
 function getAndroidUpdaterBridge(): AndroidUpdaterBridge | null {
-  return typeof window !== "undefined" ? window.KnownextAndroidUpdater ?? null : null;
+  const bridge = typeof window !== "undefined" ? window.KnownextAndroidUpdater ?? null : null;
+  if (!bridge) return null;
+  if (
+    typeof bridge.getPackageInfo !== "function" ||
+    typeof bridge.fetchUpdateManifest !== "function" ||
+    typeof bridge.canRequestPackageInstalls !== "function" ||
+    typeof bridge.openInstallPermissionSettings !== "function" ||
+    typeof bridge.downloadAndInstall !== "function"
+  ) {
+    return null;
+  }
+  return bridge;
 }
 
 function requireAndroidUpdaterBridge(): AndroidUpdaterBridge {

@@ -154,7 +154,7 @@ describe("app configuration contracts", () => {
     expect(preferences.ai?.imageGeneration.customFolderPath).toBe(defaultAiConfig.imageGeneration.customFolderPath);
     expect(preferences.ai?.imageGeneration.maxImagesPerPrompt).toBe(4);
     expect(preferences.ai?.agentic.depth).toBe("bounded_autonomous");
-    expect(preferences.ai?.agentic.webResearchEnabled).toBe(false);
+    expect(preferences.ai?.agentic.webResearchEnabled).toBe(true);
     expect(preferences.ai?.agentic.maxSteps).toBe(12);
     expect(preferences.ai?.agentic.maxEstimatedCostEur).toBe(0.1);
     expect(preferences.ai?.diagrams.visualProfile).toBe("compatible");

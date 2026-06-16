@@ -294,6 +294,13 @@ function SkillSummaryPanel({ skill }: { skill: AiSkillDetail }) {
         ["Acciones", skill.outputActions.join(", ")],
         ["Modos", String(skill.modes.length)],
       ]} />
+      {(skill.manifest.orchestratesSkills?.length || skill.manifest.auxiliarySkillCategories?.length || skill.manifest.requiredCapabilities?.length) ? (
+        <SummaryGroup title="Coordinación" rows={[
+          ["Skills auxiliares", skill.manifest.orchestratesSkills?.join(", ") || "No declaradas"],
+          ["Categorías auxiliares", skill.manifest.auxiliarySkillCategories?.join(", ") || "No declaradas"],
+          ["Capacidades requeridas", skill.manifest.requiredCapabilities?.join(", ") || "No declaradas"],
+        ]} />
+      ) : null}
       <section className="rounded-md border border-line bg-panel/40 px-3 py-3 lg:col-span-2">
         <div className="flex items-start gap-2">
           <ShieldCheck size={15} className="mt-0.5 shrink-0 text-brand-orange" />
@@ -502,7 +509,7 @@ function DiagnosticsPanel({ diagnostics }: { diagnostics: AiSkillDiagnostic[] })
               {diagnostic.skillId}{diagnostic.modeId ? ` / ${diagnostic.modeId}` : ""}{diagnostic.phase ? ` · ${diagnostic.phase}` : ""}
             </p>
             {diagnostic.validatorId ? <p className="mt-1">Validador: {diagnostic.validatorId}</p> : null}
-            {diagnostic.notes.map((note) => (
+            {(diagnostic.notes ?? []).map((note) => (
               <p key={note} className="mt-1">{note}</p>
             ))}
           </div>

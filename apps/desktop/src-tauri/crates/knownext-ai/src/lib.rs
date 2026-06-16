@@ -62,9 +62,10 @@ pub fn answer_interaction(
         );
     };
 
-    let (selector_proposal, mut usage_records) = run_skill_selector(openai_key, payload, prompt, model)
-        .map(|(proposal, usage)| (Some(proposal), usage.into_iter().collect::<Vec<_>>()))
-        .unwrap_or((None, Vec::new()));
+    let (selector_proposal, mut usage_records) =
+        run_skill_selector(openai_key, payload, prompt, model)
+            .map(|(proposal, usage)| (Some(proposal), usage.into_iter().collect::<Vec<_>>()))
+            .unwrap_or((None, Vec::new()));
     let skill_context =
         knownext_ai_skills::select_skills_for_request(payload, selector_proposal.as_ref());
     let request_body =
@@ -230,6 +231,588 @@ pub fn prompt_response(
     })
 }
 
+pub fn run_research(
+    brief: &Value,
+    context_sources: &Value,
+    openai_key: Option<&str>,
+    model: &str,
+) -> Value {
+    let Some(openai_key) = openai_key.filter(|value| !value.trim().is_empty()) else {
+        return json!({
+            "status": "failed",
+            "message": "Configura una API key de OpenAI en Ajustes > IA para ejecutar investigaciones.",
+            "markdown": null,
+            "sources": [],
+            "evidence": [],
+            "usageRecords": []
+        });
+    };
+
+    let skill_context =
+        knownext_ai_skills::select_skills_for_request(&research_skill_payload(brief), None);
+    let request_body = build_research_request(brief, context_sources, model, &skill_context);
+    let response = openai_client(openai_key)
+        .post("https://api.openai.com/v1/responses")
+        .json(&request_body)
+        .send();
+
+    match response {
+        Ok(response) if response.status().is_success() => match response.json::<Value>() {
+            Ok(value) => {
+                let text = extract_response_text(&value).unwrap_or_default();
+                let parsed = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| {
+                    json!({
+                        "markdown": text,
+                        "sources": [],
+                        "evidence": []
+                    })
+                });
+                let mut diagnostics = skill_context.diagnostics.clone();
+                let markdown = parsed
+                    .get("markdown")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim();
+                diagnostics.extend(validate_research_markdown(markdown, brief, &skill_context));
+                let mut result = json!({
+                    "status": "ready",
+                    "message": "Investigación completada.",
+                    "markdown": markdown,
+                    "sources": parsed.get("sources").cloned().unwrap_or_else(|| json!([])),
+                    "evidence": parsed.get("evidence").cloned().unwrap_or_else(|| json!([])),
+                    "visualRequests": parsed.get("visualRequests").cloned().unwrap_or_else(|| json!([])),
+                    "usedSkills": skill_context.used_skill_ids.clone(),
+                    "skillApplications": skill_context.applications.clone(),
+                    "skillDiagnostics": diagnostics,
+                    "usageRecords": []
+                });
+                if result["markdown"].as_str().unwrap_or("").is_empty() {
+                    result["status"] = Value::from("failed");
+                    result["message"] = Value::from(
+                        "La investigación no devolvió un documento Markdown utilizable.",
+                    );
+                }
+                if let Some(usage) = provider_usage_record("agentic_tasks", model, &value) {
+                    result["usageRecords"] = json!([usage]);
+                }
+                result
+            }
+            Err(error) => json!({
+                "status": "failed",
+                "message": format!("No se pudo leer la respuesta de OpenAI: {error}"),
+                "markdown": null,
+                "sources": [],
+                "evidence": [],
+                "usageRecords": []
+            }),
+        },
+        Ok(response) => {
+            let status = response.status();
+            let detail = response.text().unwrap_or_default();
+            json!({
+                "status": "failed",
+                "message": format!("OpenAI devolvió {status}: {}", summarize_error_detail(&detail)),
+                "markdown": null,
+                "sources": [],
+                "evidence": [],
+                "usageRecords": []
+            })
+        }
+        Err(error) => json!({
+            "status": "failed",
+            "message": format!("No se pudo conectar con OpenAI: {error}"),
+            "markdown": null,
+            "sources": [],
+            "evidence": [],
+            "usageRecords": []
+        }),
+    }
+}
+
+pub fn run_research_step(
+    openai_key: Option<&str>,
+    model: &str,
+    step: &str,
+    payload: &Value,
+    use_web: bool,
+) -> Value {
+    let Some(openai_key) = openai_key.filter(|value| !value.trim().is_empty()) else {
+        return json!({
+            "status": "failed",
+            "message": "Configura una API key de OpenAI en Ajustes > IA para ejecutar investigaciones.",
+            "body": null,
+            "usageRecords": []
+        });
+    };
+    let request_body = build_research_step_request(step, payload, model, use_web);
+    let response = openai_client(openai_key)
+        .post("https://api.openai.com/v1/responses")
+        .json(&request_body)
+        .send();
+    match response {
+        Ok(response) if response.status().is_success() => match response.json::<Value>() {
+            Ok(value) => {
+                let text = extract_response_text(&value).unwrap_or_default();
+                let body = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| {
+                    json!({
+                        "markdown": text
+                    })
+                });
+                let usage_records = provider_usage_record("agentic_tasks", model, &value)
+                    .map(|usage| json!([usage]))
+                    .unwrap_or_else(|| json!([]));
+                json!({
+                    "status": "ready",
+                    "message": "Paso de investigación completado.",
+                    "body": body,
+                    "usageRecords": usage_records
+                })
+            }
+            Err(error) => json!({
+                "status": "failed",
+                "message": format!("No se pudo leer la respuesta de OpenAI: {error}"),
+                "body": null,
+                "usageRecords": []
+            }),
+        },
+        Ok(response) => {
+            let status = response.status();
+            let detail = response.text().unwrap_or_default();
+            json!({
+                "status": "failed",
+                "message": format!("OpenAI devolvió {status}: {}", summarize_error_detail(&detail)),
+                "body": null,
+                "usageRecords": []
+            })
+        }
+        Err(error) => json!({
+            "status": "failed",
+            "message": format!("No se pudo conectar con OpenAI: {error}"),
+            "body": null,
+            "usageRecords": []
+        }),
+    }
+}
+
+fn build_research_step_request(step: &str, payload: &Value, model: &str, use_web: bool) -> Value {
+    let system = match step {
+        "search" => concat!(
+            "Eres el SearchWorker de KnowNext.ai. Descubre fuentes candidatas para una investigación profesional. ",
+            "No redactes conclusiones. Devuelve únicamente fuentes candidatas con título, URL si existe, extracto breve, confianza, objectiveIndex y aspectIndex. ",
+            "Prioriza fuentes primarias, documentación oficial, reguladores, investigaciones, medios especializados y fuentes independientes."
+        ),
+        "evidence" => concat!(
+            "Eres el EvidenceExtractorWorker de KnowNext.ai. Extrae evidencias solo desde sourceReads. ",
+            "Cada evidencia debe tener sourceId, claim, excerpt, confidence, objectiveIndex y aspectIndex. ",
+            "No inventes claims ni uses conocimiento externo."
+        ),
+        "synthesize" => concat!(
+            "Eres el SynthesizerWorker de KnowNext.ai. Consolida hallazgos únicamente desde evidencias. ",
+            "Cada finding debe citar evidenceIds existentes. No generes findings sin evidencias."
+        ),
+        "write" => concat!(
+            "Eres el WriterWorker de KnowNext.ai. Redacta un informe Markdown profesional solo desde plan, strategy, findings y evidence. ",
+            "No inventes fuentes ni afirmaciones. Incluye fuentes consultadas, limitaciones y contradicciones/incertidumbres. ",
+            "Respeta strategy.reportLength, strategy.targetWordRange, strategy.targetSectionCount, strategy.maxHeadingDepth y strategy.allowAppendices: ajustan extension, sintesis, estructura y anexos. ",
+            "No rellenes para alcanzar longitud si no hay evidencias suficientes; declara limitaciones en su lugar. ",
+            "Usa tablas cuando aclaren comparativas, riesgos, criterios o datos. ",
+            "Incluye Mermaid solo si allowedVisuals.diagramsEnabled es true y aporta claridad. ",
+            "Solicita imágenes en visualRequests solo si allowedVisuals.imagesEnabled es true y aportan valor; no inventes rutas de assets."
+        ),
+        _ => "Eres un worker de investigación de KnowNext.ai. Devuelve JSON estricto validable.",
+    };
+    let mut tools = Vec::new();
+    if use_web {
+        let candidate_limit = payload
+            .pointer("/strategy/candidateSourceLimit")
+            .and_then(Value::as_u64)
+            .unwrap_or(50);
+        tools.push(json!({
+            "type": "web_search",
+            "search_context_size": if candidate_limit > 200 { "high" } else if candidate_limit > 50 { "medium" } else { "low" }
+        }));
+    }
+    let mut request = json!({
+        "model": normalize_text_model(model),
+        "input": [
+            { "role": "system", "content": system },
+            { "role": "user", "content": serde_json::to_string_pretty(payload).unwrap_or_else(|_| "{}".to_string()) }
+        ],
+        "max_output_tokens": research_step_max_tokens(step),
+        "text": { "format": research_step_output_format(step) }
+    });
+    if !tools.is_empty() {
+        request["tools"] = Value::Array(tools);
+    }
+    request
+}
+
+fn research_step_max_tokens(step: &str) -> u64 {
+    match step {
+        "search" => 7000,
+        "evidence" => 9000,
+        "synthesize" => 7000,
+        "write" => 12000,
+        _ => 5000,
+    }
+}
+
+fn research_step_output_format(step: &str) -> Value {
+    let schema = match step {
+        "search" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["candidates"],
+            "properties": {
+                "candidates": {
+                    "type": "array",
+                    "items": research_source_candidate_schema()
+                }
+            }
+        }),
+        "evidence" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["evidence"],
+            "properties": {
+                "evidence": {
+                    "type": "array",
+                    "items": research_evidence_schema()
+                }
+            }
+        }),
+        "synthesize" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["findings", "researchFindings"],
+            "properties": {
+                "findings": {
+                    "type": "array",
+                    "items": research_finding_schema()
+                },
+                "researchFindings": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                }
+            }
+        }),
+        "write" => json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["markdown", "visualRequests"],
+            "properties": {
+                "markdown": { "type": "string" },
+                "visualRequests": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["id", "kind", "title", "prompt", "altText", "placementHint"],
+                        "properties": {
+                            "id": { "type": "string" },
+                            "kind": { "enum": ["image"] },
+                            "title": { "type": "string" },
+                            "prompt": { "type": "string" },
+                            "altText": { "type": "string" },
+                            "placementHint": { "type": ["string", "null"] }
+                        }
+                    }
+                }
+            }
+        }),
+        _ => json!({
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {}
+        }),
+    };
+    json!({
+        "type": "json_schema",
+        "name": format!("knownext_research_{step}"),
+        "strict": true,
+        "schema": schema
+    })
+}
+
+fn research_source_candidate_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "url", "path", "kind", "consultedAt", "confidence", "usedFragments", "snapshotExcerpt", "query", "objectiveIndex", "aspectIndex"],
+        "properties": {
+            "id": { "type": "string" },
+            "title": { "type": "string" },
+            "url": { "type": ["string", "null"] },
+            "path": { "type": ["string", "null"] },
+            "kind": { "enum": ["web", "project_document", "local_file"] },
+            "consultedAt": { "type": "string" },
+            "confidence": { "type": "number" },
+            "usedFragments": { "type": "array", "items": { "type": "string" } },
+            "snapshotExcerpt": { "type": "string" },
+            "query": { "type": "string" },
+            "objectiveIndex": { "type": "integer" },
+            "aspectIndex": { "type": "integer" }
+        }
+    })
+}
+
+fn research_evidence_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "sourceId", "claim", "excerpt", "confidence", "consultedAt", "sourceKind", "objectiveIndex", "aspectIndex"],
+        "properties": {
+            "id": { "type": "string" },
+            "sourceId": { "type": "string" },
+            "claim": { "type": "string" },
+            "excerpt": { "type": "string" },
+            "confidence": { "type": "number" },
+            "consultedAt": { "type": "string" },
+            "sourceKind": { "enum": ["web", "project_document", "local_file"] },
+            "objectiveIndex": { "type": "integer" },
+            "aspectIndex": { "type": "integer" }
+        }
+    })
+}
+
+fn research_finding_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "summary", "evidenceIds", "objectiveIndex", "aspectIndex", "confidence"],
+        "properties": {
+            "id": { "type": "string" },
+            "title": { "type": "string" },
+            "summary": { "type": "string" },
+            "evidenceIds": { "type": "array", "items": { "type": "string" } },
+            "objectiveIndex": { "type": "integer" },
+            "aspectIndex": { "type": "integer" },
+            "confidence": { "type": "number" }
+        }
+    })
+}
+
+fn build_research_request(
+    brief: &Value,
+    context_sources: &Value,
+    model: &str,
+    skill_context: &knownext_ai_skills::SkillRuntimeContext,
+) -> Value {
+    let source_scope = brief
+        .get("sourceScope")
+        .and_then(Value::as_str)
+        .unwrap_or("web_project");
+    let max_sources = brief
+        .get("candidateSourceLimit")
+        .and_then(Value::as_u64)
+        .or_else(|| brief.get("maxSources").and_then(Value::as_u64))
+        .unwrap_or(500);
+    let system = concat!(
+        "Eres el investigador documental de KnowNext.ai. ",
+        "Realiza investigaciones profesionales, verificables y útiles para documentación de proyecto. ",
+        "La busqueda web es obligatoria en investigaciones ejecutables; usa el contexto del proyecto solo cuando venga resuelto en projectContextSources. ",
+        "Trabaja en dos fases internas: primero investiga, lee fuentes, extrae evidencias, contradicciones y hallazgos; despues redacta el informe desde esos hallazgos. ",
+        "Responde siempre en JSON estricto con researchFindings, markdown, sources, evidence y visualRequests. ",
+        "El markdown debe incluir estas secciones: Título, Resumen ejecutivo, Objetivo y alcance, Metodología, Fuentes consultadas, Hallazgos principales, Análisis contrastado, Riesgos, contradicciones e incertidumbres, Conclusiones, Recomendaciones y Limitaciones. ",
+        "Si el brief incluye plan, usa primaryObjective, secondaryObjectives, researchAspects y recommendedReportStyle como guía principal; respeta el plan revisado por el usuario salvo que entre en conflicto con seguridad o veracidad. ",
+        "Respeta plan.reportLength y plan.candidateSourceLimit: las fuentes candidatas definen alcance de busqueda y contraste; la extension define nivel de detalle, profundidad de estructura y anexos. ",
+        "Para informes breves sintetiza; para estandar equilibra detalle; para amplios y exhaustivos profundiza con secciones y anexos solo si hay evidencias. ",
+        "No inventes fuentes. Si una afirmación relevante no está suficientemente respaldada, márcala como no concluyente. ",
+        "Las citas son obligatorias para afirmaciones relevantes. Usa citas Markdown enlazadas cuando haya URL. Separa hechos, interpretación y recomendación. ",
+        "Las tablas siempre están disponibles: úsalas cuando haya comparación, criterios, riesgos, pros/contras, fuentes o datos que se entiendan mejor en tabla. ",
+        "No modifiques documentos existentes. ",
+        "Incluye diagramas Mermaid solo si reportProfile.diagramsEnabled es true y aportan claridad real. ",
+        "Solicita imagenes solo si reportProfile.imagesEnabled es true y aportan claridad real. ",
+        "Para imagenes generadas, no insertes rutas inventadas; devuelve visualRequests con prompt y altText para que el runtime cree assets locales."
+    );
+    let user_content = json!({
+        "brief": brief,
+        "sourceScope": source_scope,
+        "maxSources": max_sources,
+        "projectContextSources": context_sources,
+        "activeSkills": skill_context.used_skill_ids.clone(),
+        "skillGuidance": skill_context.prompt_guidance
+    });
+    let mut tools = Vec::new();
+    if matches!(source_scope, "web" | "web_project") {
+        tools.push(json!({
+            "type": "web_search",
+            "search_context_size": if max_sources > 200 { "high" } else if max_sources > 50 { "medium" } else { "low" }
+        }));
+    }
+    let mut request = json!({
+        "model": normalize_text_model(model),
+        "input": [
+            { "role": "system", "content": system },
+            { "role": "system", "content": skill_context.prompt_guidance },
+            { "role": "user", "content": serde_json::to_string_pretty(&user_content).unwrap_or_else(|_| "{}".to_string()) }
+        ],
+        "max_output_tokens": 12000,
+        "text": { "format": research_output_format() }
+    });
+    if !tools.is_empty() {
+        request["tools"] = Value::Array(tools);
+    }
+    request
+}
+
+fn research_skill_payload(brief: &Value) -> Value {
+    let mut research_profile = brief.get("reportProfile").cloned().unwrap_or_else(|| {
+        json!({
+            "diagramsEnabled": false,
+            "imagesEnabled": false
+        })
+    });
+    if let Some(profile) = research_profile.as_object_mut() {
+        if let Some(style) = brief
+            .pointer("/plan/recommendedReportStyle")
+            .and_then(Value::as_str)
+        {
+            profile.insert("recommendedReportStyle".to_string(), Value::from(style));
+        }
+    }
+    json!({
+        "prompt": brief.get("topic").and_then(Value::as_str).unwrap_or("Investigación"),
+        "expectedAction": "create_research_report",
+        "executionMode": "reasoning",
+        "researchProfile": research_profile,
+        "runtimeAi": {
+            "diagrams": {
+                "enabled": true,
+                "visualProfile": "visual_local",
+                "iconSet": "lucide",
+                "imagePolicy": "project_assets",
+                "betaPolicy": "ask"
+            }
+        }
+    })
+}
+
+fn validate_research_markdown(
+    markdown: &str,
+    brief: &Value,
+    skill_context: &knownext_ai_skills::SkillRuntimeContext,
+) -> Vec<knownext_ai_skills::AiSkillDiagnostic> {
+    let mut diagnostics = Vec::new();
+    let used = skill_context
+        .used_skill_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    if used.contains("knownext.markdown") && markdown.contains('|') {
+        diagnostics.extend(knownext_ai_skills::validate_markdown_table(markdown));
+    }
+    if used.contains("knownext.mermaid") {
+        for code in extract_mermaid_blocks(markdown) {
+            diagnostics.extend(knownext_ai_skills::validate_mermaid_diagram(
+                &code,
+                None,
+                &research_skill_payload(brief),
+            ));
+        }
+    }
+    diagnostics
+}
+
+fn extract_mermaid_blocks(markdown: &str) -> Vec<String> {
+    let mut blocks = Vec::new();
+    let mut current = Vec::new();
+    let mut in_mermaid = false;
+    for line in markdown.lines() {
+        let trimmed = line.trim();
+        if !in_mermaid && trimmed.eq_ignore_ascii_case("```mermaid") {
+            in_mermaid = true;
+            current.clear();
+            continue;
+        }
+        if in_mermaid && trimmed == "```" {
+            in_mermaid = false;
+            if !current.is_empty() {
+                blocks.push(current.join("\n"));
+            }
+            current.clear();
+            continue;
+        }
+        if in_mermaid {
+            current.push(line.to_string());
+        }
+    }
+    blocks
+}
+
+fn research_output_format() -> Value {
+    json!({
+        "type": "json_schema",
+        "name": "knownext_research_result",
+        "strict": true,
+        "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["researchFindings", "markdown", "sources", "evidence", "visualRequests"],
+            "properties": {
+                "researchFindings": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                },
+                "markdown": { "type": "string" },
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["id", "title", "url", "path", "kind", "consultedAt", "confidence", "usedFragments", "status", "snapshotExcerpt"],
+                        "properties": {
+                            "id": { "type": "string" },
+                            "title": { "type": "string" },
+                            "url": { "type": ["string", "null"] },
+                            "path": { "type": ["string", "null"] },
+                            "kind": { "enum": ["web", "project_document", "external_file"] },
+                            "consultedAt": { "type": "string" },
+                            "confidence": { "enum": ["high", "medium", "low"] },
+                            "usedFragments": { "type": "array", "items": { "type": "string" } },
+                            "status": { "enum": ["pending", "read", "used", "rejected", "unavailable"] },
+                            "snapshotExcerpt": { "type": ["string", "null"] }
+                        }
+                    }
+                },
+                "evidence": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["id", "sourceId", "claim", "excerpt", "confidence", "consultedAt", "sourceKind"],
+                        "properties": {
+                            "id": { "type": "string" },
+                            "sourceId": { "type": "string" },
+                            "claim": { "type": "string" },
+                            "excerpt": { "type": "string" },
+                            "confidence": { "enum": ["high", "medium", "low"] },
+                            "consultedAt": { "type": ["string", "null"] },
+                            "sourceKind": { "enum": ["web", "project_document", "external_file"] }
+                        }
+                    }
+                },
+                "visualRequests": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["id", "kind", "title", "prompt", "altText", "placementHint"],
+                        "properties": {
+                            "id": { "type": "string" },
+                            "kind": { "enum": ["image"] },
+                            "title": { "type": "string" },
+                            "prompt": { "type": "string" },
+                            "altText": { "type": "string" },
+                            "placementHint": { "type": ["string", "null"] }
+                        }
+                    }
+                }
+            }
+        }
+    })
+}
+
 fn prompt_payload(prompt: &str, active_markdown: &str, document_id: Option<&str>) -> Value {
     json!({
         "prompt": prompt,
@@ -323,7 +906,12 @@ pub fn generate_image(openai_key: Option<&str>, config: &Value, prompt: &str) ->
         });
     }
 
-    let model = normalize_image_model(config.get("model").and_then(Value::as_str).unwrap_or("gpt-image-2"));
+    let model = normalize_image_model(
+        config
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or("gpt-image-2"),
+    );
     let mut request = json!({
         "model": model,
         "prompt": prompt,
@@ -472,8 +1060,14 @@ fn build_response_request(
     };
     let reasoning_guidance = reasoning_instruction(execution_mode, reasoning_depth);
     let diagram_guidance = skill_context.prompt_guidance.as_str();
+    let intent_guidance = match payload.pointer("/intent/kind").and_then(Value::as_str) {
+        Some("image") => "Intencion manual activa: crear imagen. Si hay documento activo, usa action generate_image salvo que falten permisos.",
+        Some("diagram") => "Intencion manual activa: crear diagrama. Usa action insert_diagram con Mermaid valido o crea documento con Mermaid si no hay documento activo.",
+        Some("research") => "Intencion manual activa: investigacion. Si llega a este flujo, resume que la investigacion debe prepararse como tarea guiada.",
+        _ => "",
+    };
     let system = format!(
-        "{} {} {}",
+        "{} {} {} {}",
         concat!(
         "Eres el asistente documental de KnowNext.ai. Responde en español salvo que el usuario pida otro idioma. ",
         "Usa el documento activo y las fuentes aportadas como contexto. ",
@@ -501,6 +1095,7 @@ fn build_response_request(
         ),
         reasoning_guidance,
         diagram_guidance,
+        intent_guidance,
     );
     let user_content = format!(
         "Petición del usuario:\n{prompt}\n\nModo de ejecución:\n{} ({})\n\nPermisos runtime:\n{}\n\nDocumento activo Markdown:\n{active_markdown}\n\nSelección activa:\n{}\n\nFuentes de contexto:\n{}",
@@ -546,7 +1141,8 @@ fn run_skill_selector(
 
 fn build_skill_selector_request(payload: &Value, prompt: &str, model: &str) -> Value {
     let candidates = knownext_ai_skills::selector_candidates_json(payload);
-    let execution_mode = normalize_execution_mode(payload.get("executionMode").and_then(Value::as_str));
+    let execution_mode =
+        normalize_execution_mode(payload.get("executionMode").and_then(Value::as_str));
     let selection = payload
         .get("selectionFocus")
         .filter(|value| !value.is_null())
@@ -629,7 +1225,9 @@ fn apply_skill_context_to_response(
         .cloned()
         .unwrap_or_default()
         .into_iter()
-        .filter(|operation| operation.get("action").and_then(Value::as_str) == Some("insert_diagram"))
+        .filter(|operation| {
+            operation.get("action").and_then(Value::as_str) == Some("insert_diagram")
+        })
         .collect::<Vec<_>>();
 
     for operation in diagram_operations {
@@ -646,7 +1244,9 @@ fn apply_skill_context_to_response(
                     .iter()
                     .find(|diagnostic| diagnostic.status == "error")
                     .map(|diagnostic| diagnostic.title.clone())
-                    .unwrap_or_else(|| "La skill Mermaid bloqueo el diagrama propuesto.".to_string()),
+                    .unwrap_or_else(|| {
+                        "La skill Mermaid bloqueo el diagrama propuesto.".to_string()
+                    }),
             );
         }
         for diagnostic in validation {
@@ -680,7 +1280,10 @@ fn apply_skill_context_to_response(
                 }
             }
         }
-        if let Some(fragment) = markdown_fragments.iter().find(|fragment| fragment.contains('|')) {
+        if let Some(fragment) = markdown_fragments
+            .iter()
+            .find(|fragment| fragment.contains('|'))
+        {
             diagnostics.extend(knownext_ai_skills::validate_markdown_table(fragment));
         }
     }
@@ -735,9 +1338,10 @@ fn block_response_for_skill_error(response: &mut Value, message: &str) {
         "confirmationId": null
     }]);
     if let Some(events) = response["conversationEvents"].as_array_mut() {
-        for event in events.iter_mut().filter(|event| {
-            event.get("role").and_then(Value::as_str) == Some("assistant")
-        }) {
+        for event in events
+            .iter_mut()
+            .filter(|event| event.get("role").and_then(Value::as_str) == Some("assistant"))
+        {
             event["type"] = Value::from("permission_blocked");
             event["content"] = Value::from(message.to_string());
             event["summary"] = Value::from(message.to_string());
@@ -1073,7 +1677,13 @@ fn structured_interaction_response(
         ));
     }
 
-    if action == "replace_selection" || action == "insert_at_cursor" || action == "insert_image" || action == "insert_diagram" || action == "edit_document" || action == "edit_project" {
+    if action == "replace_selection"
+        || action == "insert_at_cursor"
+        || action == "insert_image"
+        || action == "insert_diagram"
+        || action == "edit_document"
+        || action == "edit_project"
+    {
         return Some(edit_proposal_response(
             project_id,
             payload,
@@ -1318,7 +1928,8 @@ fn edit_proposal_response(
         .unwrap_or(answer);
     let operations = match action {
         "replace_selection" => {
-            let document_id = active_document_id.expect("document-scoped edit requires an active document");
+            let document_id =
+                active_document_id.expect("document-scoped edit requires an active document");
             let Some(replacement) = decision
                 .get("replacementMarkdown")
                 .or_else(|| decision.get("markdown"))
@@ -1337,7 +1948,10 @@ fn edit_proposal_response(
                     mode,
                 );
             };
-            let Some(selection) = payload.get("selectionFocus").filter(|value| !value.is_null()) else {
+            let Some(selection) = payload
+                .get("selectionFocus")
+                .filter(|value| !value.is_null())
+            else {
                 return permission_blocked_response(
                     project_id,
                     active_document_id,
@@ -1372,7 +1986,8 @@ fn edit_proposal_response(
             })]
         }
         "insert_at_cursor" => {
-            let document_id = active_document_id.expect("document-scoped edit requires an active document");
+            let document_id =
+                active_document_id.expect("document-scoped edit requires an active document");
             let Some(markdown) = decision
                 .get("markdown")
                 .or_else(|| decision.get("replacementMarkdown"))
@@ -1391,7 +2006,10 @@ fn edit_proposal_response(
                     mode,
                 );
             };
-            let Some(focus) = payload.get("selectionFocus").filter(|value| !value.is_null()) else {
+            let Some(focus) = payload
+                .get("selectionFocus")
+                .filter(|value| !value.is_null())
+            else {
                 return permission_blocked_response(
                     project_id,
                     active_document_id,
@@ -1429,7 +2047,8 @@ fn edit_proposal_response(
             })]
         }
         "insert_image" => {
-            let document_id = active_document_id.expect("document-scoped edit requires an active document");
+            let document_id =
+                active_document_id.expect("document-scoped edit requires an active document");
             let Some(asset_id) = decision
                 .get("assetId")
                 .or_else(|| decision.get("imageAssetId"))
@@ -1448,12 +2067,18 @@ fn edit_proposal_response(
                     mode,
                 );
             };
-            let focus = payload.get("selectionFocus").filter(|value| !value.is_null());
+            let focus = payload
+                .get("selectionFocus")
+                .filter(|value| !value.is_null());
             let position = focus
                 .and_then(|value| value.get("position").or_else(|| value.get("from")))
                 .and_then(Value::as_i64);
-            let from = focus.and_then(|value| value.get("from")).and_then(Value::as_i64);
-            let to = focus.and_then(|value| value.get("to")).and_then(Value::as_i64);
+            let from = focus
+                .and_then(|value| value.get("from"))
+                .and_then(Value::as_i64);
+            let to = focus
+                .and_then(|value| value.get("to"))
+                .and_then(Value::as_i64);
             vec![json!({
                 "id": knownext_core::compact_id("ai-op"),
                 "action": "insert_image",
@@ -1494,12 +2119,18 @@ fn edit_proposal_response(
                     mode,
                 );
             };
-            let focus = payload.get("selectionFocus").filter(|value| !value.is_null());
+            let focus = payload
+                .get("selectionFocus")
+                .filter(|value| !value.is_null());
             let position = focus
                 .and_then(|value| value.get("position").or_else(|| value.get("from")))
                 .and_then(Value::as_i64);
-            let from = focus.and_then(|value| value.get("from")).and_then(Value::as_i64);
-            let to = focus.and_then(|value| value.get("to")).and_then(Value::as_i64);
+            let from = focus
+                .and_then(|value| value.get("from"))
+                .and_then(Value::as_i64);
+            let to = focus
+                .and_then(|value| value.get("to"))
+                .and_then(Value::as_i64);
             let caption = decision
                 .get("diagramCaption")
                 .or_else(|| decision.get("caption"))
@@ -1529,7 +2160,9 @@ fn edit_proposal_response(
                 "placement": decision.get("placement").cloned().unwrap_or_else(|| json!({ "type": "at_cursor", "headingPath": null, "anchorExcerpt": null }))
             })]
         }
-        "edit_document" | "edit_project" => normalize_ai_patches(decision, active_document_id, summary),
+        "edit_document" | "edit_project" => {
+            normalize_ai_patches(decision, active_document_id, summary)
+        }
         _ => Vec::new(),
     };
 
@@ -1556,7 +2189,11 @@ fn edit_proposal_response(
         created_at,
         answer,
         summary,
-        if action == "edit_project" { "project" } else { document_focus_scope(payload) },
+        if action == "edit_project" {
+            "project"
+        } else {
+            document_focus_scope(payload)
+        },
         execution_mode,
         reasoning_depth,
         mode,
@@ -1653,7 +2290,11 @@ fn edit_proposal_response_from_operations(
     })
 }
 
-fn normalize_ai_patches(decision: &Value, fallback_document_id: Option<&str>, fallback_summary: &str) -> Vec<Value> {
+fn normalize_ai_patches(
+    decision: &Value,
+    fallback_document_id: Option<&str>,
+    fallback_summary: &str,
+) -> Vec<Value> {
     decision
         .get("patches")
         .and_then(Value::as_array)
@@ -1762,7 +2403,11 @@ fn strip_mermaid_fence(value: &str) -> String {
     }
 
     let mut body: Vec<&str> = lines.collect();
-    if body.last().map(|line| line.trim_start().starts_with("```")).unwrap_or(false) {
+    if body
+        .last()
+        .map(|line| line.trim_start().starts_with("```"))
+        .unwrap_or(false)
+    {
         body.pop();
     }
     normalize_ai_mermaid_code(body.join("\n").trim())
@@ -1776,7 +2421,11 @@ fn mermaid_markdown(code: &str, caption: Option<&str>) -> String {
         .map(|caption| json!({ "caption": caption, "width": "wide" }).to_string())
         .map(|metadata| format!("%% knownext: {metadata}\n"))
         .unwrap_or_default();
-    format!("```mermaid\n{}{}```\n", metadata, ensure_trailing_newline(clean_code.trim()))
+    format!(
+        "```mermaid\n{}{}```\n",
+        metadata,
+        ensure_trailing_newline(clean_code.trim())
+    )
 }
 
 fn normalize_ai_mermaid_code(value: &str) -> String {
@@ -1799,7 +2448,10 @@ fn document_focus_scope(payload: &Value) -> &str {
 }
 
 fn focus_payload(payload: &Value, document_id: Option<&str>) -> Value {
-    let Some(focus) = payload.get("selectionFocus").filter(|value| !value.is_null()) else {
+    let Some(focus) = payload
+        .get("selectionFocus")
+        .filter(|value| !value.is_null())
+    else {
         return json!({
             "type": if document_id.is_some() { "document" } else { "project" },
             "documentId": document_id,
@@ -2317,7 +2969,10 @@ fn normalize_provider_decision(mut decision: Value) -> Value {
         object.insert("summary".to_string(), Value::String(summary));
     }
     if missing_string(object.get("name")) {
-        object.insert("name".to_string(), Value::String("imagen-apoyo.png".to_string()));
+        object.insert(
+            "name".to_string(),
+            Value::String("imagen-apoyo.png".to_string()),
+        );
     }
     if missing_string(object.get("altText")) {
         object.insert(
@@ -2436,7 +3091,9 @@ fn normalize_image_size(size: &str) -> &'static str {
 
 fn normalize_image_size_for_model(model: &str, size: &str) -> &'static str {
     let normalized = normalize_image_size(size);
-    if model == "gpt-image-2" || matches!(normalized, "auto" | "1024x1024" | "1536x1024" | "1024x1536") {
+    if model == "gpt-image-2"
+        || matches!(normalized, "auto" | "1024x1024" | "1536x1024" | "1024x1536")
+    {
         normalized
     } else {
         "auto"
@@ -2528,8 +3185,8 @@ fn provider_usage_record(capability: &str, model: &str, value: &Value) -> Option
     let usage = value.get("usage")?;
     let input_tokens = usage_number(usage, &["input_tokens", "inputTokens"]);
     let output_tokens = usage_number(usage, &["output_tokens", "outputTokens"]);
-    let total_tokens = usage_number(usage, &["total_tokens", "totalTokens"])
-        .max(input_tokens + output_tokens);
+    let total_tokens =
+        usage_number(usage, &["total_tokens", "totalTokens"]).max(input_tokens + output_tokens);
     if input_tokens == 0 && output_tokens == 0 && total_tokens == 0 {
         return None;
     }
@@ -2683,7 +3340,10 @@ mod tests {
         assert!(system.contains("Modo Razonar profundo"));
         assert!(system.contains("no uses fuentes externas no aportadas"));
         assert!(system.contains("devuelve una accion estructurada"));
-        assert!(system.contains("replace_document") && system.contains("solo para reescrituras completas explicitas"));
+        assert!(
+            system.contains("replace_document")
+                && system.contains("solo para reescrituras completas explicitas")
+        );
         assert!(!system.contains("propone el cambio con action replace_document"));
         assert!(user.contains("reasoning (deep)"));
     }
@@ -2899,9 +3559,18 @@ mod tests {
         assert_eq!(operation["action"], "insert_diagram");
         assert_eq!(operation["diagramSyntax"], "mermaid");
         assert_eq!(operation["diagramType"], "flowchart");
-        assert!(operation["markdown"].as_str().unwrap().contains("```mermaid"));
-        assert!(operation["markdown"].as_str().unwrap().contains("%% knownext:"));
-        assert!(operation["markdown"].as_str().unwrap().contains("flowchart TD"));
+        assert!(operation["markdown"]
+            .as_str()
+            .unwrap()
+            .contains("```mermaid"));
+        assert!(operation["markdown"]
+            .as_str()
+            .unwrap()
+            .contains("%% knownext:"));
+        assert!(operation["markdown"]
+            .as_str()
+            .unwrap()
+            .contains("flowchart TD"));
         assert!(response["usedSkills"]
             .as_array()
             .unwrap()
@@ -2942,14 +3611,12 @@ mod tests {
         apply_skill_context_to_response(&mut response, &payload, &skill_context);
 
         assert_eq!(response["status"], "blocked");
-        assert!(response["skillDiagnostics"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|diagnostic| diagnostic["skillId"] == "knownext.mermaid"
+        assert!(response["skillDiagnostics"].as_array().unwrap().iter().any(
+            |diagnostic| diagnostic["skillId"] == "knownext.mermaid"
                 && diagnostic["modeId"] == "diagram_structure"
                 && diagnostic["validatorId"] == "mermaid.architecture_beta"
-                && diagnostic["status"] == "error"));
+                && diagnostic["status"] == "error"
+        ));
     }
 
     #[test]
@@ -2974,7 +3641,13 @@ mod tests {
         assert_eq!(response["editProposal"]["documentId"], Value::Null);
         assert_eq!(response["editProposal"]["scope"], "project");
         assert_eq!(response["routeToAiTab"], true);
-        assert_eq!(response["editProposal"]["operations"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            response["editProposal"]["operations"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
         assert_eq!(
             response["editProposal"]["operations"][0]["documentId"],
             "project::docs/a.md"
@@ -3004,7 +3677,13 @@ mod tests {
 
         assert_eq!(response["status"], "completed");
         assert_eq!(response["editProposal"]["status"], "proposed");
-        assert_eq!(response["editProposal"]["operations"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            response["editProposal"]["operations"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
         assert_eq!(response["uiPlacement"], "document_bubble");
         assert_eq!(response["routeToAiTab"], false);
     }
@@ -3028,7 +3707,13 @@ mod tests {
 
         assert_eq!(response["status"], "completed");
         assert_eq!(response["editProposal"]["scope"], "project");
-        assert_eq!(response["editProposal"]["operations"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            response["editProposal"]["operations"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
         assert_eq!(
             response["editProposal"]["operations"][0]["action"],
             "insert_image"
@@ -3103,7 +3788,10 @@ mod tests {
             "Ilustración técnica de un flujo local-first"
         );
         assert_eq!(response["operations"][0]["insertIntoDocument"], true);
-        assert_eq!(response["operations"][0]["placement"]["type"], "after_heading");
+        assert_eq!(
+            response["operations"][0]["placement"]["type"],
+            "after_heading"
+        );
         assert_eq!(
             response["operations"][0]["placement"]["headingPath"][0],
             "Arquitectura"
@@ -3131,8 +3819,14 @@ mod tests {
 
         assert_eq!(response["status"], "completed");
         assert_eq!(response["operations"][0]["type"], "image_generated");
-        assert_eq!(response["operations"][0]["prompt"], "Ilustración documental sobre cerveza antigua");
-        assert_eq!(response["operations"][0]["placement"]["type"], "after_selection");
+        assert_eq!(
+            response["operations"][0]["prompt"],
+            "Ilustración documental sobre cerveza antigua"
+        );
+        assert_eq!(
+            response["operations"][0]["placement"]["type"],
+            "after_selection"
+        );
         assert_eq!(response["routeToAiTab"], false);
     }
 
@@ -3160,7 +3854,10 @@ mod tests {
             "Ilustración histórica de elaboración de cerveza en Mesopotamia"
         );
         assert_eq!(response["operations"][0]["insertIntoDocument"], true);
-        assert_eq!(response["operations"][0]["placement"]["type"], "after_selection");
+        assert_eq!(
+            response["operations"][0]["placement"]["type"],
+            "after_selection"
+        );
     }
 
     #[test]
@@ -3171,8 +3868,14 @@ mod tests {
         assert_eq!(normalize_image_size("2048x1152"), "2048x1152");
         assert_eq!(normalize_image_size("3840x2160"), "3840x2160");
         assert_eq!(normalize_image_size("2160x3840"), "2160x3840");
-        assert_eq!(normalize_image_size_for_model("gpt-image-2", "3840x2160"), "3840x2160");
-        assert_eq!(normalize_image_size_for_model("gpt-image-1.5", "3840x2160"), "auto");
+        assert_eq!(
+            normalize_image_size_for_model("gpt-image-2", "3840x2160"),
+            "3840x2160"
+        );
+        assert_eq!(
+            normalize_image_size_for_model("gpt-image-1.5", "3840x2160"),
+            "auto"
+        );
     }
 
     #[test]

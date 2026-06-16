@@ -145,6 +145,54 @@ describe("MarkdownToolbar", () => {
     expect(onMarkdownZoomChange).toHaveBeenCalledWith(125);
   });
 
+  it("toggles the raw Markdown source view from the zoom area", async () => {
+    const onToggleMarkdownSource = vi.fn();
+
+    const { rerender } = render(
+      <MarkdownToolbar
+        historyOpen={false}
+        historyEnabled
+        historyDisabledReason="Historial no disponible"
+        editorReady
+        markdownZoomPercent={100}
+        markdownSourceVisible={false}
+        activeActions={{}}
+        editorHistoryState={{ canUndo: false, canRedo: false, undoDepth: 0, redoDepth: 0 }}
+        onRunEditorAction={vi.fn()}
+        onExportDocument={vi.fn()}
+        onMarkdownZoomChange={vi.fn()}
+        onToggleMarkdownSource={onToggleMarkdownSource}
+        onToggleHistory={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Mostrar Markdown puro" }));
+
+    expect(onToggleMarkdownSource).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <MarkdownToolbar
+        historyOpen={false}
+        historyEnabled
+        historyDisabledReason="Historial no disponible"
+        editorReady={false}
+        markdownZoomPercent={100}
+        markdownSourceVisible
+        activeActions={{}}
+        editorHistoryState={{ canUndo: false, canRedo: false, undoDepth: 0, redoDepth: 0 }}
+        onRunEditorAction={vi.fn()}
+        onExportDocument={vi.fn()}
+        onMarkdownZoomChange={vi.fn()}
+        onToggleMarkdownSource={onToggleMarkdownSource}
+        onToggleHistory={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Mostrar vista visual" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Mostrar vista visual" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Negrita" })).toBeDisabled();
+  });
+
   it("dispatches document export actions for Markdown, PDF and DOCX", async () => {
     const onExportDocument = vi.fn();
 

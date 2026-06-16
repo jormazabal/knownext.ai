@@ -6,6 +6,13 @@ import { closeWindow, minimizeWindow, startWindowDrag, startWindowResize, toggle
 
 export function TitleBar() {
   const suppressNextDoubleClickRef = useRef(false);
+  const dragCandidateRef = useRef<{ x: number; y: number } | null>(null);
+
+  function clearDragCandidate() {
+    dragCandidateRef.current = null;
+    window.removeEventListener("pointermove", handleTitlePointerMove);
+    window.removeEventListener("pointerup", handleTitlePointerUp);
+  }
 
   const handleTopResizePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -18,17 +25,34 @@ export function TitleBar() {
     if (event.button !== 0) return;
     if (event.detail > 1) {
       event.preventDefault();
+      clearDragCandidate();
       suppressNextDoubleClickRef.current = true;
       void toggleMaximizeWindow();
       return;
     }
 
-    void startWindowDrag();
+    dragCandidateRef.current = { x: event.clientX, y: event.clientY };
+    window.addEventListener("pointermove", handleTitlePointerMove);
+    window.addEventListener("pointerup", handleTitlePointerUp, { once: true });
   };
+
+  function handleTitlePointerMove(event: globalThis.PointerEvent) {
+    const candidate = dragCandidateRef.current;
+    if (!candidate) return;
+    const distance = Math.abs(event.clientX - candidate.x) + Math.abs(event.clientY - candidate.y);
+    if (distance < 4) return;
+    clearDragCandidate();
+    void startWindowDrag();
+  }
+
+  function handleTitlePointerUp() {
+    clearDragCandidate();
+  }
 
   const handleTitleDoubleClick = (event: MouseEvent<HTMLElement>) => {
     if (event.button !== 0) return;
     event.preventDefault();
+    clearDragCandidate();
     if (suppressNextDoubleClickRef.current) {
       suppressNextDoubleClickRef.current = false;
       return;
