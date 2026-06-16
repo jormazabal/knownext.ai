@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { defaultAiConfig } from "../../lib/api/config";
 import type { AiConfigStatus, AiConversationEvent, AiPendingIntent, Project } from "../../types/domain";
 import { AiConversationView } from "./AiConversationView";
 
@@ -34,6 +35,7 @@ describe("AiConversationView", () => {
     expect(screen.getByText("Puedo prepararla como documento nuevo.")).toBeInTheDocument();
     expect(screen.queryByText("Tú")).not.toBeInTheDocument();
     expect(screen.queryByText("IA")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Copiar mensaje" })).toHaveLength(2);
     expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
   });
 
@@ -96,6 +98,131 @@ describe("AiConversationView", () => {
     await userEvent.click(link);
 
     expect(openDocument).toHaveBeenCalledWith("project-1::Proyectos/COE/Sesiones coord. AI CoE.md", "Sesiones coord. AI CoE.md");
+  });
+
+  it("copies a bubble message from the compact footer action", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+
+    render(
+      <AiConversationView
+        project={project}
+        config={config}
+        indexStatus={null}
+        pendingIntent={null}
+        onIntentAction={vi.fn()}
+        events={[
+          conversationEvent({ id: "assistant-1", role: "assistant", type: "assistant_message", content: "Mensaje para copiar" }),
+        ]}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Copiar mensaje" }));
+
+    expect(writeText).toHaveBeenCalledWith("Mensaje para copiar");
+    expect(screen.getByRole("button", { name: "Mensaje copiado" })).toBeInTheDocument();
+  });
+
+  it("shows only the latest 40 bubbles first and loads 20 older bubbles on demand", async () => {
+    const events = Array.from({ length: 45 }, (_, index) =>
+      conversationEvent({
+        id: `event-${index}`,
+        role: index % 2 === 0 ? "user" : "assistant",
+        type: index % 2 === 0 ? "user_message" : "assistant_message",
+        content: `Mensaje ${index}`,
+        createdAt: `2026-06-10T10:${String(index).padStart(2, "0")}:00Z`,
+      }),
+    );
+
+    render(
+      <AiConversationView
+        project={project}
+        config={config}
+        indexStatus={null}
+        pendingIntent={null}
+        onIntentAction={vi.fn()}
+        events={events}
+      />,
+    );
+
+    expect(screen.queryByText("Mensaje 0")).not.toBeInTheDocument();
+    expect(screen.getByText("Mensaje 5")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mostrar más" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Mostrar más" }));
+
+    expect(screen.getByText("Mensaje 0")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Mostrar más" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the current reading position when older bubbles are loaded above", async () => {
+    const events = Array.from({ length: 45 }, (_, index) =>
+      conversationEvent({
+        id: `event-${index}`,
+        role: index % 2 === 0 ? "user" : "assistant",
+        type: index % 2 === 0 ? "user_message" : "assistant_message",
+        content: `Mensaje ${index}`,
+        createdAt: `2026-06-10T10:${String(index).padStart(2, "0")}:00Z`,
+      }),
+    );
+
+    render(
+      <AiConversationView
+        project={project}
+        config={config}
+        indexStatus={null}
+        pendingIntent={null}
+        onIntentAction={vi.fn()}
+        events={events}
+      />,
+    );
+
+    const scrollContainer = screen.getByTestId("ai-conversation-scroll");
+    let scrollHeightReads = 0;
+    Object.defineProperty(scrollContainer, "scrollHeight", {
+      configurable: true,
+      get: () => {
+        scrollHeightReads += 1;
+        return scrollHeightReads === 1 ? 1000 : 1320;
+      },
+    });
+    scrollContainer.scrollTop = 180;
+
+    await userEvent.click(screen.getByRole("button", { name: "Mostrar más" }));
+
+    expect(screen.getByText("Mensaje 0")).toBeInTheDocument();
+    expect(scrollContainer.scrollTop).toBe(500);
+  });
+
+  it("groups visible messages with Slack-style relative separators", () => {
+    const today = new Date();
+    const twoDaysAgo = new Date(today);
+    twoDaysAgo.setDate(today.getDate() - 2);
+    const previousMonth = new Date(today);
+    previousMonth.setMonth(today.getMonth() - 1);
+
+    render(
+      <AiConversationView
+        project={project}
+        config={config}
+        indexStatus={null}
+        pendingIntent={null}
+        onIntentAction={vi.fn()}
+        events={[
+          conversationEvent({ id: "month", content: "Mensaje mensual", createdAt: previousMonth.toISOString() }),
+          conversationEvent({ id: "week", content: "Mensaje semanal", createdAt: twoDaysAgo.toISOString() }),
+          conversationEvent({ id: "today", content: "Mensaje de hoy", createdAt: today.toISOString() }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Hoy")).toBeInTheDocument();
+    expect(screen.getByText("Hoy").parentElement).toHaveClass("sticky");
+    expect(screen.getAllByText(/Mayo|Abril|Junio|Julio|Agosto|Septiembre|Octubre|Noviembre|Diciembre|Enero|Febrero|Marzo/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Esta semana|Semana pasada/).length).toBeGreaterThan(0);
   });
 
   it("does not repeat the document path when the event title already includes it", () => {
@@ -199,6 +326,7 @@ const config: AiConfigStatus = {
     storePromptMetadata: true,
   },
   agentic: {
+    ...defaultAiConfig.agentic,
     depth: "guided",
     webResearchEnabled: false,
     confirmBeforeApplying: true,

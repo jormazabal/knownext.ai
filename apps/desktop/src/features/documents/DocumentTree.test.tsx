@@ -53,7 +53,7 @@ const nodes: DocumentTreeNode[] = [
 afterEach(() => cleanup());
 
 describe("DocumentTree", () => {
-  it("opens documents and toggles folders from the tree", async () => {
+  it("focuses tree rows on single click and opens or toggles them on double click", async () => {
     const onOpenDocument = vi.fn();
     const onToggleNode = vi.fn();
     const onActivateTreeNode = vi.fn();
@@ -79,9 +79,21 @@ describe("DocumentTree", () => {
 
     await userEvent.click(screen.getByText("Requisitos"));
     expect(onActivateTreeNode).toHaveBeenCalledWith("folder-requirements");
+    expect(onToggleNode).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Contraer Requisitos" }));
+    expect(onActivateTreeNode).toHaveBeenCalledWith("folder-requirements");
+    expect(onToggleNode).toHaveBeenCalledWith("folder-requirements");
+    onToggleNode.mockClear();
+
+    await userEvent.dblClick(screen.getByText("Requisitos"));
     expect(onToggleNode).toHaveBeenCalledWith("folder-requirements");
 
     await userEvent.click(screen.getByText("requisitos-funcionales.md"));
+    expect(onActivateTreeNode).toHaveBeenCalledWith("doc-functional");
+    expect(onOpenDocument).not.toHaveBeenCalled();
+
+    await userEvent.dblClick(screen.getByText("requisitos-funcionales.md"));
     expect(onOpenDocument).toHaveBeenCalledWith("doc-functional", "requisitos-funcionales.md");
   });
 
@@ -160,6 +172,53 @@ describe("DocumentTree", () => {
     expect(onContextAction).toHaveBeenNthCalledWith(1, "export-md", documentNode);
     expect(onContextAction).toHaveBeenNthCalledWith(2, "export-pdf", documentNode);
     expect(onContextAction).toHaveBeenNthCalledWith(3, "export-docx", documentNode);
+  });
+
+  it("keeps node option menus inside the visible viewport", async () => {
+    const originalInnerHeight = window.innerHeight;
+    Object.defineProperty(window, "innerHeight", { value: 120, configurable: true });
+
+    try {
+      render(
+        <DocumentTree
+          nodes={nodes}
+          activeDocumentId=""
+          onOpenDocument={vi.fn()}
+          onActivateTreeNode={vi.fn()}
+          onSelectTreeNode={vi.fn()}
+          onCreateFolder={vi.fn()}
+          onCreateDocument={vi.fn()}
+          onExpandTree={vi.fn()}
+          onCollapseTree={vi.fn()}
+          onConfigureProject={vi.fn()}
+          onRenameNode={vi.fn()}
+          onToggleNode={vi.fn()}
+          onContextAction={vi.fn()}
+          onMoveNode={vi.fn()}
+        />,
+      );
+
+      const menuButton = screen.getByRole("button", { name: /abrir menú de requisitos-funcionales\.md/i });
+      vi.spyOn(menuButton, "getBoundingClientRect").mockReturnValue({
+        x: 380,
+        y: 104,
+        width: 24,
+        height: 24,
+        top: 104,
+        right: 404,
+        bottom: 128,
+        left: 380,
+        toJSON: () => ({}),
+      });
+
+      await userEvent.hover(menuButton);
+      await waitFor(() => expect(screen.getByText("Exportar")).toBeInTheDocument());
+
+      const menu = screen.getByText("Exportar").closest(".fixed") as HTMLElement;
+      expect(menu).toHaveStyle({ top: "8px" });
+    } finally {
+      Object.defineProperty(window, "innerHeight", { value: originalInnerHeight, configurable: true });
+    }
   });
 
   it("moves a document by dragging it onto a folder", () => {
@@ -778,8 +837,11 @@ describe("DocumentTree", () => {
     );
 
     await userEvent.click(screen.getByText("brief.pdf"));
+    expect(onActivateTreeNode).toHaveBeenCalledWith("attachment-brief");
+    expect(onOpenReferenceDocument).not.toHaveBeenCalled();
+
+    await userEvent.dblClick(screen.getByText("brief.pdf"));
     expect(onOpenReferenceDocument).toHaveBeenCalledWith("attachment-brief", "brief.pdf", "brief.pdf");
-    expect(onActivateTreeNode).not.toHaveBeenCalled();
 
     await userEvent.hover(screen.getByRole("button", { name: /abrir menú de brief\.pdf/i }));
     await waitFor(() => expect(screen.getByText("Abrir vista")).toBeInTheDocument());
@@ -817,9 +879,12 @@ describe("DocumentTree", () => {
     );
 
     await userEvent.click(screen.getByText("diagram.png"));
+    expect(onActivateTreeNode).toHaveBeenCalledWith("image-diagram");
+    expect(onOpenImage).not.toHaveBeenCalled();
+
+    await userEvent.dblClick(screen.getByText("diagram.png"));
     expect(onOpenImage).toHaveBeenCalledWith("image-diagram", "diagram.png", "assets/diagram.png");
     expect(onOpenDocument).not.toHaveBeenCalled();
-    expect(onActivateTreeNode).not.toHaveBeenCalled();
 
     await userEvent.hover(screen.getByRole("button", { name: /abrir menú de diagram\.png/i }));
     await waitFor(() => expect(screen.getByText("Insertar en documento")).toBeInTheDocument());

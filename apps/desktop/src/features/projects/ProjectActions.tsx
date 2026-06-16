@@ -737,7 +737,7 @@ const projectActionsCopy = {
     aiUsageImages: "Imágenes",
     aiUsageVision: "Visión",
     aiUsageAudio: "Audio",
-    aiUsageAgentic: "Tareas agénticas",
+    aiUsageAgentic: "Investigación",
     aiUsageEmptyTitle: "Sin uso registrado",
     aiUsageEmptyDetail: "Las estadísticas aparecerán cuando se complete una interacción real con IA.",
     releaseNotes: "Notas de release",
@@ -824,7 +824,7 @@ function getCapabilityUsageRows(summary: AiUsageSummaryResponse | null): AiUsage
     emptyCapabilityUsage("image_generation", "Imágenes"),
     emptyCapabilityUsage("vision", "Visión"),
     emptyCapabilityUsage("audio", "Audio"),
-    emptyCapabilityUsage("agentic_tasks", "Tareas agénticas"),
+    emptyCapabilityUsage("agentic_tasks", "Investigación"),
   ];
 }
 

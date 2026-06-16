@@ -17,6 +17,12 @@ pub struct AiSkillManifest {
     pub requires: Vec<String>,
     pub validators: Vec<String>,
     #[serde(default)]
+    pub orchestrates_skills: Vec<String>,
+    #[serde(default)]
+    pub auxiliary_skill_categories: Vec<String>,
+    #[serde(default)]
+    pub required_capabilities: Vec<String>,
+    #[serde(default)]
     pub modes: Vec<AiSkillMode>,
     #[serde(default)]
     pub runtime_enabled: bool,
@@ -173,6 +179,14 @@ struct LoadedSkill {
 }
 
 const BASE_SKILLS: &[BaseSkillSource] = &[
+    BaseSkillSource {
+        manifest_json: include_str!("base/knownext.research_report/manifest.json"),
+        instructions_markdown: include_str!("base/knownext.research_report/SKILL.md"),
+        examples: &[(
+            "informe-profesional.md",
+            include_str!("base/knownext.research_report/examples/informe-profesional.md"),
+        )],
+    },
     BaseSkillSource {
         manifest_json: include_str!("base/knownext.mermaid/manifest.json"),
         instructions_markdown: include_str!("base/knownext.mermaid/SKILL.md"),
@@ -333,7 +347,17 @@ pub fn select_skills_for_request(
         .get("executionMode")
         .and_then(Value::as_str)
         .unwrap_or("quick");
-    let limit = if execution_mode == "reasoning" { 2 } else { 1 };
+    let expected_action = payload
+        .get("expectedAction")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let limit = if expected_action == "create_research_report" {
+        6
+    } else if execution_mode == "reasoning" {
+        2
+    } else {
+        1
+    };
     let mut applications = Vec::new();
 
     if let Some(proposal) = proposal {
@@ -382,7 +406,12 @@ pub fn select_skills_for_request(
     }
 
     if applications.is_empty() {
-        applications.extend(deterministic_fallback(payload, &candidates, limit, &mut diagnostics));
+        applications.extend(deterministic_fallback(
+            payload,
+            &candidates,
+            limit,
+            &mut diagnostics,
+        ));
     }
 
     let mut used_skill_ids = applications
@@ -402,7 +431,10 @@ pub fn select_skills_for_request(
 }
 
 /// Compatibility wrapper retained for consumers that still pass an expected diagram type.
-pub fn resolve_for_request(payload: &Value, expected_diagram_type: Option<&str>) -> SkillRuntimeContext {
+pub fn resolve_for_request(
+    payload: &Value,
+    expected_diagram_type: Option<&str>,
+) -> SkillRuntimeContext {
     let proposal = expected_diagram_type.map(|diagram_type| AiSkillSelectorProposal {
         selected: vec![AiSkillSelectorChoice {
             skill_id: "knownext.mermaid".to_string(),
@@ -516,7 +548,10 @@ pub fn validate_mermaid_diagram(
             "validation",
             "error",
             "Iconos no permitidos",
-            vec!["La configuracion actual no permite iconos dentro de diagramas Mermaid.".to_string()],
+            vec![
+                "La configuracion actual no permite iconos dentro de diagramas Mermaid."
+                    .to_string(),
+            ],
             Some("mermaid.policy"),
         ));
     }
@@ -532,7 +567,10 @@ pub fn validate_mermaid_diagram(
             "validation",
             "error",
             "URL externa bloqueada",
-            vec!["Los diagramas no pueden cargar recursos externos con la politica actual.".to_string()],
+            vec![
+                "Los diagramas no pueden cargar recursos externos con la politica actual."
+                    .to_string(),
+            ],
             Some("mermaid.policy"),
         ));
     }
@@ -642,7 +680,11 @@ pub fn mermaid_catalog() -> Vec<MermaidDiagramType> {
             label: item.label.to_string(),
             family: item.family.to_string(),
             maturity: item.maturity.to_string(),
-            aliases: item.aliases.iter().map(|alias| (*alias).to_string()).collect(),
+            aliases: item
+                .aliases
+                .iter()
+                .map(|alias| (*alias).to_string())
+                .collect(),
             required_policy: item.required_policy.to_string(),
             validator_id: item.validator_id.to_string(),
         })
@@ -707,6 +749,9 @@ fn manifest_v1_to_v2(raw: Value) -> Result<AiSkillManifest, String> {
         output_actions: v1.output_actions,
         requires: v1.requires,
         validators: v1.validators,
+        orchestrates_skills: vec![],
+        auxiliary_skill_categories: vec![],
+        required_capabilities: vec![],
         modes: vec![],
         runtime_enabled: false,
     })
@@ -778,7 +823,12 @@ fn skill_summary(skill: &LoadedSkill) -> AiSkillSummary {
             version: manifest.version.clone(),
             source: manifest.source.clone(),
             status: "valid".to_string(),
-            visibility: if manifest.source == "base" { "readonly" } else { "editable" }.to_string(),
+            visibility: if manifest.source == "base" {
+                "readonly"
+            } else {
+                "editable"
+            }
+            .to_string(),
             runtime_enabled: manifest.runtime_enabled,
             description: manifest.description.clone(),
             categories: manifest.categories.clone(),
@@ -817,6 +867,9 @@ fn skill_detail(skill: &LoadedSkill) -> AiSkillDetail {
         output_actions: summary.output_actions.clone(),
         requires: vec![],
         validators: vec![],
+        orchestrates_skills: vec![],
+        auxiliary_skill_categories: vec![],
+        required_capabilities: vec![],
         modes: vec![],
         runtime_enabled: false,
     });
@@ -888,17 +941,25 @@ fn accept_choice(
         .find(|skill| skill.id == choice.skill_id)
         .ok_or_else(|| "La skill no esta entre las candidatas permitidas.".to_string())?;
     if !skill.runtime_enabled {
-        return Err("La skill es visible pero no esta habilitada para ejecucion runtime.".to_string());
+        return Err(
+            "La skill es visible pero no esta habilitada para ejecucion runtime.".to_string(),
+        );
     }
     let mode = skill
         .modes
         .iter()
         .find(|mode| mode.id == choice.mode_id)
         .ok_or_else(|| "El modo seleccionado no existe en la skill.".to_string())?;
-    if !mode.supported_actions.iter().any(|action| action == &choice.action) {
+    if !mode
+        .supported_actions
+        .iter()
+        .any(|action| action == &choice.action)
+    {
         return Err("La accion no es compatible con el modo seleccionado.".to_string());
     }
-    if mode.risk_level == "high" && payload.get("executionMode").and_then(Value::as_str) != Some("reasoning") {
+    if mode.risk_level == "high"
+        && payload.get("executionMode").and_then(Value::as_str) != Some("reasoning")
+    {
         return Err("Los modos de alto riesgo requieren modo reasoning.".to_string());
     }
     for capability in &mode.requires_capabilities {
@@ -926,9 +987,81 @@ fn deterministic_fallback(
     diagnostics: &mut Vec<AiSkillDiagnostic>,
 ) -> Vec<AiSkillApplication> {
     let mut applications = Vec::new();
+    let expected_action = payload
+        .get("expectedAction")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if expected_action == "create_research_report" {
+        if candidates
+            .iter()
+            .any(|skill| skill.id == "knownext.research_report")
+        {
+            let mode_id = payload
+                .pointer("/researchProfile/recommendedReportStyle")
+                .and_then(Value::as_str)
+                .map(research_report_mode)
+                .unwrap_or("profundo");
+            applications.push(AiSkillApplication {
+                skill_id: "knownext.research_report".to_string(),
+                mode_id: mode_id.to_string(),
+                action: "create_research_report".to_string(),
+                status: "applied".to_string(),
+                reason: "Skill base coordinadora para informes de investigación.".to_string(),
+                confidence: "high".to_string(),
+            });
+            diagnostics.push(diagnostic(
+                "knownext.research_report",
+                mode_id,
+                "applied",
+                "selection",
+                "info",
+                "Skill de informe aplicada",
+                vec!["La investigación usa el skill base de informe profesional.".to_string()],
+                None,
+            ));
+        }
+        if applications.len() < limit
+            && candidates
+                .iter()
+                .any(|skill| skill.id == "knownext.markdown")
+        {
+            applications.push(AiSkillApplication {
+                skill_id: "knownext.markdown".to_string(),
+                mode_id: "table".to_string(),
+                action: "create_document".to_string(),
+                status: "applied".to_string(),
+                reason: "Las tablas Markdown están disponibles como recurso base del informe."
+                    .to_string(),
+                confidence: "medium".to_string(),
+            });
+        }
+        if applications.len() < limit
+            && payload
+                .pointer("/researchProfile/diagramsEnabled")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            && diagrams_enabled(payload)
+            && candidates
+                .iter()
+                .any(|skill| skill.id == "knownext.mermaid")
+        {
+            applications.push(AiSkillApplication {
+                skill_id: "knownext.mermaid".to_string(),
+                mode_id: "diagram_flow".to_string(),
+                action: "create_document".to_string(),
+                status: "applied".to_string(),
+                reason: "El tipo de investigación permite diagramas Mermaid si aportan claridad."
+                    .to_string(),
+                confidence: "medium".to_string(),
+            });
+        }
+    }
     let expected_diagram_type = payload.get("diagramType").and_then(Value::as_str);
     if expected_diagram_type.is_some() && diagrams_enabled(payload) && applications.len() < limit {
-        if candidates.iter().any(|skill| skill.id == "knownext.mermaid") {
+        if candidates
+            .iter()
+            .any(|skill| skill.id == "knownext.mermaid")
+        {
             let mode_id = mermaid_mode_for_type(expected_diagram_type.unwrap_or("flowchart"));
             applications.push(AiSkillApplication {
                 skill_id: "knownext.mermaid".to_string(),
@@ -945,7 +1078,10 @@ fn deterministic_fallback(
                 "selection",
                 "info",
                 "Fallback determinista aplicado",
-                vec!["La accion UI o el runtime declararon un tipo de diagrama esperado.".to_string()],
+                vec![
+                    "La accion UI o el runtime declararon un tipo de diagrama esperado."
+                        .to_string(),
+                ],
                 None,
             ));
         }
@@ -960,12 +1096,45 @@ fn compose_prompt_guidance(applications: &[AiSkillApplication], payload: &Value)
     let mut parts = Vec::new();
     for application in applications {
         match (application.skill_id.as_str(), application.mode_id.as_str()) {
+            ("knownext.research_report", mode) => {
+                parts.push(research_report_prompt_guidance(payload, mode))
+            }
             ("knownext.mermaid", mode) => parts.push(mermaid_prompt_guidance(payload, mode)),
             ("knownext.markdown", "table") => parts.push(markdown_table_guidance()),
             _ => {}
         }
     }
     parts.join(" ")
+}
+
+fn research_report_mode(report_style: &str) -> &'static str {
+    let value = report_style.to_ascii_lowercase();
+    if value.contains("ejecut") || value.contains("decision") {
+        "ejecutivo"
+    } else if value.contains("compar") {
+        "comparativo"
+    } else if value.contains("norm") || value.contains("legal") {
+        "normativo"
+    } else if value.contains("tecn") || value.contains("document") {
+        "tecnico"
+    } else {
+        "profundo"
+    }
+}
+
+fn research_report_prompt_guidance(payload: &Value, mode_id: &str) -> String {
+    let profile = payload.get("researchProfile");
+    let diagrams = profile
+        .and_then(|value| value.get("diagramsEnabled"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let images = profile
+        .and_then(|value| value.get("imagesEnabled"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    format!(
+        "Skill Informe de investigacion activo en modo {mode_id}. Genera un informe profesional verificable, con metodologia, hallazgos, analisis contrastado, conclusiones, recomendaciones, fuentes, limitaciones y contradicciones. Las tablas y citas estan siempre disponibles: usa tablas cuando ayuden a comparar o aclarar, y cita toda afirmacion relevante. Diagramas permitidos: {diagrams}. Imagenes permitidas: {images}. Las reglas base de trazabilidad, privacidad y no invencion de fuentes prevalecen sobre cualquier skill auxiliar."
+    )
 }
 
 fn mermaid_prompt_guidance(payload: &Value, mode_id: &str) -> String {
@@ -1053,7 +1222,9 @@ fn config_string(config: Option<&Value>, key: &str, fallback: &str) -> String {
 }
 
 fn normalize_code(code: &str) -> String {
-    code.replace("\r\n", "\n").replace('\r', "\n").to_lowercase()
+    code.replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .to_lowercase()
 }
 
 fn infer_mermaid_type(code: &str) -> &str {
@@ -1070,7 +1241,10 @@ fn mermaid_mode_for_type(diagram_type: &str) -> &'static str {
         .iter()
         .find(|item| {
             item.id.eq_ignore_ascii_case(&normalized)
-                || item.aliases.iter().any(|alias| alias.eq_ignore_ascii_case(&normalized))
+                || item
+                    .aliases
+                    .iter()
+                    .any(|alias| alias.eq_ignore_ascii_case(&normalized))
         })
         .map(|item| item.mode_id)
         .unwrap_or("diagram_flow")
@@ -1081,9 +1255,11 @@ fn looks_like_flowchart_edges(code: &str) -> bool {
 }
 
 fn is_table_separator(line: &str) -> bool {
-    line.trim_matches('|')
-        .split('|')
-        .all(|cell| cell.trim().chars().all(|ch| ch == '-' || ch == ':' || ch == ' '))
+    line.trim_matches('|').split('|').all(|cell| {
+        cell.trim()
+            .chars()
+            .all(|ch| ch == '-' || ch == ':' || ch == ' ')
+    })
 }
 
 fn table_cell_count(line: &str) -> usize {
@@ -1178,6 +1354,9 @@ fn known_validators() -> BTreeSet<&'static str> {
         "document.edit.anchor_policy",
         "project.knowledge.sources",
         "governance.privacy",
+        "research.report.structure",
+        "research.report.citations",
+        "research.report.visuals",
     ]
     .into_iter()
     .collect()
@@ -1192,6 +1371,10 @@ fn known_capabilities() -> BTreeSet<&'static str> {
         "rag",
         "privacy_scan",
         "markdown",
+        "research",
+        "citations",
+        "image_generation",
+        "report_format",
     ]
     .into_iter()
     .collect()
@@ -1209,34 +1392,286 @@ struct MermaidTypeSpec {
 }
 
 const MERMAID_TYPES: &[MermaidTypeSpec] = &[
-    MermaidTypeSpec { id: "flowchart", label: "Flowchart", family: "flow", maturity: "stable", aliases: &["graph"], required_policy: "stable", validator_id: "mermaid.flow", mode_id: "diagram_flow" },
-    MermaidTypeSpec { id: "sequenceDiagram", label: "Sequence", family: "sequence", maturity: "stable", aliases: &["sequence"], required_policy: "stable", validator_id: "mermaid.sequence", mode_id: "diagram_sequence" },
-    MermaidTypeSpec { id: "classDiagram", label: "Class", family: "structure", maturity: "stable", aliases: &["class"], required_policy: "stable", validator_id: "mermaid.structure", mode_id: "diagram_structure" },
-    MermaidTypeSpec { id: "stateDiagram-v2", label: "State", family: "flow", maturity: "stable", aliases: &["stateDiagram"], required_policy: "stable", validator_id: "mermaid.flow", mode_id: "diagram_flow" },
-    MermaidTypeSpec { id: "erDiagram", label: "ER", family: "structure", maturity: "stable", aliases: &["er"], required_policy: "stable", validator_id: "mermaid.structure", mode_id: "diagram_structure" },
-    MermaidTypeSpec { id: "journey", label: "Journey", family: "flow", maturity: "stable", aliases: &[], required_policy: "stable", validator_id: "mermaid.flow", mode_id: "diagram_flow" },
-    MermaidTypeSpec { id: "gantt", label: "Gantt", family: "planning", maturity: "stable", aliases: &[], required_policy: "stable", validator_id: "mermaid.planning", mode_id: "diagram_planning" },
-    MermaidTypeSpec { id: "pie", label: "Pie", family: "data", maturity: "stable", aliases: &[], required_policy: "stable", validator_id: "mermaid.data", mode_id: "diagram_data" },
-    MermaidTypeSpec { id: "quadrantChart", label: "Quadrant", family: "data", maturity: "stable", aliases: &["quadrant"], required_policy: "stable", validator_id: "mermaid.data", mode_id: "diagram_data" },
-    MermaidTypeSpec { id: "requirementDiagram", label: "Requirement", family: "technical", maturity: "stable", aliases: &["requirement"], required_policy: "stable", validator_id: "mermaid.technical", mode_id: "diagram_technical" },
-    MermaidTypeSpec { id: "gitGraph", label: "Git graph", family: "technical", maturity: "stable", aliases: &["gitgraph"], required_policy: "stable", validator_id: "mermaid.technical", mode_id: "diagram_technical" },
-    MermaidTypeSpec { id: "mindmap", label: "Mindmap", family: "planning", maturity: "stable", aliases: &[], required_policy: "stable", validator_id: "mermaid.planning", mode_id: "diagram_planning" },
-    MermaidTypeSpec { id: "timeline", label: "Timeline", family: "planning", maturity: "stable", aliases: &[], required_policy: "stable", validator_id: "mermaid.planning", mode_id: "diagram_planning" },
-    MermaidTypeSpec { id: "C4Context", label: "C4 context", family: "structure", maturity: "advanced", aliases: &["c4"], required_policy: "visual_local", validator_id: "mermaid.structure", mode_id: "diagram_structure" },
-    MermaidTypeSpec { id: "xychart-beta", label: "XY chart", family: "data", maturity: "beta", aliases: &["xychart"], required_policy: "beta", validator_id: "mermaid.data", mode_id: "diagram_data" },
-    MermaidTypeSpec { id: "sankey-beta", label: "Sankey", family: "data", maturity: "beta", aliases: &["sankey"], required_policy: "beta", validator_id: "mermaid.data", mode_id: "diagram_data" },
-    MermaidTypeSpec { id: "block-beta", label: "Block", family: "structure", maturity: "beta", aliases: &["block"], required_policy: "beta", validator_id: "mermaid.structure", mode_id: "diagram_structure" },
-    MermaidTypeSpec { id: "kanban", label: "Kanban", family: "planning", maturity: "advanced", aliases: &[], required_policy: "visual_local", validator_id: "mermaid.planning", mode_id: "diagram_planning" },
-    MermaidTypeSpec { id: "architecture-beta", label: "Architecture", family: "structure", maturity: "beta", aliases: &["architecture"], required_policy: "beta", validator_id: "mermaid.architecture_beta", mode_id: "diagram_structure" },
-    MermaidTypeSpec { id: "packet-beta", label: "Packet", family: "technical", maturity: "beta", aliases: &["packet"], required_policy: "beta", validator_id: "mermaid.technical", mode_id: "diagram_technical" },
-    MermaidTypeSpec { id: "radar-beta", label: "Radar", family: "data", maturity: "beta", aliases: &["radar"], required_policy: "beta", validator_id: "mermaid.data", mode_id: "diagram_data" },
-    MermaidTypeSpec { id: "treemap-beta", label: "Treemap", family: "data", maturity: "beta", aliases: &["treemap"], required_policy: "beta", validator_id: "mermaid.data", mode_id: "diagram_data" },
-    MermaidTypeSpec { id: "venn-beta", label: "Venn", family: "data", maturity: "beta", aliases: &["venn"], required_policy: "beta", validator_id: "mermaid.data", mode_id: "diagram_data" },
-    MermaidTypeSpec { id: "zenuml", label: "ZenUML", family: "sequence", maturity: "advanced", aliases: &[], required_policy: "visual_local", validator_id: "mermaid.sequence", mode_id: "diagram_sequence" },
-    MermaidTypeSpec { id: "ishikawa", label: "Ishikawa", family: "flow", maturity: "advanced", aliases: &[], required_policy: "visual_local", validator_id: "mermaid.flow", mode_id: "diagram_flow" },
-    MermaidTypeSpec { id: "wardley", label: "Wardley", family: "technical", maturity: "beta", aliases: &[], required_policy: "beta", validator_id: "mermaid.technical", mode_id: "diagram_technical" },
-    MermaidTypeSpec { id: "eventmodeling", label: "Event modeling", family: "technical", maturity: "beta", aliases: &["event-modeling"], required_policy: "beta", validator_id: "mermaid.technical", mode_id: "diagram_technical" },
-    MermaidTypeSpec { id: "treeview", label: "Tree view", family: "planning", maturity: "beta", aliases: &["tree"], required_policy: "beta", validator_id: "mermaid.planning", mode_id: "diagram_planning" },
+    MermaidTypeSpec {
+        id: "flowchart",
+        label: "Flowchart",
+        family: "flow",
+        maturity: "stable",
+        aliases: &["graph"],
+        required_policy: "stable",
+        validator_id: "mermaid.flow",
+        mode_id: "diagram_flow",
+    },
+    MermaidTypeSpec {
+        id: "sequenceDiagram",
+        label: "Sequence",
+        family: "sequence",
+        maturity: "stable",
+        aliases: &["sequence"],
+        required_policy: "stable",
+        validator_id: "mermaid.sequence",
+        mode_id: "diagram_sequence",
+    },
+    MermaidTypeSpec {
+        id: "classDiagram",
+        label: "Class",
+        family: "structure",
+        maturity: "stable",
+        aliases: &["class"],
+        required_policy: "stable",
+        validator_id: "mermaid.structure",
+        mode_id: "diagram_structure",
+    },
+    MermaidTypeSpec {
+        id: "stateDiagram-v2",
+        label: "State",
+        family: "flow",
+        maturity: "stable",
+        aliases: &["stateDiagram"],
+        required_policy: "stable",
+        validator_id: "mermaid.flow",
+        mode_id: "diagram_flow",
+    },
+    MermaidTypeSpec {
+        id: "erDiagram",
+        label: "ER",
+        family: "structure",
+        maturity: "stable",
+        aliases: &["er"],
+        required_policy: "stable",
+        validator_id: "mermaid.structure",
+        mode_id: "diagram_structure",
+    },
+    MermaidTypeSpec {
+        id: "journey",
+        label: "Journey",
+        family: "flow",
+        maturity: "stable",
+        aliases: &[],
+        required_policy: "stable",
+        validator_id: "mermaid.flow",
+        mode_id: "diagram_flow",
+    },
+    MermaidTypeSpec {
+        id: "gantt",
+        label: "Gantt",
+        family: "planning",
+        maturity: "stable",
+        aliases: &[],
+        required_policy: "stable",
+        validator_id: "mermaid.planning",
+        mode_id: "diagram_planning",
+    },
+    MermaidTypeSpec {
+        id: "pie",
+        label: "Pie",
+        family: "data",
+        maturity: "stable",
+        aliases: &[],
+        required_policy: "stable",
+        validator_id: "mermaid.data",
+        mode_id: "diagram_data",
+    },
+    MermaidTypeSpec {
+        id: "quadrantChart",
+        label: "Quadrant",
+        family: "data",
+        maturity: "stable",
+        aliases: &["quadrant"],
+        required_policy: "stable",
+        validator_id: "mermaid.data",
+        mode_id: "diagram_data",
+    },
+    MermaidTypeSpec {
+        id: "requirementDiagram",
+        label: "Requirement",
+        family: "technical",
+        maturity: "stable",
+        aliases: &["requirement"],
+        required_policy: "stable",
+        validator_id: "mermaid.technical",
+        mode_id: "diagram_technical",
+    },
+    MermaidTypeSpec {
+        id: "gitGraph",
+        label: "Git graph",
+        family: "technical",
+        maturity: "stable",
+        aliases: &["gitgraph"],
+        required_policy: "stable",
+        validator_id: "mermaid.technical",
+        mode_id: "diagram_technical",
+    },
+    MermaidTypeSpec {
+        id: "mindmap",
+        label: "Mindmap",
+        family: "planning",
+        maturity: "stable",
+        aliases: &[],
+        required_policy: "stable",
+        validator_id: "mermaid.planning",
+        mode_id: "diagram_planning",
+    },
+    MermaidTypeSpec {
+        id: "timeline",
+        label: "Timeline",
+        family: "planning",
+        maturity: "stable",
+        aliases: &[],
+        required_policy: "stable",
+        validator_id: "mermaid.planning",
+        mode_id: "diagram_planning",
+    },
+    MermaidTypeSpec {
+        id: "C4Context",
+        label: "C4 context",
+        family: "structure",
+        maturity: "advanced",
+        aliases: &["c4"],
+        required_policy: "visual_local",
+        validator_id: "mermaid.structure",
+        mode_id: "diagram_structure",
+    },
+    MermaidTypeSpec {
+        id: "xychart-beta",
+        label: "XY chart",
+        family: "data",
+        maturity: "beta",
+        aliases: &["xychart"],
+        required_policy: "beta",
+        validator_id: "mermaid.data",
+        mode_id: "diagram_data",
+    },
+    MermaidTypeSpec {
+        id: "sankey-beta",
+        label: "Sankey",
+        family: "data",
+        maturity: "beta",
+        aliases: &["sankey"],
+        required_policy: "beta",
+        validator_id: "mermaid.data",
+        mode_id: "diagram_data",
+    },
+    MermaidTypeSpec {
+        id: "block-beta",
+        label: "Block",
+        family: "structure",
+        maturity: "beta",
+        aliases: &["block"],
+        required_policy: "beta",
+        validator_id: "mermaid.structure",
+        mode_id: "diagram_structure",
+    },
+    MermaidTypeSpec {
+        id: "kanban",
+        label: "Kanban",
+        family: "planning",
+        maturity: "advanced",
+        aliases: &[],
+        required_policy: "visual_local",
+        validator_id: "mermaid.planning",
+        mode_id: "diagram_planning",
+    },
+    MermaidTypeSpec {
+        id: "architecture-beta",
+        label: "Architecture",
+        family: "structure",
+        maturity: "beta",
+        aliases: &["architecture"],
+        required_policy: "beta",
+        validator_id: "mermaid.architecture_beta",
+        mode_id: "diagram_structure",
+    },
+    MermaidTypeSpec {
+        id: "packet-beta",
+        label: "Packet",
+        family: "technical",
+        maturity: "beta",
+        aliases: &["packet"],
+        required_policy: "beta",
+        validator_id: "mermaid.technical",
+        mode_id: "diagram_technical",
+    },
+    MermaidTypeSpec {
+        id: "radar-beta",
+        label: "Radar",
+        family: "data",
+        maturity: "beta",
+        aliases: &["radar"],
+        required_policy: "beta",
+        validator_id: "mermaid.data",
+        mode_id: "diagram_data",
+    },
+    MermaidTypeSpec {
+        id: "treemap-beta",
+        label: "Treemap",
+        family: "data",
+        maturity: "beta",
+        aliases: &["treemap"],
+        required_policy: "beta",
+        validator_id: "mermaid.data",
+        mode_id: "diagram_data",
+    },
+    MermaidTypeSpec {
+        id: "venn-beta",
+        label: "Venn",
+        family: "data",
+        maturity: "beta",
+        aliases: &["venn"],
+        required_policy: "beta",
+        validator_id: "mermaid.data",
+        mode_id: "diagram_data",
+    },
+    MermaidTypeSpec {
+        id: "zenuml",
+        label: "ZenUML",
+        family: "sequence",
+        maturity: "advanced",
+        aliases: &[],
+        required_policy: "visual_local",
+        validator_id: "mermaid.sequence",
+        mode_id: "diagram_sequence",
+    },
+    MermaidTypeSpec {
+        id: "ishikawa",
+        label: "Ishikawa",
+        family: "flow",
+        maturity: "advanced",
+        aliases: &[],
+        required_policy: "visual_local",
+        validator_id: "mermaid.flow",
+        mode_id: "diagram_flow",
+    },
+    MermaidTypeSpec {
+        id: "wardley",
+        label: "Wardley",
+        family: "technical",
+        maturity: "beta",
+        aliases: &[],
+        required_policy: "beta",
+        validator_id: "mermaid.technical",
+        mode_id: "diagram_technical",
+    },
+    MermaidTypeSpec {
+        id: "eventmodeling",
+        label: "Event modeling",
+        family: "technical",
+        maturity: "beta",
+        aliases: &["event-modeling"],
+        required_policy: "beta",
+        validator_id: "mermaid.technical",
+        mode_id: "diagram_technical",
+    },
+    MermaidTypeSpec {
+        id: "treeview",
+        label: "Tree view",
+        family: "planning",
+        maturity: "beta",
+        aliases: &["tree"],
+        required_policy: "beta",
+        validator_id: "mermaid.planning",
+        mode_id: "diagram_planning",
+    },
 ];
 
 #[cfg(test)]
@@ -1246,9 +1681,13 @@ mod tests {
     #[test]
     fn registry_loads_compact_base_skills_with_unique_valid_ids() {
         let skills = list_ai_skills();
-        assert_eq!(skills.len(), 7);
-        let ids = skills.iter().map(|skill| skill.id.clone()).collect::<BTreeSet<_>>();
+        assert_eq!(skills.len(), 8);
+        let ids = skills
+            .iter()
+            .map(|skill| skill.id.clone())
+            .collect::<BTreeSet<_>>();
         assert_eq!(ids.len(), skills.len());
+        assert!(ids.contains("knownext.research_report"));
         assert!(ids.contains("knownext.mermaid"));
         assert!(ids.contains("knownext.markdown"));
         assert!(skills.iter().all(|skill| skill.status == "valid"));
@@ -1261,15 +1700,23 @@ mod tests {
         assert_eq!(skill.manifest.id, "knownext.mermaid");
         assert!(skill.instructions_markdown.contains("Mermaid"));
         assert!(!skill.examples.is_empty());
-        assert!(skill.mermaid_catalog.iter().any(|item| item.id == "architecture-beta"));
-        assert!(skill.summary.modes.iter().any(|mode| mode.id == "diagram_structure"));
+        assert!(skill
+            .mermaid_catalog
+            .iter()
+            .any(|item| item.id == "architecture-beta"));
+        assert!(skill
+            .summary
+            .modes
+            .iter()
+            .any(|mode| mode.id == "diagram_structure"));
     }
 
     #[test]
     fn validator_detects_invalid_manifest_and_bad_mode_validator() {
         let validation = validate_manifest_json(r#"{"id":"bad"}"#);
         assert_eq!(validation.status, "error");
-        let validation = validate_manifest_json(r#"{
+        let validation = validate_manifest_json(
+            r#"{
           "schemaVersion": 2,
           "id": "knownext.bad",
           "name": "Bad",
@@ -1294,7 +1741,8 @@ mod tests {
             "riskLevel": "low",
             "contextBudget": 200
           }]
-        }"#);
+        }"#,
+        );
         assert_eq!(validation.status, "error");
     }
 
@@ -1305,7 +1753,10 @@ mod tests {
             None,
         );
         assert!(context.used_skill_ids.is_empty());
-        assert!(context.diagnostics.iter().all(|diagnostic| diagnostic.skill_id != "knownext.mermaid"));
+        assert!(context
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.skill_id != "knownext.mermaid"));
     }
 
     #[test]
@@ -1330,7 +1781,10 @@ mod tests {
         };
         let context = select_skills_for_request(&json!({}), Some(&proposal));
         assert!(context.applications.is_empty());
-        assert!(context.diagnostics.iter().any(|diagnostic| diagnostic.status == "rejected"));
+        assert!(context
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.status == "rejected"));
     }
 
     #[test]
@@ -1353,9 +1807,11 @@ mod tests {
                 },
             ],
         };
-        let quick = select_skills_for_request(&json!({ "executionMode": "quick" }), Some(&proposal));
+        let quick =
+            select_skills_for_request(&json!({ "executionMode": "quick" }), Some(&proposal));
         assert_eq!(quick.applications.len(), 1);
-        let reasoning = select_skills_for_request(&json!({ "executionMode": "reasoning" }), Some(&proposal));
+        let reasoning =
+            select_skills_for_request(&json!({ "executionMode": "reasoning" }), Some(&proposal));
         assert_eq!(reasoning.applications.len(), 2);
     }
 
@@ -1407,7 +1863,10 @@ mod tests {
             &json!({ "clientContext": { "diagramConfig": { "enabled": true, "betaPolicy": "enabled", "visualProfile": "advanced" } } }),
         );
         assert!(diagnostics_have_errors(&diagnostics));
-        assert!(diagnostics.iter().any(|diagnostic| diagnostic.validator_id.as_deref() == Some("mermaid.architecture_beta")));
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.validator_id.as_deref()
+                == Some("mermaid.architecture_beta")));
     }
 
     #[test]

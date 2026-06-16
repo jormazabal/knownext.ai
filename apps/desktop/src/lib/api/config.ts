@@ -122,12 +122,20 @@ export const defaultAiConfig: AiConfig = {
   },
   agentic: {
     depth: "guided",
-    webResearchEnabled: false,
+    webResearchEnabled: true,
     confirmBeforeApplying: true,
     maxSteps: 4,
     maxDocuments: 6,
     maxEstimatedCostEur: 1,
-    maxSources: 6,
+    maxSources: 500,
+    researchDiagramsEnabled: true,
+    researchImagesEnabled: true,
+    researchPresets: {
+      quick: { candidateSourceLimit: 50, diagramsEnabled: false, imagesEnabled: false },
+      deep: { candidateSourceLimit: 500, diagramsEnabled: true, imagesEnabled: true },
+      compare: { candidateSourceLimit: 200, diagramsEnabled: true, imagesEnabled: false },
+      currentDocument: { candidateSourceLimit: 10, diagramsEnabled: true, imagesEnabled: false },
+    },
   },
   transcription: {
     enabled: true,
@@ -428,16 +436,36 @@ function normalizeAi(ai: AiConfig | undefined): AiConfig | undefined {
     imageGeneration: normalizeImageGeneration(ai.imageGeneration),
     agentic: {
       depth: normalizeAgenticDepth(ai.agentic?.depth),
-      webResearchEnabled: false,
+      webResearchEnabled: ai.agentic?.webResearchEnabled !== false,
       confirmBeforeApplying: ai.agentic?.confirmBeforeApplying !== false,
       maxSteps: clampNumber(ai.agentic?.maxSteps, 1, 12, defaultAiConfig.agentic.maxSteps),
       maxDocuments: clampNumber(ai.agentic?.maxDocuments, 1, 30, defaultAiConfig.agentic.maxDocuments),
       maxEstimatedCostEur: clampNumber(ai.agentic?.maxEstimatedCostEur, 0.1, 25, defaultAiConfig.agentic.maxEstimatedCostEur),
-      maxSources: clampNumber(ai.agentic?.maxSources, 1, 20, defaultAiConfig.agentic.maxSources),
+      maxSources: clampNumber(ai.agentic?.maxSources, 1, 500, defaultAiConfig.agentic.maxSources),
+      researchDiagramsEnabled: normalizeResearchGlobalToggle(ai.agentic, "researchDiagramsEnabled", "diagramsEnabled", defaultAiConfig.agentic.researchDiagramsEnabled),
+      researchImagesEnabled: normalizeResearchGlobalToggle(ai.agentic, "researchImagesEnabled", "imagesEnabled", defaultAiConfig.agentic.researchImagesEnabled),
+      researchPresets: normalizeResearchPresets(ai.agentic?.researchPresets),
     },
     transcription: normalizeTranscription(ai.transcription),
     diagrams: normalizeDiagramConfig(ai.diagrams),
   };
+}
+
+function normalizeResearchGlobalToggle(
+  agentic: (Partial<AiConfig["agentic"]> & Record<string, unknown>) | undefined,
+  field: "researchDiagramsEnabled" | "researchImagesEnabled",
+  presetField: "diagramsEnabled" | "imagesEnabled",
+  fallback: boolean,
+) {
+  if (typeof agentic?.[field] === "boolean") return agentic[field] as boolean;
+  const presets = agentic?.researchPresets;
+  if (presets && typeof presets === "object") {
+    const values = Object.values(presets as Record<string, Record<string, unknown>>)
+      .map((preset) => preset?.[presetField])
+      .filter((value): value is boolean => typeof value === "boolean");
+    if (values.length > 0) return values.some(Boolean);
+  }
+  return fallback;
 }
 
 function normalizeDiagramConfig(diagrams: AiConfig["diagrams"] | undefined): AiConfig["diagrams"] {
@@ -577,6 +605,32 @@ function normalizeAgenticDepth(depth: unknown) {
   return ["quick", "guided", "deep", "bounded_autonomous"].includes(String(depth))
     ? depth as AiConfig["agentic"]["depth"]
     : defaultAiConfig.agentic.depth;
+}
+
+function normalizeResearchPresets(presets: unknown): AiConfig["agentic"]["researchPresets"] {
+  const source = presets && typeof presets === "object" ? presets as Partial<AiConfig["agentic"]["researchPresets"]> : {};
+  return {
+    quick: normalizeResearchPreset(source.quick, defaultAiConfig.agentic.researchPresets.quick),
+    deep: normalizeResearchPreset(source.deep, defaultAiConfig.agentic.researchPresets.deep),
+    compare: normalizeResearchPreset(source.compare, defaultAiConfig.agentic.researchPresets.compare),
+    currentDocument: normalizeResearchPreset(source.currentDocument, defaultAiConfig.agentic.researchPresets.currentDocument),
+  };
+}
+
+function normalizeResearchPreset(
+  preset: (Partial<AiConfig["agentic"]["researchPresets"]["quick"]> & Record<string, unknown>) | undefined,
+  fallback: AiConfig["agentic"]["researchPresets"]["quick"],
+): AiConfig["agentic"]["researchPresets"]["quick"] {
+  const legacyDiagrams = preset && "diagrams" in preset ? String(preset.diagrams) !== "none" : undefined;
+  const legacyImages = preset && "images" in preset ? String(preset.images) !== "none" : undefined;
+  const explicitCandidate = typeof preset?.candidateSourceLimit === "number" ? preset.candidateSourceLimit : undefined;
+  const legacyMaxSources = preset && typeof preset.maxSources === "number" ? preset.maxSources : undefined;
+  const legacySourceLimit = explicitCandidate === fallback.candidateSourceLimit ? legacyMaxSources ?? explicitCandidate : explicitCandidate ?? legacyMaxSources ?? fallback.candidateSourceLimit;
+  return {
+    candidateSourceLimit: clampNumber(legacySourceLimit, 1, 500, fallback.candidateSourceLimit),
+    diagramsEnabled: typeof preset?.diagramsEnabled === "boolean" ? preset.diagramsEnabled : legacyDiagrams ?? fallback.diagramsEnabled,
+    imagesEnabled: typeof preset?.imagesEnabled === "boolean" ? preset.imagesEnabled : legacyImages ?? fallback.imagesEnabled,
+  };
 }
 
 function normalizeTranscription(transcription: AiConfig["transcription"] | undefined): AiConfig["transcription"] {

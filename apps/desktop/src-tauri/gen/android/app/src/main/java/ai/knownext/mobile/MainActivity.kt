@@ -10,12 +10,19 @@ import android.provider.Settings
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.core.content.FileProvider
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.HttpURLConnection
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.net.URL
+import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import kotlin.concurrent.thread
 import org.json.JSONObject
+
+private const val MAX_UPDATE_MANIFEST_BYTES = 256 * 1024
+private const val MAX_UPDATE_REDIRECTS = 5
 
 class MainActivity : TauriActivity() {
     private var updaterBridge: KnowNextAndroidUpdater? = null
@@ -40,6 +47,24 @@ class KnowNextAndroidUpdater(
             .put("versionCode", longVersionCode(info))
             .put("supportedAbis", Build.SUPPORTED_ABIS.joinToString(","))
             .toString()
+    }
+
+    @JavascriptInterface
+    fun fetchUpdateManifest(requestJson: String): String {
+        return try {
+            val request = JSONObject(requestJson)
+            val url = request.getString("url")
+            val body = downloadText(url, MAX_UPDATE_MANIFEST_BYTES)
+            JSONObject()
+                .put("ok", true)
+                .put("body", body)
+                .toString()
+        } catch (error: Exception) {
+            JSONObject()
+                .put("ok", false)
+                .put("message", describeUpdateFetchError(error))
+                .toString()
+        }
     }
 
     @JavascriptInterface
@@ -71,6 +96,66 @@ class KnowNextAndroidUpdater(
         }
 
         return requestId
+    }
+
+    private fun downloadText(url: String, maxBytes: Int): String {
+        var currentUrl = URL(url)
+        repeat(MAX_UPDATE_REDIRECTS + 1) { redirectCount ->
+            if (!currentUrl.protocol.equals("https", ignoreCase = true)) {
+                throw IllegalArgumentException("Las actualizaciones Android deben consultarse por HTTPS.")
+            }
+
+            val connection = (currentUrl.openConnection() as HttpURLConnection).apply {
+                connectTimeout = 15_000
+                readTimeout = 30_000
+                instanceFollowRedirects = false
+                requestMethod = "GET"
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty("User-Agent", "KnowNext.ai Android Updater")
+            }
+
+            try {
+                val responseCode = connection.responseCode
+                if (responseCode in 300..399) {
+                    val location = connection.getHeaderField("Location")
+                        ?: throw IllegalStateException("La actualización Android devolvió una redirección sin destino.")
+                    if (redirectCount >= MAX_UPDATE_REDIRECTS) {
+                        throw IllegalStateException("La actualización Android devolvió demasiadas redirecciones.")
+                    }
+                    currentUrl = URL(currentUrl, location)
+                    return@repeat
+                }
+
+                if (responseCode !in 200..299) {
+                    throw IllegalStateException("El servidor devolvió HTTP $responseCode al consultar actualizaciones.")
+                }
+
+                val total = connection.contentLengthLong
+                if (total > maxBytes) {
+                    throw IllegalStateException("La información de actualización Android es demasiado grande.")
+                }
+
+                val output = ByteArrayOutputStream()
+                var downloaded = 0
+                connection.inputStream.use { input ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        downloaded += read
+                        if (downloaded > maxBytes) {
+                            throw IllegalStateException("La información de actualización Android es demasiado grande.")
+                        }
+                        output.write(buffer, 0, read)
+                    }
+                }
+                return output.toString(StandardCharsets.UTF_8.name())
+            } finally {
+                connection.disconnect()
+            }
+        }
+
+        throw IllegalStateException("La actualización Android devolvió demasiadas redirecciones.")
     }
 
     private fun downloadValidateAndInstall(requestId: String, request: JSONObject) {
@@ -244,6 +329,14 @@ class KnowNextAndroidUpdater(
         return signatures.map { signature ->
             MessageDigest.getInstance("SHA-256").digest(signature.toByteArray()).joinToString("") { "%02x".format(it) }
         }.toSet()
+    }
+
+    private fun describeUpdateFetchError(error: Exception): String {
+        return when (error) {
+            is UnknownHostException -> "No se pudo conectar para buscar actualizaciones. Revisa la conexión a Internet."
+            is SocketTimeoutException -> "La búsqueda de actualizaciones tardó demasiado. Vuelve a intentarlo."
+            else -> error.message ?: "No se pudo buscar actualizaciones."
+        }
     }
 
     private fun normalizeSha256(value: String): String = value.lowercase().replace(":", "").trim()

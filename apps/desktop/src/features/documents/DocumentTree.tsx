@@ -78,6 +78,12 @@ type ExtendedTreeFilter = TreeFilter | "attachments";
 type TreeDropTarget = { id: string | null; valid: boolean; label: string };
 type TreeMouseDropTarget = TreeDropTarget & { targetFolderId?: string | null };
 
+const CONTEXT_MENU_WIDTH = 176;
+const CONTEXT_SUBMENU_WIDTH = 150;
+const CONTEXT_MENU_ITEM_HEIGHT = 28;
+const CONTEXT_MENU_PADDING = 8;
+const CONTEXT_MENU_VIEWPORT_GAP = 8;
+
 export type DocumentTreeAction =
   | "create-folder"
   | "create-document"
@@ -177,10 +183,18 @@ export function DocumentTree({
   function handleMenuEnter(node: DocumentTreeNode, event: MouseEvent<HTMLButtonElement>) {
     clearCloseTimer();
     const rect = event.currentTarget.getBoundingClientRect();
+    const itemCount = getContextMenuItemCount(node.type);
+    const position = getSafeContextMenuPosition({
+      anchorX: rect.right + 8,
+      anchorY: rect.top - 2,
+      anchorLeft: rect.left,
+      width: CONTEXT_MENU_WIDTH,
+      height: getContextMenuHeight(itemCount),
+    });
     setOpenMenu({
       node,
-      x: rect.right + 8,
-      y: rect.top - 2,
+      x: position.x,
+      y: position.y,
     });
   }
 
@@ -444,12 +458,24 @@ export function DocumentTree({
       return;
     }
     if (node.isEditing) return;
+    onActivateTreeNode(node.id);
+  }
+
+  function handleNodeDoubleClick(node: DocumentTreeNode) {
+    if (node.isEditing) return;
     if (node.type === "folder") {
       onActivateTreeNode(node.id);
       onToggleNode(node.id);
+      return;
     }
-    if (node.type === "document") onOpenDocument(node.id, node.name);
-    if (node.type === "image" && node.path) onOpenImage?.(node.id, node.name, node.path);
+    if (node.type === "document") {
+      onOpenDocument(node.id, node.name);
+      return;
+    }
+    if (node.type === "image" && node.path) {
+      onOpenImage?.(node.id, node.name, node.path);
+      return;
+    }
     if (node.type === "attachment") {
       if (node.path && isReferenceDocumentName(node.name)) onOpenReferenceDocument?.(node.id, node.name, node.path);
       else onActivateTreeNode(node.id);
@@ -515,6 +541,7 @@ export function DocumentTree({
               onNodeDrop={handleNodeDrop}
               onMouseDragStart={startMouseDrag}
               onNodeClick={handleNodeClick}
+              onNodeDoubleClick={handleNodeDoubleClick}
               changeBadges={changeBadges}
               showFileExtensions={showFileExtensions}
             />
@@ -627,6 +654,7 @@ type TreeNodeProps = {
   onNodeDrop: (node: DocumentTreeNode, event: DragEvent<HTMLDivElement>) => void;
   onMouseDragStart: (node: DocumentTreeNode, event: MouseEvent<HTMLDivElement>) => void;
   onNodeClick: (node: DocumentTreeNode) => void;
+  onNodeDoubleClick: (node: DocumentTreeNode) => void;
   changeBadges: Record<string, string>;
   showFileExtensions: boolean;
 };
@@ -653,6 +681,7 @@ function TreeNode({
   onNodeDrop,
   onMouseDragStart,
   onNodeClick,
+  onNodeDoubleClick,
   changeBadges,
   showFileExtensions,
 }: TreeNodeProps) {
@@ -692,9 +721,26 @@ function TreeNode({
         onMouseDown={(event) => onMouseDragStart(node, event)}
         data-tree-node-id={node.id}
         onClick={() => onNodeClick(node)}
+        onDoubleClick={(event) => {
+          event.stopPropagation();
+          onNodeDoubleClick(node);
+        }}
       >
         <span className="mr-0.5 grid h-5 w-4 place-items-center">
-          {isFolder ? (node.open ? <ChevronDown size={14} /> : <ChevronRight size={14} />) : null}
+          {isFolder ? (
+            <button
+              type="button"
+              className="grid h-5 w-4 place-items-center rounded text-ink-secondary transition hover:bg-brand-hover hover:text-brand-orange"
+              aria-label={`${node.open ? "Contraer" : "Expandir"} ${displayName}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onActivateTreeNode(node.id);
+                onToggleNode(node.id);
+              }}
+            >
+              {node.open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            </button>
+          ) : null}
         </span>
         {isFolder ? (
           <Folder size={15} className="mr-1.5 text-brand-orange" />
@@ -771,6 +817,7 @@ function TreeNode({
               onNodeDrop={onNodeDrop}
               onMouseDragStart={onMouseDragStart}
               onNodeClick={onNodeClick}
+              onNodeDoubleClick={onNodeDoubleClick}
               changeBadges={changeBadges}
               showFileExtensions={showFileExtensions}
             />
@@ -1370,6 +1417,42 @@ function isReferenceDocumentName(name: string) {
   return /\.(pdf|docx|xlsx)$/i.test(name);
 }
 
+function getContextMenuItemCount(type: DocumentTreeNode["type"]) {
+  if (type === "document") return 5;
+  if (type === "image") return 7;
+  if (type === "attachment") return 6;
+  return 6;
+}
+
+function getContextMenuHeight(itemCount: number) {
+  return itemCount * CONTEXT_MENU_ITEM_HEIGHT + CONTEXT_MENU_PADDING;
+}
+
+function getSafeContextMenuPosition({
+  anchorX,
+  anchorY,
+  anchorLeft,
+  width,
+  height,
+}: {
+  anchorX: number;
+  anchorY: number;
+  anchorLeft: number;
+  width: number;
+  height: number;
+}) {
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 1024;
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 768;
+  const x = anchorX + width + CONTEXT_MENU_VIEWPORT_GAP > viewportWidth
+    ? Math.max(CONTEXT_MENU_VIEWPORT_GAP, anchorLeft - width - CONTEXT_MENU_VIEWPORT_GAP)
+    : Math.max(CONTEXT_MENU_VIEWPORT_GAP, anchorX);
+  const y = Math.min(
+    Math.max(CONTEXT_MENU_VIEWPORT_GAP, anchorY),
+    Math.max(CONTEXT_MENU_VIEWPORT_GAP, viewportHeight - height - CONTEXT_MENU_VIEWPORT_GAP),
+  );
+  return { x, y };
+}
+
 function ContextMenu({
   type,
   x,
@@ -1396,7 +1479,7 @@ function ContextMenu({
     }>;
   };
   const [openSubmenu, setOpenSubmenu] = useState<string | null>(null);
-  const folderItems = [
+  const folderItems: ContextMenuItem[] = [
     { label: "Nueva carpeta", icon: FolderPlus, action: "create-folder" },
     { label: "Nuevo documento", icon: FilePlus2, action: "create-document" },
     { label: "Importar archivo", icon: FileUp, action: "import-file" },
@@ -1419,7 +1502,7 @@ function ContextMenu({
     { label: "Mover", icon: MoveRight, action: "move" },
     { label: "Eliminar", icon: Trash2, action: "delete" },
   ];
-  const attachmentItems = [
+  const attachmentItems: ContextMenuItem[] = [
     { label: "Abrir vista", icon: Eye, action: "open-reference-document" },
     { label: "Usar como contexto IA", icon: Copy, action: "add-attachment-context" },
     { label: "Copiar ruta", icon: Copy, action: "copy-path" },
@@ -1427,7 +1510,7 @@ function ContextMenu({
     { label: "Mover", icon: MoveRight, action: "move" },
     { label: "Eliminar", icon: Trash2, action: "delete" },
   ];
-  const imageItems = [
+  const imageItems: ContextMenuItem[] = [
     { label: "Abrir", icon: Image, action: "open-image" },
     { label: "Insertar en documento", icon: FileImage, action: "insert-image" },
     { label: "Usar como contexto IA", icon: Copy, action: "add-image-context" },
@@ -1436,18 +1519,25 @@ function ContextMenu({
     { label: "Mover", icon: MoveRight, action: "move" },
     { label: "Eliminar", icon: Trash2, action: "delete" },
   ];
-  const items = type === "folder" ? folderItems : type === "image" ? imageItems : type === "attachment" ? attachmentItems : documentItems;
+  const items: ContextMenuItem[] = type === "folder" ? folderItems : type === "image" ? imageItems : type === "attachment" ? attachmentItems : documentItems;
+  const submenuOpensLeft = x + CONTEXT_MENU_WIDTH + CONTEXT_SUBMENU_WIDTH + CONTEXT_MENU_VIEWPORT_GAP > (window.innerWidth || document.documentElement.clientWidth || 1024);
 
   return (
     <div
-      className="fixed z-50 w-[176px] rounded-md border border-line bg-white p-1 shadow-menu"
-      style={{ left: x, top: y }}
+      className="fixed z-50 w-[176px] overflow-y-auto rounded-md border border-line bg-white p-1 shadow-menu"
+      style={{ left: x, top: y, maxHeight: `calc(100vh - ${CONTEXT_MENU_VIEWPORT_GAP * 2}px)` }}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
-      {items.map((item) => {
-        const hasSubmenu = "submenu" in item && item.submenu;
+      {items.map((item, index) => {
+        const submenu = item.submenu ?? [];
+        const hasSubmenu = submenu.length > 0;
         const isOpen = hasSubmenu && openSubmenu === item.label;
+        const submenuHeight = getContextMenuHeight(submenu.length);
+        const submenuTop = Math.min(
+          index * CONTEXT_MENU_ITEM_HEIGHT,
+          Math.max(0, (window.innerHeight || document.documentElement.clientHeight || 768) - y - submenuHeight - CONTEXT_MENU_VIEWPORT_GAP),
+        );
 
         return (
           <div key={item.label} className="group relative">
@@ -1471,12 +1561,20 @@ function ContextMenu({
             </button>
             {hasSubmenu ? (
               <div
-                className={`absolute left-full top-0 z-50 ml-1.5 w-[150px] rounded-md border border-line bg-white p-1 shadow-menu ${
+                className={`absolute z-50 w-[150px] overflow-y-auto rounded-md border border-line bg-white p-1 shadow-menu ${
                   isOpen ? "block" : "hidden group-hover:block group-focus-within:block"
                 }`}
+                style={{
+                  top: submenuTop,
+                  left: submenuOpensLeft ? undefined : "100%",
+                  right: submenuOpensLeft ? "100%" : undefined,
+                  marginLeft: submenuOpensLeft ? undefined : 6,
+                  marginRight: submenuOpensLeft ? 6 : undefined,
+                  maxHeight: `calc(100vh - ${CONTEXT_MENU_VIEWPORT_GAP * 2}px)`,
+                }}
                 role="menu"
               >
-                {item.submenu?.map((submenuItem) => (
+                {submenu.map((submenuItem) => (
                   <button
                     key={submenuItem.action}
                     className="flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover focus:bg-brand-hover focus:outline-none"

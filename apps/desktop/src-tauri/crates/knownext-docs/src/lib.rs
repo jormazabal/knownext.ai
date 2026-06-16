@@ -2,9 +2,9 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 #[cfg(not(target_os = "android"))]
 use printpdf::{
-    Actions, BorderArray, BuiltinFont, Color, ColorArray, FontId, Line, LinePoint, LinkAnnotation, Mm, Op,
-    ParsedFont, PdfDocument, PdfFontHandle, PdfPage, PdfSaveOptions, Point, Pt, RawImage, Rect, Rgb,
-    TextItem, XObjectTransform,
+    Actions, BorderArray, BuiltinFont, Color, ColorArray, FontId, Line, LinePoint, LinkAnnotation,
+    Mm, Op, ParsedFont, PdfDocument, PdfFontHandle, PdfPage, PdfSaveOptions, Point, Pt, RawImage,
+    Rect, Rgb, TextItem, XObjectTransform,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -29,7 +29,11 @@ pub fn minimal_pdf(title: &str, markdown: &str) -> Vec<u8> {
     minimal_pdf_with_diagrams(title, markdown, &[])
 }
 
-pub fn minimal_pdf_with_diagrams(title: &str, markdown: &str, diagram_assets: &[DiagramAsset]) -> Vec<u8> {
+pub fn minimal_pdf_with_diagrams(
+    title: &str,
+    markdown: &str,
+    diagram_assets: &[DiagramAsset],
+) -> Vec<u8> {
     minimal_pdf_with_diagrams_and_template(title, markdown, diagram_assets, None)
 }
 
@@ -52,7 +56,13 @@ pub fn minimal_pdf_with_assets_and_template(
     #[cfg(not(target_os = "android"))]
     {
         let template = DocxTemplate::from_value(template);
-        if let Some(bytes) = print_pdf_with_diagrams_and_template(title, markdown, diagram_assets, image_assets, &template) {
+        if let Some(bytes) = print_pdf_with_diagrams_and_template(
+            title,
+            markdown,
+            diagram_assets,
+            image_assets,
+            &template,
+        ) {
             return bytes;
         }
     }
@@ -76,7 +86,11 @@ pub fn write_docx(path: &Path, markdown: &str) -> Result<(), String> {
     write_docx_with_diagrams(path, markdown, &[])
 }
 
-pub fn write_docx_with_diagrams(path: &Path, markdown: &str, diagram_assets: &[DiagramAsset]) -> Result<(), String> {
+pub fn write_docx_with_diagrams(
+    path: &Path,
+    markdown: &str,
+    diagram_assets: &[DiagramAsset],
+) -> Result<(), String> {
     write_docx_with_diagrams_and_template(path, markdown, diagram_assets, None)
 }
 
@@ -155,7 +169,8 @@ pub fn write_docx_with_assets_template_and_title(
         }
         zip.start_file(format!("word/media/diagram-{}.png", index + 1), options)
             .map_err(|error| error.to_string())?;
-        zip.write_all(&asset.png).map_err(|error| error.to_string())?;
+        zip.write_all(&asset.png)
+            .map_err(|error| error.to_string())?;
     }
     for (index, asset) in image_assets.iter().enumerate() {
         if asset.bytes.is_empty() {
@@ -346,15 +361,28 @@ pub fn diagram_assets_from_json(value: Option<&Value>) -> Vec<DiagramAsset> {
 }
 
 enum MarkdownBlock {
-    Heading { level: usize, content: String },
+    Heading {
+        level: usize,
+        content: String,
+    },
     Paragraph(String),
-    ListItem { ordered: bool, level: usize, content: String },
+    ListItem {
+        ordered: bool,
+        level: usize,
+        content: String,
+    },
     Quote(String),
     CodeBlock(String),
     HorizontalRule,
-    Table { headers: Vec<String>, rows: Vec<Vec<String>> },
+    Table {
+        headers: Vec<String>,
+        rows: Vec<Vec<String>>,
+    },
     Diagram(usize),
-    Image { source: String, alt: String },
+    Image {
+        source: String,
+        alt: String,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -408,7 +436,6 @@ impl InlineFlags {
             ..Self::default()
         }
     }
-
 }
 
 impl DocxTemplate {
@@ -416,7 +443,15 @@ impl DocxTemplate {
         let paragraph = value.and_then(|item| item.get("paragraph"));
         let paragraph_space_before = number_at(paragraph, "spaceBeforePt", 0.0).clamp(0.0, 24.0);
         let paragraph_space_after = number_at(paragraph, "spaceAfterPt", 6.0).clamp(0.0, 24.0);
-        let mut normal = text_style(value.and_then(|item| item.get("normal")), "Arial", 11.0, "#111827", "normal", 0.0, 0.0);
+        let mut normal = text_style(
+            value.and_then(|item| item.get("normal")),
+            "Arial",
+            11.0,
+            "#111827",
+            "normal",
+            0.0,
+            0.0,
+        );
         normal.space_before_pt = paragraph_space_before;
         normal.space_after_pt = paragraph_space_after;
         let heading_font = value
@@ -458,7 +493,15 @@ impl DocxTemplate {
             margin_left_mm: number_at(margins, "leftMm", 20.0),
             normal,
             headings,
-            code: text_style(value.and_then(|item| item.get("code")), "Consolas", 10.0, "#111827", "normal", 0.0, paragraph_space_after),
+            code: text_style(
+                value.and_then(|item| item.get("code")),
+                "Consolas",
+                10.0,
+                "#111827",
+                "normal",
+                0.0,
+                paragraph_space_after,
+            ),
             line_spacing: number_at(paragraph, "lineSpacing", 1.25).clamp(1.0, 2.5),
             space_after_pt: paragraph_space_after,
             include_title: document
@@ -547,7 +590,9 @@ fn markdown_blocks(markdown: &str) -> Vec<MarkdownBlock> {
             index += 1;
             continue;
         }
-        if let Some((alt, source)) = markdown_image_block(trimmed).or_else(|| html_image_block(trimmed)) {
+        if let Some((alt, source)) =
+            markdown_image_block(trimmed).or_else(|| html_image_block(trimmed))
+        {
             blocks.push(MarkdownBlock::Image { source, alt });
             index += 1;
             continue;
@@ -573,7 +618,11 @@ fn markdown_blocks(markdown: &str) -> Vec<MarkdownBlock> {
             continue;
         }
         if let Some((ordered, level, content)) = list_item(line) {
-            blocks.push(MarkdownBlock::ListItem { ordered, level, content });
+            blocks.push(MarkdownBlock::ListItem {
+                ordered,
+                level,
+                content,
+            });
             index += 1;
             continue;
         }
@@ -694,7 +743,10 @@ fn html_image_block(trimmed: &str) -> Option<(String, String)> {
     }
     let source = html_attr_value(trimmed, "src")?;
     Some((
-        html_attr_value(trimmed, "alt").unwrap_or("Imagen").trim().to_string(),
+        html_attr_value(trimmed, "alt")
+            .unwrap_or("Imagen")
+            .trim()
+            .to_string(),
         source.trim().to_string(),
     ))
 }
@@ -740,22 +792,42 @@ fn html_attr_value<'a>(tag: &'a str, attr: &str) -> Option<&'a str> {
 }
 
 fn heading_block(trimmed: &str) -> Option<(usize, String)> {
-    let hashes = trimmed.chars().take_while(|character| *character == '#').count();
+    let hashes = trimmed
+        .chars()
+        .take_while(|character| *character == '#')
+        .count();
     if !(1..=6).contains(&hashes) || !trimmed.chars().nth(hashes).is_some_and(char::is_whitespace) {
         return None;
     }
-    Some((hashes, trimmed[hashes..].trim().trim_end_matches('#').trim().to_string()))
+    Some((
+        hashes,
+        trimmed[hashes..]
+            .trim()
+            .trim_end_matches('#')
+            .trim()
+            .to_string(),
+    ))
 }
 
 fn list_item(line: &str) -> Option<(bool, usize, String)> {
-    let indent = line.chars().take_while(|character| character.is_whitespace()).count();
+    let indent = line
+        .chars()
+        .take_while(|character| character.is_whitespace())
+        .count();
     let level = indent / 2;
     let trimmed = line.trim_start();
-    if let Some(rest) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
+    if let Some(rest) = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+    {
         return Some((false, level, rest.trim().to_string()));
     }
     let split = trimmed.find(". ")?;
-    if split > 0 && trimmed[..split].chars().all(|character| character.is_ascii_digit()) {
+    if split > 0
+        && trimmed[..split]
+            .chars()
+            .all(|character| character.is_ascii_digit())
+    {
         return Some((true, level, trimmed[split + 2..].trim().to_string()));
     }
     None
@@ -783,7 +855,13 @@ fn is_fence_end(line: &str) -> bool {
 
 fn docx_styles_xml(template: &DocxTemplate) -> String {
     let heading_styles = (1..=6)
-        .map(|level| style_xml(&format!("Heading{level}"), &format!("Heading {level}"), template.heading(level)))
+        .map(|level| {
+            style_xml(
+                &format!("Heading{level}"),
+                &format!("Heading {level}"),
+                template.heading(level),
+            )
+        })
         .collect::<String>();
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">{}{}{}{}</w:styles>"#,
@@ -864,7 +942,11 @@ fn docx_table_row_xml(
     header: bool,
     link_rel_ids: &BTreeMap<String, String>,
 ) -> String {
-    let fill = if header { r#"<w:shd w:val="clear" w:color="auto" w:fill="F9FAFB"/>"# } else { "" };
+    let fill = if header {
+        r#"<w:shd w:val="clear" w:color="auto" w:fill="F9FAFB"/>"#
+    } else {
+        ""
+    };
     let cells_xml = cells
         .iter()
         .map(|cell| {
@@ -895,7 +977,9 @@ fn paragraph_spacing_xml(style: &DocxTextStyle, template: &DocxTemplate) -> Stri
     let before = (style.space_before_pt * 20.0).round() as i32;
     let after = (style.space_after_pt * 20.0).round() as i32;
     let line = (template.line_spacing * 240.0).round() as i32;
-    format!(r#"<w:spacing w:before="{before}" w:after="{after}" w:line="{line}" w:lineRule="auto"/>"#)
+    format!(
+        r#"<w:spacing w:before="{before}" w:after="{after}" w:line="{line}" w:lineRule="auto"/>"#
+    )
 }
 
 fn parse_inline_runs(
@@ -907,7 +991,11 @@ fn parse_inline_runs(
     parse_inline_segments(text)
         .into_iter()
         .map(|segment| {
-            let style = if segment.flags.code { &template.code } else { base_style };
+            let style = if segment.flags.code {
+                &template.code
+            } else {
+                base_style
+            };
             let color = if segment.link_target.is_some() {
                 Some(template.link_color.as_str())
             } else {
@@ -923,7 +1011,12 @@ fn parse_inline_runs(
                 .link_target
                 .as_ref()
                 .and_then(|target| link_rel_ids.get(target))
-                .map(|rel_id| format!(r#"<w:hyperlink r:id="{}">{run}</w:hyperlink>"#, xml_attr_escape(rel_id)))
+                .map(|rel_id| {
+                    format!(
+                        r#"<w:hyperlink r:id="{}">{run}</w:hyperlink>"#,
+                        xml_attr_escape(rel_id)
+                    )
+                })
                 .unwrap_or(run)
         })
         .filter(|run| !run.is_empty())
@@ -934,7 +1027,11 @@ fn parse_inline_segments(text: &str) -> Vec<InlineSegment> {
     parse_inline_segments_with(text, InlineFlags::default(), None)
 }
 
-fn parse_inline_segments_with(text: &str, active_flags: InlineFlags, active_link: Option<String>) -> Vec<InlineSegment> {
+fn parse_inline_segments_with(
+    text: &str,
+    active_flags: InlineFlags,
+    active_link: Option<String>,
+) -> Vec<InlineSegment> {
     let mut segments = Vec::new();
     let mut index = 0;
     while index < text.len() {
@@ -943,14 +1040,24 @@ fn parse_inline_segments_with(text: &str, active_flags: InlineFlags, active_link
             let mut flags = active_flags;
             flags.link = true;
             flags.underline = true;
-            segments.extend(parse_inline_segments_with(label, flags, Some(target.to_string())));
+            segments.extend(parse_inline_segments_with(
+                label,
+                flags,
+                Some(target.to_string()),
+            ));
             index += consumed;
             continue;
         }
-        if let Some((content, consumed)) = parse_wrapped(rest, "**", "**").or_else(|| parse_wrapped(rest, "__", "__")) {
+        if let Some((content, consumed)) =
+            parse_wrapped(rest, "**", "**").or_else(|| parse_wrapped(rest, "__", "__"))
+        {
             let mut flags = active_flags;
             flags.bold = true;
-            segments.extend(parse_inline_segments_with(content, flags, active_link.clone()));
+            segments.extend(parse_inline_segments_with(
+                content,
+                flags,
+                active_link.clone(),
+            ));
             index += consumed;
             continue;
         }
@@ -968,21 +1075,35 @@ fn parse_inline_segments_with(text: &str, active_flags: InlineFlags, active_link
         if let Some((content, consumed)) = parse_wrapped(rest, "~~", "~~") {
             let mut flags = active_flags;
             flags.strike = true;
-            segments.extend(parse_inline_segments_with(content, flags, active_link.clone()));
+            segments.extend(parse_inline_segments_with(
+                content,
+                flags,
+                active_link.clone(),
+            ));
             index += consumed;
             continue;
         }
         if let Some((content, consumed)) = parse_wrapped(rest, "<u>", "</u>") {
             let mut flags = active_flags;
             flags.underline = true;
-            segments.extend(parse_inline_segments_with(content, flags, active_link.clone()));
+            segments.extend(parse_inline_segments_with(
+                content,
+                flags,
+                active_link.clone(),
+            ));
             index += consumed;
             continue;
         }
-        if let Some((content, consumed)) = parse_wrapped(rest, "*", "*").or_else(|| parse_wrapped(rest, "_", "_")) {
+        if let Some((content, consumed)) =
+            parse_wrapped(rest, "*", "*").or_else(|| parse_wrapped(rest, "_", "_"))
+        {
             let mut flags = active_flags;
             flags.italic = true;
-            segments.extend(parse_inline_segments_with(content, flags, active_link.clone()));
+            segments.extend(parse_inline_segments_with(
+                content,
+                flags,
+                active_link.clone(),
+            ));
             index += consumed;
             continue;
         }
@@ -1048,7 +1169,10 @@ fn collect_docx_link_relationships(blocks: &[MarkdownBlock]) -> BTreeMap<String,
 
 fn collect_link_targets(markdown: &str, targets: &mut BTreeMap<String, ()>) {
     for segment in parse_inline_segments(markdown) {
-        if let Some(target) = segment.link_target.filter(|target| is_external_link(target)) {
+        if let Some(target) = segment
+            .link_target
+            .filter(|target| is_external_link(target))
+        {
             targets.insert(target, ());
         }
     }
@@ -1101,7 +1225,12 @@ fn next_inline_marker(value: &str) -> Option<usize> {
         .min()
 }
 
-fn text_run(text: &str, style: &DocxTextStyle, template: &DocxTemplate, flags: InlineFlags) -> String {
+fn text_run(
+    text: &str,
+    style: &DocxTextStyle,
+    template: &DocxTemplate,
+    flags: InlineFlags,
+) -> String {
     text_run_with_override(text, style, template, flags, None)
 }
 
@@ -1115,7 +1244,10 @@ fn text_run_with_override(
     if text.is_empty() {
         return String::new();
     }
-    let preserve = if text.starts_with(char::is_whitespace) || text.ends_with(char::is_whitespace) || text.contains("  ") {
+    let preserve = if text.starts_with(char::is_whitespace)
+        || text.ends_with(char::is_whitespace)
+        || text.contains("  ")
+    {
         r#" xml:space="preserve""#
     } else {
         ""
@@ -1127,7 +1259,11 @@ fn text_run_with_override(
     )
 }
 
-fn run_properties_xml(style: &DocxTextStyle, color_override: Option<&str>, flags: InlineFlags) -> String {
+fn run_properties_xml(
+    style: &DocxTextStyle,
+    color_override: Option<&str>,
+    flags: InlineFlags,
+) -> String {
     let color = color_value(color_override.unwrap_or(&style.color));
     let size = (style.font_size_pt * 2.0).round() as i32;
     let format = style.text_format.to_ascii_lowercase();
@@ -1142,9 +1278,17 @@ fn run_properties_xml(style: &DocxTextStyle, color_override: Option<&str>, flags
         xml_attr_escape(&style.font_family),
         if bold { "<w:b/>" } else { "" },
         if italic { "<w:i/>" } else { "" },
-        if underline { r#"<w:u w:val="single"/>"# } else { "" },
+        if underline {
+            r#"<w:u w:val="single"/>"#
+        } else {
+            ""
+        },
         if strike { "<w:strike/>" } else { "" },
-        if flags.code { r#"<w:highlight w:val="lightGray"/>"# } else { "" },
+        if flags.code {
+            r#"<w:highlight w:val="lightGray"/>"#
+        } else {
+            ""
+        },
     )
 }
 
@@ -1240,7 +1384,9 @@ fn jpeg_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
         if segment_len < 2 || index + segment_len > bytes.len() {
             break;
         }
-        if matches!(marker, 0xC0..=0xC3 | 0xC5..=0xC7 | 0xC9..=0xCB | 0xCD..=0xCF) && segment_len >= 7 {
+        if matches!(marker, 0xC0..=0xC3 | 0xC5..=0xC7 | 0xC9..=0xCB | 0xCD..=0xCF)
+            && segment_len >= 7
+        {
             let height = u16::from_be_bytes(bytes[index + 3..index + 5].try_into().ok()?) as u32;
             let width = u16::from_be_bytes(bytes[index + 5..index + 7].try_into().ok()?) as u32;
             return Some((width, height));
@@ -1255,10 +1401,8 @@ fn webp_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
         return None;
     }
     if &bytes[12..16] == b"VP8X" && bytes.len() >= 30 {
-        let width = 1
-            + u32::from_le_bytes([bytes[24], bytes[25], bytes[26], 0]);
-        let height = 1
-            + u32::from_le_bytes([bytes[27], bytes[28], bytes[29], 0]);
+        let width = 1 + u32::from_le_bytes([bytes[24], bytes[25], bytes[26], 0]);
+        let height = 1 + u32::from_le_bytes([bytes[27], bytes[28], bytes[29], 0]);
         return Some((width, height));
     }
     None
@@ -1273,7 +1417,10 @@ fn image_extension(asset: &ExportImageAsset) -> &'static str {
     }
 }
 
-fn find_image_asset<'a>(assets: &'a [ExportImageAsset], source: &str) -> Option<&'a ExportImageAsset> {
+fn find_image_asset<'a>(
+    assets: &'a [ExportImageAsset],
+    source: &str,
+) -> Option<&'a ExportImageAsset> {
     assets.iter().find(|asset| asset.source == source)
 }
 
@@ -1309,19 +1456,40 @@ fn print_pdf_with_diagrams_and_template(
 ) -> Option<Vec<u8>> {
     let mut context = PdfRenderContext::new(title, template);
     if template.include_title {
-        context.render_wrapped_text(title, template.heading(1), 0.0, template.heading(1).space_after_pt + 8.0);
+        context.render_wrapped_text(
+            title,
+            template.heading(1),
+            0.0,
+            template.heading(1).space_after_pt + 8.0,
+        );
     }
 
     for block in markdown_blocks(markdown) {
         match block {
             MarkdownBlock::Heading { level, content } => {
                 let style = template.heading(level);
-                context.render_wrapped_markdown(&content, style, 0.0, style.space_after_pt, template);
+                context.render_wrapped_markdown(
+                    &content,
+                    style,
+                    0.0,
+                    style.space_after_pt,
+                    template,
+                );
             }
             MarkdownBlock::Paragraph(content) => {
-                context.render_wrapped_markdown(&content, &template.normal, 0.0, template.normal.space_after_pt, template);
+                context.render_wrapped_markdown(
+                    &content,
+                    &template.normal,
+                    0.0,
+                    template.normal.space_after_pt,
+                    template,
+                );
             }
-            MarkdownBlock::ListItem { ordered, level, content } => {
+            MarkdownBlock::ListItem {
+                ordered,
+                level,
+                content,
+            } => {
                 let marker = if content.starts_with("[ ] ") {
                     "[ ] "
                 } else if content.starts_with("[x] ") || content.starts_with("[X] ") {
@@ -1348,7 +1516,13 @@ fn print_pdf_with_diagrams_and_template(
             MarkdownBlock::Quote(content) => {
                 let mut quote_style = template.normal.clone();
                 quote_style.color = "#6B7280".to_string();
-                context.render_wrapped_markdown(&content, &quote_style, 18.0, quote_style.space_after_pt, template);
+                context.render_wrapped_markdown(
+                    &content,
+                    &quote_style,
+                    18.0,
+                    quote_style.space_after_pt,
+                    template,
+                );
             }
             MarkdownBlock::CodeBlock(content) => {
                 for line in content.lines() {
@@ -1359,7 +1533,12 @@ fn print_pdf_with_diagrams_and_template(
             MarkdownBlock::HorizontalRule => {
                 let mut rule_style = template.normal.clone();
                 rule_style.color = template.horizontal_rule_color.clone();
-                context.render_wrapped_text("________________________________________", &rule_style, 0.0, template.space_after_pt);
+                context.render_wrapped_text(
+                    "________________________________________",
+                    &rule_style,
+                    0.0,
+                    template.space_after_pt,
+                );
             }
             MarkdownBlock::Table { headers, rows } => {
                 context.render_table(&headers, &rows, template);
@@ -1408,7 +1587,11 @@ impl PdfRenderContext {
     }
 
     fn content_width_pt(&self, indent_pt: f32) -> f32 {
-        (mm_to_pt(self.page_width_mm as f64) as f32 - self.margin_left_pt - self.margin_right_pt - indent_pt).max(120.0)
+        (mm_to_pt(self.page_width_mm as f64) as f32
+            - self.margin_left_pt
+            - self.margin_right_pt
+            - indent_pt)
+            .max(120.0)
     }
 
     fn ensure_space(&mut self, needed_pt: f32) {
@@ -1430,13 +1613,25 @@ impl PdfRenderContext {
         self.y = self.page_height_pt - self.margin_top_pt;
     }
 
-    fn render_wrapped_text(&mut self, text: &str, style: &DocxTextStyle, indent_pt: f32, after_pt: f64) {
+    fn render_wrapped_text(
+        &mut self,
+        text: &str,
+        style: &DocxTextStyle,
+        indent_pt: f32,
+        after_pt: f64,
+    ) {
         let segment = InlineSegment {
             text: text.to_string(),
             flags: InlineFlags::default(),
             link_target: None,
         };
-        self.render_wrapped_segments(&[segment], style, indent_pt, after_pt, &DocxTemplate::from_value(None));
+        self.render_wrapped_segments(
+            &[segment],
+            style,
+            indent_pt,
+            after_pt,
+            &DocxTemplate::from_value(None),
+        );
     }
 
     fn render_wrapped_markdown(
@@ -1447,7 +1642,13 @@ impl PdfRenderContext {
         after_pt: f64,
         template: &DocxTemplate,
     ) {
-        self.render_wrapped_segments(&parse_inline_segments(markdown), style, indent_pt, after_pt, template);
+        self.render_wrapped_segments(
+            &parse_inline_segments(markdown),
+            style,
+            indent_pt,
+            after_pt,
+            template,
+        );
     }
 
     fn render_wrapped_segments(
@@ -1460,11 +1661,18 @@ impl PdfRenderContext {
     ) {
         let font_size = style.font_size_pt as f32;
         let line_height = (font_size * 1.25).max(font_size + 3.0);
-        let lines = wrap_inline_segments(segments, style, template, self.content_width_pt(indent_pt));
+        let lines =
+            wrap_inline_segments(segments, style, template, self.content_width_pt(indent_pt));
         self.y -= style.space_before_pt as f32;
         for line in lines {
             self.ensure_space(line_height);
-            self.draw_inline_line(&line, self.margin_left_pt + indent_pt, self.y, style, template);
+            self.draw_inline_line(
+                &line,
+                self.margin_left_pt + indent_pt,
+                self.y,
+                style,
+                template,
+            );
             self.y -= line_height;
         }
         self.y -= after_pt as f32;
@@ -1492,17 +1700,45 @@ impl PdfRenderContext {
                 pdf_color(&style.color)
             };
             let width = text_width_pt(&segment.text, size, flags.code);
-            self.draw_text_line(&segment.text, x_pt, y_pt, self.pdf_font_with_flags(&style, flags), size, color);
+            self.draw_text_line(
+                &segment.text,
+                x_pt,
+                y_pt,
+                self.pdf_font_with_flags(&style, flags),
+                size,
+                color,
+            );
             if flags.underline {
-                self.draw_line(x_pt, y_pt - size * 0.18, x_pt + width, y_pt - size * 0.18, pdf_color(&template.link_color));
+                self.draw_line(
+                    x_pt,
+                    y_pt - size * 0.18,
+                    x_pt + width,
+                    y_pt - size * 0.18,
+                    pdf_color(&template.link_color),
+                );
             }
             if flags.strike {
-                self.draw_line(x_pt, y_pt + size * 0.32, x_pt + width, y_pt + size * 0.32, pdf_color(&style.color));
+                self.draw_line(
+                    x_pt,
+                    y_pt + size * 0.32,
+                    x_pt + width,
+                    y_pt + size * 0.32,
+                    pdf_color(&style.color),
+                );
             }
-            if let Some(target) = segment.link_target.as_deref().filter(|target| is_external_link(target)) {
+            if let Some(target) = segment
+                .link_target
+                .as_deref()
+                .filter(|target| is_external_link(target))
+            {
                 self.ops.push(Op::LinkAnnotation {
                     link: LinkAnnotation::new(
-                        Rect::from_xywh(Pt(x_pt), Pt(y_pt - size * 0.25), Pt(width.max(1.0)), Pt(size * 1.25)),
+                        Rect::from_xywh(
+                            Pt(x_pt),
+                            Pt(y_pt - size * 0.25),
+                            Pt(width.max(1.0)),
+                            Pt(size * 1.25),
+                        ),
                         Actions::uri(target.to_string()),
                         Some(BorderArray::Solid([0.0, 0.0, 0.0])),
                         Some(ColorArray::Transparent),
@@ -1514,13 +1750,24 @@ impl PdfRenderContext {
         }
     }
 
-    fn draw_text_line(&mut self, text: &str, x_pt: f32, y_pt: f32, font: PdfFontHandle, size: f32, color: Color) {
+    fn draw_text_line(
+        &mut self,
+        text: &str,
+        x_pt: f32,
+        y_pt: f32,
+        font: PdfFontHandle,
+        size: f32,
+        color: Color,
+    ) {
         self.ops.extend_from_slice(&[
             Op::StartTextSection,
             Op::SetTextCursor {
                 pos: Point::new(Mm(x_pt * 25.4 / 72.0), Mm(y_pt * 25.4 / 72.0)),
             },
-            Op::SetFont { font, size: Pt(size) },
+            Op::SetFont {
+                font,
+                size: Pt(size),
+            },
             Op::SetLineHeight { lh: Pt(size + 3.0) },
             Op::SetFillColor { col: color },
             Op::ShowText {
@@ -1592,14 +1839,21 @@ impl PdfRenderContext {
         let wrapped = cells
             .iter()
             .take(columns)
-            .map(|cell| wrap_inline_segments(&parse_inline_segments(cell), style, template, cell_width))
+            .map(|cell| {
+                wrap_inline_segments(&parse_inline_segments(cell), style, template, cell_width)
+            })
             .collect::<Vec<_>>();
         let line_count = wrapped.iter().map(Vec::len).max().unwrap_or(1).max(1);
         let row_height = line_count as f32 * line_height + padding * 2.0;
         self.ensure_space(row_height + 2.0);
         let row_top = self.y;
         let row_bottom = self.y - row_height;
-        self.draw_horizontal_line(self.margin_left_pt, self.margin_left_pt + column_width * columns as f32, row_top, rule_color.clone());
+        self.draw_horizontal_line(
+            self.margin_left_pt,
+            self.margin_left_pt + column_width * columns as f32,
+            row_top,
+            rule_color.clone(),
+        );
         for column in 0..=columns {
             let x = self.margin_left_pt + column_width * column as f32;
             self.draw_vertical_line(x, row_top, row_bottom, rule_color.clone());
@@ -1607,12 +1861,18 @@ impl PdfRenderContext {
         for (column, lines) in wrapped.iter().enumerate() {
             let x = self.margin_left_pt + column_width * column as f32 + padding;
             for (line_index, line) in lines.iter().enumerate() {
-                let y = row_top - padding - style.font_size_pt as f32 - line_index as f32 * line_height;
+                let y =
+                    row_top - padding - style.font_size_pt as f32 - line_index as f32 * line_height;
                 let _ = &color;
                 self.draw_inline_line(line, x, y, style, template);
             }
         }
-        self.draw_horizontal_line(self.margin_left_pt, self.margin_left_pt + column_width * columns as f32, row_bottom, rule_color);
+        self.draw_horizontal_line(
+            self.margin_left_pt,
+            self.margin_left_pt + column_width * columns as f32,
+            row_bottom,
+            rule_color,
+        );
         self.y -= row_height;
     }
 
@@ -1658,7 +1918,10 @@ impl PdfRenderContext {
         diagram_assets: &[DiagramAsset],
         template: &DocxTemplate,
     ) -> Option<()> {
-        let Some(asset) = diagram_assets.get(index).filter(|asset| !asset.png.is_empty()) else {
+        let Some(asset) = diagram_assets
+            .get(index)
+            .filter(|asset| !asset.png.is_empty())
+        else {
             return Some(());
         };
         let mut warnings = Vec::new();
@@ -1682,7 +1945,11 @@ impl PdfRenderContext {
             },
         });
         self.y -= image_height + 8.0;
-        if let Some(caption) = asset.caption.as_ref().filter(|caption| !caption.trim().is_empty()) {
+        if let Some(caption) = asset
+            .caption
+            .as_ref()
+            .filter(|caption| !caption.trim().is_empty())
+        {
             let mut caption_style = template.normal.clone();
             caption_style.font_size_pt = (caption_style.font_size_pt - 1.0).max(8.0);
             caption_style.color = "#6B7280".to_string();
@@ -1711,7 +1978,10 @@ impl PdfRenderContext {
         };
         if !self.render_raw_image(&asset.bytes, template) {
             self.render_wrapped_text(
-                &format!("[Imagen no compatible: {}]", asset.alt.as_deref().unwrap_or(alt)),
+                &format!(
+                    "[Imagen no compatible: {}]",
+                    asset.alt.as_deref().unwrap_or(alt)
+                ),
                 &template.normal,
                 0.0,
                 template.space_after_pt,
@@ -1774,13 +2044,15 @@ impl PdfRenderContext {
         let family = style.font_family.to_ascii_lowercase();
         let format = style.text_format.to_ascii_lowercase();
         let bold = flags.bold || format.contains("bold");
-        let external = if family.contains("courier") || family.contains("consolas") || family.contains("mono") {
-            self.mono_font.as_ref().or(self.regular_font.as_ref())
-        } else if bold {
-            self.bold_font.as_ref().or(self.regular_font.as_ref())
-        } else {
-            self.regular_font.as_ref()
-        };
+        let external =
+            if family.contains("courier") || family.contains("consolas") || family.contains("mono")
+            {
+                self.mono_font.as_ref().or(self.regular_font.as_ref())
+            } else if bold {
+                self.bold_font.as_ref().or(self.regular_font.as_ref())
+            } else {
+                self.regular_font.as_ref()
+            };
         external
             .cloned()
             .map(PdfFontHandle::External)
@@ -1931,14 +2203,16 @@ fn wrap_inline_segments(
                 format!(" {word}")
             };
             let style = pdf_segment_style(&token, base_style, template);
-            let token_width = text_width_pt(&token.text, style.font_size_pt as f32, token.flags.code);
+            let token_width =
+                text_width_pt(&token.text, style.font_size_pt as f32, token.flags.code);
             if current_width + token_width > width_pt && !current.is_empty() {
                 lines.push(std::mem::take(&mut current));
                 current_width = 0.0;
                 token.text = word.to_string();
             }
             let style = pdf_segment_style(&token, base_style, template);
-            let token_width = text_width_pt(&token.text, style.font_size_pt as f32, token.flags.code);
+            let token_width =
+                text_width_pt(&token.text, style.font_size_pt as f32, token.flags.code);
             push_inline_segment(&mut current, token);
             current_width += token_width;
         }
@@ -1954,7 +2228,11 @@ fn text_width_pt(text: &str, font_size: f32, mono: bool) -> f32 {
     text.chars().count() as f32 * font_size * factor
 }
 
-fn pdf_segment_style(segment: &InlineSegment, base_style: &DocxTextStyle, template: &DocxTemplate) -> DocxTextStyle {
+fn pdf_segment_style(
+    segment: &InlineSegment,
+    base_style: &DocxTextStyle,
+    template: &DocxTemplate,
+) -> DocxTextStyle {
     let mut style = if segment.flags.code {
         template.code.clone()
     } else {
@@ -1987,18 +2265,26 @@ fn plain_markdown_text(value: &str) -> String {
         if !output[target_start..].starts_with('(') {
             break;
         }
-        let Some(target_end) = find_markdown_link_close(&output[target_start + 1..]).map(|index| target_start + 1 + index) else {
+        let Some(target_end) = find_markdown_link_close(&output[target_start + 1..])
+            .map(|index| target_start + 1 + index)
+        else {
             break;
         };
         let alt = output[start + 2..alt_end].to_string();
         output.replace_range(start..=target_end, &alt);
     }
     while let Some(start) = output.find('[') {
-        let Some(label_end) = output[start + 1..].find("](").map(|index| start + 1 + index) else {
+        let Some(label_end) = output[start + 1..]
+            .find("](")
+            .map(|index| start + 1 + index)
+        else {
             break;
         };
         let target_start = label_end + 2;
-        let Some(target_end) = output[target_start..].find(')').map(|index| target_start + index) else {
+        let Some(target_end) = output[target_start..]
+            .find(')')
+            .map(|index| target_start + index)
+        else {
             break;
         };
         let label = output[start + 1..label_end].to_string();
@@ -2474,7 +2760,8 @@ mod tests {
             bytes: png,
         }];
 
-        write_docx_with_assets_template_and_title(&path, markdown, &[], &image_assets, None, None).unwrap();
+        write_docx_with_assets_template_and_title(&path, markdown, &[], &image_assets, None, None)
+            .unwrap();
 
         let file = std::fs::File::open(&path).unwrap();
         let mut archive = zip::ZipArchive::new(file).unwrap();
@@ -2552,9 +2839,14 @@ mod tests {
         assert!(document_xml.contains(r#"<w:pStyle w:val="CodeBlock"/>"#));
         assert!(document_xml.contains(r#"<w:ind w:left="720" w:hanging="360"/>"#));
         assert!(document_xml.contains(r#"<w:pgSz w:w="12240" w:h="15840"/>"#));
-        assert!(document_xml.contains(r#"<w:pgMar w:top="567" w:right="624" w:bottom="680" w:left="737""#));
-        assert!(document_xml.contains(r#"<w:spacing w:before="280" w:after="180" w:line="360" w:lineRule="auto"/>"#));
-        assert!(document_xml.contains(r#"<w:spacing w:before="40" w:after="160" w:line="360" w:lineRule="auto"/>"#));
+        assert!(document_xml
+            .contains(r#"<w:pgMar w:top="567" w:right="624" w:bottom="680" w:left="737""#));
+        assert!(document_xml.contains(
+            r#"<w:spacing w:before="280" w:after="180" w:line="360" w:lineRule="auto"/>"#
+        ));
+        assert!(document_xml.contains(
+            r#"<w:spacing w:before="40" w:after="160" w:line="360" w:lineRule="auto"/>"#
+        ));
         assert!(document_xml.contains("Documento configurado"));
         assert!(document_xml.contains(r#"<w:b/>"#));
         assert!(document_xml.contains(r#"<w:i/>"#));
@@ -2577,7 +2869,8 @@ mod tests {
 
     #[test]
     fn markdown_parser_detects_pipe_tables() {
-        let markdown = "| Control | Aplicacion practica |\n| --- | --- |\n| Revision | Evidencia trazable |\n";
+        let markdown =
+            "| Control | Aplicacion practica |\n| --- | --- |\n| Revision | Evidencia trazable |\n";
         let blocks = markdown_blocks(markdown);
         assert!(matches!(
             blocks.first(),
@@ -2589,14 +2882,23 @@ mod tests {
     fn inline_parser_preserves_editor_styles_and_links() {
         let segments = parse_inline_segments("Texto **negrita**, *cursiva*, ~~tachado~~, <u>subrayado</u>, `codigo` y [web](https://knownext.ai).");
 
-        assert!(segments.iter().any(|segment| segment.text == "negrita" && segment.flags.bold));
-        assert!(segments.iter().any(|segment| segment.text == "cursiva" && segment.flags.italic));
-        assert!(segments.iter().any(|segment| segment.text == "tachado" && segment.flags.strike));
-        assert!(segments.iter().any(|segment| segment.text == "subrayado" && segment.flags.underline));
-        assert!(segments.iter().any(|segment| segment.text == "codigo" && segment.flags.code));
         assert!(segments
             .iter()
-            .any(|segment| segment.text == "web" && segment.link_target.as_deref() == Some("https://knownext.ai")));
+            .any(|segment| segment.text == "negrita" && segment.flags.bold));
+        assert!(segments
+            .iter()
+            .any(|segment| segment.text == "cursiva" && segment.flags.italic));
+        assert!(segments
+            .iter()
+            .any(|segment| segment.text == "tachado" && segment.flags.strike));
+        assert!(segments
+            .iter()
+            .any(|segment| segment.text == "subrayado" && segment.flags.underline));
+        assert!(segments
+            .iter()
+            .any(|segment| segment.text == "codigo" && segment.flags.code));
+        assert!(segments.iter().any(|segment| segment.text == "web"
+            && segment.link_target.as_deref() == Some("https://knownext.ai")));
     }
 
     #[test]

@@ -18,13 +18,22 @@ describe("TitleBar", () => {
 
   afterEach(() => cleanup());
 
-  it("drags the window from the header on a single primary pointer down", () => {
+  it("drags the window from the header when the pointer moves", () => {
     render(<TitleBar />);
 
     const pointerDown = new Event("pointerdown", { bubbles: true, cancelable: true });
     Object.defineProperty(pointerDown, "button", { value: 0 });
     Object.defineProperty(pointerDown, "detail", { value: 1 });
+    Object.defineProperty(pointerDown, "clientX", { value: 80 });
+    Object.defineProperty(pointerDown, "clientY", { value: 12 });
     screen.getByRole("banner").dispatchEvent(pointerDown);
+
+    expect(startWindowDrag).not.toHaveBeenCalled();
+
+    const pointerMove = new Event("pointermove", { bubbles: true, cancelable: true });
+    Object.defineProperty(pointerMove, "clientX", { value: 90 });
+    Object.defineProperty(pointerMove, "clientY", { value: 13 });
+    window.dispatchEvent(pointerMove);
 
     expect(startWindowDrag).toHaveBeenCalledTimes(1);
     expect(toggleMaximizeWindow).not.toHaveBeenCalled();

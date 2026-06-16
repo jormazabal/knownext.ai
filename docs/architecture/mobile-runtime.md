@@ -74,7 +74,7 @@ Do not put OpenAI credentials in `VITE_*` variables or Android build inputs. The
 
 Private Android distribution uses the visible `Buscar actualizaciones` action, but the implementation is Android-specific:
 
-1. The app reads `https://github.com/jormazabal/knownext.ai/releases/latest/download/android-latest.json` unless `VITE_ANDROID_UPDATE_MANIFEST_URL` is set at build time.
+1. The Android native bridge reads `https://github.com/jormazabal/knownext.ai/releases/latest/download/android-latest.json` unless `VITE_ANDROID_UPDATE_MANIFEST_URL` is set at build time. Do not fetch this manifest from the WebView; GitHub Release redirects can fail there because of browser CORS rules.
 2. The manifest must declare `applicationId=ai.knownext.mobile`, a higher `versionCode`, an HTTPS APK URL, APK size, ABI, and SHA-256 digest.
 3. The Android bridge downloads the APK to app cache, verifies SHA-256, checks the package id, checks the exact published `versionCode`, rejects downgrades, and confirms the APK is signed with the same certificate as the installed app.
 4. The app opens Android's system installer. Android may require the user to grant KnowNext.ai permission to install unknown apps before continuing.

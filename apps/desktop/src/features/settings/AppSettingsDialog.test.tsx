@@ -399,7 +399,7 @@ describe("AppSettingsDialog", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Capacidades" }));
     expect(screen.getByText("1. Diagramas")).toBeInTheDocument();
     expect(screen.getByText("2. Imágenes")).toBeInTheDocument();
-    expect(screen.getByText("5. Tareas agénticas")).toBeInTheDocument();
+    expect(screen.getByText("5. Investigación")).toBeInTheDocument();
   });
 
   it("shows configurable image generation backed by the Rust runtime contract", () => {
@@ -636,7 +636,7 @@ describe("AppSettingsDialog", () => {
     });
   });
 
-  it("configures local guided agentic tasks while keeping web research unavailable", () => {
+  it("configures simplified research settings", () => {
     const onAiChange = vi.fn();
 
     render(
@@ -649,17 +649,29 @@ describe("AppSettingsDialog", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "Capacidades" }));
 
-    expect(screen.getByText("5. Tareas agénticas")).toBeInTheDocument();
-    expect(screen.getAllByText("Control desde el prompt").length).toBeGreaterThan(0);
-    expect(screen.getByText("Investigación web")).toBeInTheDocument();
-    expect(screen.getByText(/No disponible hasta que la app pueda investigar en web/i)).toBeInTheDocument();
+    expect(screen.getByText("5. Investigación")).toBeInTheDocument();
+    expect(screen.getByLabelText("Coste máximo por investigación")).toBeInTheDocument();
+    expect(screen.getByText("Diagramas")).toBeInTheDocument();
+    expect(screen.getByText("Imágenes")).toBeInTheDocument();
+    expect(screen.queryByText("Control desde el prompt")).not.toBeInTheDocument();
+    expect(screen.queryByText("Investigación web")).not.toBeInTheDocument();
+    expect(screen.queryByText("Tipos de investigación")).not.toBeInTheDocument();
+    expect(screen.queryByText("Pasos")).not.toBeInTheDocument();
+    expect(screen.queryByText("Fuentes")).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Pasos"), { target: { value: "8" } });
+    fireEvent.change(screen.getByLabelText("Coste máximo por investigación"), { target: { value: "2.5" } });
 
     expect(onAiChange).toHaveBeenLastCalledWith(expect.objectContaining({
       agentic: expect.objectContaining({
-        maxSteps: 8,
-        webResearchEnabled: false,
+        maxEstimatedCostEur: 2.5,
+      }),
+    }));
+
+    fireEvent.click(screen.getAllByRole("switch", { name: "Diagramas" })[0]);
+
+    expect(onAiChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      agentic: expect.objectContaining({
+        researchDiagramsEnabled: false,
       }),
     }));
   });

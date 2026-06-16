@@ -87,6 +87,7 @@ type MarkdownToolbarProps = {
   editorReady: boolean;
   extendedUnderlineEnabled?: boolean;
   markdownZoomPercent: number;
+  markdownSourceVisible?: boolean;
   activeActions: MarkdownEditorFormatState;
   editorHistoryState: MarkdownEditorHistoryState;
   imageInsertionEnabled?: boolean;
@@ -95,6 +96,7 @@ type MarkdownToolbarProps = {
   onRunEditorAction: (action: MarkdownEditorAction, options?: MarkdownEditorActionOptions) => void;
   onExportDocument: (format: ExportFormat) => void;
   onMarkdownZoomChange: (zoomPercent: number) => void;
+  onToggleMarkdownSource?: () => void;
   onToggleHistory: () => void;
 };
 
@@ -105,6 +107,7 @@ export function MarkdownToolbar({
   editorReady,
   extendedUnderlineEnabled = true,
   markdownZoomPercent,
+  markdownSourceVisible = false,
   activeActions,
   editorHistoryState,
   imageInsertionEnabled = true,
@@ -113,6 +116,7 @@ export function MarkdownToolbar({
   onRunEditorAction,
   onExportDocument,
   onMarkdownZoomChange,
+  onToggleMarkdownSource,
   onToggleHistory,
 }: MarkdownToolbarProps) {
   const [openMenu, setOpenMenu] = useState<"block" | "format" | "structure" | "insert" | "table" | "export" | "zoom" | null>(null);
@@ -211,10 +215,15 @@ export function MarkdownToolbar({
         <ToolbarMenuButton
           label="Más opciones"
           icon={MoreHorizontal}
-          disabled={!editorReady}
+          disabled={false}
           expanded={compactOptionsOpen}
           onMouseDown={keepEditorSelection}
           onClick={openCompactOptions}
+        />
+        <MarkdownSourceToggleButton
+          active={markdownSourceVisible}
+          onMouseDown={keepEditorSelection}
+          onToggle={onToggleMarkdownSource}
         />
 
         <ToolbarHistoryActions
@@ -232,6 +241,7 @@ export function MarkdownToolbar({
             historyEnabled={historyEnabled}
             historyDisabledReason={historyDisabledReason}
             markdownZoomPercent={markdownZoomPercent}
+            markdownSourceVisible={markdownSourceVisible}
             imageInsertionEnabled={imageInsertionEnabled}
             diagramInsertionEnabled={diagramInsertionEnabled}
             documentActionsEnabled={documentActionsEnabled}
@@ -245,6 +255,10 @@ export function MarkdownToolbar({
             onMarkdownZoomChange={(zoomPercent) => {
               setCompactOptionsOpen(false);
               onMarkdownZoomChange(zoomPercent);
+            }}
+            onToggleMarkdownSource={() => {
+              setCompactOptionsOpen(false);
+              onToggleMarkdownSource?.();
             }}
             onToggleHistory={() => {
               setCompactOptionsOpen(false);
@@ -471,6 +485,11 @@ export function MarkdownToolbar({
       </ToolbarActionGroup>
 
       <div className="ml-auto flex shrink-0 items-center gap-1">
+        <MarkdownSourceToggleButton
+          active={markdownSourceVisible}
+          onMouseDown={keepEditorSelection}
+          onToggle={onToggleMarkdownSource}
+        />
         <div className="relative shrink-0">
           <button
             className="toolbar-select knownext-markdown-zoom-select"
@@ -612,6 +631,7 @@ function CompactToolbarOptionsDialog({
   historyEnabled,
   historyDisabledReason,
   markdownZoomPercent,
+  markdownSourceVisible,
   imageInsertionEnabled,
   diagramInsertionEnabled,
   documentActionsEnabled,
@@ -620,6 +640,7 @@ function CompactToolbarOptionsDialog({
   onRunAction,
   onExportDocument,
   onMarkdownZoomChange,
+  onToggleMarkdownSource,
   onToggleHistory,
 }: {
   activeActions: MarkdownEditorFormatState;
@@ -628,6 +649,7 @@ function CompactToolbarOptionsDialog({
   historyEnabled: boolean;
   historyDisabledReason: string;
   markdownZoomPercent: number;
+  markdownSourceVisible: boolean;
   imageInsertionEnabled: boolean;
   diagramInsertionEnabled: boolean;
   documentActionsEnabled: boolean;
@@ -636,6 +658,7 @@ function CompactToolbarOptionsDialog({
   onRunAction: (action: MarkdownEditorAction, options?: MarkdownEditorActionOptions) => void;
   onExportDocument: (format: ExportFormat) => void;
   onMarkdownZoomChange: (zoomPercent: number) => void;
+  onToggleMarkdownSource: () => void;
   onToggleHistory: () => void;
 }) {
   return (
@@ -723,8 +746,20 @@ function CompactToolbarOptionsDialog({
             </CompactToolbarSection>
           ) : null}
 
-          <CompactToolbarSection title="Zoom">
-            <div className="grid grid-cols-3 gap-2">
+          <CompactToolbarSection title="Visualización">
+            <button
+              className={`col-span-2 flex h-10 items-center gap-2 rounded-md border px-3 text-left text-[12px] font-semibold transition ${
+                markdownSourceVisible ? "border-brand-orange bg-brand-hover text-brand-orange" : "border-line text-ink-primary hover:bg-brand-hover"
+              }`}
+              type="button"
+              aria-pressed={markdownSourceVisible}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={onToggleMarkdownSource}
+            >
+              <Code2 size={15} />
+              <span className="min-w-0 flex-1 truncate">{markdownSourceVisible ? "Vista visual" : "MD puro"}</span>
+            </button>
+            <div className="col-span-2 grid grid-cols-3 gap-2">
               {markdownZoomOptions.map((zoomPercent) => (
                 <button
                   key={zoomPercent}
@@ -740,6 +775,31 @@ function CompactToolbarOptionsDialog({
         </div>
       </section>
     </div>
+  );
+}
+
+function MarkdownSourceToggleButton({
+  active,
+  onMouseDown,
+  onToggle,
+}: {
+  active: boolean;
+  onMouseDown: (event: MouseEvent<HTMLButtonElement>) => void;
+  onToggle?: () => void;
+}) {
+  const label = active ? "Mostrar vista visual" : "Mostrar Markdown puro";
+  return (
+    <button
+      className={`toolbar-button ${active ? "toolbar-button-active" : ""}`}
+      type="button"
+      data-tooltip={label}
+      aria-label={label}
+      aria-pressed={active}
+      onMouseDown={onMouseDown}
+      onClick={() => onToggle?.()}
+    >
+      <Code2 size={15} />
+    </button>
   );
 }
 
