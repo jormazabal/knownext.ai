@@ -2,6 +2,12 @@
 
 All KnowNext.ai releases use one monolithic application version for the frontend, Tauri shell, Rust runtime, Windows updater, and Android updater.
 
+## 2.5.1 - 2026-06-19
+
+- Fixed Git status path decoding for files with UTF-8 names, including generated assets with Spanish accents such as `Cronologia`, `Guia`, `decision`, `Linea` and `Nino`, so the save and synchronization drawer no longer shows mojibake such as `CronologÃ­a`.
+- Applied the same Git path decoding to local and remote diff paths so local history and GitHub pending states match the real filesystem paths.
+- Added Rust contract coverage for the file synchronization overview and Git quoted-path parser with accented filenames.
+
 ## 2.5.0 - 2026-06-16
 
 - Added the professional `Investigación` flow: a single prompt capability prepares a reviewable plan, proposes candidate sources and report length, runs a Rust-orchestrated research job, and creates a new reviewable Markdown report.

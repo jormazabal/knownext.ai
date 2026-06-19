@@ -7302,25 +7302,26 @@ fn unquote_git_path(path: &str) -> String {
         return trimmed.to_string();
     }
     let mut chars = trimmed[1..].chars().peekable();
-    let mut output = String::new();
+    let mut output = Vec::<u8>::new();
     while let Some(character) = chars.next() {
         if character == '"' {
             break;
         }
         if character != '\\' {
-            output.push(character);
+            let mut buffer = [0; 4];
+            output.extend_from_slice(character.encode_utf8(&mut buffer).as_bytes());
             continue;
         }
         match chars.next() {
-            Some('a') => output.push('\u{0007}'),
-            Some('b') => output.push('\u{0008}'),
-            Some('f') => output.push('\u{000C}'),
-            Some('n') => output.push('\n'),
-            Some('r') => output.push('\r'),
-            Some('t') => output.push('\t'),
-            Some('v') => output.push('\u{000B}'),
-            Some('\\') => output.push('\\'),
-            Some('"') => output.push('"'),
+            Some('a') => output.push(0x07),
+            Some('b') => output.push(0x08),
+            Some('f') => output.push(0x0c),
+            Some('n') => output.push(b'\n'),
+            Some('r') => output.push(b'\r'),
+            Some('t') => output.push(b'\t'),
+            Some('v') => output.push(0x0b),
+            Some('\\') => output.push(b'\\'),
+            Some('"') => output.push(b'"'),
             Some(first @ '0'..='7') => {
                 let mut octal = String::from(first);
                 for _ in 0..2 {
@@ -7331,14 +7332,17 @@ fn unquote_git_path(path: &str) -> String {
                     }
                 }
                 if let Ok(value) = u8::from_str_radix(&octal, 8) {
-                    output.push(value as char);
+                    output.push(value);
                 }
             }
-            Some(other) => output.push(other),
+            Some(other) => {
+                let mut buffer = [0; 4];
+                output.extend_from_slice(other.encode_utf8(&mut buffer).as_bytes());
+            }
             None => break,
         }
     }
-    output
+    String::from_utf8_lossy(&output).to_string()
 }
 
 fn git_head_hash(root: &Path) -> Result<Option<String>, String> {
@@ -7465,7 +7469,7 @@ fn git_diff_names(root: &Path, range: &str) -> Result<Vec<String>, String> {
     }
     let mut paths = String::from_utf8_lossy(&output.stdout)
         .lines()
-        .map(|line| line.trim().replace('\\', "/"))
+        .map(git_status_path)
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>();
     paths.sort();
@@ -9447,7 +9451,9 @@ mod tests {
     ) -> Value {
         for _ in 0..40 {
             let job = api.ai_research_job(project_id, job_id);
-            if job["status"].as_str() == Some(status) {
+            if job["status"].as_str() == Some(status)
+                && job["error"]["code"].as_str() != Some("not_found")
+            {
                 return job;
             }
             std::thread::sleep(std::time::Duration::from_millis(25));
@@ -10583,6 +10589,49 @@ mod tests {
     }
 
     #[test]
+    fn file_sync_overview_preserves_utf8_file_names_from_git_status() {
+        let api = api();
+        let (project_id, root) = create_project(&api);
+        api.handle(
+            "POST",
+            &format!("/api/projects/{project_id}/history/enable"),
+            Value::Null,
+            vec![],
+        )
+        .unwrap();
+        let folder = root.join("assets").join("generated");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(
+            folder.join("Cronología visual del Mazda MX-5.png"),
+            b"image",
+        )
+        .unwrap();
+
+        let overview = api
+            .handle(
+                "GET",
+                &format!("/api/projects/{project_id}/file-sync-overview"),
+                Value::Null,
+                vec![],
+            )
+            .unwrap();
+        let files = overview.body["files"].as_array().unwrap();
+        let image_path = "assets/generated/Cronología visual del Mazda MX-5.png";
+        let image = files
+            .iter()
+            .find(|file| file["path"].as_str() == Some(image_path))
+            .unwrap();
+
+        assert_eq!(image["name"], "Cronología visual del Mazda MX-5.png");
+        assert_eq!(image["historyStatus"]["state"], "pending");
+        assert!(
+            files
+                .iter()
+                .all(|file| !file["path"].as_str().unwrap_or("").contains("Ã"))
+        );
+    }
+
+    #[test]
     fn git_status_path_removes_git_quotes_and_keeps_spaces() {
         assert_eq!(
             git_status_path("\"Prompt informe reuniones empresas.md\""),
@@ -10599,6 +10648,18 @@ mod tests {
         assert_eq!(
             git_status_path("\"docs/Norma \\\"155/22\\\".md\""),
             "docs/Norma \"155/22\".md"
+        );
+        assert_eq!(
+            git_status_path("\"assets/generated/Cronolog\\303\\255a visual del Mazda MX-5.png\""),
+            "assets/generated/Cronología visual del Mazda MX-5.png"
+        );
+        assert_eq!(
+            git_status_path("\"assets/generated/Gu\\303\\255a de decisi\\303\\263n.png\""),
+            "assets/generated/Guía de decisión.png"
+        );
+        assert_eq!(
+            git_status_path("\"assets/generated/L\\303\\255nea temporal del Ni\\303\\261o.png\""),
+            "assets/generated/Línea temporal del Niño.png"
         );
     }
 
