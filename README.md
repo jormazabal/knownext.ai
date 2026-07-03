@@ -18,8 +18,8 @@ There is no external product service, packaged auxiliary runtime, API port, or m
 
 The latest installers are published on GitHub Releases:
 
-- [Download KnowNext.ai for Windows](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_2.5.1_x64_en-US.msi)
-- [Download KnowNext.ai for Android arm64](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai-android-arm64-v2.5.1.apk)
+- [Download KnowNext.ai for Windows](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_2.5.2_x64_en-US.msi)
+- [Download KnowNext.ai for Android arm64](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai-android-arm64-v2.5.2.apk)
 - [View all releases](https://github.com/jormazabal/knownext.ai/releases)
 
 The Windows updater checks the signed Tauri manifest:

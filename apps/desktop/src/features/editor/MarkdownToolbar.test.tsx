@@ -92,6 +92,39 @@ describe("MarkdownToolbar", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Subrayado" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resaltado" })).not.toBeInTheDocument();
+  });
+
+  it("applies and clears highlight colors from the toolbar", async () => {
+    const onRunEditorAction = vi.fn();
+
+    render(
+      <MarkdownToolbar
+        historyOpen={false}
+        historyEnabled
+        historyDisabledReason="Historial no disponible"
+        editorReady
+        markdownZoomPercent={100}
+        activeActions={{ highlight: true, highlightColor: "green" }}
+        editorHistoryState={{ canUndo: false, canRedo: false, undoDepth: 0, redoDepth: 0 }}
+        onRunEditorAction={onRunEditorAction}
+        onExportDocument={vi.fn()}
+        onMarkdownZoomChange={vi.fn()}
+        onToggleHistory={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Resaltado" })).toHaveAttribute("aria-pressed", "true");
+
+    await userEvent.click(screen.getByRole("button", { name: "Resaltado" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Resaltar en Rosa" }));
+
+    expect(onRunEditorAction).toHaveBeenCalledWith("highlight", { highlight: { color: "pink" } });
+
+    await userEvent.click(screen.getByRole("button", { name: "Resaltado" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Quitar resaltado" }));
+
+    expect(onRunEditorAction).toHaveBeenCalledWith("clear-highlight");
   });
 
   it("can hide project document actions for the fixed notes editor", () => {
@@ -328,6 +361,7 @@ describe("MarkdownToolbar", () => {
     expect(screen.getByRole("button", { name: "Enlace" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Diagrama" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Tabla 3 x 4" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resaltar en Amarillo" })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Viñetas" }));
 

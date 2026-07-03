@@ -8,6 +8,7 @@ import {
   Heading2,
   Heading3,
   History,
+  Highlighter,
   Image,
   Italic,
   Link,
@@ -30,6 +31,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import type { MarkdownEditorAction, MarkdownEditorActionOptions, MarkdownEditorFormatState, MarkdownEditorHistoryState } from "./editorTypes";
+import { markdownHighlightColors, type MarkdownHighlightColorId } from "./highlightExtension";
 import type { ExportFormat } from "../../types/domain";
 
 type ToolbarAction = {
@@ -119,7 +121,7 @@ export function MarkdownToolbar({
   onToggleMarkdownSource,
   onToggleHistory,
 }: MarkdownToolbarProps) {
-  const [openMenu, setOpenMenu] = useState<"block" | "format" | "structure" | "insert" | "table" | "export" | "zoom" | null>(null);
+  const [openMenu, setOpenMenu] = useState<"block" | "format" | "highlight" | "structure" | "insert" | "table" | "export" | "zoom" | null>(null);
   const [compactOptionsOpen, setCompactOptionsOpen] = useState(false);
   const [hoveredTableSize, setHoveredTableSize] = useState({ rows: 3, columns: 4 });
   const compactToolbar = useCompactToolbarMode();
@@ -172,6 +174,10 @@ export function MarkdownToolbar({
       return;
     }
     onRunEditorAction(action);
+  }
+
+  function runHighlight(color: MarkdownHighlightColorId) {
+    runAction("highlight", { highlight: { color } });
   }
 
   function toggleMenu(menu: typeof openMenu, event: MouseEvent<HTMLButtonElement>) {
@@ -246,8 +252,11 @@ export function MarkdownToolbar({
             diagramInsertionEnabled={diagramInsertionEnabled}
             documentActionsEnabled={documentActionsEnabled}
             visibleSecondaryInlineTools={visibleSecondaryInlineTools}
+            highlightEnabled={extendedUnderlineEnabled}
+            activeHighlightColor={activeActions.highlightColor ?? null}
             onClose={() => setCompactOptionsOpen(false)}
             onRunAction={runAction}
+            onRunHighlight={runHighlight}
             onExportDocument={(format) => {
               setCompactOptionsOpen(false);
               onExportDocument(format);
@@ -306,6 +315,24 @@ export function MarkdownToolbar({
               onRun={() => runAction(tool.action)}
             />
           ))}
+          {extendedUnderlineEnabled ? (
+            <div className="relative">
+              <HighlightToolbarButton
+                activeColor={activeActions.highlightColor ?? null}
+                disabled={!editorReady}
+                expanded={openMenu === "highlight"}
+                onMouseDown={keepEditorSelection}
+                onToggle={(event) => toggleMenu("highlight", event)}
+              />
+              {openMenu === "highlight" ? (
+                <HighlightMenu
+                  activeColor={activeActions.highlightColor ?? null}
+                  onRun={runHighlight}
+                  onClear={() => runAction("clear-highlight")}
+                />
+              ) : null}
+            </div>
+          ) : null}
         </div>
         <div className="knownext-toolbar-compact-menu relative">
           <ToolbarMenuButton
@@ -326,6 +353,14 @@ export function MarkdownToolbar({
                   onRun={() => runAction(tool.action)}
                 />
               ))}
+              {extendedUnderlineEnabled ? (
+                <HighlightMenu
+                  activeColor={activeActions.highlightColor ?? null}
+                  onRun={runHighlight}
+                  onClear={() => runAction("clear-highlight")}
+                  compact
+                />
+              ) : null}
             </ToolbarMenu>
           ) : null}
         </div>
@@ -636,8 +671,11 @@ function CompactToolbarOptionsDialog({
   diagramInsertionEnabled,
   documentActionsEnabled,
   visibleSecondaryInlineTools,
+  highlightEnabled,
+  activeHighlightColor,
   onClose,
   onRunAction,
+  onRunHighlight,
   onExportDocument,
   onMarkdownZoomChange,
   onToggleMarkdownSource,
@@ -654,8 +692,11 @@ function CompactToolbarOptionsDialog({
   diagramInsertionEnabled: boolean;
   documentActionsEnabled: boolean;
   visibleSecondaryInlineTools: ToolbarAction[];
+  highlightEnabled: boolean;
+  activeHighlightColor: MarkdownHighlightColorId | null;
   onClose: () => void;
   onRunAction: (action: MarkdownEditorAction, options?: MarkdownEditorActionOptions) => void;
+  onRunHighlight: (color: MarkdownHighlightColorId) => void;
   onExportDocument: (format: ExportFormat) => void;
   onMarkdownZoomChange: (zoomPercent: number) => void;
   onToggleMarkdownSource: () => void;
@@ -688,6 +729,14 @@ function CompactToolbarOptionsDialog({
                 onRun={() => onRunAction(tool.action)}
               />
             ))}
+            {highlightEnabled ? (
+              <CompactHighlightPalette
+                activeColor={activeHighlightColor}
+                disabled={!editorReady}
+                onRun={onRunHighlight}
+                onClear={() => onRunAction("clear-highlight")}
+              />
+            ) : null}
           </CompactToolbarSection>
 
           <CompactToolbarSection title="Estructura">
@@ -800,6 +849,135 @@ function MarkdownSourceToggleButton({
     >
       <Code2 size={15} />
     </button>
+  );
+}
+
+function HighlightToolbarButton({
+  activeColor,
+  disabled,
+  expanded,
+  onMouseDown,
+  onToggle,
+}: {
+  activeColor: MarkdownHighlightColorId | null;
+  disabled: boolean;
+  expanded: boolean;
+  onMouseDown: (event: MouseEvent<HTMLButtonElement>) => void;
+  onToggle: (event: MouseEvent<HTMLButtonElement>) => void;
+}) {
+  const color = markdownHighlightColors.find((item) => item.id === activeColor);
+  return (
+    <button
+      className={`toolbar-button ${activeColor || expanded ? "toolbar-button-active" : ""} ${disabled ? "opacity-40" : ""}`}
+      data-tooltip="Resaltado"
+      aria-label="Resaltado"
+      aria-haspopup="menu"
+      aria-expanded={expanded}
+      aria-pressed={Boolean(activeColor)}
+      disabled={disabled}
+      onMouseDown={onMouseDown}
+      onClick={onToggle}
+    >
+      <span className="relative grid h-[15px] w-[15px] place-items-center">
+        <Highlighter size={15} />
+        <span
+          className="absolute -bottom-0.5 h-1.5 w-3 rounded-full border border-white"
+          style={{ backgroundColor: color?.background ?? "transparent" }}
+          aria-hidden="true"
+        />
+      </span>
+    </button>
+  );
+}
+
+function HighlightMenu({
+  activeColor,
+  onRun,
+  onClear,
+  compact = false,
+}: {
+  activeColor: MarkdownHighlightColorId | null;
+  onRun: (color: MarkdownHighlightColorId) => void;
+  onClear: () => void;
+  compact?: boolean;
+}) {
+  const content = (
+    <>
+      <div className="grid grid-cols-5 gap-1 p-1" role="group" aria-label="Colores de resaltado">
+        {markdownHighlightColors.map((color) => (
+          <button
+            key={color.id}
+            className={`h-7 w-7 rounded-md border ${activeColor === color.id ? "ring-2 ring-brand-orange ring-offset-1" : ""}`}
+            style={{ backgroundColor: color.background, borderColor: color.border }}
+            type="button"
+            role="menuitem"
+            aria-label={`Resaltar en ${color.label}`}
+            aria-pressed={activeColor === color.id}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => onRun(color.id)}
+          />
+        ))}
+      </div>
+      <button
+        className="mt-1 flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] text-ink-primary hover:bg-brand-hover"
+        role="menuitem"
+        type="button"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={onClear}
+      >
+        <X size={14} />
+        <span className="min-w-0 flex-1 truncate">Quitar resaltado</span>
+      </button>
+    </>
+  );
+
+  if (compact) return <div className="border-t border-line pt-1">{content}</div>;
+  return <ToolbarMenu align="left">{content}</ToolbarMenu>;
+}
+
+function CompactHighlightPalette({
+  activeColor,
+  disabled,
+  onRun,
+  onClear,
+}: {
+  activeColor: MarkdownHighlightColorId | null;
+  disabled: boolean;
+  onRun: (color: MarkdownHighlightColorId) => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className={`col-span-2 rounded-md border border-line p-2 ${disabled ? "opacity-40" : ""}`}>
+      <div className="mb-2 flex items-center gap-2 text-[12px] font-medium text-ink-primary">
+        <Highlighter size={15} />
+        <span>Resaltado</span>
+      </div>
+      <div className="grid grid-cols-6 gap-2">
+        {markdownHighlightColors.map((color) => (
+          <button
+            key={color.id}
+            className={`h-8 rounded-md border ${activeColor === color.id ? "ring-2 ring-brand-orange ring-offset-1" : ""}`}
+            style={{ backgroundColor: color.background, borderColor: color.border }}
+            type="button"
+            disabled={disabled}
+            aria-label={`Resaltar en ${color.label}`}
+            aria-pressed={activeColor === color.id}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => onRun(color.id)}
+          />
+        ))}
+        <button
+          className="grid h-8 place-items-center rounded-md border border-line text-ink-secondary hover:bg-brand-hover"
+          type="button"
+          disabled={disabled}
+          aria-label="Quitar resaltado"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={onClear}
+        >
+          <X size={14} />
+        </button>
+      </div>
+    </div>
   );
 }
 

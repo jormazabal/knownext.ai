@@ -40,6 +40,7 @@ Use `docs/development/functional-validation-matrix.md` to record which areas are
 - Use the tab context menu actions `Cerrar`, `Cerrar otras pestañas` and `Cerrar todas las pestañas`; with dirty tabs, confirm the confirmation dialog advances one document at a time and no tab is skipped.
 - Drag document tabs to reorder them; confirm the order persists while switching tabs and reopening the app.
 - Edit in Milkdown, save, close, reopen, and confirm Markdown content persists.
+- Select a word, phrase and partial paragraph in Milkdown; apply each highlight color, change one highlight to another color, remove a highlight, save, reopen, view raw Markdown, and confirm MD/PDF/DOCX exports preserve the highlighted text.
 - Apply `Cita` from the Markdown toolbar to selected text, then apply it again and confirm the blockquote style is removed.
 - Edit a document without saving, force an orphaned draft by removing the backing Markdown file from disk, then open `Borradores recuperables`; confirm the draft is listed, can recreate the file, and disappears after restore or discard.
 - Create and save user notes.

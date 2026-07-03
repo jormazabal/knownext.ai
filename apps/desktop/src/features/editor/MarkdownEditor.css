@@ -1,3 +1,36 @@
+.knownext-editor mark[data-knx-highlight],
+.knownext-editor .knownext-highlight {
+  border-radius: 3px;
+  padding: 0 0.12em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.knownext-editor mark[data-knx-highlight="yellow"],
+.knownext-editor .knownext-highlight-yellow {
+  background: #fef08a;
+}
+
+.knownext-editor mark[data-knx-highlight="green"],
+.knownext-editor .knownext-highlight-green {
+  background: #bbf7d0;
+}
+
+.knownext-editor mark[data-knx-highlight="blue"],
+.knownext-editor .knownext-highlight-blue {
+  background: #bfdbfe;
+}
+
+.knownext-editor mark[data-knx-highlight="pink"],
+.knownext-editor .knownext-highlight-pink {
+  background: #fbcfe8;
+}
+
+.knownext-editor mark[data-knx-highlight="orange"],
+.knownext-editor .knownext-highlight-orange {
+  background: #fed7aa;
+}
+
 .knownext-editor .milkdown-image-block > .image-wrapper {
   display: inline-block !important;
   width: fit-content;

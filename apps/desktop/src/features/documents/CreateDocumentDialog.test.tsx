@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CreateDocumentDialog } from "./CreateDocumentDialog";
 
@@ -23,6 +24,16 @@ describe("CreateDocumentDialog", () => {
     expect(onCreate).toHaveBeenCalledWith("plan-producto.md", "requirements");
     expect(screen.getByLabelText(/Nombre del documento/)).toHaveValue("");
     expect(screen.getByLabelText(/Plantilla/)).toHaveValue("blank");
+  });
+
+  it("creates the document when pressing Enter in the name input", async () => {
+    const onCreate = vi.fn();
+
+    render(<CreateDocumentDialog open onClose={vi.fn()} onCreate={onCreate} />);
+
+    await userEvent.type(screen.getByLabelText(/Nombre del documento/), "atajo-enter{Enter}");
+
+    expect(onCreate).toHaveBeenCalledWith("atajo-enter.md", "blank");
   });
 
   it("creates a default Markdown document and closes from both controls", () => {

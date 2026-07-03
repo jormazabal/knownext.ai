@@ -2,6 +2,12 @@
 
 All KnowNext.ai releases use one monolithic application version for the frontend, Tauri shell, Rust runtime, Windows updater, and Android updater.
 
+## 2.5.2 - 2026-07-03
+
+- Added controlled Markdown text highlighting with five rotulador colors, visual Milkdown toolbar controls, persisted `<mark data-knx-highlight="...">` markup, and MD/PDF/DOCX export support.
+- Fixed editor toolbar readiness so stale Milkdown controller cleanup cannot leave formatting buttons disabled while the document remains editable.
+- Fixed document creation flows so Enter submits the primary dialog action and the web development runtime can complete local document operations without the packaged Tauri runtime.
+
 ## 2.5.1 - 2026-06-19
 
 - Fixed Git status path decoding for files with UTF-8 names, including generated assets with Spanish accents such as `Cronologia`, `Guia`, `decision`, `Linea` and `Nino`, so the save and synchronization drawer no longer shows mojibake such as `CronologÃ­a`.

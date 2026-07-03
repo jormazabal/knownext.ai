@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { APP_VERSION } from "../appVersion";
 import { isTauriMobileRuntime, isTauriRuntime } from "../runtime/platform";
+import { handleWebDevLocalApiRequest } from "./webDevLocalApi";
 
 export type RuntimeHealth = {
   app?: string;
@@ -65,7 +66,9 @@ type LocalApiFile = {
 export async function requestJson<T>(path: string, init?: ApiRequestInit): Promise<T> {
   await initializeApiBaseUrl();
   if (!isTauriRuntime()) {
-    throw new ApiError(503, "Runtime unavailable", `KnowNext.ai ${APP_VERSION} requiere el runtime Tauri local.`);
+    const response = await handleWebDevLocalApiRequest<T>(init?.method ?? "GET", path, parseBody(init?.body));
+    if (response.status >= 400) throw apiErrorFromResponse(response.status, response.body);
+    return response.body;
   }
 
   const response = await invoke<LocalApiResponse<T>>("local_api_request", {

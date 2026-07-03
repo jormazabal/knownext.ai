@@ -228,6 +228,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   const mobileShell = isMobileDeviceRuntime();
   const phoneShell = isPhoneAppShell();
   const [editorControllers, setEditorControllers] = useState<Record<string, MarkdownEditorController>>({});
+  const editorControllersRef = useRef<Record<string, MarkdownEditorController>>({});
   const [editorFormatState, setEditorFormatState] = useState<MarkdownEditorFormatState>(emptyMarkdownEditorFormatState);
   const [editorHistoryStates, setEditorHistoryStates] = useState<Record<string, MarkdownEditorHistoryState>>({});
   const [navigationOpen, setNavigationOpen] = useState(false);
@@ -266,6 +267,10 @@ export function DesktopLayout(props: DesktopLayoutProps) {
     resizeEdge: "left",
     onWidthChange: (historyWidth) => props.onLayoutConfigChange({ historyWidth }),
   });
+
+  useEffect(() => {
+    editorControllersRef.current = editorControllers;
+  }, [editorControllers]);
 
   useEffect(() => {
     setActiveImageAsset(null);
@@ -390,15 +395,23 @@ export function DesktopLayout(props: DesktopLayoutProps) {
     activeEditorController?.clearTransientTextPreview();
   }, [activeEditorController]);
 
-  const handleEditorControllerChange = useCallback((documentId: string, controller: MarkdownEditorController | null) => {
+  const handleEditorControllerChange = useCallback((documentId: string, controller: MarkdownEditorController | null, releasedController?: MarkdownEditorController | null) => {
+    const shouldReleaseController = Boolean(releasedController && editorControllersRef.current[documentId] === releasedController);
+
     setEditorControllers((currentControllers) => {
       if (!controller) {
+        if (!shouldReleaseController || currentControllers[documentId] !== releasedController) {
+          return currentControllers;
+        }
         const { [documentId]: _removedController, ...nextControllers } = currentControllers;
+        editorControllersRef.current = nextControllers;
         return nextControllers;
       }
-      return { ...currentControllers, [documentId]: controller };
+      const nextControllers = { ...currentControllers, [documentId]: controller };
+      editorControllersRef.current = nextControllers;
+      return nextControllers;
     });
-    if (documentId === activeEditorId) {
+    if (documentId === activeEditorId && (controller || shouldReleaseController)) {
       setEditorFormatState((currentFormatState) =>
         keepStableFormatState(currentFormatState, controller ? controller.getFormatState() : emptyMarkdownEditorFormatState),
       );
@@ -408,11 +421,14 @@ export function DesktopLayout(props: DesktopLayoutProps) {
     }
     if (!controller) {
       setEditorHistoryStates((currentHistoryStates) => {
+        if (!shouldReleaseController) {
+          return currentHistoryStates;
+        }
         const { [documentId]: _removedHistoryState, ...nextHistoryStates } = currentHistoryStates;
         return nextHistoryStates;
       });
     }
-  }, [activeEditorId]);
+  }, [activeEditorController, activeEditorId]);
 
   useEffect(() => {
     setEditorFormatState((currentFormatState) =>
@@ -750,7 +766,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                                 documentKey={props.notesEditorKey}
                                 markdown={props.notesMarkdown}
                                 onChange={props.onNotesMarkdownChange}
-                                onControllerChange={(controller) => handleEditorControllerChange("user-notes", controller)}
+                                onControllerChange={(controller, releasedController) => handleEditorControllerChange("user-notes", controller, releasedController)}
                                 onFormatStateChange={(formatState) => {
                                   if (hasNotes) {
                                     setEditorFormatState((currentFormatState) => keepStableFormatState(currentFormatState, formatState));
@@ -824,7 +840,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                                   documentKey={session.editorKey}
                                   markdown={materializeProjectImageReferences(session.markdown, props.activeProject?.id ?? "", session.document.path, props.tree)}
                                   onChange={(markdown, source) => props.onMarkdownChange(session.documentId, restoreProjectImageReferences(markdown, props.activeProject?.id ?? "", session.document!.path, props.tree), source)}
-                                  onControllerChange={(controller) => handleEditorControllerChange(session.documentId, controller)}
+                                  onControllerChange={(controller, releasedController) => handleEditorControllerChange(session.documentId, controller, releasedController)}
                                   onFormatStateChange={(formatState) => {
                                     if (session.documentId === props.activeDocumentId) {
                                       setEditorFormatState((currentFormatState) => keepStableFormatState(currentFormatState, formatState));
@@ -1813,7 +1829,7 @@ function getHistoryDisabledReason(project: Project | null, versioningStatus: Pro
 }
 
 function countWords(markdown: string) {
-  return markdown.trim().split(/\s+/).filter(Boolean).length;
+  return markdown.replace(/<[^>\n]+>/g, " ").trim().split(/\s+/).filter(Boolean).length;
 }
 
 function formatCompactDateTime(value: string) {

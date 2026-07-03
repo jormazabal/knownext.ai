@@ -18,6 +18,7 @@ The frontend is React + TypeScript and renders product state received through th
 - Unsaved document changes are autosaved through `src/lib/api/documents.ts` to runtime-managed drafts.
 - Document export goes through `src/lib/api/documents.ts`; React may open native save dialogs, but Rust writes or returns the export artifact.
 - Reference previews render runtime-prepared PDF/text/workbook payloads and show explicit errors for unsupported files.
+- The Markdown string remains the source of truth for inline visual formatting. Supported extended marks may use controlled inline HTML, including `<u>` and `<mark data-knx-highlight="yellow|green|blue|pink|orange">`.
 
 ## Runtime Services
 

@@ -15,6 +15,13 @@ import {
   readMarkdownEditorHistoryState,
   readMarkdownEditorFormatState,
 } from "./editorCommands";
+import {
+  clearHighlightCommand,
+  configureHighlightMarkdownSerialization,
+  highlightSchema,
+  remarkHighlightHtmlPlugin,
+  toggleHighlightCommand,
+} from "./highlightExtension";
 import { extractKnownextDiagramMetadata, stripKnownextDiagramMetadata, updateKnownextDiagramMetadata } from "./mermaidDiagrams";
 import {
   configureUnderlineMarkdownSerialization,
@@ -34,7 +41,7 @@ type MarkdownEditorProps = {
   documentKey: string;
   markdown: string;
   onChange: (markdown: string, source?: MarkdownEditorChangeSource) => void;
-  onControllerChange: (controller: MarkdownEditorController | null) => void;
+  onControllerChange: (controller: MarkdownEditorController | null, releasedController?: MarkdownEditorController | null) => void;
   onFormatStateChange: (formatState: MarkdownEditorFormatState) => void;
   onHistoryStateChange: (historyState: MarkdownEditorHistoryState) => void;
   onSelectionChange: (selection: MarkdownEditorSelection | null) => void;
@@ -46,7 +53,7 @@ type MarkdownEditorProps = {
 
 type MarkdownEditorCallbacks = {
   onChange: (markdown: string, source?: MarkdownEditorChangeSource) => void;
-  onControllerChange: (controller: MarkdownEditorController | null) => void;
+  onControllerChange: (controller: MarkdownEditorController | null, releasedController?: MarkdownEditorController | null) => void;
   onFormatStateChange: (formatState: MarkdownEditorFormatState) => void;
   onHistoryStateChange: (historyState: MarkdownEditorHistoryState) => void;
   onSelectionChange: (selection: MarkdownEditorSelection | null) => void;
@@ -76,6 +83,7 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
   const lastSelectionRef = useRef<MarkdownEditorSelection | null>(null);
   const callbacksRef = useRef<MarkdownEditorCallbacks>({ onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, onImageEditRequest, onDiagramEditRequest });
   const controllerReadyRef = useRef(false);
+  const controllerRef = useRef<MarkdownEditorController | null>(null);
   const imageEditOverlayElementRef = useRef<HTMLImageElement | null>(null);
   const diagramEditOverlayElementRef = useRef<HTMLElement | null>(null);
   const [imageEditOverlay, setImageEditOverlay] = useState<ImageEditOverlayState | null>(null);
@@ -107,9 +115,11 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
         createPersistentCaretPlugin(),
       ]);
       configureUnderlineMarkdownSerialization(ctx);
+      configureHighlightMarkdownSerialization(ctx);
     });
     crepe.editor.use(createMermaidDiagramViewPlugin((target) => callbacksRef.current.onDiagramEditRequest?.(target)));
     crepe.editor.use(remarkUnderlineHtmlPlugin).use(underlineSchema).use(toggleUnderlineCommand);
+    crepe.editor.use(remarkHighlightHtmlPlugin).use(highlightSchema).use(toggleHighlightCommand).use(clearHighlightCommand);
 
     crepe.on((listener) => {
       const syncFormatState = (ctx: Ctx, selection?: Selection) => {
@@ -161,6 +171,7 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
     if (editor) {
       controllerReadyRef.current = true;
       const controller = createMarkdownEditorController(editor, selectionFocusPluginKey, transientTextPluginKey);
+      controllerRef.current = controller;
       callbacksRef.current.onControllerChange(controller);
       notifyFormatState(controller.getFormatState());
       notifyHistoryState(controller.getHistoryState());
@@ -180,7 +191,10 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
   }, [get, loading, selectionFocus?.from, selectionFocus?.to]);
 
   useEffect(() => {
-    return () => callbacksRef.current.onControllerChange(null);
+    return () => {
+      callbacksRef.current.onControllerChange(null, controllerRef.current);
+      controllerRef.current = null;
+    };
   }, []);
 
   useEffect(() => {

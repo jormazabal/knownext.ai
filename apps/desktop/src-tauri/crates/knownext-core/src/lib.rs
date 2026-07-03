@@ -16,10 +16,30 @@ pub fn compact_id(prefix: &str) -> String {
 }
 
 pub fn word_count(markdown: &str) -> usize {
-    markdown
+    strip_inline_html(markdown)
         .split_whitespace()
         .filter(|word| !word.trim().is_empty())
         .count()
+}
+
+fn strip_inline_html(markdown: &str) -> String {
+    let mut output = String::with_capacity(markdown.len());
+    let mut in_tag = false;
+    for character in markdown.chars() {
+        match character {
+            '<' => {
+                in_tag = true;
+                output.push(' ');
+            }
+            '>' if in_tag => {
+                in_tag = false;
+                output.push(' ');
+            }
+            _ if !in_tag => output.push(character),
+            _ => {}
+        }
+    }
+    output
 }
 
 pub fn percent_decode(value: &str) -> String {
@@ -50,5 +70,18 @@ fn hex(value: u8) -> Option<u8> {
         b'a'..=b'f' => Some(value - b'a' + 10),
         b'A'..=b'F' => Some(value - b'A' + 10),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::word_count;
+
+    #[test]
+    fn word_count_ignores_inline_html_attributes() {
+        assert_eq!(
+            word_count(r#"<mark data-knx-highlight="yellow">texto resaltado</mark> final"#),
+            3
+        );
     }
 }

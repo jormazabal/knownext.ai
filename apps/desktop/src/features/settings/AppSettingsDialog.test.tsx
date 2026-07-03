@@ -500,11 +500,11 @@ describe("AppSettingsDialog", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Interfaz" }));
 
     expect(screen.getByText("Compatibilidad Markdown")).toBeInTheDocument();
-    expect(screen.getByText("Mostrar subrayado en el editor")).toBeInTheDocument();
-    expect(screen.getByText(/no forma parte de Markdown estándar/i)).toBeInTheDocument();
+    expect(screen.getByText("Mostrar formatos extendidos en el editor")).toBeInTheDocument();
+    expect(screen.getByText(/no forman parte de Markdown estándar/i)).toBeInTheDocument();
     expect(screen.getByText(/limitar el editor a controles de Markdown estándar/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("switch", { name: "Activar subrayado extendido" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Activar formatos Markdown extendidos" }));
 
     expect(onAppearanceChange).toHaveBeenCalledWith({ markdownExtendedUnderlineEnabled: false });
   });
