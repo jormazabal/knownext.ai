@@ -147,7 +147,7 @@ export function shouldDiscardPersistedDraft(session: DocumentSession) {
 }
 
 export function countWords(markdown: string) {
-  return markdown.trim().split(/\s+/).filter(Boolean).length;
+  return markdown.replace(/<[^>\n]+>/g, " ").trim().split(/\s+/).filter(Boolean).length;
 }
 
 export function markdownMatchesSaved(markdown: string, savedMarkdown: string) {

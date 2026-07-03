@@ -3,8 +3,8 @@ use base64::Engine;
 #[cfg(not(target_os = "android"))]
 use printpdf::{
     Actions, BorderArray, BuiltinFont, Color, ColorArray, FontId, Line, LinePoint, LinkAnnotation,
-    Mm, Op, ParsedFont, PdfDocument, PdfFontHandle, PdfPage, PdfSaveOptions, Point, Pt, RawImage,
-    Rect, Rgb, TextItem, XObjectTransform,
+    Mm, Op, PaintMode, ParsedFont, PdfDocument, PdfFontHandle, PdfPage, PdfSaveOptions, Point,
+    Polygon, Pt, RawImage, Rect, Rgb, TextItem, WindingOrder, XObjectTransform,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -427,7 +427,17 @@ struct InlineSegment {
     text: String,
     flags: InlineFlags,
     link_target: Option<String>,
+    highlight_color: Option<String>,
 }
+
+const DEFAULT_HIGHLIGHT_COLOR_ID: &str = "yellow";
+const HIGHLIGHT_COLORS: &[(&str, &str)] = &[
+    ("yellow", "#FEF08A"),
+    ("green", "#BBF7D0"),
+    ("blue", "#BFDBFE"),
+    ("pink", "#FBCFE8"),
+    ("orange", "#FED7AA"),
+];
 
 impl InlineFlags {
     fn code() -> Self {
@@ -875,7 +885,7 @@ fn docx_styles_xml(template: &DocxTemplate) -> String {
 fn style_xml(style_id: &str, name: &str, style: &DocxTextStyle) -> String {
     format!(
         r#"<w:style w:type="paragraph" w:styleId="{style_id}"><w:name w:val="{name}"/><w:rPr>{}</w:rPr></w:style>"#,
-        run_properties_xml(style, None, InlineFlags::default())
+        run_properties_xml(style, None, InlineFlags::default(), None)
     )
 }
 
@@ -1006,7 +1016,14 @@ fn parse_inline_runs(
                 flags.link = true;
                 flags.underline = true;
             }
-            let run = text_run_with_override(&segment.text, style, template, flags, color);
+            let run = text_run_with_override(
+                &segment.text,
+                style,
+                template,
+                flags,
+                color,
+                segment.highlight_color.as_deref(),
+            );
             segment
                 .link_target
                 .as_ref()
@@ -1024,13 +1041,14 @@ fn parse_inline_runs(
 }
 
 fn parse_inline_segments(text: &str) -> Vec<InlineSegment> {
-    parse_inline_segments_with(text, InlineFlags::default(), None)
+    parse_inline_segments_with(text, InlineFlags::default(), None, None)
 }
 
 fn parse_inline_segments_with(
     text: &str,
     active_flags: InlineFlags,
     active_link: Option<String>,
+    active_highlight_color: Option<String>,
 ) -> Vec<InlineSegment> {
     let mut segments = Vec::new();
     let mut index = 0;
@@ -1044,6 +1062,7 @@ fn parse_inline_segments_with(
                 label,
                 flags,
                 Some(target.to_string()),
+                active_highlight_color.clone(),
             ));
             index += consumed;
             continue;
@@ -1057,6 +1076,7 @@ fn parse_inline_segments_with(
                 content,
                 flags,
                 active_link.clone(),
+                active_highlight_color.clone(),
             ));
             index += consumed;
             continue;
@@ -1068,6 +1088,7 @@ fn parse_inline_segments_with(
                 text: content.to_string(),
                 flags,
                 link_target: active_link.clone(),
+                highlight_color: active_highlight_color.clone(),
             });
             index += consumed;
             continue;
@@ -1079,6 +1100,7 @@ fn parse_inline_segments_with(
                 content,
                 flags,
                 active_link.clone(),
+                active_highlight_color.clone(),
             ));
             index += consumed;
             continue;
@@ -1090,6 +1112,17 @@ fn parse_inline_segments_with(
                 content,
                 flags,
                 active_link.clone(),
+                active_highlight_color.clone(),
+            ));
+            index += consumed;
+            continue;
+        }
+        if let Some((content, color, consumed)) = parse_highlight(rest) {
+            segments.extend(parse_inline_segments_with(
+                content,
+                active_flags,
+                active_link.clone(),
+                Some(color.to_string()),
             ));
             index += consumed;
             continue;
@@ -1103,6 +1136,7 @@ fn parse_inline_segments_with(
                 content,
                 flags,
                 active_link.clone(),
+                active_highlight_color.clone(),
             ));
             index += consumed;
             continue;
@@ -1116,6 +1150,7 @@ fn parse_inline_segments_with(
                 text: text[index..end].to_string(),
                 flags: active_flags,
                 link_target: active_link.clone(),
+                highlight_color: active_highlight_color.clone(),
             },
         );
         index = end;
@@ -1128,7 +1163,10 @@ fn push_inline_segment(segments: &mut Vec<InlineSegment>, segment: InlineSegment
         return;
     }
     if let Some(previous) = segments.last_mut() {
-        if previous.flags == segment.flags && previous.link_target == segment.link_target {
+        if previous.flags == segment.flags
+            && previous.link_target == segment.link_target
+            && previous.highlight_color == segment.highlight_color
+        {
             previous.text.push_str(&segment.text);
             return;
         }
@@ -1218,11 +1256,46 @@ fn parse_link(value: &str) -> Option<(&str, &str, usize)> {
 }
 
 fn next_inline_marker(value: &str) -> Option<usize> {
-    ["[", "**", "__", "~~", "`", "<u>", "*", "_"]
+    ["[", "**", "__", "~~", "`", "<u>", "<mark", "*", "_"]
         .iter()
         .filter_map(|marker| value.find(marker))
         .filter(|index| *index > 0)
         .min()
+}
+
+fn parse_highlight(value: &str) -> Option<(&str, &str, usize)> {
+    let lower = value.to_ascii_lowercase();
+    if !lower.starts_with("<mark") {
+        return None;
+    }
+    let open_end = value.find('>')?;
+    let close_start = lower[open_end + 1..].find("</mark>")? + open_end + 1;
+    let open_tag = &value[..=open_end];
+    let color = normalize_highlight_color_id(html_attr_value(open_tag, "data-knx-highlight"));
+    Some((
+        &value[open_end + 1..close_start],
+        color,
+        close_start + "</mark>".len(),
+    ))
+}
+
+fn normalize_highlight_color_id(value: Option<&str>) -> &'static str {
+    let Some(value) = value.map(str::trim) else {
+        return DEFAULT_HIGHLIGHT_COLOR_ID;
+    };
+    HIGHLIGHT_COLORS
+        .iter()
+        .find(|(id, _)| *id == value)
+        .map(|(id, _)| *id)
+        .unwrap_or(DEFAULT_HIGHLIGHT_COLOR_ID)
+}
+
+fn highlight_color_hex(value: &str) -> &'static str {
+    HIGHLIGHT_COLORS
+        .iter()
+        .find(|(id, _)| *id == value)
+        .map(|(_, hex)| *hex)
+        .unwrap_or("#FEF08A")
 }
 
 fn text_run(
@@ -1231,7 +1304,7 @@ fn text_run(
     template: &DocxTemplate,
     flags: InlineFlags,
 ) -> String {
-    text_run_with_override(text, style, template, flags, None)
+    text_run_with_override(text, style, template, flags, None, None)
 }
 
 fn text_run_with_override(
@@ -1240,6 +1313,7 @@ fn text_run_with_override(
     _template: &DocxTemplate,
     flags: InlineFlags,
     color_override: Option<&str>,
+    highlight_color: Option<&str>,
 ) -> String {
     if text.is_empty() {
         return String::new();
@@ -1254,7 +1328,7 @@ fn text_run_with_override(
     };
     format!(
         r#"<w:r><w:rPr>{}</w:rPr><w:t{preserve}>{}</w:t></w:r>"#,
-        run_properties_xml(style, color_override, flags),
+        run_properties_xml(style, color_override, flags, highlight_color),
         xml_escape(text)
     )
 }
@@ -1263,6 +1337,7 @@ fn run_properties_xml(
     style: &DocxTextStyle,
     color_override: Option<&str>,
     flags: InlineFlags,
+    highlight_color: Option<&str>,
 ) -> String {
     let color = color_value(color_override.unwrap_or(&style.color));
     let size = (style.font_size_pt * 2.0).round() as i32;
@@ -1271,8 +1346,16 @@ fn run_properties_xml(
     let italic = flags.italic || format.contains("italic");
     let underline = flags.underline || format.contains("underline");
     let strike = flags.strike || format.contains("strike");
+    let highlight = highlight_color
+        .map(|color| {
+            format!(
+                r#"<w:shd w:val="clear" w:color="auto" w:fill="{}"/>"#,
+                color_value(highlight_color_hex(color))
+            )
+        })
+        .unwrap_or_default();
     format!(
-        r#"<w:rFonts w:ascii="{}" w:hAnsi="{}" w:cs="{}"/><w:sz w:val="{size}"/><w:color w:val="{color}"/>{}{}{}{}{}"#,
+        r#"<w:rFonts w:ascii="{}" w:hAnsi="{}" w:cs="{}"/><w:sz w:val="{size}"/><w:color w:val="{color}"/>{}{}{}{}{}{}"#,
         xml_attr_escape(&style.font_family),
         xml_attr_escape(&style.font_family),
         xml_attr_escape(&style.font_family),
@@ -1289,6 +1372,7 @@ fn run_properties_xml(
         } else {
             ""
         },
+        highlight,
     )
 }
 
@@ -1624,6 +1708,7 @@ impl PdfRenderContext {
             text: text.to_string(),
             flags: InlineFlags::default(),
             link_target: None,
+            highlight_color: None,
         };
         self.render_wrapped_segments(
             &[segment],
@@ -1700,6 +1785,15 @@ impl PdfRenderContext {
                 pdf_color(&style.color)
             };
             let width = text_width_pt(&segment.text, size, flags.code);
+            if let Some(highlight_color) = segment.highlight_color.as_deref() {
+                self.draw_filled_rect(
+                    x_pt - 1.0,
+                    y_pt - size * 0.24,
+                    width + 2.0,
+                    size * 1.12,
+                    pdf_color(highlight_color_hex(highlight_color)),
+                );
+            }
             self.draw_text_line(
                 &segment.text,
                 x_pt,
@@ -1909,6 +2003,22 @@ impl PdfRenderContext {
                     is_closed: false,
                 },
             },
+        ]);
+    }
+
+    fn draw_filled_rect(&mut self, x: f32, y: f32, width: f32, height: f32, color: Color) {
+        let points = vec![
+            (Point { x: Pt(x), y: Pt(y) }, false),
+            (Point { x: Pt(x + width), y: Pt(y) }, false),
+            (Point { x: Pt(x + width), y: Pt(y + height) }, false),
+            (Point { x: Pt(x), y: Pt(y + height) }, false),
+        ];
+        let mut polygon: Polygon = points.into_iter().collect();
+        polygon.mode = PaintMode::Fill;
+        polygon.winding_order = WindingOrder::NonZero;
+        self.ops.extend_from_slice(&[
+            Op::SetFillColor { col: color },
+            Op::DrawPolygon { polygon },
         ]);
     }
 
@@ -2249,6 +2359,7 @@ fn prefixed_segments(prefix: &str, segments: &[InlineSegment]) -> Vec<InlineSegm
         text: prefix.to_string(),
         flags: InlineFlags::default(),
         link_target: None,
+        highlight_color: None,
     }];
     prefixed.extend_from_slice(segments);
     prefixed
@@ -2290,7 +2401,13 @@ fn plain_markdown_text(value: &str) -> String {
         let label = output[start + 1..label_end].to_string();
         output.replace_range(start..=target_end, &label);
     }
-    for marker in ["**", "__", "~~", "`", "<u>", "</u>", "*", "_"] {
+    while let Some(start) = output.to_ascii_lowercase().find("<mark") {
+        let Some(end) = output[start..].find('>').map(|index| start + index) else {
+            break;
+        };
+        output.replace_range(start..=end, "");
+    }
+    for marker in ["**", "__", "~~", "`", "<u>", "</u>", "</mark>", "*", "_"] {
         output = output.replace(marker, "");
     }
     output
@@ -2709,6 +2826,71 @@ fn xml_attr_escape(value: &str) -> String {
 mod tests {
     use super::*;
     use std::io::Read;
+
+    #[test]
+    fn inline_parser_recognizes_mark_highlight_and_normalizes_color() {
+        let segments = parse_inline_segments(
+            r#"Base <mark data-knx-highlight="green">texto **clave**</mark> y <mark data-knx-highlight="purple">otro</mark>"#,
+        );
+
+        assert!(segments
+            .iter()
+            .any(|segment| segment.text == "texto " && segment.highlight_color.as_deref() == Some("green")));
+        assert!(segments
+            .iter()
+            .any(|segment| segment.text == "clave" && segment.flags.bold && segment.highlight_color.as_deref() == Some("green")));
+        assert!(segments
+            .iter()
+            .any(|segment| segment.text == "otro" && segment.highlight_color.as_deref() == Some("yellow")));
+    }
+
+    #[test]
+    fn docx_export_writes_highlight_shading() {
+        let path = std::env::temp_dir().join(format!(
+            "{}.docx",
+            knownext_core::compact_id("knownext-docs-highlight-test")
+        ));
+        let markdown = r#"# Documento
+
+Texto con <mark data-knx-highlight="pink">resaltado</mark>.
+"#;
+
+        write_docx(&path, markdown).unwrap();
+
+        let file = std::fs::File::open(&path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let mut document_xml = String::new();
+        archive
+            .by_name("word/document.xml")
+            .unwrap()
+            .read_to_string(&mut document_xml)
+            .unwrap();
+
+        assert!(document_xml.contains(r#"<w:shd w:val="clear" w:color="auto" w:fill="FBCFE8"/>"#));
+        assert!(document_xml.contains("resaltado"));
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(not(target_os = "android"))]
+    #[test]
+    fn pdf_render_draws_highlight_background_polygon() {
+        let template = DocxTemplate::from_value(None);
+        let mut context = PdfRenderContext::new("Highlight", &template);
+
+        context.render_wrapped_markdown(
+            r#"Texto <mark data-knx-highlight="yellow">resaltado largo</mark>"#,
+            &template.normal,
+            0.0,
+            0.0,
+            &template,
+        );
+
+        assert!(context
+            .ops
+            .iter()
+            .any(|operation| matches!(operation, Op::DrawPolygon { .. })));
+    }
 
     #[test]
     fn docx_export_embeds_rendered_mermaid_diagram_png() {

@@ -9,6 +9,8 @@ export type MarkdownEditorAction =
   | "bold"
   | "italic"
   | "underline"
+  | "highlight"
+  | "clear-highlight"
   | "strike"
   | "clear-format"
   | "bullet-list"
@@ -57,6 +59,9 @@ export type MarkdownEditorActionOptions = {
   diagram?: {
     markdown: string;
   };
+  highlight?: {
+    color: MarkdownHighlightColorId;
+  };
 };
 
 export type MarkdownEditorReplaceOptions = {
@@ -96,7 +101,11 @@ export type MarkdownEditorDiagramEditTarget = {
   widthRatio?: number | null;
 };
 
-export type MarkdownEditorFormatState = Partial<Record<MarkdownEditorAction, boolean>>;
+export type MarkdownHighlightColorId = "yellow" | "green" | "blue" | "pink" | "orange";
+
+export type MarkdownEditorFormatState = Partial<Record<MarkdownEditorAction, boolean>> & {
+  highlightColor?: MarkdownHighlightColorId | null;
+};
 
 export type MarkdownEditorHistoryState = {
   canUndo: boolean;

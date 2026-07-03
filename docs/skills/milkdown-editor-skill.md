@@ -16,6 +16,7 @@ Milkdown is the required WYSIWYG Markdown editor for KnowNext.ai. Markdown remai
 - Export edits back to Markdown strings.
 - Keep document content single-column.
 - Style Milkdown through scoped CSS/Tailwind-compatible selectors.
+- Extended inline visual marks are persisted as controlled HTML only when the product explicitly supports them. Underline uses `<u>text</u>` and highlights use `<mark data-knx-highlight="yellow|green|blue|pink|orange">text</mark>`.
 
 ## Recommended Steps
 
@@ -28,6 +29,7 @@ Milkdown is the required WYSIWYG Markdown editor for KnowNext.ai. Markdown remai
 ## Acceptance Criteria
 
 - The editor renders headings, lists, tables, code, quotes, and tasks visually.
+- The editor preserves supported inline HTML marks such as underline and KnowNext.ai highlights through visual editing, save, reload, and export.
 - Editing marks the document dirty.
 - Saving persists the exported Markdown through the API contract.
 
@@ -36,4 +38,3 @@ Milkdown is the required WYSIWYG Markdown editor for KnowNext.ai. Markdown remai
 - Directly manipulating Milkdown DOM nodes for business logic.
 - Introducing multi-column document layouts.
 - Binding Git or AI operations to editor components.
-

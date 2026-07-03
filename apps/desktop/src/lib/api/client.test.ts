@@ -12,6 +12,7 @@ describe("requestJson", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     invokeMock.mockReset();
+    window.localStorage.clear();
     delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   });
 
@@ -93,6 +94,36 @@ describe("requestJson", () => {
     });
     expect(blob.type).toBe("application/pdf");
     await expect(readBlobAsText(blob)).resolves.toBe("PDF");
+  });
+
+  it("serves browser development JSON requests from the web-dev local adapter", async () => {
+    await expect(requestJson("/health")).resolves.toMatchObject({
+      app: "knownext",
+      status: "ok",
+      profile: "web-dev",
+      version: APP_VERSION,
+    });
+
+    const project = await requestJson<{ id: string; name: string; active: boolean }>("/api/projects", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Documentación plataforma",
+        folderPath: "",
+        icon: "folder",
+        iconColor: "#F37021",
+        creationMode: "new-local",
+        storageMode: "local-files",
+        versioningMode: "none",
+        syncMode: "none",
+      }),
+    });
+
+    expect(project).toMatchObject({
+      name: "Documentación plataforma",
+      active: true,
+    });
+    await expect(requestJson(`/api/projects/${project.id}/tree`)).resolves.toEqual([]);
+    expect(invokeMock).not.toHaveBeenCalled();
   });
 });
 

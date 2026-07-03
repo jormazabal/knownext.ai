@@ -2176,7 +2176,7 @@ dependencies = [
 
 [[package]]
 name = "knownext-ai-desktop"
-version = "2.5.1"
+version = "2.5.2"
 dependencies = [
  "base64 0.22.1",
  "knownext-core",

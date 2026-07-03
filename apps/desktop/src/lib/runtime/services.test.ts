@@ -11,6 +11,7 @@ describe("runtime services", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     invokeMock.mockReset();
+    window.localStorage.clear();
     delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   });
 
@@ -54,15 +55,17 @@ describe("runtime services", () => {
     expect(status.services[0]).not.toHaveProperty("port");
   });
 
-  it("reports unavailable outside Tauri instead of probing HTTP", async () => {
+  it("reports the browser web-dev runtime outside Tauri without probing HTTP", async () => {
     const status = await getRuntimeServiceStatus();
 
     expect(status.services[0]).toMatchObject({
       id: "local-runtime",
-      status: "unavailable",
-      statusLabel: "No disponible",
+      status: "running",
+      statusLabel: "Operativo",
+      profile: "web-dev",
+      managedBy: "manual",
     });
     expect(status.services[0]).not.toHaveProperty("canRestart");
-    expect(status.services[0].lastError).toContain("runtime");
+    expect(status.services[0].lastError).toBeNull();
   });
 });

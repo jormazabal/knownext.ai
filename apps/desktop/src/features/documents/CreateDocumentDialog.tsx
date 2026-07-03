@@ -1,5 +1,5 @@
 import { FileText, X } from "lucide-react";
-import { useState } from "react";
+import { type FormEvent, type KeyboardEvent, useState } from "react";
 
 type CreateDocumentDialogProps = {
   open: boolean;
@@ -27,15 +27,27 @@ export function CreateDocumentDialog({ open, onClose, onCreate }: CreateDocument
     setTemplate("blank");
   }
 
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    handleCreate();
+  }
+
+  function handleNameKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter") return;
+
+    event.preventDefault();
+    handleCreate();
+  }
+
   return (
     <div className="knownext-modal-overlay fixed inset-0 z-[80] grid place-items-center bg-black/20">
-      <section className="w-[420px] rounded-lg border border-line bg-white shadow-menu">
+      <form className="w-[420px] rounded-lg border border-line bg-white shadow-menu" onSubmit={handleSubmit}>
         <header className="flex items-center justify-between border-b border-line px-5 py-4">
           <div className="flex items-center gap-3">
             <FileText size={18} className="text-brand-orange" />
             <h2 className="text-[15px] font-semibold">Crear documento</h2>
           </div>
-          <button className="grid h-8 w-8 place-items-center rounded-md hover:bg-brand-hover" onClick={onClose} aria-label="Cerrar">
+          <button type="button" className="grid h-8 w-8 place-items-center rounded-md hover:bg-brand-hover" onClick={onClose} aria-label="Cerrar">
             <X size={17} />
           </button>
         </header>
@@ -46,6 +58,7 @@ export function CreateDocumentDialog({ open, onClose, onCreate }: CreateDocument
               className="mt-2 h-10 w-full rounded-md border border-line px-3 text-[11px] text-ink-primary outline-none focus:border-brand-orange"
               value={name}
               onChange={(event) => setName(event.target.value)}
+              onKeyDown={handleNameKeyDown}
               placeholder="ej. decisiones-arquitectura.md"
               autoFocus
             />
@@ -66,14 +79,14 @@ export function CreateDocumentDialog({ open, onClose, onCreate }: CreateDocument
           </label>
         </div>
         <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
-          <button className="h-9 rounded-md border border-line px-4 text-[11px] hover:bg-panel" onClick={onClose}>
+          <button type="button" className="h-9 rounded-md border border-line px-4 text-[11px] hover:bg-panel" onClick={onClose}>
             Cancelar
           </button>
-          <button className="h-9 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark" onClick={handleCreate}>
+          <button type="submit" className="h-9 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark">
             Crear documento
           </button>
         </footer>
-      </section>
+      </form>
     </div>
   );
 }

@@ -24,6 +24,7 @@ import { insertTableCommand, toggleStrikethroughCommand } from "@milkdown/kit/pr
 import { redoCommand, undoCommand } from "@milkdown/kit/plugin/history";
 import type { MarkdownEditorAction, MarkdownEditorController, MarkdownEditorFormatState, MarkdownEditorHistoryState, MarkdownEditorSelection } from "./editorTypes";
 import { emptyMarkdownEditorHistoryState } from "./editorTypes";
+import { defaultMarkdownHighlightColor, highlightSchema, normalizeMarkdownHighlightColor } from "./highlightExtension";
 import { toggleUnderlineCommand } from "./underlineExtension";
 
 export function createMarkdownEditorController(editor: Editor, selectionFocusPluginKey?: PluginKey, transientTextPluginKey?: PluginKey): MarkdownEditorController {
@@ -56,6 +57,10 @@ export function createMarkdownEditorController(editor: Editor, selectionFocusPlu
             return commands.call(toggleEmphasisCommand.key);
           case "underline":
             return commands.call(toggleUnderlineCommand.key);
+          case "highlight":
+            return applyHighlight(ctx, options?.highlight?.color);
+          case "clear-highlight":
+            return clearHighlight(ctx);
           case "strike":
             return commands.call(toggleStrikethroughCommand.key);
           case "clear-format":
@@ -406,6 +411,8 @@ export function readMarkdownEditorFormatState(state: EditorState): MarkdownEdito
     bold: selectionHasMark(state, "strong"),
     italic: selectionHasMark(state, "emphasis"),
     underline: selectionHasMark(state, "underline"),
+    highlight: selectionHasMark(state, "highlight"),
+    highlightColor: selectionMarkAttribute(state, "highlight", "color"),
     strike: selectionHasMark(state, "strike_through"),
     "inline-code": selectionHasMark(state, "inlineCode"),
     "code-block": block.codeBlock,
@@ -456,6 +463,52 @@ function clearFormatting(ctx: EditorCommandContext) {
   }
 
   return paragraphApplied;
+}
+
+function applyHighlight(ctx: EditorCommandContext, color = defaultMarkdownHighlightColor) {
+  const view = ctx.get(editorViewCtx);
+  const markType = highlightSchema.type(ctx);
+  const { state } = view;
+  const { empty, from, to, $from } = state.selection;
+  const attrs = { color: normalizeMarkdownHighlightColor(color) };
+  let tr = state.tr;
+
+  if (empty) {
+    tr = tr.removeStoredMark(markType).addStoredMark(markType.create(attrs));
+  } else {
+    tr = tr.removeMark(from, to, markType).addMark(from, to, markType.create(attrs));
+  }
+
+  if (tr.docChanged || tr.storedMarksSet) {
+    view.dispatch(tr.scrollIntoView());
+    return true;
+  }
+
+  const fallbackFrom = empty ? $from.start() : from;
+  const fallbackTo = empty ? $from.end() : to;
+  view.dispatch(state.tr.removeMark(fallbackFrom, fallbackTo, markType).addMark(fallbackFrom, fallbackTo, markType.create(attrs)).scrollIntoView());
+  return true;
+}
+
+function clearHighlight(ctx: EditorCommandContext) {
+  const view = ctx.get(editorViewCtx);
+  const markType = highlightSchema.type(ctx);
+  const { state } = view;
+  const { empty, from, to, $from } = state.selection;
+  let tr = state.tr;
+
+  if (empty) {
+    tr = tr.removeStoredMark(markType).removeMark($from.start(), $from.end(), markType);
+  } else {
+    tr = tr.removeMark(from, to, markType);
+  }
+
+  if (tr.docChanged || tr.storedMarksSet) {
+    view.dispatch(tr.scrollIntoView());
+    return true;
+  }
+
+  return false;
 }
 
 function toggleBlockquote(ctx: EditorCommandContext) {
@@ -633,6 +686,27 @@ function selectionHasMark(state: EditorState, markName: string) {
     return !hasMark;
   });
   return hasMark;
+}
+
+function selectionMarkAttribute(state: EditorState, markName: string, attribute: string) {
+  const markType = state.schema.marks[markName];
+  if (!markType) return null;
+
+  const { empty, from, to, $from } = state.selection;
+
+  if (empty) {
+    const mark = markType.isInSet(state.storedMarks ?? $from.marks());
+    return mark ? normalizeMarkdownHighlightColor(mark.attrs[attribute]) : null;
+  }
+
+  let value: string | null = null;
+  state.doc.nodesBetween(from, to, (node) => {
+    if (!node.isText || value) return false;
+    const mark = markType.isInSet(node.marks);
+    if (mark) value = normalizeMarkdownHighlightColor(mark.attrs[attribute]);
+    return !value;
+  });
+  return value;
 }
 
 function findBlockState(state: EditorState) {
