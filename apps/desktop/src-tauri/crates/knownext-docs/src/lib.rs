@@ -1,5 +1,6 @@
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
+use image::{ImageFormat, Rgba, RgbaImage};
 #[cfg(not(target_os = "android"))]
 use printpdf::{
     Actions, BorderArray, BuiltinFont, Color, ColorArray, FontId, Line, LinePoint, LinkAnnotation,
@@ -8,7 +9,7 @@ use printpdf::{
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
-use std::io::Write;
+use std::io::{Cursor, Write};
 use std::path::Path;
 
 #[derive(Clone, Debug)]
@@ -23,6 +24,70 @@ pub struct ExportImageAsset {
     pub alt: Option<String>,
     pub content_type: String,
     pub bytes: Vec<u8>,
+}
+
+pub fn handwritten_note_svg(
+    note: &Value,
+    page_id: Option<&str>,
+) -> Result<(String, String), String> {
+    let page = handwritten_page(note, page_id)?;
+    let page_id = page["id"].as_str().unwrap_or("page").to_string();
+    Ok((page_id, handwritten_page_svg(&page)))
+}
+
+pub fn handwritten_note_png(
+    note: &Value,
+    page_id: Option<&str>,
+    scale: f32,
+) -> Result<(String, Vec<u8>), String> {
+    let page = handwritten_page(note, page_id)?;
+    let page_id = page["id"].as_str().unwrap_or("page").to_string();
+    Ok((
+        page_id,
+        handwritten_page_png(&page, scale.max(0.25).min(4.0))?,
+    ))
+}
+
+pub fn handwritten_note_pdf(note: &Value) -> Result<Vec<u8>, String> {
+    let pages = note["pages"]
+        .as_array()
+        .filter(|pages| !pages.is_empty())
+        .ok_or_else(|| "La nota no contiene paginas.".to_string())?;
+    Ok(handwritten_pages_pdf(pages))
+}
+
+pub fn handwritten_note_text(note: &Value) -> String {
+    let mut parts = Vec::new();
+    if let Some(title) = note["title"]
+        .as_str()
+        .filter(|value| !value.trim().is_empty())
+    {
+        parts.push(title.to_string());
+    }
+    if let Some(text_by_page) = note["ocr"]["textByPage"].as_object() {
+        for page in note["pages"].as_array().into_iter().flatten() {
+            let page_id = page["id"].as_str().unwrap_or("");
+            if let Some(text) = text_by_page
+                .get(page_id)
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+            {
+                parts.push(text.to_string());
+            }
+        }
+    }
+    if parts.len() <= 1 {
+        let stroke_count = note["pages"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|page| page["strokes"].as_array().map(Vec::len).unwrap_or(0))
+            .sum::<usize>();
+        if stroke_count > 0 {
+            parts.push(format!("Nota manuscrita con {stroke_count} trazo(s)."));
+        }
+    }
+    parts.join("\n\n")
 }
 
 pub fn minimal_pdf(title: &str, markdown: &str) -> Vec<u8> {
@@ -1512,6 +1577,640 @@ fn image_asset_index(assets: &[ExportImageAsset], source: &str) -> Option<usize>
     assets.iter().position(|asset| asset.source == source)
 }
 
+fn handwritten_page(note: &Value, page_id: Option<&str>) -> Result<Value, String> {
+    let pages = note["pages"]
+        .as_array()
+        .filter(|pages| !pages.is_empty())
+        .ok_or_else(|| "La nota no contiene paginas.".to_string())?;
+    if let Some(page_id) = page_id {
+        return pages
+            .iter()
+            .find(|page| page["id"].as_str() == Some(page_id))
+            .cloned()
+            .ok_or_else(|| "Pagina manuscrita no encontrada.".to_string());
+    }
+    Ok(pages[0].clone())
+}
+
+fn handwritten_page_size(page: &Value) -> (u32, u32) {
+    let width = page["size"]["width"]
+        .as_f64()
+        .unwrap_or(1190.0)
+        .round()
+        .clamp(320.0, 4096.0) as u32;
+    let height = page["size"]["height"]
+        .as_f64()
+        .unwrap_or(1684.0)
+        .round()
+        .clamp(320.0, 4096.0) as u32;
+    (width, height)
+}
+
+fn handwritten_page_svg(page: &Value) -> String {
+    let (width, height) = handwritten_page_size(page);
+    let mut svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">"#
+    );
+    svg.push_str(r##"<rect width="100%" height="100%" fill="#FFFFFF"/>"##);
+    svg.push_str(&handwritten_background_svg(page, width, height));
+    for stroke in page["strokes"].as_array().into_iter().flatten() {
+        let Some(path) = handwritten_stroke_path(stroke) else {
+            continue;
+        };
+        let color = sanitize_hex_color(stroke["color"].as_str().unwrap_or("#111827"));
+        let width = stroke["width"].as_f64().unwrap_or(2.4).clamp(0.5, 96.0);
+        let opacity = stroke["opacity"].as_f64().unwrap_or(1.0).clamp(0.05, 1.0);
+        if stroke["tool"].as_str() == Some("eraser") {
+            continue;
+        }
+        let metadata = if stroke["tool"].as_str() == Some("pencil") {
+            r#" data-knownext-tool="pencil" data-knownext-texture-version="1""#
+        } else {
+            ""
+        };
+        svg.push_str(&format!(
+            r#"<path d="{path}" fill="none" stroke="{color}" stroke-width="{width:.2}" stroke-opacity="{opacity:.3}" stroke-linecap="round" stroke-linejoin="round"{metadata}/>"#
+        ));
+    }
+    svg.push_str("</svg>");
+    svg
+}
+
+fn handwritten_background_svg(page: &Value, width: u32, height: u32) -> String {
+    let background = page["background"]["type"].as_str().unwrap_or("blank");
+    let spacing = page["background"]["spacing"]
+        .as_f64()
+        .unwrap_or(32.0)
+        .clamp(8.0, 96.0);
+    let mut output = String::new();
+    match background {
+        "ruled" => {
+            let mut y = spacing;
+            while y < height as f64 {
+                output.push_str(&format!(r##"<line x1="0" y1="{y:.1}" x2="{width}" y2="{y:.1}" stroke="#E5E7EB" stroke-width="1"/>"##));
+                y += spacing;
+            }
+        }
+        "grid" => {
+            let mut x = spacing;
+            while x < width as f64 {
+                output.push_str(&format!(r##"<line x1="{x:.1}" y1="0" x2="{x:.1}" y2="{height}" stroke="#F3F4F6" stroke-width="1"/>"##));
+                x += spacing;
+            }
+            let mut y = spacing;
+            while y < height as f64 {
+                output.push_str(&format!(r##"<line x1="0" y1="{y:.1}" x2="{width}" y2="{y:.1}" stroke="#F3F4F6" stroke-width="1"/>"##));
+                y += spacing;
+            }
+        }
+        "dots" => {
+            let mut y = spacing;
+            while y < height as f64 {
+                let mut x = spacing;
+                while x < width as f64 {
+                    output.push_str(&format!(
+                        r##"<circle cx="{x:.1}" cy="{y:.1}" r="1.2" fill="#E5E7EB"/>"##
+                    ));
+                    x += spacing;
+                }
+                y += spacing;
+            }
+        }
+        "cornell" => {
+            output.push_str(&format!(r##"<line x1="{:.1}" y1="0" x2="{:.1}" y2="{height}" stroke="#E5E7EB" stroke-width="2"/>"##, width as f64 * 0.32, width as f64 * 0.32));
+            output.push_str(&format!(r##"<line x1="0" y1="{:.1}" x2="{width}" y2="{:.1}" stroke="#E5E7EB" stroke-width="2"/>"##, height as f64 * 0.78, height as f64 * 0.78));
+        }
+        _ => {}
+    }
+    output
+}
+
+fn handwritten_page_png(page: &Value, scale: f32) -> Result<Vec<u8>, String> {
+    let image = handwritten_page_image(page, scale);
+    let mut bytes = Vec::new();
+    image
+        .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
+        .map_err(|error| error.to_string())?;
+    Ok(bytes)
+}
+
+fn handwritten_page_image(page: &Value, scale: f32) -> RgbaImage {
+    let (base_width, base_height) = handwritten_page_size(page);
+    let width = ((base_width as f32) * scale).round().clamp(128.0, 8192.0) as u32;
+    let height = ((base_height as f32) * scale).round().clamp(128.0, 8192.0) as u32;
+    let mut image = RgbaImage::from_pixel(width, height, Rgba([255, 255, 255, 255]));
+    draw_handwritten_background(&mut image, page, scale);
+    for stroke in page["strokes"].as_array().into_iter().flatten() {
+        if stroke["tool"].as_str() == Some("eraser") {
+            continue;
+        }
+        draw_handwritten_stroke(&mut image, stroke, scale);
+    }
+    image
+}
+
+fn draw_handwritten_background(image: &mut RgbaImage, page: &Value, scale: f32) {
+    let background = page["background"]["type"].as_str().unwrap_or("blank");
+    let spacing = (page["background"]["spacing"]
+        .as_f64()
+        .unwrap_or(32.0)
+        .clamp(8.0, 96.0) as f32
+        * scale)
+        .max(4.0);
+    let line = Rgba([229, 231, 235, 255]);
+    let faint = Rgba([243, 244, 246, 255]);
+    match background {
+        "ruled" => {
+            let mut y = spacing.round() as u32;
+            while y < image.height() {
+                draw_line(
+                    image,
+                    0.0,
+                    y as f32,
+                    image.width() as f32,
+                    y as f32,
+                    1.0,
+                    line,
+                );
+                y += spacing.round() as u32;
+            }
+        }
+        "grid" => {
+            let mut x = spacing.round() as u32;
+            while x < image.width() {
+                draw_line(
+                    image,
+                    x as f32,
+                    0.0,
+                    x as f32,
+                    image.height() as f32,
+                    1.0,
+                    faint,
+                );
+                x += spacing.round() as u32;
+            }
+            let mut y = spacing.round() as u32;
+            while y < image.height() {
+                draw_line(
+                    image,
+                    0.0,
+                    y as f32,
+                    image.width() as f32,
+                    y as f32,
+                    1.0,
+                    faint,
+                );
+                y += spacing.round() as u32;
+            }
+        }
+        "dots" => {
+            let mut y = spacing.round() as u32;
+            while y < image.height() {
+                let mut x = spacing.round() as u32;
+                while x < image.width() {
+                    draw_circle(image, x as f32, y as f32, 1.4, line);
+                    x += spacing.round() as u32;
+                }
+                y += spacing.round() as u32;
+            }
+        }
+        "cornell" => {
+            draw_line(
+                image,
+                image.width() as f32 * 0.32,
+                0.0,
+                image.width() as f32 * 0.32,
+                image.height() as f32,
+                2.0,
+                line,
+            );
+            draw_line(
+                image,
+                0.0,
+                image.height() as f32 * 0.78,
+                image.width() as f32,
+                image.height() as f32 * 0.78,
+                2.0,
+                line,
+            );
+        }
+        _ => {}
+    }
+}
+
+fn draw_handwritten_stroke(image: &mut RgbaImage, stroke: &Value, scale: f32) {
+    if stroke["tool"].as_str() == Some("pencil") {
+        draw_handwritten_pencil_stroke(image, stroke, scale);
+        return;
+    }
+    let points = handwritten_points(stroke);
+    if points.is_empty() {
+        return;
+    }
+    let width = stroke["width"].as_f64().unwrap_or(2.4).clamp(0.5, 96.0) as f32 * scale;
+    let opacity = stroke["opacity"].as_f64().unwrap_or(1.0).clamp(0.05, 1.0) as f32;
+    let [r, g, b] = parse_hex_color(stroke["color"].as_str().unwrap_or("#111827"));
+    let alpha = (opacity * 255.0).round().clamp(1.0, 255.0) as u8;
+    let color = Rgba([r, g, b, alpha]);
+    if points.len() == 1 {
+        draw_circle(
+            image,
+            points[0].0 * scale,
+            points[0].1 * scale,
+            width / 2.0,
+            color,
+        );
+        return;
+    }
+    for pair in points.windows(2) {
+        draw_line(
+            image,
+            pair[0].0 * scale,
+            pair[0].1 * scale,
+            pair[1].0 * scale,
+            pair[1].1 * scale,
+            width,
+            color,
+        );
+    }
+}
+
+fn draw_handwritten_pencil_stroke(image: &mut RgbaImage, stroke: &Value, scale: f32) {
+    let points = handwritten_points_with_pressure(stroke);
+    if points.is_empty() {
+        return;
+    }
+    let width = stroke["width"].as_f64().unwrap_or(2.4).clamp(0.5, 96.0) as f32 * scale;
+    let opacity = stroke["opacity"].as_f64().unwrap_or(1.0).clamp(0.05, 1.0) as f32;
+    let pressure_enabled = stroke["pressure"].as_bool().unwrap_or(false);
+    let pressure_sensitivity = stroke["pressureSensitivity"]
+        .as_f64()
+        .unwrap_or(0.55)
+        .clamp(0.0, 1.0) as f32;
+    let [r, g, b] = parse_hex_color(stroke["color"].as_str().unwrap_or("#374151"));
+    let seed = handwritten_texture_seed(stroke);
+    let mut random = SeededRandom::new(hash_seed(&seed));
+    let base_alpha = (opacity * 78.0).round().clamp(1.0, 150.0) as u8;
+    let base_color = Rgba([r, g, b, base_alpha]);
+
+    if points.len() == 1 {
+        draw_circle(
+            image,
+            points[0].0 * scale,
+            points[0].1 * scale,
+            width / 2.0,
+            base_color,
+        );
+        return;
+    }
+
+    for pair in points.windows(2) {
+        draw_line(
+            image,
+            pair[0].0 * scale,
+            pair[0].1 * scale,
+            pair[1].0 * scale,
+            pair[1].1 * scale,
+            width,
+            base_color,
+        );
+    }
+
+    let total_length = polyline_length_with_pressure(&points) * scale;
+    let density_scale = if total_length > 1600.0 {
+        0.55
+    } else if total_length > 900.0 {
+        0.72
+    } else {
+        1.0
+    };
+    let step = (width * 1.2).clamp(2.6, 8.0) / density_scale;
+
+    for pair in points.windows(2) {
+        let x1 = pair[0].0 * scale;
+        let y1 = pair[0].1 * scale;
+        let x2 = pair[1].0 * scale;
+        let y2 = pair[1].1 * scale;
+        let dx = x2 - x1;
+        let dy = y2 - y1;
+        let distance = (dx * dx + dy * dy).sqrt();
+        if distance < 0.5 {
+            continue;
+        }
+        let ux = dx / distance;
+        let uy = dy / distance;
+        let nx = -uy;
+        let ny = ux;
+        let samples = (distance / step).floor().max(1.0) as usize;
+        for sample_index in 0..samples {
+            let ratio = (sample_index as f32 + random.next() * 0.85) / samples as f32;
+            let pressure = if pressure_enabled {
+                apply_pressure_sensitivity(
+                    pair[0].2 + (pair[1].2 - pair[0].2) * ratio,
+                    pressure_sensitivity,
+                )
+            } else {
+                0.5
+            };
+            let radius = (width * (0.28 + pressure * 0.34)).max(0.8);
+            let center_x = x1 + dx * ratio + (random.next() - 0.5) * width * 0.32;
+            let center_y = y1 + dy * ratio + (random.next() - 0.5) * width * 0.32;
+            let fiber_count = (1.0 + pressure * 2.0).round().clamp(1.0, 3.0) as usize;
+            for _ in 0..fiber_count {
+                let offset = (random.next() - 0.5) * radius * 1.85;
+                let jitter = (random.next() - 0.5) * radius * 0.22;
+                let start_x = center_x + nx * offset - ux * jitter;
+                let start_y = center_y + ny * offset - uy * jitter;
+                let fiber_length = (width * (0.55 + random.next() * 0.9)).clamp(1.2, 7.0);
+                let alpha = (opacity * (20.0 + pressure * 46.0 + random.next() * 24.0))
+                    .round()
+                    .clamp(1.0, 120.0) as u8;
+                let fiber_color = Rgba([r, g, b, alpha]);
+                draw_line(
+                    image,
+                    start_x,
+                    start_y,
+                    start_x + ux * fiber_length + nx * jitter,
+                    start_y + uy * fiber_length + ny * jitter,
+                    (width * (0.08 + random.next() * 0.08)).clamp(0.35, 1.5),
+                    fiber_color,
+                );
+            }
+        }
+    }
+}
+
+fn draw_line(
+    image: &mut RgbaImage,
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+    width: f32,
+    color: Rgba<u8>,
+) {
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    let distance = (dx * dx + dy * dy).sqrt().max(1.0);
+    let steps = distance.ceil() as usize;
+    let radius = (width / 2.0).max(0.5);
+    for index in 0..=steps {
+        let t = index as f32 / steps as f32;
+        draw_circle(image, x1 + dx * t, y1 + dy * t, radius, color);
+    }
+}
+
+fn draw_circle(image: &mut RgbaImage, cx: f32, cy: f32, radius: f32, color: Rgba<u8>) {
+    let min_x = (cx - radius).floor().max(0.0) as u32;
+    let max_x = (cx + radius)
+        .ceil()
+        .min(image.width().saturating_sub(1) as f32) as u32;
+    let min_y = (cy - radius).floor().max(0.0) as u32;
+    let max_y = (cy + radius)
+        .ceil()
+        .min(image.height().saturating_sub(1) as f32) as u32;
+    let radius_sq = radius * radius;
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
+            let dx = x as f32 - cx;
+            let dy = y as f32 - cy;
+            if dx * dx + dy * dy <= radius_sq {
+                blend_pixel(image.get_pixel_mut(x, y), color);
+            }
+        }
+    }
+}
+
+fn blend_pixel(target: &mut Rgba<u8>, source: Rgba<u8>) {
+    let alpha = source[3] as f32 / 255.0;
+    let inverse = 1.0 - alpha;
+    target[0] = (source[0] as f32 * alpha + target[0] as f32 * inverse).round() as u8;
+    target[1] = (source[1] as f32 * alpha + target[1] as f32 * inverse).round() as u8;
+    target[2] = (source[2] as f32 * alpha + target[2] as f32 * inverse).round() as u8;
+    target[3] = 255;
+}
+
+fn handwritten_pages_pdf(pages: &[Value]) -> Vec<u8> {
+    let mut objects = Vec::<Vec<u8>>::new();
+    objects.push(b"<< /Type /Catalog /Pages 2 0 R >>".to_vec());
+    let mut page_refs = Vec::new();
+    for (index, page) in pages.iter().enumerate() {
+        let (width, height) = handwritten_page_size(page);
+        let image = handwritten_page_image(page, 1.0);
+        let image_rgb = rgba_to_rgb_bytes(&image);
+        let page_object = 3 + index * 3;
+        let content_object = page_object + 1;
+        let image_object = page_object + 2;
+        page_refs.push(format!("{page_object} 0 R"));
+        objects.push(format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] /Resources << /XObject << /Im{} {image_object} 0 R >> >> /Contents {content_object} 0 R >>",
+            index + 1,
+        ).into_bytes());
+        let stream = format!("q\n{width} 0 0 {height} 0 0 cm\n/Im{} Do\nQ", index + 1);
+        objects.push(pdf_stream(stream.into_bytes()));
+        objects.push(pdf_stream_with_dictionary(
+            format!(
+                "/Type /XObject /Subtype /Image /Width {} /Height {} /ColorSpace /DeviceRGB /BitsPerComponent 8",
+                image.width(),
+                image.height(),
+            ),
+            image_rgb,
+        ));
+    }
+    let kids = page_refs.join(" ");
+    objects.insert(
+        1,
+        format!("<< /Type /Pages /Kids [{kids}] /Count {} >>", pages.len()).into_bytes(),
+    );
+    write_pdf_binary_objects(objects)
+}
+
+fn pdf_stream(bytes: Vec<u8>) -> Vec<u8> {
+    pdf_stream_with_dictionary(String::new(), bytes)
+}
+
+fn pdf_stream_with_dictionary(dictionary: String, bytes: Vec<u8>) -> Vec<u8> {
+    let prefix = if dictionary.trim().is_empty() {
+        format!("<< /Length {} >>\nstream\n", bytes.len())
+    } else {
+        format!("<< {dictionary} /Length {} >>\nstream\n", bytes.len())
+    };
+    let mut output = prefix.into_bytes();
+    output.extend_from_slice(&bytes);
+    output.extend_from_slice(b"\nendstream");
+    output
+}
+
+fn rgba_to_rgb_bytes(image: &RgbaImage) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity((image.width() * image.height() * 3) as usize);
+    for pixel in image.pixels() {
+        bytes.push(pixel[0]);
+        bytes.push(pixel[1]);
+        bytes.push(pixel[2]);
+    }
+    bytes
+}
+
+fn write_pdf_binary_objects(objects: Vec<Vec<u8>>) -> Vec<u8> {
+    let mut output = b"%PDF-1.4\n".to_vec();
+    let mut offsets = Vec::new();
+    for (index, object) in objects.iter().enumerate() {
+        offsets.push(output.len());
+        output.extend_from_slice(format!("{} 0 obj\n", index + 1).as_bytes());
+        output.extend_from_slice(object);
+        output.extend_from_slice(b"\nendobj\n");
+    }
+    let xref_offset = output.len();
+    output.extend_from_slice(
+        format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes(),
+    );
+    for offset in offsets {
+        output.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    output.extend_from_slice(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n",
+            objects.len() + 1
+        )
+        .as_bytes(),
+    );
+    output
+}
+
+fn handwritten_stroke_path(stroke: &Value) -> Option<String> {
+    if let Some(path) = stroke["path"]
+        .as_str()
+        .filter(|value| !value.trim().is_empty())
+    {
+        return Some(xml_attr_escape(path));
+    }
+    let points = handwritten_points(stroke);
+    let first = points.first()?;
+    let mut path = format!("M {:.2} {:.2}", first.0, first.1);
+    for point in points.iter().skip(1) {
+        path.push_str(&format!(" L {:.2} {:.2}", point.0, point.1));
+    }
+    Some(path)
+}
+
+fn handwritten_points(stroke: &Value) -> Vec<(f32, f32)> {
+    stroke["points"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|point| {
+            let array = point.as_array()?;
+            Some((
+                array.first()?.as_f64()? as f32,
+                array.get(1)?.as_f64()? as f32,
+            ))
+        })
+        .collect()
+}
+
+fn handwritten_points_with_pressure(stroke: &Value) -> Vec<(f32, f32, f32)> {
+    stroke["points"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|point| {
+            let array = point.as_array()?;
+            Some((
+                array.first()?.as_f64()? as f32,
+                array.get(1)?.as_f64()? as f32,
+                array
+                    .get(2)
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.5)
+                    .clamp(0.0, 1.0) as f32,
+            ))
+        })
+        .collect()
+}
+
+fn polyline_length_with_pressure(points: &[(f32, f32, f32)]) -> f32 {
+    points
+        .windows(2)
+        .map(|pair| {
+            let dx = pair[1].0 - pair[0].0;
+            let dy = pair[1].1 - pair[0].1;
+            (dx * dx + dy * dy).sqrt()
+        })
+        .sum()
+}
+
+fn handwritten_texture_seed(stroke: &Value) -> String {
+    if let Some(seed) = stroke["textureSeed"]
+        .as_str()
+        .filter(|value| !value.trim().is_empty())
+    {
+        return seed.to_string();
+    }
+    let first_point = handwritten_points(stroke)
+        .first()
+        .copied()
+        .unwrap_or((0.0, 0.0));
+    format!(
+        "{}:{}:{}:{:.2}:{:.2},{:.2}",
+        stroke["id"].as_str().unwrap_or("stroke"),
+        stroke["path"].as_str().unwrap_or(""),
+        stroke["color"].as_str().unwrap_or("#374151"),
+        stroke["width"].as_f64().unwrap_or(2.4),
+        first_point.0,
+        first_point.1,
+    )
+}
+
+fn apply_pressure_sensitivity(pressure: f32, sensitivity: f32) -> f32 {
+    let centered = (pressure.clamp(0.0, 1.0) - 0.5) * (0.25 + sensitivity.clamp(0.0, 1.0) * 1.5);
+    (0.5 + centered).clamp(0.12, 1.0)
+}
+
+fn hash_seed(value: &str) -> u32 {
+    let mut hash = 2_166_136_261u32;
+    for byte in value.as_bytes() {
+        hash ^= *byte as u32;
+        hash = hash.wrapping_mul(16_777_619);
+    }
+    hash
+}
+
+struct SeededRandom {
+    state: u32,
+}
+
+impl SeededRandom {
+    fn new(seed: u32) -> Self {
+        Self {
+            state: if seed == 0 { 1 } else { seed },
+        }
+    }
+
+    fn next(&mut self) -> f32 {
+        self.state = self.state.wrapping_add(0x6D2B79F5);
+        let mut value = self.state;
+        value = (value ^ (value >> 15)).wrapping_mul(value | 1);
+        value ^= value.wrapping_add((value ^ (value >> 7)).wrapping_mul(value | 61));
+        ((value ^ (value >> 14)) as f32) / (u32::MAX as f32)
+    }
+}
+
+fn sanitize_hex_color(value: &str) -> String {
+    let [r, g, b] = parse_hex_color(value);
+    format!("#{r:02X}{g:02X}{b:02X}")
+}
+
+fn parse_hex_color(value: &str) -> [u8; 3] {
+    let cleaned = value.trim().trim_start_matches('#');
+    if cleaned.len() == 6 {
+        let r = u8::from_str_radix(&cleaned[0..2], 16).unwrap_or(17);
+        let g = u8::from_str_radix(&cleaned[2..4], 16).unwrap_or(24);
+        let b = u8::from_str_radix(&cleaned[4..6], 16).unwrap_or(39);
+        return [r, g, b];
+    }
+    [17, 24, 39]
+}
+
 #[cfg(not(target_os = "android"))]
 struct PdfRenderContext {
     doc: PdfDocument,
@@ -2009,17 +2708,33 @@ impl PdfRenderContext {
     fn draw_filled_rect(&mut self, x: f32, y: f32, width: f32, height: f32, color: Color) {
         let points = vec![
             (Point { x: Pt(x), y: Pt(y) }, false),
-            (Point { x: Pt(x + width), y: Pt(y) }, false),
-            (Point { x: Pt(x + width), y: Pt(y + height) }, false),
-            (Point { x: Pt(x), y: Pt(y + height) }, false),
+            (
+                Point {
+                    x: Pt(x + width),
+                    y: Pt(y),
+                },
+                false,
+            ),
+            (
+                Point {
+                    x: Pt(x + width),
+                    y: Pt(y + height),
+                },
+                false,
+            ),
+            (
+                Point {
+                    x: Pt(x),
+                    y: Pt(y + height),
+                },
+                false,
+            ),
         ];
         let mut polygon: Polygon = points.into_iter().collect();
         polygon.mode = PaintMode::Fill;
         polygon.winding_order = WindingOrder::NonZero;
-        self.ops.extend_from_slice(&[
-            Op::SetFillColor { col: color },
-            Op::DrawPolygon { polygon },
-        ]);
+        self.ops
+            .extend_from_slice(&[Op::SetFillColor { col: color }, Op::DrawPolygon { polygon }]);
     }
 
     fn render_diagram(
@@ -2833,15 +3548,13 @@ mod tests {
             r#"Base <mark data-knx-highlight="green">texto **clave**</mark> y <mark data-knx-highlight="purple">otro</mark>"#,
         );
 
-        assert!(segments
-            .iter()
-            .any(|segment| segment.text == "texto " && segment.highlight_color.as_deref() == Some("green")));
-        assert!(segments
-            .iter()
-            .any(|segment| segment.text == "clave" && segment.flags.bold && segment.highlight_color.as_deref() == Some("green")));
-        assert!(segments
-            .iter()
-            .any(|segment| segment.text == "otro" && segment.highlight_color.as_deref() == Some("yellow")));
+        assert!(segments.iter().any(|segment| segment.text == "texto "
+            && segment.highlight_color.as_deref() == Some("green")));
+        assert!(segments.iter().any(|segment| segment.text == "clave"
+            && segment.flags.bold
+            && segment.highlight_color.as_deref() == Some("green")));
+        assert!(segments.iter().any(|segment| segment.text == "otro"
+            && segment.highlight_color.as_deref() == Some("yellow")));
     }
 
     #[test]
@@ -3159,5 +3872,49 @@ Texto con <mark data-knx-highlight="pink">resaltado</mark>.
         )
         .len()
             > 1);
+    }
+
+    #[test]
+    fn handwritten_pencil_exports_texture_metadata_png_variation_and_image_pdf() {
+        let note = json!({
+            "id": "note-1",
+            "pages": [{
+                "id": "page-1",
+                "size": { "width": 260, "height": 180 },
+                "background": { "type": "blank", "spacing": 32 },
+                "strokes": [{
+                    "id": "stroke-pencil",
+                    "tool": "pencil",
+                    "color": "#374151",
+                    "width": 10,
+                    "opacity": 0.72,
+                    "pressure": true,
+                    "pressureSensitivity": 0.82,
+                    "textureSeed": "texture-test",
+                    "textureVersion": 1,
+                    "points": [[30, 90, 0.2, 0], [80, 70, 0.9, 10], [140, 95, 0.45, 20], [220, 75, 0.8, 30]]
+                }]
+            }]
+        });
+
+        let (_page_id, svg) = handwritten_note_svg(&note, Some("page-1")).unwrap();
+        assert!(svg.contains(r#"data-knownext-tool="pencil""#));
+        assert!(svg.contains(r#"data-knownext-texture-version="1""#));
+
+        let (_page_id, png) = handwritten_note_png(&note, Some("page-1"), 1.0).unwrap();
+        assert!(png.starts_with(&[0x89, b'P', b'N', b'G']));
+        let decoded = image::load_from_memory(&png).unwrap().to_rgba8();
+        let mut unique_dark_pixels = std::collections::BTreeSet::new();
+        for pixel in decoded.pixels() {
+            if pixel[0] < 245 || pixel[1] < 245 || pixel[2] < 245 {
+                unique_dark_pixels.insert((pixel[0], pixel[1], pixel[2]));
+            }
+        }
+        assert!(unique_dark_pixels.len() > 4);
+
+        let pdf = handwritten_note_pdf(&note).unwrap();
+        assert!(pdf.starts_with(b"%PDF"));
+        let pdf_text = String::from_utf8_lossy(&pdf);
+        assert!(pdf_text.contains("/Subtype /Image"));
     }
 }

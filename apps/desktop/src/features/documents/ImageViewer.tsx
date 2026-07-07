@@ -1,5 +1,5 @@
 import { Copy, FileImage, FileText, Sparkles } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { AssetMetadata, AssetReference, AssetUsageResponse, Project } from "../../types/domain";
 import { getProjectImageContentDataUrl, getProjectImageUsage } from "../../lib/api/projects";
 
@@ -33,6 +33,7 @@ export function ImageViewer({
   const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
   const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null);
   const [imageUrl, setImageUrl] = useState("");
+  const copyResetTimeoutRef = useRef<number | null>(null);
   const asset = usage?.asset;
   const displayAsset = useMemo(() => {
     if (!asset) return null;
@@ -75,12 +76,22 @@ export function ImageViewer({
     onAssetMetadataChange?.(displayAsset);
   }, [displayAsset, onAssetMetadataChange]);
 
+  useEffect(() => {
+    return () => {
+      if (copyResetTimeoutRef.current !== null) window.clearTimeout(copyResetTimeoutRef.current);
+    };
+  }, []);
+
   async function copyReference() {
     const reference = `![${name.replace(/\.[^.]+$/, "")}](${path})`;
     try {
       await navigator.clipboard.writeText(reference);
       setCopyState("copied");
-      window.setTimeout(() => setCopyState("idle"), 1400);
+      if (copyResetTimeoutRef.current !== null) window.clearTimeout(copyResetTimeoutRef.current);
+      copyResetTimeoutRef.current = window.setTimeout(() => {
+        copyResetTimeoutRef.current = null;
+        setCopyState("idle");
+      }, 1400);
     } catch {
       setCopyState("idle");
     }

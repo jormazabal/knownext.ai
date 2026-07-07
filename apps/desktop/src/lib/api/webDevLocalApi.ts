@@ -9,6 +9,10 @@ import type {
   DraftResponse,
   ExportTemplateConfig,
   FileOperationResult,
+  HandwrittenNoteContent,
+  HandwrittenNoteDraftResponse,
+  HandwrittenNoteRecord,
+  HandwrittenPoint,
   Project,
   ProjectCapabilities,
   ProjectPayload,
@@ -41,6 +45,7 @@ type WebDevRuntimeHealth = {
 type WebDevProjectState = {
   tree: DocumentTreeNode[];
   documents: Record<string, DocumentRecord>;
+  handwrittenNotes: Record<string, HandwrittenNoteRecord>;
   activity: ActivityEvent[];
 };
 
@@ -193,11 +198,23 @@ function routeRequest(
     if (method === "GET" && segments[3] === "activity") return ok({ projectId, events: projectState(state, projectId).activity });
     if (method === "POST" && segments[3] === "activity") return ok(recordActivity(state, projectId, body));
     if (method === "POST" && segments[3] === "documents") return ok(createDocument(state, projectId, body));
+    if (method === "POST" && segments[3] === "handwritten-notes") return ok(createHandwrittenNote(state, projectId, body));
     if (method === "POST" && segments[3] === "folders") return ok(createFolder(state, projectId, body));
     if (method === "GET" && segments[3] === "external-changes") return ok(emptyExternalChanges(projectId));
     if (method === "POST" && segments[3] === "external-changes" && segments[4] === "scan") return ok(emptyExternalChanges(projectId));
     if (method === "GET" && segments[3] === "ai" && segments[4] === "context" && segments[5] === "search") return ok([]);
     if (method === "GET" && segments[3] === "ai" && segments[4] === "context" && segments[5] === "sources") return ok({ sources: [], expiredSourceIds: [] });
+    if (method === "POST" && segments[3] === "ai" && segments[4] === "context" && segments[5] === "handwritten-notes") return ok({
+      id: String(asObject(body).noteId ?? "handwritten-note"),
+      projectId,
+      kind: "handwritten_note",
+      name: "Nota a mano",
+      status: "ready",
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      expiresAt: null,
+      metadata: {},
+    });
     if (method === "GET" && segments[3] === "ai" && segments[4] === "index" && segments[5] === "status") return ok(aiIndexStatus(projectId));
     if (method === "GET" && segments[3] === "ai" && segments[4] === "conversation") return ok({ events: [] });
     if (method === "GET" && segments[3] === "ai" && segments[4] === "pending-intent") return ok(null);
@@ -209,6 +226,18 @@ function routeRequest(
     if (method === "PUT" && segments.length === 3) return ok(saveDocument(state, documentId, body));
     if (method === "PUT" && segments[3] === "draft") return ok(saveDraft(state, documentId, body));
     if (method === "DELETE" && segments[3] === "draft") return ok(undefined);
+  }
+
+  if (segments[0] === "api" && segments[1] === "handwritten-notes" && segments[2]) {
+    const noteId = segments[2];
+    if (method === "GET" && segments.length === 3) return ok(getHandwrittenNote(state, noteId));
+    if (method === "PUT" && segments.length === 3) return ok(saveHandwrittenNote(state, noteId, body));
+    if (method === "PUT" && segments[3] === "draft") return ok(saveHandwrittenDraft(state, noteId, body));
+    if (method === "DELETE" && segments[3] === "draft") return ok(undefined);
+    if (method === "POST" && segments[3] === "export" && segments[4] === "content") return okContent(exportHandwrittenContent(state, noteId, body));
+    if (method === "POST" && segments[3] === "export") return ok({ noteId, format: String(asObject(body).format ?? "knote"), outputPath: String(asObject(body).outputPath ?? ""), exportedAt: nowIso() });
+    if (method === "GET" && segments[3] === "pages" && segments[4] && segments[5] === "render") return ok(renderHandwrittenPage(state, noteId, segments[4]));
+    if (method === "POST" && segments[3] === "pages" && segments[4] && segments[5] === "insert-markdown") return ok(insertHandwrittenPageMarkdown(state, noteId, segments[4], body));
   }
 
   if (method === "POST" && matches(segments, ["api", "documents", "sync-status"])) {
@@ -254,7 +283,7 @@ function createProject(state: WebDevLocalApiState, body: unknown): Project {
   state.projects = state.projects.map((current) => ({ ...current, active: false }));
   state.projects.push(project);
   state.activeProjectId = id;
-  state.projectState[id] = { tree: [], documents: {}, activity: [] };
+  state.projectState[id] = { tree: [], documents: {}, handwrittenNotes: {}, activity: [] };
   return project;
 }
 
@@ -281,6 +310,22 @@ function createDocument(state: WebDevLocalApiState, projectId: string, body: unk
   return { tree: projectData.tree, node, affectedDocuments: [] };
 }
 
+function createHandwrittenNote(state: WebDevLocalApiState, projectId: string, body: unknown): FileOperationResult {
+  const payload = asObject(body);
+  const rawName = sanitizeName(String(payload.name || "Nota a mano.knote"), "Nota a mano.knote");
+  const name = rawName.toLowerCase().endsWith(".knote") ? rawName : `${rawName}.knote`;
+  const parentId = typeof payload.parentId === "string" && payload.parentId ? payload.parentId : null;
+  const path = parentId ? `${nodePath(projectState(state, projectId).tree, parentId)}/${name}` : name;
+  const id = documentId(projectId, path);
+  const content = defaultHandwrittenContent(id, name.replace(/\.knote$/i, ""), String(payload.background || "blank"));
+  const record = handwrittenRecord(projectId, path, content);
+  const node: DocumentTreeNode = { id, name, type: "handwritten-note", path, mimeType: "application/vnd.knownext.handwritten-note+json" };
+  const projectData = projectState(state, projectId);
+  projectData.handwrittenNotes[id] = record;
+  projectData.tree = insertTreeNode(projectData.tree, parentId, node);
+  return { tree: projectData.tree, node, affectedDocuments: [] };
+}
+
 function createFolder(state: WebDevLocalApiState, projectId: string, body: unknown): FileOperationResult {
   const payload = asObject(body);
   const name = sanitizeName(String(payload.name || "Nueva carpeta"), "Nueva carpeta");
@@ -298,11 +343,25 @@ function getDocument(state: WebDevLocalApiState, documentIdValue: string): Docum
   return document;
 }
 
+function getHandwrittenNote(state: WebDevLocalApiState, noteId: string): HandwrittenNoteRecord {
+  const note = Object.values(state.projectState).flatMap((project) => Object.values(project.handwrittenNotes ?? {})).find((candidate) => candidate.id === noteId);
+  if (!note) throw new Error("Nota no encontrada");
+  return note;
+}
+
 function saveDocument(state: WebDevLocalApiState, documentIdValue: string, body: unknown): DocumentRecord {
   const current = getDocument(state, documentIdValue);
   const markdown = String(asObject(body).markdown ?? current.markdown);
   const saved = documentRecord(current.projectId, current.path, markdown);
   projectState(state, current.projectId).documents[documentIdValue] = saved;
+  return saved;
+}
+
+function saveHandwrittenNote(state: WebDevLocalApiState, noteId: string, body: unknown): HandwrittenNoteRecord {
+  const current = getHandwrittenNote(state, noteId);
+  const content = asObject(body).content as HandwrittenNoteContent | undefined;
+  const saved = handwrittenRecord(current.projectId, current.path, normalizeHandwrittenContent(content ?? current.content, noteId, current.name));
+  projectState(state, current.projectId).handwrittenNotes[noteId] = saved;
   return saved;
 }
 
@@ -318,6 +377,84 @@ function saveDraft(state: WebDevLocalApiState, documentIdValue: string, body: un
     diskContentHash: document.diskContentHash,
     savedContentHash: document.savedContentHash,
     draftContentHash: isDirty ? contentHash(markdown) : null,
+  };
+}
+
+function saveHandwrittenDraft(state: WebDevLocalApiState, noteId: string, body: unknown): HandwrittenNoteDraftResponse {
+  const note = getHandwrittenNote(state, noteId);
+  const content = normalizeHandwrittenContent(asObject(body).content as HandwrittenNoteContent | undefined ?? note.content, noteId, note.name);
+  const draftHash = contentHash(JSON.stringify(content));
+  const savedHash = note.savedContentHash ?? note.diskContentHash ?? contentHash(JSON.stringify(note.content));
+  const isDirty = draftHash !== savedHash;
+  return {
+    noteId,
+    draftUpdatedAt: isDirty ? nowIso() : null,
+    isDirty,
+    hasDraft: isDirty,
+    diskContentHash: note.diskContentHash,
+    savedContentHash: note.savedContentHash,
+    draftContentHash: isDirty ? draftHash : null,
+  };
+}
+
+function renderHandwrittenPage(state: WebDevLocalApiState, noteId: string, pageId: string) {
+  const note = getHandwrittenNote(state, noteId);
+  const page = note.content.pages.find((candidate) => candidate.id === pageId) ?? note.content.pages[0];
+  const svg = handwrittenSvg(note.content, page?.id);
+  return {
+    noteId,
+    pageId: page?.id ?? pageId,
+    format: "svg",
+    contentType: "image/svg+xml",
+    dataUrl: `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`,
+    renderedAt: nowIso(),
+  };
+}
+
+function exportHandwrittenContent(state: WebDevLocalApiState, noteId: string, body: unknown) {
+  const note = getHandwrittenNote(state, noteId);
+  const payload = asObject(body);
+  const content = normalizeHandwrittenContent(payload.content as HandwrittenNoteContent | undefined ?? note.content, noteId, note.name);
+  const format = String(payload.format || "knote");
+  if (format === "svg") {
+    return { contentType: "image/svg+xml", dataBase64: toBase64(handwrittenSvg(content, String(payload.pageId || content.pages[0]?.id || ""))) };
+  }
+  if (format === "png") {
+    return { contentType: "image/png", dataBase64: WEB_DEV_PLACEHOLDER_PNG_BASE64 };
+  }
+  if (format === "pdf") {
+    return { contentType: "application/pdf", dataBase64: toBase64("%PDF-1.4\n% web-dev handwritten export placeholder\n") };
+  }
+  return { contentType: "application/vnd.knownext.handwritten-note+json", dataBase64: toBase64(JSON.stringify(content, null, 2)) };
+}
+
+function insertHandwrittenPageMarkdown(state: WebDevLocalApiState, noteId: string, pageId: string, body: unknown) {
+  const note = getHandwrittenNote(state, noteId);
+  const payload = asObject(body);
+  const document = getDocument(state, String(payload.documentId ?? ""));
+  const assetPath = `assets/handwritten/${sanitizeName(note.name.replace(/\.knote$/i, ""), "nota")}-${pageId}.svg`;
+  const assetId = documentId(document.projectId, assetPath);
+  const asset: DocumentTreeNode = { id: assetId, name: assetPath.split("/").pop() ?? "nota.svg", type: "image", path: assetPath, mimeType: "image/svg+xml" };
+  const projectData = projectState(state, document.projectId);
+  if (!projectData.tree.some((node) => node.id === assetId)) projectData.tree = insertTreeNode(projectData.tree, null, asset);
+  return {
+    markdown: `![${String(payload.altText || "Nota manuscrita")}](${assetPath} "knownext-note:${noteId}#${pageId}")`,
+    asset: {
+      id: assetId,
+      projectId: document.projectId,
+      name: asset.name,
+      path: assetPath,
+      mimeType: "image/svg+xml",
+      sizeBytes: 0,
+      width: 1190,
+      height: 1684,
+      updatedAt: nowIso(),
+      usageCount: 0,
+      indexed: false,
+      indexStatus: "not-indexed",
+    },
+    noteId,
+    pageId,
   };
 }
 
@@ -506,6 +643,116 @@ function documentRecord(projectId: string, path: string, markdown: string): Docu
   };
 }
 
+function handwrittenRecord(projectId: string, path: string, content: HandwrittenNoteContent): HandwrittenNoteRecord {
+  const name = path.split("/").pop() || path;
+  const normalizedContent = normalizeHandwrittenContent(content, documentId(projectId, path), name);
+  const hash = contentHash(JSON.stringify(normalizedContent));
+  return {
+    id: documentId(projectId, path),
+    name,
+    path,
+    projectId,
+    content: normalizedContent,
+    diskContent: normalizedContent,
+    diskContentHash: hash,
+    savedContentHash: hash,
+    draftContentHash: null,
+    pageCount: normalizedContent.pages.length,
+    updatedAt: nowIso(),
+    baseFingerprint: null,
+    hasDraft: false,
+    isDirty: false,
+    diskChanged: false,
+    orphaned: false,
+    conflictStatus: "none",
+    draftUpdatedAt: null,
+  };
+}
+
+function defaultHandwrittenContent(id: string, title: string, background: string): HandwrittenNoteContent {
+  const now = nowIso();
+  const safeBackground = ["blank", "ruled", "grid", "dots", "cornell"].includes(background) ? background as HandwrittenNoteContent["defaultPage"]["background"] : "blank";
+  return {
+    schemaVersion: 1,
+    id,
+    title,
+    createdAt: now,
+    updatedAt: now,
+    defaultPage: { preset: "A4", orientation: "portrait", background: safeBackground },
+    toolPresets: [
+      { id: "pencil-1", type: "pen", label: "Boligrafo", color: "#111827", width: 4, opacity: 1, pressure: true, pressureSensitivity: 0.55, smoothing: 0.62 },
+      { id: "pencil-2", type: "pencil", label: "Lapiz", color: "#374151", width: 3, opacity: 0.68, pressure: true, pressureSensitivity: 0.82, smoothing: 0.48 },
+      { id: "pencil-3", type: "highlighter", label: "Subrayador", color: "#FACC15", width: 18, opacity: 0.36, pressure: false, pressureSensitivity: 0.2, smoothing: 0.42 },
+    ],
+    pages: [{
+      id: "page-1",
+      title: null,
+      size: { width: 1190, height: 1684, unit: "px", preset: "A4" },
+      background: { type: safeBackground, spacing: 32 },
+      strokes: [],
+      thumbnailHash: null,
+      updatedAt: now,
+    }],
+    ocr: { status: "not-indexed", updatedAt: null, textByPage: {} },
+  };
+}
+
+function normalizeHandwrittenContent(content: HandwrittenNoteContent, id: string, fallbackName: string): HandwrittenNoteContent {
+  const base = content && Array.isArray(content.pages) ? content : defaultHandwrittenContent(id, fallbackName.replace(/\.knote$/i, ""), "blank");
+  return {
+    ...base,
+    schemaVersion: 1,
+    id,
+    title: base.title || fallbackName.replace(/\.knote$/i, ""),
+    pages: (base.pages.length > 0 ? base.pages : defaultHandwrittenContent(id, fallbackName, "blank").pages).map((page) => ({
+      ...page,
+      strokes: page.strokes.map((stroke) => (
+        stroke.tool === "pencil"
+          ? {
+            ...stroke,
+            textureSeed: stroke.textureSeed || handwrittenTextureSeed(stroke),
+            textureVersion: 1,
+          }
+          : stroke
+      )),
+    })),
+    ocr: base.ocr ?? { status: "not-indexed", updatedAt: null, textByPage: {} },
+  };
+}
+
+function handwrittenSvg(content: HandwrittenNoteContent, pageId?: string) {
+  const page = content.pages.find((candidate) => candidate.id === pageId) ?? content.pages[0];
+  const width = page?.size.width ?? 1190;
+  const height = page?.size.height ?? 1684;
+  const strokes = (page?.strokes ?? []).map((stroke) => {
+    if (stroke.path && !stroke.id.startsWith("ai-")) return `<path d="${escapeXml(stroke.path)}" fill="${stroke.color}" opacity="${stroke.opacity}" />`;
+    const points = stroke.points.map((point) => `${point[0]},${point[1]}`).join(" ");
+    return `<polyline points="${points}" fill="none" stroke="${stroke.color}" stroke-width="${stroke.width}" stroke-linecap="round" stroke-linejoin="round" opacity="${stroke.opacity}" />`;
+  }).join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="#fff"/>${strokes}</svg>`;
+}
+
+function toBase64(value: string) {
+  return btoa(unescape(encodeURIComponent(value)));
+}
+
+const WEB_DEV_PLACEHOLDER_PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+
+function handwrittenTextureSeed(stroke: { id: string; path?: string | null; color: string; width: number; points: HandwrittenPoint[] }) {
+  const firstPoint = stroke.points[0];
+  return [
+    stroke.id,
+    stroke.path ?? "",
+    stroke.color,
+    Math.round(stroke.width * 100) / 100,
+    firstPoint ? `${Math.round(firstPoint[0] * 100) / 100},${Math.round(firstPoint[1] * 100) / 100}` : "empty",
+  ].join(":");
+}
+
+function escapeXml(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function insertTreeNode(nodes: DocumentTreeNode[], parentId: string | null, node: DocumentTreeNode): DocumentTreeNode[] {
   if (!parentId) return [...nodes, node].sort(compareTreeNodes);
   return nodes.map((current) => {
@@ -529,7 +776,8 @@ function nodePath(nodes: DocumentTreeNode[], nodeIdValue: string): string {
 
 function projectState(state: WebDevLocalApiState, projectId: string): WebDevProjectState {
   requireProject(state, projectId);
-  state.projectState[projectId] ??= { tree: [], documents: {}, activity: [] };
+  state.projectState[projectId] ??= { tree: [], documents: {}, handwrittenNotes: {}, activity: [] };
+  state.projectState[projectId].handwrittenNotes ??= {};
   return state.projectState[projectId];
 }
 
@@ -559,12 +807,22 @@ function writeState(state: WebDevLocalApiState) {
 function normalizeState(value: unknown): WebDevLocalApiState {
   const source = asObject(value);
   const projects = Array.isArray(source.projects) ? source.projects as Project[] : [];
+  const rawProjectState = source.projectState && typeof source.projectState === "object" ? source.projectState as Record<string, WebDevProjectState> : {};
+  const projectState = Object.fromEntries(Object.entries(rawProjectState).map(([projectId, state]) => [
+    projectId,
+    {
+      tree: Array.isArray(state.tree) ? state.tree : [],
+      documents: state.documents ?? {},
+      handwrittenNotes: state.handwrittenNotes ?? {},
+      activity: Array.isArray(state.activity) ? state.activity : [],
+    },
+  ]));
   return {
     schemaVersion: 1,
     startedAt: typeof source.startedAt === "string" ? source.startedAt : nowIso(),
     activeProjectId: typeof source.activeProjectId === "string" ? source.activeProjectId : projects.find((project) => project.active)?.id ?? null,
     projects,
-    projectState: source.projectState && typeof source.projectState === "object" ? source.projectState as Record<string, WebDevProjectState> : {},
+    projectState,
     config: { ...defaultAppConfig(), ...asObject(source.config), updatedAt: typeof asObject(source.config).updatedAt === "string" ? String(asObject(source.config).updatedAt) : nowIso() },
     aiConfig: { ...defaultAiConfigStatus(), ...asObject(source.aiConfig) },
     exportTemplate: { ...defaultExportTemplate(), ...asObject(source.exportTemplate) },
@@ -577,7 +835,7 @@ function normalizeState(value: unknown): WebDevLocalApiState {
 
 function defaultAppConfig(): AppConfig {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     layout: { sidebarWidth: 338, historyWidth: 320 },
     appearance: {
       language: "es",
@@ -587,6 +845,14 @@ function defaultAppConfig(): AppConfig {
       primaryColor: "orange",
     },
     diagnostics: { traceLoggingEnabled: false },
+    handwritten: {
+      toolPresets: [
+        { id: "pencil-1", type: "pen", label: "Boligrafo", color: "#111827", width: 4, opacity: 1, pressure: true, pressureSensitivity: 0.55, smoothing: 0.62 },
+        { id: "pencil-2", type: "pencil", label: "Lapiz", color: "#374151", width: 3, opacity: 0.68, pressure: true, pressureSensitivity: 0.82, smoothing: 0.48 },
+        { id: "pencil-3", type: "highlighter", label: "Subrayador", color: "#FACC15", width: 18, opacity: 0.36, pressure: false, pressureSensitivity: 0.2, smoothing: 0.42 },
+      ],
+      eraser: { width: 24, mode: "stroke" },
+    },
     ai: defaultAiConfigStatus(),
     tabsByProject: {},
     treeOpenPathsByProject: {},
@@ -604,6 +870,8 @@ function defaultAiConfigStatus(): AiConfigStatus {
     model: "gpt-5.4-mini",
     permissions: {
       editDocuments: true,
+      editHandwrittenNotes: true,
+      drawHandwrittenNotes: true,
       createFolders: false,
       createDocuments: true,
       deleteDocumentsAndFolders: false,
@@ -668,6 +936,14 @@ function defaultAiConfigStatus(): AiConfigStatus {
       defaultWidth: "wide",
       aiGenerationMode: "visual",
     },
+    handwrittenDrawing: {
+      enabled: true,
+      creativeSketchEnabled: false,
+      defaultStyle: "professional_whiteboard",
+      maxElements: 48,
+      maxStrokes: 1400,
+      maxPagesPerRequest: 1,
+    },
     openaiKeyConfigured: false,
     openaiKeyPreview: null,
   };
@@ -704,6 +980,10 @@ function matches(segments: string[], expected: string[]) {
 }
 
 function ok<T>(body: T): WebDevLocalApiResponse<T> {
+  return { status: 200, body };
+}
+
+function okContent(body: { contentType: string; dataBase64: string; filename?: string | null }): WebDevLocalApiResponse<typeof body> {
   return { status: 200, body };
 }
 

@@ -1,6 +1,6 @@
 [package]
 name = "knownext-ai-desktop"
-version = "2.5.2"
+version = "2.5.3"
 description = "KnowNext.ai desktop application"
 authors = ["KnowNext.ai contributors"]
 license = "Apache-2.0"
@@ -13,6 +13,7 @@ members = [
   "crates/knownext-ai",
   "crates/knownext-ai-skills",
   "crates/knownext-core",
+  "crates/knownext-drawing",
   "crates/knownext-docs",
   "crates/knownext-research",
   "crates/knownext-storage",

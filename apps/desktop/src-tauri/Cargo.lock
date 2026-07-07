@@ -2176,7 +2176,7 @@ dependencies = [
 
 [[package]]
 name = "knownext-ai-desktop"
-version = "2.5.2"
+version = "2.5.3"
 dependencies = [
  "base64 0.22.1",
  "knownext-core",
@@ -2214,11 +2214,20 @@ name = "knownext-docs"
 version = "2.5.1"
 dependencies = [
  "base64 0.22.1",
+ "image",
  "knownext-core",
  "printpdf",
  "roxmltree 0.20.0",
  "serde_json",
  "zip 2.4.2",
+]
+
+[[package]]
+name = "knownext-drawing"
+version = "2.5.1"
+dependencies = [
+ "knownext-core",
+ "serde_json",
 ]
 
 [[package]]
@@ -2239,6 +2248,7 @@ dependencies = [
  "knownext-ai-skills",
  "knownext-core",
  "knownext-docs",
+ "knownext-drawing",
  "knownext-research",
  "reqwest",
  "serde",

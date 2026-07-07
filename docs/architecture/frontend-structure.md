@@ -15,8 +15,11 @@ The frontend is React + TypeScript and renders product state received through th
 - Project creation, editing, selection, and tree operations go through `src/lib/api/projects.ts`.
 - Project file guard/sync overviews go through `src/lib/api/sync.ts` and are rendered as state; React does not inspect Git or the filesystem directly.
 - Layout, tabs, folder open state, notes, drafts, export templates, and settings go through API modules.
+- Handwritten pencil presets are application settings under `AppConfig.handwritten.toolPresets`. The handwritten editor receives them from app state and updates them through the config flow; opening a different `.knote` must not replace the active preset list.
 - Unsaved document changes are autosaved through `src/lib/api/documents.ts` to runtime-managed drafts.
+- Unsaved handwritten-note changes are autosaved through `src/lib/api/handwrittenNotes.ts` to runtime-managed drafts. React stores editor session state under `src/app/handwrittenSessions.ts`; it must not persist `.knote` files, render caches, or derived assets directly.
 - Document export goes through `src/lib/api/documents.ts`; React may open native save dialogs, but Rust writes or returns the export artifact.
+- Handwritten-note export and Markdown insertion go through `src/lib/api/handwrittenNotes.ts`. React may collect pointer input and draw canvas previews, but Rust validates/persists the `.knote`, renders export artifacts, writes derived assets, and prepares AI context.
 - Reference previews render runtime-prepared PDF/text/workbook payloads and show explicit errors for unsupported files.
 - The Markdown string remains the source of truth for inline visual formatting. Supported extended marks may use controlled inline HTML, including `<u>` and `<mark data-knx-highlight="yellow|green|blue|pink|orange">`.
 
@@ -41,6 +44,8 @@ The Skills de IA settings tab is a compact capability manager, not an editor. It
 ## Visual Structure
 
 - Keep the document editor as a single-column Milkdown surface.
+- Keep handwritten notes in `src/features/handwritten` as a separate feature surface. The handwritten editor is a paginated canvas notebook, not a replacement for Milkdown and not a raw JSON editor.
+- Handwritten UI must be stylus-first: pen/mouse write, touch scrolls, pressure and coalesced pointer events are used when available, and toolbar controls remain compact icon-led controls consistent with the workspace.
 - Keep the left panel compact and operational.
 - Use hover/context menus for tree item actions.
 - Do not show raw Markdown as the primary editing experience.

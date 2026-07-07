@@ -90,6 +90,12 @@ Manual Android acceptance must include:
 - install from a clean APK
 - create a project offline
 - create/edit/save Markdown
+- create a handwritten note offline with the default A4 page
+- write with a stylus when hardware is available, including pressure or the documented pressure fallback
+- confirm finger scroll, two-finger zoom, palm rejection, page navigation and rotation behavior in the handwritten editor
+- save, close and reopen a handwritten note and confirm strokes, tools and page backgrounds persist
+- export handwritten notes to `.knote`, PNG, SVG and PDF without a workstation service
+- insert a handwritten page into Markdown as a local asset and confirm the reference survives save/reopen
 - open notes and tabs
 - import/export documents
 - preview PDF/DOCX/XLSX reference files when available
@@ -101,3 +107,13 @@ Manual Android acceptance must include:
 ## Limitations
 
 - Play Store release tracks are not implemented yet. The current Android release channel is private APK distribution from GitHub Releases through `android-latest.json`.
+
+## Handwritten Notes On Android
+
+Android uses the same handwritten-note contracts as Windows: React captures Pointer Events in the editor, and Rust/Tauri services validate `.knote` files, persist drafts, render pages, export files and prepare AI context. React must not write note files, render caches or assets directly.
+
+Stylus input is expected to use `pointerType="pen"` with pressure where the Android WebView and hardware expose it. When pressure is unavailable or always reports the default value, the editor must fall back to the selected tool's base width while keeping the note editable. This fallback is acceptable only if writing latency, palm rejection and save/reopen remain usable in hands-on validation.
+
+PDF export on Android must use rendered page images or a native-compatible vector/image path through the Rust runtime. The old textual document-export fallback is not acceptable for handwritten notes because the visual page content is the document.
+
+Foreground/background transitions are part of acceptance. The editor must persist a recoverable draft before app pause, handle rotation without losing pointer state, and reopen the active note/tab without requiring a workstation process, local server or network connection.

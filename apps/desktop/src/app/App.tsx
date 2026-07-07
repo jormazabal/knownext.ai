@@ -4,7 +4,7 @@ import type { MarkdownEditorChangeSource, MarkdownEditorExternalOperation, Markd
 import { prepareMermaidDiagramAssets } from "../features/editor/mermaidDiagrams";
 import type { AiPromptExecutionOptions } from "../features/assistant/AiPromptInput";
 import { AiDeleteConfirmationDialog } from "../features/assistant/AiDeleteConfirmationDialog";
-import { CreateDocumentDialog } from "../features/documents/CreateDocumentDialog";
+import { CreateDocumentDialog, type CreateDocumentRequest } from "../features/documents/CreateDocumentDialog";
 import { MoveDocumentDialog } from "../features/documents/MoveDocumentDialog";
 import {
   CloseDirtyDocumentDialog,
@@ -32,10 +32,22 @@ import {
   type DocumentSession,
 } from "./documentSessions";
 import {
+  applyLocalHandwrittenNoteEdit,
+  createEmptyHandwrittenNoteSession,
+  createLoadedHandwrittenNoteSession,
+  handwrittenContentMatchesSaved,
+  shouldDiscardPersistedHandwrittenDraft,
+  shouldPersistHandwrittenDraft,
+  stringifyHandwrittenContent,
+  updateHandwrittenNoteSession,
+  type HandwrittenNoteSession,
+} from "./handwrittenSessions";
+import {
   defaultAppearanceConfig,
   defaultAiConfig,
   defaultDiagnosticsConfig,
   defaultExportTemplateConfig,
+  defaultHandwrittenConfig,
   defaultLayoutConfig,
   defaultProjectTabsConfig,
   getAppConfig,
@@ -58,6 +70,7 @@ import {
   addProjectAttachmentAiContextSource,
   addProjectImageAiContextSource,
   addProjectDocumentAiContextSource,
+  addProjectHandwrittenNoteAiContextSource,
   extendAiContextSource,
   getAiContextSources,
   getAiConversation,
@@ -99,6 +112,16 @@ import {
   saveDocument,
   saveDocumentDraft,
 } from "../lib/api/documents";
+import {
+  createHandwrittenNote,
+  discardHandwrittenNoteDraft,
+  exportHandwrittenNote,
+  exportHandwrittenNoteContent,
+  getHandwrittenNote,
+  insertHandwrittenPageIntoMarkdown,
+  saveHandwrittenNote,
+  saveHandwrittenNoteDraft,
+} from "../lib/api/handwrittenNotes";
 import { getUserNotes, saveUserNotes } from "../lib/api/notes";
 import { getExternalChanges, importExternalChanges, scanExternalChanges } from "../lib/api/externalChanges";
 import { autoRunProjectSync, changeProjectSyncMode, connectProjectGithub, enableProjectHistory, getProjectFileSyncOverview, getProjectSyncStatus, publishProjectGithub, resolveProjectSyncConflict, scanProjectSync, verifyProjectGithubConnection } from "../lib/api/sync";
@@ -116,7 +139,15 @@ import {
 } from "../lib/runtime/updater";
 import { getTraceLogStatus, openTraceLogFolder, recordTraceLog, type TraceLogStatus } from "../lib/runtime/logging";
 import { openExternalUrl } from "../lib/runtime/links";
-import { isTauriRuntime, selectBrowserExportTarget, selectExportFilePath, withExportExtension } from "../lib/runtime/exportDialogs";
+import {
+  isTauriRuntime,
+  selectBrowserExportTarget,
+  selectBrowserHandwrittenExportTarget,
+  selectExportFilePath,
+  selectHandwrittenExportFilePath,
+  withExportExtension,
+  withHandwrittenExportExtension,
+} from "../lib/runtime/exportDialogs";
 import { selectAiContextFilePaths } from "../lib/runtime/fileDialogs";
 import { isTauriMobileRuntime } from "../lib/runtime/platform";
 import { getRuntimeServiceStatus, type RuntimeServicesStatus } from "../lib/runtime/services";
@@ -179,6 +210,13 @@ import type {
   ExportTemplateConfig,
   ExportTemplateUpdate,
   FileOperationResult,
+  HandwrittenExportFormat,
+  HandwrittenConfig,
+  HandwrittenEraserConfig,
+  HandwrittenNoteContent,
+  HandwrittenNoteInsertMarkdownResponse,
+  HandwrittenNoteRecord,
+  HandwrittenToolPreset,
   InsertImageReferenceResponse,
   LayoutConfig,
   OpenDocumentTab,
@@ -247,6 +285,8 @@ export function App() {
   const [tree, setTree] = useState<DocumentTreeNode[]>([]);
   const [tabs, setTabs] = useState<OpenDocumentTab[]>(defaultProjectTabsConfig.openTabs);
   const [activeDocumentId, setActiveDocumentId] = useState(defaultProjectTabsConfig.activeDocumentId);
+  const [handwrittenTabs, setHandwrittenTabs] = useState<OpenDocumentTab[]>(defaultProjectTabsConfig.openHandwrittenTabs ?? []);
+  const [activeHandwrittenNoteId, setActiveHandwrittenNoteId] = useState(defaultProjectTabsConfig.activeHandwrittenNoteId ?? "");
   const [activeTreeNodeId, setActiveTreeNodeId] = useState(defaultProjectTabsConfig.activeDocumentId);
   const [imageTabs, setImageTabs] = useState<Array<{ id: string; name: string; path: string }>>([]);
   const [activeImageId, setActiveImageId] = useState("");
@@ -254,15 +294,18 @@ export function App() {
   const [activeReferenceDocumentId, setActiveReferenceDocumentId] = useState("");
   const [workspaceTabOrder, setWorkspaceTabOrder] = useState<string[]>([]);
   const [documentSessions, setDocumentSessions] = useState<Record<string, DocumentSession>>({});
+  const [handwrittenSessions, setHandwrittenSessions] = useState<Record<string, HandwrittenNoteSession>>({});
   const [historyOpen, setHistoryOpen] = useState(false);
   const [createDocumentOpen, setCreateDocumentOpen] = useState(false);
   const [createDocumentParentId, setCreateDocumentParentId] = useState<string | null>(null);
+  const [createDocumentInitialKind, setCreateDocumentInitialKind] = useState<CreateDocumentRequest["kind"]>("document");
   const [moveNode, setMoveNode] = useState<DocumentTreeNode | null>(null);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [editProjectOpen, setEditProjectOpen] = useState(false);
   const [layoutConfig, setLayoutConfig] = useState<LayoutConfig>(defaultLayoutConfig);
   const [appearanceConfig, setAppearanceConfig] = useState<AppearanceConfig>(defaultAppearanceConfig);
   const [diagnosticsConfig, setDiagnosticsConfig] = useState<DiagnosticsConfig>(defaultDiagnosticsConfig);
+  const [handwrittenConfig, setHandwrittenConfig] = useState<HandwrittenConfig>(defaultHandwrittenConfig);
   const [exportTemplateConfig, setExportTemplateConfig] = useState<ExportTemplateConfig>(defaultExportTemplateConfig);
   const [exportTemplatePath, setExportTemplatePath] = useState("");
   const exportTemplateSaveSequence = useRef(0);
@@ -349,7 +392,9 @@ export function App() {
   const githubLoginPollingRef = useRef(false);
   const lastDocumentContextRef = useRef<{ id: string | null; path: string | null }>({ id: null, path: null });
   const documentSessionsRef = useRef(documentSessions);
+  const handwrittenSessionsRef = useRef(handwrittenSessions);
   const draftDiscardInFlightRef = useRef<Set<string>>(new Set());
+  const handwrittenDraftDiscardInFlightRef = useRef<Set<string>>(new Set());
   const autoAppliedAiEditProposalIdsRef = useRef<Set<string>>(new Set());
   const externalChangesLastCheckRef = useRef(0);
   const projectSyncLastCheckRef = useRef(0);
@@ -359,6 +404,10 @@ export function App() {
   useEffect(() => {
     documentSessionsRef.current = documentSessions;
   }, [documentSessions]);
+
+  useEffect(() => {
+    handwrittenSessionsRef.current = handwrittenSessions;
+  }, [handwrittenSessions]);
 
   useEffect(() => {
     void (async () => {
@@ -416,7 +465,7 @@ export function App() {
         }
         const activeProjectTabs = active
           ? resolveProjectTabs(appConfig.tabsByProject, active.id, projectTree)
-          : { openTabs: [], activeDocumentId: "" };
+          : { ...defaultProjectTabsConfig };
         const shouldOpenReleaseNotes = shouldOpenReleaseNotesAfterStartup(appConfig, APP_VERSION);
         const nextOpenUtilityTabs = shouldOpenReleaseNotes
           ? ensureReleaseNotesTab(appConfig.openUtilityTabs)
@@ -432,6 +481,7 @@ export function App() {
         setLayoutConfig(appConfig.layout);
         setAppearanceConfig(appConfig.appearance ?? defaultAppearanceConfig);
         setDiagnosticsConfig(appConfig.diagnostics ?? defaultDiagnosticsConfig);
+        setHandwrittenConfig(appConfig.handwritten ?? defaultHandwrittenConfig);
         setExportTemplateConfig(loadedExportTemplate);
         setExportTemplatePath(loadedExportTemplatePath);
         setAiConfig(loadedAiConfig);
@@ -450,7 +500,9 @@ export function App() {
         setLastSeenReleaseNotesVersion(appConfig.lastSeenReleaseNotesVersion ?? null);
         setTabs(activeProjectTabs.openTabs);
         setActiveDocumentId(activeProjectTabs.activeDocumentId);
-        setActiveTreeNodeId(activeProjectTabs.activeDocumentId);
+        setHandwrittenTabs(activeProjectTabs.openHandwrittenTabs ?? []);
+        setActiveHandwrittenNoteId(activeProjectTabs.activeHandwrittenNoteId ?? "");
+        setActiveTreeNodeId(activeProjectTabs.activeWorkspaceTabId || activeProjectTabs.activeHandwrittenNoteId || activeProjectTabs.activeDocumentId);
         setLocalRuntimeRecoveryOpen(false);
         setLocalRuntimeRecoveryError(null);
       } catch (error) {
@@ -476,9 +528,12 @@ export function App() {
         setTree([]);
         setTabs([]);
         setActiveDocumentId("");
+        setHandwrittenTabs([]);
+        setActiveHandwrittenNoteId("");
         setActiveTreeNodeId("");
         setAppearanceConfig(localPreferences.appearance ?? defaultAppearanceConfig);
         setDiagnosticsConfig(localPreferences.diagnostics ?? defaultDiagnosticsConfig);
+        setHandwrittenConfig(localPreferences.handwritten ?? defaultHandwrittenConfig);
         setExportTemplateConfig(defaultExportTemplateConfig);
         setExportTemplatePath("");
         setAiConfig({ ...(localPreferences.ai ?? defaultAiConfig), openaiKeyConfigured: false, openaiKeyPreview: null });
@@ -505,6 +560,7 @@ export function App() {
       writeLocalAppPreferences({
         appearance: appearanceConfig,
         diagnostics: diagnosticsConfig,
+        handwritten: handwrittenConfig,
       });
 
       if (!configPersistenceAvailable) {
@@ -522,6 +578,7 @@ export function App() {
         layout: layoutConfig,
         appearance: appearanceConfig,
         diagnostics: diagnosticsConfig,
+        handwritten: handwrittenConfig,
         tabsByProject,
         treeOpenPathsByProject,
         lastRunAppVersion,
@@ -553,6 +610,7 @@ export function App() {
     configLoaded,
     configPersistenceAvailable,
     diagnosticsConfig,
+    handwrittenConfig,
     lastRunAppVersion,
     lastSeenReleaseNotesVersion,
     layoutConfig,
@@ -735,6 +793,12 @@ export function App() {
     return () => window.clearInterval(interval);
   }, [activeProject?.id]);
 
+  const activeWorkspaceTabIdForConfig = activeUtilityTab === RELEASE_NOTES_UTILITY_TAB_ID
+    ? RELEASE_NOTES_WORKSPACE_TAB_ID
+    : activeUtilityTab === NOTES_UTILITY_TAB_ID
+    ? NOTES_WORKSPACE_TAB_ID
+    : activeReferenceDocumentId || activeImageId || activeHandwrittenNoteId || activeDocumentId || (activeProject ? AI_CONVERSATION_TAB_ID : NOTES_WORKSPACE_TAB_ID);
+
   useEffect(() => {
     if (!authStatus.isAuthenticated) {
       setGithubRepositories([]);
@@ -762,6 +826,14 @@ export function App() {
         if (!shouldPersistDraft(session)) continue;
         void saveDocumentDraft(documentId, { markdown: session.markdown, baseFingerprint: session.baseFingerprint });
       }
+      for (const [noteId, session] of Object.entries(handwrittenSessions)) {
+        if (!shouldPersistHandwrittenDraft(session) || !session.content) continue;
+        void saveHandwrittenNoteDraft(noteId, {
+          content: session.content,
+          baseFingerprint: session.baseFingerprint,
+          baseContentHash: session.savedContentHash ?? null,
+        });
+      }
       if (notesLoaded && notesMarkdown !== notesSavedMarkdown) {
         void saveUserNotes(notesMarkdown);
       }
@@ -769,7 +841,7 @@ export function App() {
 
     window.addEventListener("pagehide", handlePageHide);
     return () => window.removeEventListener("pagehide", handlePageHide);
-  }, [documentSessions, notesLoaded, notesMarkdown, notesSavedMarkdown]);
+  }, [documentSessions, handwrittenSessions, notesLoaded, notesMarkdown, notesSavedMarkdown]);
 
   useEffect(() => {
     if (!configLoaded || !activeProject) return;
@@ -777,6 +849,9 @@ export function App() {
     const activeProjectTabs = normalizeProjectTabs({
       openTabs: tabs,
       activeDocumentId,
+      openHandwrittenTabs: handwrittenTabs,
+      activeHandwrittenNoteId,
+      activeWorkspaceTabId: activeWorkspaceTabIdForConfig,
     });
 
     setTabsByProject((currentTabsByProject) => {
@@ -787,12 +862,17 @@ export function App() {
         [activeProject.id]: activeProjectTabs,
       };
     });
-  }, [activeDocumentId, activeProject, configLoaded, tabs]);
+  }, [activeDocumentId, activeHandwrittenNoteId, activeProject, activeWorkspaceTabIdForConfig, configLoaded, handwrittenTabs, tabs]);
 
   useEffect(() => {
     if (!activeDocumentId || documentSessions[activeDocumentId]) return;
     void loadDocumentSession(activeDocumentId);
   }, [activeDocumentId, documentSessions]);
+
+  useEffect(() => {
+    if (!activeHandwrittenNoteId || handwrittenSessions[activeHandwrittenNoteId]) return;
+    void loadHandwrittenNoteSession(activeHandwrittenNoteId);
+  }, [activeHandwrittenNoteId, handwrittenSessions]);
 
   useEffect(() => {
     const activeSelectionDocumentId = activeUtilityTab === NOTES_UTILITY_TAB_ID ? NOTES_WORKSPACE_TAB_ID : activeDocumentId;
@@ -830,6 +910,19 @@ export function App() {
   }, [documentSessions]);
 
   useEffect(() => {
+    const pendingDrafts = Object.entries(handwrittenSessions).filter(([, session]) => shouldPersistHandwrittenDraft(session));
+    if (pendingDrafts.length === 0) return;
+
+    const timeout = window.setTimeout(() => {
+      for (const [noteId, session] of pendingDrafts) {
+        void persistHandwrittenDraft(noteId, session);
+      }
+    }, 1000);
+
+    return () => window.clearTimeout(timeout);
+  }, [handwrittenSessions]);
+
+  useEffect(() => {
     const draftsToDiscard = Object.entries(documentSessions).filter(([, session]) => shouldDiscardPersistedDraft(session));
     if (draftsToDiscard.length === 0) return;
 
@@ -841,6 +934,19 @@ export function App() {
 
     return () => window.clearTimeout(timeout);
   }, [documentSessions]);
+
+  useEffect(() => {
+    const draftsToDiscard = Object.entries(handwrittenSessions).filter(([, session]) => shouldDiscardPersistedHandwrittenDraft(session));
+    if (draftsToDiscard.length === 0) return;
+
+    const timeout = window.setTimeout(() => {
+      for (const [noteId] of draftsToDiscard) {
+        void discardPersistedHandwrittenDraft(noteId);
+      }
+    }, 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [handwrittenSessions]);
 
   useEffect(() => {
     if (!notesLoaded || notesMarkdown === notesSavedMarkdown) return;
@@ -894,6 +1000,7 @@ export function App() {
 
   const scrollableWorkspaceTabs = useMemo<WorkspaceTab[]>(() => [
     ...tabs.map((tab) => ({ ...tab, kind: "document" as const })),
+    ...handwrittenTabs.map((tab) => ({ ...tab, kind: "handwritten-note" as const })),
     ...imageTabs.map((tab) => ({ ...tab, kind: "image" as const })),
     ...referenceDocumentTabs.map((tab) => ({ ...tab, kind: "reference-document" as const, readonly: true as const })),
     ...(openUtilityTabs.includes(RELEASE_NOTES_UTILITY_TAB_ID)
@@ -905,7 +1012,7 @@ export function App() {
         readonly: true as const,
       }]
       : []),
-  ], [activeProject, imageTabs, openUtilityTabs, referenceDocumentTabs, tabs]);
+  ], [activeProject, handwrittenTabs, imageTabs, openUtilityTabs, referenceDocumentTabs, tabs]);
 
   useEffect(() => {
     const visibleTabIds = scrollableWorkspaceTabs.map((tab) => tab.id);
@@ -921,12 +1028,9 @@ export function App() {
     () => [...fixedWorkspaceTabs, ...orderedScrollableWorkspaceTabs],
     [fixedWorkspaceTabs, orderedScrollableWorkspaceTabs],
   );
-  const activeTabId = activeUtilityTab === RELEASE_NOTES_UTILITY_TAB_ID
-    ? RELEASE_NOTES_WORKSPACE_TAB_ID
-    : activeUtilityTab === NOTES_UTILITY_TAB_ID
-    ? NOTES_WORKSPACE_TAB_ID
-    : activeReferenceDocumentId || activeImageId || activeDocumentId || (activeProject ? AI_CONVERSATION_TAB_ID : NOTES_WORKSPACE_TAB_ID);
+  const activeTabId = activeWorkspaceTabIdForConfig;
   const activeSession = activeDocumentId ? documentSessions[activeDocumentId] : undefined;
+  const activeHandwrittenSession = activeHandwrittenNoteId ? handwrittenSessions[activeHandwrittenNoteId] : undefined;
   const activeDocumentSyncStatus = activeDocumentId ? documentSyncStatuses[activeDocumentId] ?? null : null;
   const activeDocumentPendingSaveHint = activeSession?.isDirty && activeSession.pendingSaveReason === "opened"
     ? "El documento se abrió con cambios recuperados o ajustes de formato. Guarda para aplicarlos o deshaz para mantener la versión anterior."
@@ -964,8 +1068,11 @@ export function App() {
     lastDocumentContextRef.current = { id: activeDocumentId, path: activeSession.document.path };
   }, [activeDocumentId, activeSession?.document?.path]);
   const dirtyDocumentIds = useMemo(
-    () => Object.entries(documentSessions).filter(([, session]) => session.isDirty).map(([documentId]) => documentId),
-    [documentSessions],
+    () => [
+      ...Object.entries(documentSessions).filter(([, session]) => session.isDirty).map(([documentId]) => documentId),
+      ...Object.entries(handwrittenSessions).filter(([, session]) => session.isDirty).map(([noteId]) => noteId),
+    ],
+    [documentSessions, handwrittenSessions],
   );
   const openDocumentDraftStates = useMemo(
     () => Object.entries(documentSessions)
@@ -990,6 +1097,8 @@ export function App() {
     })),
     [documentSessions, tabs],
   );
+  const activeHandwrittenContent = activeHandwrittenSession?.content ?? null;
+  const activeHandwrittenNote = activeHandwrittenSession?.note ?? null;
 
   function persistTreeOpenState(projectId: string, nodes: DocumentTreeNode[]) {
     setTreeOpenPathsByProject((currentState) => updateTreeOpenPathsForProject(currentState, projectId, nodes));
@@ -1032,6 +1141,9 @@ export function App() {
   }
 
   function handleOpenDocument(documentId: string, name: string) {
+    if (activeHandwrittenNoteId && handwrittenSessions[activeHandwrittenNoteId]) {
+      void persistHandwrittenDraft(activeHandwrittenNoteId, handwrittenSessions[activeHandwrittenNoteId]);
+    }
     setTabs((currentTabs) => (
       currentTabs.some((tab) => tab.id === documentId)
         ? currentTabs
@@ -1040,6 +1152,24 @@ export function App() {
     setActiveDocumentId(documentId);
     revealTreeNode(documentId);
     setActiveImageId("");
+    setActiveHandwrittenNoteId("");
+    setActiveReferenceDocumentId("");
+    setActiveUtilityTab(null);
+  }
+
+  function handleOpenHandwrittenNote(noteId: string, name: string) {
+    if (activeDocumentId && documentSessions[activeDocumentId]) {
+      void persistDraft(activeDocumentId, documentSessions[activeDocumentId]);
+    }
+    setHandwrittenTabs((currentTabs) => (
+      currentTabs.some((tab) => tab.id === noteId)
+        ? currentTabs.map((tab) => (tab.id === noteId ? { id: noteId, name } : tab))
+        : [...currentTabs, { id: noteId, name }]
+    ));
+    setActiveHandwrittenNoteId(noteId);
+    revealTreeNode(noteId);
+    setActiveDocumentId("");
+    setActiveImageId("");
     setActiveReferenceDocumentId("");
     setActiveUtilityTab(null);
   }
@@ -1047,6 +1177,7 @@ export function App() {
   function handleSelectTreeNode(nodeId: string, type: DocumentTreeNode["type"], name: string) {
     revealTreeNode(nodeId);
     if (type === "document") handleOpenDocument(nodeId, name);
+    if (type === "handwritten-note") handleOpenHandwrittenNote(nodeId, name);
     if (type === "image") {
       const imageNode = findNodeById(tree, nodeId);
       if (imageNode?.path) handleOpenImage(nodeId, name, imageNode.path);
@@ -1068,8 +1199,13 @@ export function App() {
         : [...currentTabs, { id: assetId, name, path }]
     ));
     if (options?.activate !== false) {
+      if (activeHandwrittenNoteId && handwrittenSessions[activeHandwrittenNoteId]) {
+        void persistHandwrittenDraft(activeHandwrittenNoteId, handwrittenSessions[activeHandwrittenNoteId]);
+      }
       setActiveImageId(assetId);
       setActiveReferenceDocumentId("");
+      setActiveHandwrittenNoteId("");
+      setActiveDocumentId("");
       setActiveTreeNodeId(assetId);
       setActiveUtilityTab(null);
     }
@@ -1090,8 +1226,12 @@ export function App() {
     if (activeDocumentId && documentSessions[activeDocumentId]) {
       void persistDraft(activeDocumentId, documentSessions[activeDocumentId]);
     }
+    if (activeHandwrittenNoteId && handwrittenSessions[activeHandwrittenNoteId]) {
+      void persistHandwrittenDraft(activeHandwrittenNoteId, handwrittenSessions[activeHandwrittenNoteId]);
+    }
     setActiveReferenceDocumentId(nodeId);
     setActiveImageId("");
+    setActiveHandwrittenNoteId("");
     setActiveDocumentId("");
     setActiveTreeNodeId(nodeId);
     setActiveUtilityTab(null);
@@ -1296,6 +1436,15 @@ export function App() {
       return;
     }
 
+    if (handwrittenTabs.some((tab) => tab.id === tabId)) {
+      if (handwrittenSessions[tabId]?.isDirty) {
+        setCloseDocumentId(tabId);
+        return;
+      }
+      closeHandwrittenTabNow(tabId);
+      return;
+    }
+
     const documentId = tabId;
     if (documentSessions[documentId]?.isDirty) {
       setCloseDocumentId(documentId);
@@ -1313,11 +1462,12 @@ export function App() {
         return;
       }
 
-      if (documentSessions[tabId]?.isDirty) {
+      if (documentSessions[tabId]?.isDirty || handwrittenSessions[tabId]?.isDirty) {
         dirtyDocumentIdsToConfirm.push(tabId);
         return;
       }
-      closeTabNow(tabId);
+      if (handwrittenTabs.some((tab) => tab.id === tabId)) closeHandwrittenTabNow(tabId);
+      else closeTabNow(tabId);
     });
     if (dirtyDocumentIdsToConfirm.length > 0) {
       const [firstDocumentId, ...remainingDocumentIds] = dirtyDocumentIdsToConfirm;
@@ -1340,6 +1490,7 @@ export function App() {
       return reorderWorkspaceTabIds(normalizeWorkspaceTabOrder(currentOrder, visibleTabIds), draggedTabId, targetTabId, placement);
     });
     setTabs((currentTabs) => reorderOpenDocumentTabs(currentTabs, draggedTabId, targetTabId, placement));
+    setHandwrittenTabs((currentTabs) => reorderOpenDocumentTabs(currentTabs, draggedTabId, targetTabId, placement));
   }
 
   function closeTabNow(documentId: string) {
@@ -1363,14 +1514,38 @@ export function App() {
     });
   }
 
+  function closeHandwrittenTabNow(noteId: string) {
+    setHandwrittenTabs((currentTabs) => {
+      const nextTabs = currentTabs.filter((tab) => tab.id !== noteId);
+      if (noteId === activeHandwrittenNoteId && activeUtilityTab === null) {
+        const nextActiveNoteId = nextTabs[0]?.id ?? "";
+        setActiveHandwrittenNoteId(nextActiveNoteId);
+        if (nextActiveNoteId) {
+          revealTreeNode(nextActiveNoteId);
+        } else {
+          setActiveTreeNodeId(activeDocumentId);
+        }
+      }
+      return nextTabs;
+    });
+    setHandwrittenSessions((currentSessions) => {
+      const { [noteId]: _closedSession, ...nextSessions } = currentSessions;
+      return nextSessions;
+    });
+  }
+
   function handleSelectTab(tabId: string) {
     if (tabId === AI_CONVERSATION_TAB_ID) {
       if (activeDocumentId && documentSessions[activeDocumentId]) {
         void persistDraft(activeDocumentId, documentSessions[activeDocumentId]);
       }
+      if (activeHandwrittenNoteId && handwrittenSessions[activeHandwrittenNoteId]) {
+        void persistHandwrittenDraft(activeHandwrittenNoteId, handwrittenSessions[activeHandwrittenNoteId]);
+      }
       setActiveUtilityTab(null);
       setActiveImageId("");
       setActiveReferenceDocumentId("");
+      setActiveHandwrittenNoteId("");
       setActiveDocumentId("");
       setActiveTreeNodeId("");
       return;
@@ -1380,6 +1555,7 @@ export function App() {
       setOpenUtilityTabs((currentTabs) => ensureReleaseNotesTab(currentTabs));
       setActiveUtilityTab(RELEASE_NOTES_UTILITY_TAB_ID);
       setActiveImageId("");
+      setActiveHandwrittenNoteId("");
       setActiveReferenceDocumentId("");
       setActiveTreeNodeId("");
       return;
@@ -1389,9 +1565,13 @@ export function App() {
       if (activeDocumentId && documentSessions[activeDocumentId]) {
         void persistDraft(activeDocumentId, documentSessions[activeDocumentId]);
       }
+      if (activeHandwrittenNoteId && handwrittenSessions[activeHandwrittenNoteId]) {
+        void persistHandwrittenDraft(activeHandwrittenNoteId, handwrittenSessions[activeHandwrittenNoteId]);
+      }
       setActiveUtilityTab(NOTES_UTILITY_TAB_ID);
       setActiveImageId("");
       setActiveReferenceDocumentId("");
+      setActiveHandwrittenNoteId("");
       setActiveDocumentId("");
       setActiveTreeNodeId("");
       return;
@@ -1401,9 +1581,14 @@ export function App() {
       if (activeDocumentId && documentSessions[activeDocumentId]) {
         void persistDraft(activeDocumentId, documentSessions[activeDocumentId]);
       }
+      if (activeHandwrittenNoteId && handwrittenSessions[activeHandwrittenNoteId]) {
+        void persistHandwrittenDraft(activeHandwrittenNoteId, handwrittenSessions[activeHandwrittenNoteId]);
+      }
       setActiveUtilityTab(null);
       setActiveImageId(tabId);
       setActiveReferenceDocumentId("");
+      setActiveHandwrittenNoteId("");
+      setActiveDocumentId("");
       setActiveTreeNodeId(tabId);
       return;
     }
@@ -1412,11 +1597,31 @@ export function App() {
       if (activeDocumentId && documentSessions[activeDocumentId]) {
         void persistDraft(activeDocumentId, documentSessions[activeDocumentId]);
       }
+      if (activeHandwrittenNoteId && handwrittenSessions[activeHandwrittenNoteId]) {
+        void persistHandwrittenDraft(activeHandwrittenNoteId, handwrittenSessions[activeHandwrittenNoteId]);
+      }
       setActiveUtilityTab(null);
       setActiveImageId("");
       setActiveReferenceDocumentId(tabId);
+      setActiveHandwrittenNoteId("");
       setActiveDocumentId("");
       setActiveTreeNodeId(tabId);
+      return;
+    }
+
+    if (handwrittenTabs.some((tab) => tab.id === tabId)) {
+      if (activeDocumentId && documentSessions[activeDocumentId]) {
+        void persistDraft(activeDocumentId, documentSessions[activeDocumentId]);
+      }
+      if (activeHandwrittenNoteId && activeHandwrittenNoteId !== tabId && handwrittenSessions[activeHandwrittenNoteId]) {
+        void persistHandwrittenDraft(activeHandwrittenNoteId, handwrittenSessions[activeHandwrittenNoteId]);
+      }
+      setActiveUtilityTab(null);
+      setActiveImageId("");
+      setActiveReferenceDocumentId("");
+      setActiveDocumentId("");
+      setActiveHandwrittenNoteId(tabId);
+      revealTreeNode(tabId);
       return;
     }
 
@@ -1424,9 +1629,13 @@ export function App() {
     if (activeDocumentId && documentSessions[activeDocumentId]) {
       void persistDraft(activeDocumentId, documentSessions[activeDocumentId]);
     }
+    if (activeHandwrittenNoteId && handwrittenSessions[activeHandwrittenNoteId]) {
+      void persistHandwrittenDraft(activeHandwrittenNoteId, handwrittenSessions[activeHandwrittenNoteId]);
+    }
     setActiveUtilityTab(null);
     setActiveImageId("");
     setActiveReferenceDocumentId("");
+    setActiveHandwrittenNoteId("");
     setActiveDocumentId(documentId);
     revealTreeNode(documentId);
   }
@@ -1436,6 +1645,7 @@ export function App() {
     setActiveUtilityTab(RELEASE_NOTES_UTILITY_TAB_ID);
     setActiveReferenceDocumentId("");
     setActiveImageId("");
+    setActiveHandwrittenNoteId("");
     setActiveTreeNodeId("");
   }
 
@@ -1447,6 +1657,33 @@ export function App() {
         ...currentSessions,
         [documentId]: applyLocalMarkdownEdit(session, nextMarkdown, source),
       };
+    });
+  }
+
+  function handleHandwrittenChange(noteId: string, content: HandwrittenNoteContent) {
+    setHandwrittenSessions((currentSessions) => {
+      const session = currentSessions[noteId];
+      if (!session) return currentSessions;
+      return {
+        ...currentSessions,
+        [noteId]: applyLocalHandwrittenNoteEdit(session, content),
+      };
+    });
+  }
+
+  function handleHandwrittenToolPresetsChange(toolPresets: HandwrittenToolPreset[]) {
+    setHandwrittenConfig((currentConfig) => {
+      const updatedConfig = { ...currentConfig, toolPresets };
+      writeLocalAppPreferences({ handwritten: updatedConfig });
+      return updatedConfig;
+    });
+  }
+
+  function handleHandwrittenEraserConfigChange(eraser: HandwrittenEraserConfig) {
+    setHandwrittenConfig((currentConfig) => {
+      const updatedConfig = { ...currentConfig, eraser };
+      writeLocalAppPreferences({ handwritten: updatedConfig });
+      return updatedConfig;
     });
   }
 
@@ -1491,8 +1728,18 @@ export function App() {
     if (!activeProject) return;
     const hasNotesContext = activeUtilityTab === NOTES_UTILITY_TAB_ID;
     const hasDocumentContext = Boolean(activeDocumentId && activeSession?.document);
+    const hasHandwrittenContext = Boolean(
+      activeHandwrittenNoteId
+      && activeHandwrittenSession?.note
+      && activeHandwrittenSession.content
+      && activeWorkspaceTabIdForConfig === activeHandwrittenNoteId,
+    );
     if (hasDocumentContext && (activeSession?.conflictStatus === "disk-changed" || activeSession?.orphaned || activeSession?.conflictStatus === "missing")) {
       setAiBubble({ id: `local-${Date.now()}`, answer: "Resuelve el conflicto del documento antes de aplicar cambios con IA." });
+      return;
+    }
+    if (hasHandwrittenContext && (activeHandwrittenSession?.conflictStatus === "disk-changed" || activeHandwrittenSession?.orphaned || activeHandwrittenSession?.conflictStatus === "missing")) {
+      setAiBubble({ id: `local-${Date.now()}`, answer: "Resuelve el conflicto de la nota a mano antes de aplicar dibujos con IA." });
       return;
     }
     const interactionDocumentId = hasNotesContext ? NOTES_WORKSPACE_TAB_ID : hasDocumentContext ? activeDocumentId : null;
@@ -1500,6 +1747,16 @@ export function App() {
     const interactionSelection = hasNotesContext
       ? selectionFocus?.documentId === NOTES_WORKSPACE_TAB_ID ? selectionFocus : null
       : hasDocumentContext && selectionFocus?.documentId === activeDocumentId ? selectionFocus : null;
+    const handwrittenContent = hasHandwrittenContext ? activeHandwrittenSession?.content ?? null : null;
+    const activeHandwrittenPage = handwrittenContent?.pages[0] ?? null;
+    const handwrittenContentJson = handwrittenContent ? stringifyHandwrittenContent(handwrittenContent) : "";
+    const targetKind = hasNotesContext
+      ? "notes"
+      : hasHandwrittenContext
+      ? "handwritten_note"
+      : hasDocumentContext
+      ? "markdown_document"
+      : "project";
 
     setAiBubble(null);
     try {
@@ -1533,6 +1790,15 @@ export function App() {
         documentId: interactionDocumentId,
         prompt,
         activeMarkdown: interactionMarkdown,
+        targetKind,
+        handwrittenNoteId: hasHandwrittenContext ? activeHandwrittenNoteId : null,
+        activeHandwrittenPageId: activeHandwrittenPage?.id ?? null,
+        activeHandwrittenSummary: handwrittenContent && activeHandwrittenPage
+          ? buildActiveHandwrittenSummary(handwrittenContent, activeHandwrittenPage.id)
+          : null,
+        activeHandwrittenContentHash: handwrittenContent ? simpleStringHash(handwrittenContentJson) : null,
+        activeHandwrittenBaseFingerprint: hasHandwrittenContext ? activeHandwrittenSession?.baseFingerprint ?? null : null,
+        activeHandwrittenContent: handwrittenContent,
         selectionFocus: interactionSelection,
         clientContext: {
           lastDocumentId: lastDocumentContextRef.current.id,
@@ -1542,7 +1808,7 @@ export function App() {
         intent: options?.intent ?? null,
         executionMode: options?.executionMode ?? "quick",
         reasoningDepth: options?.reasoningDepth ?? "light",
-        mode: interactionDocumentId ? "document" : "project",
+        mode: interactionDocumentId || hasHandwrittenContext ? "document" : "project",
         clientMessageId: `client-${Date.now()}`,
         contextSourceIds: promptContextSourceIds,
       });
@@ -1633,11 +1899,13 @@ export function App() {
   async function handleAddProjectDocumentContext(documentId: string) {
     if (!activeProject) return;
     try {
-      const node = documentId.startsWith("fs_") ? findNodeById(tree, documentId) : null;
+      const node = findNodeById(tree, documentId);
       if (node?.type === "image") {
         await addProjectImageAiContextSource(activeProject.id, documentId);
       } else if (node?.type === "attachment") {
         await addProjectAttachmentAiContextSource(activeProject.id, documentId);
+      } else if (node?.type === "handwritten-note") {
+        await addProjectHandwrittenNoteAiContextSource(activeProject.id, documentId);
       } else {
         await addProjectDocumentAiContextSource(activeProject.id, documentId);
       }
@@ -1841,6 +2109,50 @@ export function App() {
           return !documentPath || !isPathInDeletedScope(documentPath, deletedPaths);
         }),
       );
+    }
+
+    if (response.updatedHandwrittenNote) {
+      const updated = response.updatedHandwrittenNote;
+      const targetNode = findNodeById(tree, updated.noteId);
+      const tabName = targetNode?.name ?? activeHandwrittenSession?.note?.name ?? "Nota a mano";
+      const now = new Date().toISOString();
+      const existingSession = handwrittenSessions[updated.noteId];
+      setHandwrittenTabs((currentTabs) => (
+        currentTabs.some((tab) => tab.id === updated.noteId)
+          ? currentTabs.map((tab) => (tab.id === updated.noteId ? { id: updated.noteId, name: tab.name || tabName } : tab))
+          : [...currentTabs, { id: updated.noteId, name: tabName }]
+      ));
+      setHandwrittenSessions((currentSessions) => {
+        const session = currentSessions[updated.noteId];
+        if (!session) return currentSessions;
+        return {
+          ...currentSessions,
+          [updated.noteId]: markAiHandwrittenDraftApplied(applyLocalHandwrittenNoteEdit(session, updated.content), updated.content, now),
+        };
+      });
+      if (!existingSession) {
+        void getHandwrittenNote(updated.noteId)
+          .then((record) => {
+            setHandwrittenSessions((currentSessions) => {
+              const baseSession = createLoadedHandwrittenNoteSession(record, currentSessions[updated.noteId]);
+              return {
+                ...currentSessions,
+                [updated.noteId]: markAiHandwrittenDraftApplied(applyLocalHandwrittenNoteEdit(baseSession, updated.content), updated.content, now),
+              };
+            });
+          })
+          .catch((error) => showError(error, "No se pudo abrir la nota a mano actualizada por IA.", { source: "app.aiUpdatedHandwrittenNote" }));
+      }
+      setActiveUtilityTab(null);
+      setActiveDocumentId("");
+      setActiveImageId("");
+      setActiveReferenceDocumentId("");
+      setActiveHandwrittenNoteId(updated.noteId);
+      setActiveTreeNodeId(updated.noteId);
+      setAiAppliedChange({
+        documentId: updated.noteId,
+        summary: updated.summary,
+      });
     }
 
     if (response.updatedDocument) {
@@ -2267,13 +2579,77 @@ export function App() {
     }
   }
 
+  async function handleSaveHandwrittenNote(noteId = activeHandwrittenNoteId) {
+    const session = handwrittenSessions[noteId];
+    if (!noteId || !session?.note || !session.content) return false;
+    setHandwrittenSessions((currentSessions) => updateHandwrittenNoteSession(currentSessions, noteId, { saveState: "saving" }));
+    try {
+      const saved = await saveHandwrittenNote(noteId, {
+        content: session.content,
+        baseFingerprint: session.baseFingerprint,
+      });
+      setHandwrittenSessions((currentSessions) => updateHandwrittenNoteSession(currentSessions, noteId, {
+        note: saved,
+        content: saved.content,
+        savedContent: saved.content,
+        isDirty: false,
+        saveState: "saved",
+        lastDraftContentJson: "",
+        baseFingerprint: saved.baseFingerprint,
+        savedContentHash: saved.savedContentHash ?? saved.diskContentHash ?? null,
+        draftContentHash: null,
+        conflictStatus: "none",
+        diskChanged: false,
+        orphaned: false,
+        hasRecoveredDraft: false,
+        draftUpdatedAt: null,
+        pendingDraftDiscard: false,
+      }));
+      window.setTimeout(() => {
+        setHandwrittenSessions((currentSessions) => {
+          const currentSession = currentSessions[noteId];
+          if (!currentSession || currentSession.saveState !== "saved") return currentSessions;
+          return updateHandwrittenNoteSession(currentSessions, noteId, { saveState: "idle" });
+        });
+      }, 1400);
+      if (versioningStatus?.enabled) {
+        try {
+          await createProjectVersion(saved.projectId, noteId, `Actualiza ${saved.name}`);
+        } catch (error) {
+          if (!isNoVersionChangesError(error)) {
+            void recordTraceLog({
+              source: "app.versioning.afterHandwrittenSave",
+              message: "No se pudo crear la versión local tras guardar la nota.",
+              detail: describeError(error),
+            });
+          }
+        }
+      }
+      await refreshProjectCapabilityState(saved.projectId);
+      const project = projects.find((candidate) => candidate.id === saved.projectId) ?? (activeProject?.id === saved.projectId ? activeProject : null);
+      await refreshProjectSyncStatus(saved.projectId, { autoRun: isAutomaticSyncMode(project?.syncMode), silent: true });
+      if (externalChangesOpen) await refreshProjectFileSyncOverview(saved.projectId);
+      return true;
+    } catch (error) {
+      setHandwrittenSessions((currentSessions) => updateHandwrittenNoteSession(currentSessions, noteId, { saveState: "error" }));
+      showError(error, "No se pudo guardar la nota a mano.");
+      return false;
+    }
+  }
+
   async function handleSelectProject(project: Project) {
     if (project.id === activeProject?.id) return;
     if (!await flushPendingDrafts()) return;
     if (activeProject) {
       setTabsByProject((currentTabsByProject) => ({
         ...currentTabsByProject,
-        [activeProject.id]: normalizeProjectTabs({ openTabs: tabs, activeDocumentId }),
+        [activeProject.id]: normalizeProjectTabs({
+          openTabs: tabs,
+          activeDocumentId,
+          openHandwrittenTabs: handwrittenTabs,
+          activeHandwrittenNoteId,
+          activeWorkspaceTabId: activeWorkspaceTabIdForConfig,
+        }),
       }));
     }
 
@@ -2295,11 +2671,15 @@ export function App() {
       persistTreeOpenState(active.id, restoredTree);
       setTabs(nextProjectTabs.openTabs);
       setActiveDocumentId(nextProjectTabs.activeDocumentId);
-      setActiveTreeNodeId(nextProjectTabs.activeDocumentId);
+      setHandwrittenTabs(nextProjectTabs.openHandwrittenTabs ?? []);
+      setActiveHandwrittenNoteId(nextProjectTabs.activeHandwrittenNoteId ?? "");
+      setActiveTreeNodeId(nextProjectTabs.activeWorkspaceTabId || nextProjectTabs.activeHandwrittenNoteId || nextProjectTabs.activeDocumentId);
       setImageTabs([]);
       setActiveImageId("");
       setReferenceDocumentTabs([]);
       setActiveReferenceDocumentId("");
+      setDocumentSessions({});
+      setHandwrittenSessions({});
       setExternalChangeSet(null);
       setExternalChangeDecisions({});
       setExternalChangesMessage(null);
@@ -2362,12 +2742,24 @@ export function App() {
     updateCurrentProjectTree((currentTree) => setAllFoldersOpen(currentTree, false));
   }
 
-  async function handleCreateDocument(name: string, template: string) {
+  async function handleCreateDocument(request: CreateDocumentRequest) {
     if (!activeProject) return;
-    const documentName = name.trim().endsWith(".md") ? name.trim() : `${name.trim()}.md`;
-    const markdownValue = getTemplateMarkdown(template, documentName);
+    const documentName = request.name.trim();
     try {
-      const result = await createProjectDocument(activeProject.id, createDocumentParentId, documentName, markdownValue);
+      if (request.kind === "handwritten-note") {
+        const result = await createHandwrittenNote(activeProject.id, createDocumentParentId, documentName, request.background);
+        applyFileOperationResult(result);
+        if (result.node?.type === "handwritten-note") {
+          handleOpenHandwrittenNote(result.node.id, result.node.name);
+        }
+        setCreateDocumentOpen(false);
+        setCreateDocumentParentId(null);
+        return;
+      }
+
+      const markdownName = documentName.endsWith(".md") ? documentName : `${documentName}.md`;
+      const markdownValue = getTemplateMarkdown(request.template, markdownName);
+      const result = await createProjectDocument(activeProject.id, createDocumentParentId, markdownName, markdownValue);
       applyFileOperationResult(result);
       if (result.node?.type === "document") {
         openOrReplaceTab(result.node.id, result.node.name);
@@ -2396,9 +2788,15 @@ export function App() {
       persistTreeOpenState(nextProject.id, restoredTree);
       setTabs(nextProjectTabs.openTabs);
       setActiveDocumentId(nextProjectTabs.activeDocumentId);
-      setActiveTreeNodeId(nextProjectTabs.activeDocumentId);
+      setHandwrittenTabs(nextProjectTabs.openHandwrittenTabs ?? []);
+      setActiveHandwrittenNoteId(nextProjectTabs.activeHandwrittenNoteId ?? "");
+      setActiveTreeNodeId(nextProjectTabs.activeWorkspaceTabId || nextProjectTabs.activeHandwrittenNoteId || nextProjectTabs.activeDocumentId);
+      setImageTabs([]);
+      setActiveImageId("");
       setReferenceDocumentTabs([]);
       setActiveReferenceDocumentId("");
+      setDocumentSessions({});
+      setHandwrittenSessions({});
       setTabsByProject((currentTabsByProject) => ({
         ...currentTabsByProject,
         [nextProject.id]: nextProjectTabs,
@@ -2474,9 +2872,15 @@ export function App() {
         const nextProjectTabs = resolveProjectTabs(tabsByProject, projectId, restoredTree);
         setTabs(nextProjectTabs.openTabs);
         setActiveDocumentId(nextProjectTabs.activeDocumentId);
-        setActiveTreeNodeId(nextProjectTabs.activeDocumentId);
+        setHandwrittenTabs(nextProjectTabs.openHandwrittenTabs ?? []);
+        setActiveHandwrittenNoteId(nextProjectTabs.activeHandwrittenNoteId ?? "");
+        setActiveTreeNodeId(nextProjectTabs.activeWorkspaceTabId || nextProjectTabs.activeHandwrittenNoteId || nextProjectTabs.activeDocumentId);
+        setImageTabs([]);
+        setActiveImageId("");
         setReferenceDocumentTabs([]);
         setActiveReferenceDocumentId("");
+        setDocumentSessions({});
+        setHandwrittenSessions({});
         if (!nextVersioningStatus.enabled) setHistoryOpen(false);
         await refreshProjectSyncStatus(projectId, { autoRun: isAutomaticSyncMode(updatedProject?.syncMode), silent: true });
         await refreshProjectActivity(projectId);
@@ -2510,12 +2914,15 @@ export function App() {
         setTree([]);
         setTabs([]);
         setActiveDocumentId("");
+        setHandwrittenTabs([]);
+        setActiveHandwrittenNoteId("");
         setActiveTreeNodeId("");
         setImageTabs([]);
         setActiveImageId("");
         setReferenceDocumentTabs([]);
         setActiveReferenceDocumentId("");
         setDocumentSessions({});
+        setHandwrittenSessions({});
         setHistoryOpen(false);
         setExternalChangeSet(null);
         setExternalChangeDecisions({});
@@ -2536,11 +2943,15 @@ export function App() {
       persistTreeOpenState(nextActiveProject.id, restoredTree);
       setTabs(nextProjectTabs.openTabs);
       setActiveDocumentId(nextProjectTabs.activeDocumentId);
-      setActiveTreeNodeId(nextProjectTabs.activeDocumentId);
+      setHandwrittenTabs(nextProjectTabs.openHandwrittenTabs ?? []);
+      setActiveHandwrittenNoteId(nextProjectTabs.activeHandwrittenNoteId ?? "");
+      setActiveTreeNodeId(nextProjectTabs.activeWorkspaceTabId || nextProjectTabs.activeHandwrittenNoteId || nextProjectTabs.activeDocumentId);
       setImageTabs([]);
       setActiveImageId("");
       setReferenceDocumentTabs([]);
       setActiveReferenceDocumentId("");
+      setDocumentSessions({});
+      setHandwrittenSessions({});
       if (!nextVersioningStatus.enabled) setHistoryOpen(false);
     } catch (error) {
       showError(error, "No se pudo eliminar el proyecto.");
@@ -3200,6 +3611,7 @@ export function App() {
       agentic: nextAiConfig.agentic,
       transcription: nextAiConfig.transcription,
       diagrams: nextAiConfig.diagrams,
+      handwrittenDrawing: nextAiConfig.handwrittenDrawing,
     })
       .then((savedAiConfig) => {
         if (aiConfigSaveSequence.current !== saveSequence) return;
@@ -3326,6 +3738,12 @@ export function App() {
       return;
     }
 
+    if (action === "export-knote" || action === "export-note-png" || action === "export-note-svg" || action === "export-note-pdf") {
+      const format: HandwrittenExportFormat = action === "export-knote" ? "knote" : action === "export-note-png" ? "png" : action === "export-note-svg" ? "svg" : "pdf";
+      void handleExportHandwrittenNote(node.id, format);
+      return;
+    }
+
     if (action === "rename") {
       updateCurrentProjectTree((currentTree) => markNodeEditing(currentTree, node.id));
       return;
@@ -3338,6 +3756,14 @@ export function App() {
 
     if (action === "create-document") {
       setCreateDocumentParentId(node.id);
+      setCreateDocumentInitialKind("document");
+      setCreateDocumentOpen(true);
+      return;
+    }
+
+    if (action === "create-handwritten-note") {
+      setCreateDocumentParentId(node.id);
+      setCreateDocumentInitialKind("handwritten-note");
       setCreateDocumentOpen(true);
       return;
     }
@@ -3357,6 +3783,11 @@ export function App() {
       return;
     }
 
+    if (action === "open-handwritten-note") {
+      handleOpenHandwrittenNote(node.id, node.name);
+      return;
+    }
+
     if (action === "open-reference-document" && node.path) {
       handleOpenReferenceDocument(node.id, node.name, node.path);
       return;
@@ -3369,6 +3800,11 @@ export function App() {
 
     if (action === "add-attachment-context") {
       void handleAddProjectAttachmentContext(node.id);
+      return;
+    }
+
+    if (action === "add-handwritten-context") {
+      void handleAddHandwrittenNoteContext(node.id);
       return;
     }
 
@@ -3386,10 +3822,14 @@ export function App() {
 
     if (action === "insert-image") {
       if (!activeDocumentId) {
-        setNotice({ title: "Abre un documento", message: "Necesitas un documento activo para insertar una imagen.", tone: "info" });
+        setNotice({ title: "Abre un documento", message: "Necesitas un documento activo para insertar un recurso visual.", tone: "info" });
         return;
       }
-      void insertImageIntoActiveDocument(node.id);
+      if (node.type === "handwritten-note") {
+        void insertHandwrittenNoteIntoActiveDocument(node);
+      } else {
+        void insertImageIntoActiveDocument(node.id);
+      }
       return;
     }
 
@@ -3453,6 +3893,39 @@ export function App() {
     }
   }
 
+  async function handleExportHandwrittenNote(noteId: string, format: HandwrittenExportFormat, pageId?: string) {
+    const session = handwrittenSessions[noteId];
+    const noteName = session?.note?.name ?? findNodeById(tree, noteId)?.name ?? "nota-a-mano.knote";
+    const content = session?.content ?? null;
+
+    try {
+      if (!isTauriRuntime()) {
+        const exportTarget = await selectBrowserHandwrittenExportTarget(noteName, format);
+        if (!exportTarget) return;
+        const blob = await exportHandwrittenNoteContent(noteId, {
+          format,
+          pageId: format === "png" || format === "svg" ? pageId ?? content?.pages[0]?.id ?? null : null,
+          content,
+        });
+        await exportTarget.save(blob);
+        setNotice({ title: "Nota exportada", message: exportTarget.fileName, tone: "info" });
+        return;
+      }
+
+      const outputPath = await selectHandwrittenExportFilePath(withHandwrittenExportExtension(noteName, format), format);
+      if (!outputPath) return;
+      const response = await exportHandwrittenNote(noteId, {
+        format,
+        outputPath,
+        pageId: format === "png" || format === "svg" ? pageId ?? content?.pages[0]?.id ?? null : null,
+        content,
+      });
+      setNotice({ title: "Nota exportada", message: response.outputPath, tone: "info" });
+    } catch (error) {
+      showError(error, "No se pudo exportar la nota a mano.", { source: "app.handwrittenExport" });
+    }
+  }
+
   async function resolveExportMarkdown(documentId: string, session: DocumentSession | undefined) {
     if (session?.markdown !== undefined) return session.markdown;
     const record = await getDocument(documentId);
@@ -3465,6 +3938,8 @@ export function App() {
       ? `Se eliminará la carpeta "${node.name}" y su contenido del disco. Esta acción no se puede deshacer.`
       : node.type === "image"
         ? `Se eliminará la imagen "${node.name}" del disco. Esta acción no se puede deshacer.`
+        : node.type === "handwritten-note"
+          ? `Se eliminará la nota a mano "${node.name}" del disco. Esta acción no se puede deshacer.`
         : node.type === "attachment"
           ? `Se eliminará el archivo "${node.name}" del disco. Esta acción no se puede deshacer.`
           : `Se eliminará el documento "${node.name}" del disco. Esta acción no se puede deshacer.`;
@@ -3489,15 +3964,18 @@ export function App() {
   }
 
   async function handleDuplicateDocument(node: DocumentTreeNode) {
-    if (!activeProject || node.type !== "document") return;
+    if (!activeProject || (node.type !== "document" && node.type !== "handwritten-note")) return;
     try {
       const result = await duplicateProjectDocument(activeProject.id, node.id);
       applyFileOperationResult(result);
       if (result.node?.type === "document") {
         openOrReplaceTab(result.node.id, result.node.name);
       }
+      if (result.node?.type === "handwritten-note") {
+        handleOpenHandwrittenNote(result.node.id, result.node.name);
+      }
     } catch (error) {
-      showError(error, "No se pudo duplicar el documento.");
+      showError(error, "No se pudo duplicar el archivo.");
     }
   }
 
@@ -3553,7 +4031,20 @@ export function App() {
     setActiveDocumentId(documentId);
     setActiveTreeNodeId(documentId);
     setActiveImageId("");
+    setActiveHandwrittenNoteId("");
+    setActiveReferenceDocumentId("");
     setActiveUtilityTab(null);
+  }
+
+  async function handleAddHandwrittenNoteContext(noteId: string) {
+    if (!activeProject) return;
+    try {
+      await addProjectHandwrittenNoteAiContextSource(activeProject.id, noteId);
+      await refreshAiContextSources(activeProject.id);
+      setNotice({ title: "Nota añadida a IA", message: findNodeById(tree, noteId)?.name ?? "Nota a mano", tone: "info" });
+    } catch (error) {
+      showError(error, "No se pudo añadir la nota al contexto IA.", { source: "app.aiContext.addHandwritten" });
+    }
   }
 
   async function promptImportImage(parentId: string | null) {
@@ -3628,6 +4119,23 @@ export function App() {
     return buildImageReference(activeProject.id, documentId, assetId, altText);
   }
 
+  async function handleBuildHandwrittenImageReference(documentId: string, noteId: string, altText?: string | null): Promise<HandwrittenNoteInsertMarkdownResponse> {
+    if (!activeProject) throw new Error("No active project");
+    const session = handwrittenSessions[noteId];
+    const loadedNote = session?.content ? null : await getHandwrittenNote(noteId);
+    const content = session?.content ?? loadedNote?.content ?? null;
+    const name = session?.note?.name ?? loadedNote?.name ?? findNodeById(tree, noteId)?.name ?? "Nota manuscrita.knote";
+    const pageId = content?.pages[0]?.id ?? "page-1";
+    const response = await insertHandwrittenPageIntoMarkdown(noteId, {
+      documentId,
+      pageId,
+      altText: altText || name.replace(/\.knote$/i, "") || "Nota manuscrita",
+      content: session?.content ?? null,
+    });
+    setProjectTree(activeProject.id, await getProjectTree(activeProject.id));
+    return response;
+  }
+
   async function insertImageIntoActiveDocument(assetId: string) {
     if (!activeProject || !activeDocumentId) return;
     try {
@@ -3639,6 +4147,23 @@ export function App() {
       setNotice({ title: "Imagen insertada", message: reference.asset.name, tone: "info" });
     } catch (error) {
       showError(error, "No se pudo insertar la imagen.");
+    }
+  }
+
+  async function insertHandwrittenNoteIntoActiveDocument(note: DocumentTreeNode) {
+    if (!activeProject || !activeDocumentId) {
+      setNotice({ title: "Abre un documento", message: "Necesitas un documento Markdown activo para insertar la nota manuscrita.", tone: "info" });
+      return;
+    }
+    try {
+      const response = await handleBuildHandwrittenImageReference(activeDocumentId, note.id, note.name.replace(/\.knote$/i, ""));
+      const documentSession = documentSessions[activeDocumentId];
+      if (!documentSession) return;
+      const nextMarkdown = `${documentSession.markdown.trimEnd()}\n\n${response.markdown}\n`;
+      handleMarkdownChange(activeDocumentId, nextMarkdown);
+      setNotice({ title: "Imagen insertada", message: response.asset.name, tone: "info" });
+    } catch (error) {
+      showError(error, "No se pudo insertar la nota manuscrita.");
     }
   }
 
@@ -3676,6 +4201,26 @@ export function App() {
         setActiveTreeNodeId((currentNodeId) => (currentNodeId === sourceNode.id ? result.node!.id : currentNodeId));
       } else {
         setActiveTreeNodeId((currentNodeId) => (currentNodeId === sourceNode.id ? activeDocumentId : currentNodeId));
+      }
+    }
+
+    if (sourceNode?.type === "handwritten-note") {
+      if (result.node?.type === "handwritten-note") {
+        setHandwrittenTabs((currentTabs) => currentTabs.map((tab) => (
+          tab.id === sourceNode.id ? { id: result.node!.id, name: result.node!.name } : tab
+        )));
+        setActiveHandwrittenNoteId((currentNoteId) => (currentNoteId === sourceNode.id ? result.node!.id : currentNoteId));
+        setActiveTreeNodeId((currentNodeId) => (currentNodeId === sourceNode.id ? result.node!.id : currentNodeId));
+      } else {
+        setHandwrittenTabs((currentTabs) => {
+          const nextTabs = currentTabs.filter((tab) => tab.id !== sourceNode.id);
+          setActiveHandwrittenNoteId((currentNoteId) => (currentNoteId === sourceNode.id ? nextTabs[0]?.id ?? "" : currentNoteId));
+          return nextTabs;
+        });
+        setHandwrittenSessions((currentSessions) => {
+          const { [sourceNode.id]: _removedSession, ...nextSessions } = currentSessions;
+          return nextSessions;
+        });
       }
     }
 
@@ -3736,6 +4281,22 @@ export function App() {
       return nextTabs;
     });
 
+    setHandwrittenTabs((currentTabs) => {
+      let nextTabs = currentTabs;
+      for (const affectedDocument of result.affectedDocuments) {
+        if (affectedDocument.newId) {
+          nextTabs = nextTabs.map((tab) => (
+            tab.id === affectedDocument.oldId
+              ? { id: affectedDocument.newId!, name: affectedDocument.name ?? tab.name }
+              : tab
+          ));
+        } else {
+          nextTabs = nextTabs.filter((tab) => tab.id !== affectedDocument.oldId);
+        }
+      }
+      return nextTabs;
+    });
+
     setDocumentSessions((currentSessions) => {
       let nextSessions = { ...currentSessions };
       for (const affectedDocument of result.affectedDocuments) {
@@ -3761,6 +4322,33 @@ export function App() {
       return nextSessions;
     });
 
+    setHandwrittenSessions((currentSessions) => {
+      let nextSessions = { ...currentSessions };
+      for (const affectedDocument of result.affectedDocuments) {
+        const currentSession = nextSessions[affectedDocument.oldId];
+        if (!currentSession) continue;
+
+        delete nextSessions[affectedDocument.oldId];
+        if (affectedDocument.newId) {
+          nextSessions[affectedDocument.newId] = {
+            ...currentSession,
+            note: currentSession.note
+              ? {
+                ...currentSession.note,
+                id: affectedDocument.newId,
+                name: affectedDocument.name ?? currentSession.note.name,
+                path: affectedDocument.path ?? currentSession.note.path,
+              }
+              : currentSession.note,
+            content: currentSession.content ? { ...currentSession.content, id: affectedDocument.newId } : currentSession.content,
+            savedContent: currentSession.savedContent ? { ...currentSession.savedContent, id: affectedDocument.newId } : currentSession.savedContent,
+            loadVersion: currentSession.loadVersion + 1,
+          };
+        }
+      }
+      return nextSessions;
+    });
+
     const activeChange = result.affectedDocuments.find((affectedDocument) => affectedDocument.oldId === activeDocumentId);
     if (activeChange?.newId) {
       setActiveDocumentId(activeChange.newId);
@@ -3773,6 +4361,20 @@ export function App() {
       setActiveDocumentId(firstDocument?.id ?? "");
       setActiveTreeNodeId(firstDocument?.id ?? "");
       setTabs((currentTabs) => currentTabs.length > 0 ? currentTabs : firstDocument ? [{ id: firstDocument.id, name: firstDocument.name }] : []);
+    }
+
+    const activeHandwrittenChange = result.affectedDocuments.find((affectedDocument) => affectedDocument.oldId === activeHandwrittenNoteId);
+    if (activeHandwrittenChange?.newId) {
+      setActiveHandwrittenNoteId(activeHandwrittenChange.newId);
+      setActiveTreeNodeId(activeHandwrittenChange.newId);
+      return;
+    }
+
+    if (activeHandwrittenChange && !activeHandwrittenChange.newId) {
+      const firstHandwrittenNote = findFirstHandwrittenNote(result.tree);
+      setActiveHandwrittenNoteId(firstHandwrittenNote?.id ?? "");
+      setActiveTreeNodeId(firstHandwrittenNote?.id ?? "");
+      setHandwrittenTabs((currentTabs) => currentTabs.length > 0 ? currentTabs : firstHandwrittenNote ? [{ id: firstHandwrittenNote.id, name: firstHandwrittenNote.name }] : []);
     }
   }
 
@@ -3809,6 +4411,7 @@ export function App() {
         activeDocumentId={activeDocumentId}
         activeTreeNodeId={activeTreeNodeId}
         activeImageId={activeImageId}
+        activeHandwrittenNoteId={activeHandwrittenNoteId}
         editorSessions={editorSessions}
         notesMarkdown={notesMarkdown}
         notesUpdatedAt={notesUpdatedAt}
@@ -3818,6 +4421,12 @@ export function App() {
         releaseNotesMarkdown={RELEASE_NOTES_MARKDOWN}
         activeDocument={activeSession?.document ?? null}
         activeMarkdown={activeSession?.markdown ?? ""}
+        activeHandwrittenNote={activeHandwrittenNote}
+        activeHandwrittenContent={activeHandwrittenContent}
+        handwrittenToolPresets={handwrittenConfig.toolPresets}
+        handwrittenEraserConfig={handwrittenConfig.eraser}
+        activeHandwrittenDirty={activeHandwrittenSession?.isDirty ?? false}
+        activeHandwrittenSaveState={activeHandwrittenSession?.saveState ?? "idle"}
         activeDocumentDirty={activeSession?.isDirty ?? false}
         activeDocumentSyncStatus={activeDocumentSyncStatus}
         activeDocumentPostSaveSyncState={documentPostSaveSyncStates[activeDocumentId]?.state ?? "idle"}
@@ -3860,6 +4469,12 @@ export function App() {
         onCollapseTree={handleCollapseTree}
         onCreateDocument={() => {
           setCreateDocumentParentId(null);
+          setCreateDocumentInitialKind("document");
+          setCreateDocumentOpen(true);
+        }}
+        onCreateHandwrittenNote={() => {
+          setCreateDocumentParentId(null);
+          setCreateDocumentInitialKind("handwritten-note");
           setCreateDocumentOpen(true);
         }}
         onOpenRecoverableDrafts={() => {
@@ -3917,6 +4532,7 @@ export function App() {
         onOpenAiConversation={() => handleSelectTab(AI_CONVERSATION_TAB_ID)}
         isSyncingProject={syncState !== "idle"}
         onOpenDocument={handleOpenDocument}
+        onOpenHandwrittenNote={handleOpenHandwrittenNote}
         onOpenImage={handleOpenImage}
         onOpenReferenceDocument={handleOpenReferenceDocument}
         onActivateTreeNode={handleActivateTreeNode}
@@ -3927,9 +4543,16 @@ export function App() {
         onReorderDocumentTabs={handleReorderDocumentTabs}
         onTreeContextAction={handleTreeContextAction}
         onExportDocument={handleExportDocument}
+        onHandwrittenChange={handleHandwrittenChange}
+        onHandwrittenToolPresetsChange={handleHandwrittenToolPresetsChange}
+        onHandwrittenEraserConfigChange={handleHandwrittenEraserConfigChange}
+        onSaveHandwrittenNote={handleSaveHandwrittenNote}
+        onExportHandwrittenNote={handleExportHandwrittenNote}
+        onAddHandwrittenNoteContext={handleAddHandwrittenNoteContext}
         onMoveTreeNode={handleMoveTreeNodeDrop}
         onImportProjectImage={handleImportProjectImage}
         onBuildImageReference={handleBuildImageReference}
+        onBuildHandwrittenImageReference={handleBuildHandwrittenImageReference}
         onInsertImageIntoActiveDocument={(assetId) => void insertImageIntoActiveDocument(assetId)}
         onMarkdownChange={handleMarkdownChange}
         onNotesMarkdownChange={handleNotesMarkdownChange}
@@ -4015,9 +4638,11 @@ export function App() {
       />
       <CreateDocumentDialog
         open={createDocumentOpen}
+        initialKind={createDocumentInitialKind}
         onClose={() => {
           setCreateDocumentOpen(false);
           setCreateDocumentParentId(null);
+          setCreateDocumentInitialKind("document");
         }}
         onCreate={handleCreateDocument}
       />
@@ -4066,7 +4691,7 @@ export function App() {
       />
       <CloseDirtyDocumentDialog
         open={closeDocumentId !== null}
-        documentName={closeDocumentId ? tabs.find((tab) => tab.id === closeDocumentId)?.name ?? "documento" : ""}
+        documentName={closeDocumentId ? tabs.find((tab) => tab.id === closeDocumentId)?.name ?? handwrittenTabs.find((tab) => tab.id === closeDocumentId)?.name ?? "documento" : ""}
         onCancel={() => {
           setCloseDocumentId(null);
           setPendingCloseDocumentIds([]);
@@ -4074,10 +4699,12 @@ export function App() {
         onDiscard={() => {
           if (!closeDocumentId) return;
           const documentId = closeDocumentId;
+          const isHandwritten = handwrittenTabs.some((tab) => tab.id === documentId);
           setCloseDocumentId(null);
-          void discardDocumentDraft(documentId)
+          void (isHandwritten ? discardHandwrittenNoteDraft(documentId) : discardDocumentDraft(documentId))
             .then(() => {
-              closeTabNow(documentId);
+              if (isHandwritten) closeHandwrittenTabNow(documentId);
+              else closeTabNow(documentId);
               showNextPendingCloseDialog();
             })
             .catch((error) => showError(error, "No se pudo descartar el borrador interno."));
@@ -4085,10 +4712,12 @@ export function App() {
         onSave={() => {
           if (!closeDocumentId) return;
           const documentId = closeDocumentId;
-          void handleSave(documentId).then((saved) => {
+          const isHandwritten = handwrittenTabs.some((tab) => tab.id === documentId);
+          void (isHandwritten ? handleSaveHandwrittenNote(documentId) : handleSave(documentId)).then((saved) => {
             setCloseDocumentId(null);
             if (saved) {
-              closeTabNow(documentId);
+              if (isHandwritten) closeHandwrittenTabNow(documentId);
+              else closeTabNow(documentId);
               showNextPendingCloseDialog();
             }
           });
@@ -4150,6 +4779,39 @@ export function App() {
     }
   }
 
+  async function loadHandwrittenNoteSession(noteId: string, forceReload = false) {
+    setHandwrittenSessions((currentSessions) => {
+      const currentSession = currentSessions[noteId];
+      if (currentSession?.isLoading && !forceReload) return currentSessions;
+      return {
+        ...currentSessions,
+        [noteId]: {
+          ...createEmptyHandwrittenNoteSession(currentSession?.loadVersion ?? 0),
+          ...currentSession,
+          isLoading: true,
+          loadVersion: forceReload ? (currentSession?.loadVersion ?? 0) + 1 : currentSession?.loadVersion ?? 0,
+        },
+      };
+    });
+
+    try {
+      const record = await getHandwrittenNote(noteId);
+      setHandwrittenSessions((currentSessions) => {
+        const currentSession = currentSessions[noteId];
+        return {
+          ...currentSessions,
+          [noteId]: createLoadedHandwrittenNoteSession(record, currentSession),
+        };
+      });
+    } catch (error) {
+      setHandwrittenSessions((currentSessions) => {
+        const { [noteId]: _failedSession, ...nextSessions } = currentSessions;
+        return nextSessions;
+      });
+      showError(error, "No se pudo abrir la nota a mano.");
+    }
+  }
+
   async function persistDraft(documentId: string, session: DocumentSession) {
     if (!shouldPersistDraft(session)) return true;
     const requestMarkdown = session.markdown;
@@ -4191,6 +4853,50 @@ export function App() {
       return true;
     } catch (error) {
       showError(error, "No se pudo guardar el borrador interno del documento.");
+      return false;
+    }
+  }
+
+  async function persistHandwrittenDraft(noteId: string, session: HandwrittenNoteSession) {
+    if (!shouldPersistHandwrittenDraft(session) || !session.content) return true;
+    const requestContent = session.content;
+    try {
+      const draft = await saveHandwrittenNoteDraft(noteId, {
+        content: requestContent,
+        baseFingerprint: session.baseFingerprint,
+        baseContentHash: session.savedContentHash ?? null,
+      });
+      const latestSession = handwrittenSessionsRef.current[noteId];
+      if (!latestSession?.content || !handwrittenContentMatchesSaved(latestSession.content, requestContent)) {
+        if (latestSession && !latestSession.isDirty) void discardPersistedHandwrittenDraft(noteId);
+        return true;
+      }
+      setHandwrittenSessions((currentSessions) => {
+        const currentSession = currentSessions[noteId];
+        if (!currentSession?.content) return currentSessions;
+        if (!handwrittenContentMatchesSaved(currentSession.content, requestContent)) return currentSessions;
+        if (!draft.isDirty) {
+          return updateHandwrittenNoteSession(currentSessions, noteId, {
+            lastDraftContentJson: "",
+            draftUpdatedAt: null,
+            hasRecoveredDraft: false,
+            draftContentHash: null,
+            savedContentHash: draft.savedContentHash ?? draft.diskContentHash ?? currentSession.savedContentHash ?? null,
+            pendingDraftDiscard: false,
+          });
+        }
+        return updateHandwrittenNoteSession(currentSessions, noteId, {
+          lastDraftContentJson: stringifyHandwrittenContent(requestContent),
+          draftUpdatedAt: draft.draftUpdatedAt,
+          hasRecoveredDraft: Boolean(draft.hasDraft ?? true),
+          draftContentHash: draft.draftContentHash ?? currentSession.draftContentHash ?? null,
+          savedContentHash: draft.savedContentHash ?? draft.diskContentHash ?? currentSession.savedContentHash ?? null,
+          pendingDraftDiscard: false,
+        });
+      });
+      return true;
+    } catch (error) {
+      showError(error, "No se pudo guardar el borrador interno de la nota.");
       return false;
     }
   }
@@ -4238,6 +4944,34 @@ export function App() {
     }
   }
 
+  async function discardPersistedHandwrittenDraft(noteId: string) {
+    if (handwrittenDraftDiscardInFlightRef.current.has(noteId)) return true;
+    handwrittenDraftDiscardInFlightRef.current.add(noteId);
+    try {
+      await discardHandwrittenNoteDraft(noteId);
+      setHandwrittenSessions((currentSessions) => {
+        const currentSession = currentSessions[noteId];
+        if (!currentSession || currentSession.isDirty) return currentSessions;
+        return updateHandwrittenNoteSession(currentSessions, noteId, {
+          lastDraftContentJson: "",
+          draftUpdatedAt: null,
+          hasRecoveredDraft: false,
+          draftContentHash: null,
+          pendingDraftDiscard: false,
+        });
+      });
+      return true;
+    } catch (error) {
+      showError(error, "No se pudo limpiar el borrador interno de la nota.", {
+        source: "app.handwrittenDraft.discard",
+        suppressApiConnectionNotice: true,
+      });
+      return false;
+    } finally {
+      handwrittenDraftDiscardInFlightRef.current.delete(noteId);
+    }
+  }
+
   async function persistNotes(markdown: string) {
     setNotesSaveState("saving");
     try {
@@ -4258,7 +4992,11 @@ export function App() {
 
   async function flushPendingDrafts() {
     const pendingDrafts = Object.entries(documentSessions).filter(([, session]) => shouldPersistDraft(session));
-    const results = await Promise.all(pendingDrafts.map(([documentId, session]) => persistDraft(documentId, session)));
+    const pendingHandwrittenDrafts = Object.entries(handwrittenSessions).filter(([, session]) => shouldPersistHandwrittenDraft(session));
+    const results = await Promise.all([
+      ...pendingDrafts.map(([documentId, session]) => persistDraft(documentId, session)),
+      ...pendingHandwrittenDrafts.map(([noteId, session]) => persistHandwrittenDraft(noteId, session)),
+    ]);
     return results.every(Boolean);
   }
 
@@ -4432,6 +5170,53 @@ function getDeletedOperationPaths(response: AiInteractionResponse) {
     .map((operation) => normalizeDocumentPath(operation.path ?? ""));
 }
 
+function buildActiveHandwrittenSummary(content: HandwrittenNoteContent, pageId: string) {
+  const page = content.pages.find((candidate) => candidate.id === pageId) ?? content.pages[0];
+  const textByPage = content.ocr?.textByPage ?? {};
+  const totalStrokeCount = content.pages.reduce((total, candidate) => total + candidate.strokes.length, 0);
+  return {
+    noteId: content.id,
+    title: content.title,
+    pageId: page?.id ?? null,
+    pageCount: content.pages.length,
+    pageSize: page?.size ?? null,
+    pageBackground: page?.background ?? null,
+    pageStrokeCount: page?.strokes.length ?? 0,
+    totalStrokeCount,
+    generatedElementCount: page?.generatedElements?.length ?? 0,
+    ocrText: page ? String(textByPage[page.id] ?? "").slice(0, 2000) : "",
+    toolPresets: content.toolPresets.map((preset) => ({
+      id: preset.id,
+      type: preset.type ?? "pen",
+      label: preset.label,
+      color: preset.color,
+      width: preset.width,
+      opacity: preset.opacity,
+    })),
+  };
+}
+
+function markAiHandwrittenDraftApplied(session: HandwrittenNoteSession, content: HandwrittenNoteContent, updatedAt: string): HandwrittenNoteSession {
+  if (!session.isDirty) return session;
+  return {
+    ...session,
+    hasRecoveredDraft: true,
+    lastDraftContentJson: stringifyHandwrittenContent(content),
+    draftUpdatedAt: updatedAt,
+    draftContentHash: null,
+    pendingDraftDiscard: false,
+  };
+}
+
+function simpleStringHash(value: string) {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
 function isPathInDeletedScope(documentPath: string, deletedPaths: string[]) {
   const normalizedDocumentPath = normalizeDocumentPath(documentPath);
   return deletedPaths.some((deletedPath) => normalizedDocumentPath === deletedPath || normalizedDocumentPath.startsWith(`${deletedPath}/`));
@@ -4537,17 +5322,19 @@ function getTemplateMarkdown(template: string, documentName: string) {
 function resolveProjectTabs(tabsByProject: Record<string, ProjectTabsConfig>, projectId: string, tree: DocumentTreeNode[]) {
   const configuredTabs = normalizeProjectTabs(tabsByProject[projectId] ?? defaultProjectTabsConfig);
   const knownDocumentIds = new Set(collectDocuments(tree).map((node) => node.id));
-  if (knownDocumentIds.size === 0) return { openTabs: [], activeDocumentId: "" };
+  const knownHandwrittenNoteIds = new Set(collectHandwrittenNotes(tree).map((node) => node.id));
 
   const openTabs = configuredTabs.openTabs.filter((tab) => knownDocumentIds.has(tab.id));
-  if (openTabs.length > 0) {
-    return normalizeProjectTabs({
-      openTabs,
-      activeDocumentId: knownDocumentIds.has(configuredTabs.activeDocumentId) ? configuredTabs.activeDocumentId : openTabs[0].id,
-    });
-  }
-
-  return { openTabs: [], activeDocumentId: "" };
+  const openHandwrittenTabs = (configuredTabs.openHandwrittenTabs ?? []).filter((tab) => knownHandwrittenNoteIds.has(tab.id));
+  return normalizeProjectTabs({
+    openTabs,
+    activeDocumentId: knownDocumentIds.has(configuredTabs.activeDocumentId) ? configuredTabs.activeDocumentId : openTabs[0]?.id ?? "",
+    openHandwrittenTabs,
+    activeHandwrittenNoteId: knownHandwrittenNoteIds.has(configuredTabs.activeHandwrittenNoteId ?? "") ? configuredTabs.activeHandwrittenNoteId : openHandwrittenTabs[0]?.id ?? "",
+    activeWorkspaceTabId: [...openTabs, ...openHandwrittenTabs].some((tab) => tab.id === configuredTabs.activeWorkspaceTabId)
+      ? configuredTabs.activeWorkspaceTabId ?? ""
+      : openHandwrittenTabs[0]?.id ?? openTabs[0]?.id ?? "",
+  });
 }
 
 function normalizeProjectTabs(projectTabs: ProjectTabsConfig): ProjectTabsConfig {
@@ -4558,14 +5345,29 @@ function normalizeProjectTabs(projectTabs: ProjectTabsConfig): ProjectTabsConfig
     return true;
   });
 
-  const normalizedOpenTabs = openTabs;
+  const normalizedOpenTabs = openTabs.map((tab) => ({ id: tab.id, name: tab.name, kind: "document" as const }));
   const activeDocumentId = normalizedOpenTabs.some((tab) => tab.id === projectTabs.activeDocumentId)
     ? projectTabs.activeDocumentId
     : normalizedOpenTabs[0]?.id ?? "";
+  const seenHandwritten = new Set<string>();
+  const openHandwrittenTabs = (projectTabs.openHandwrittenTabs ?? []).filter((tab) => {
+    if (!tab.id || !tab.name || seenHandwritten.has(tab.id)) return false;
+    seenHandwritten.add(tab.id);
+    return true;
+  }).map((tab) => ({ id: tab.id, name: tab.name, kind: "handwritten-note" as const }));
+  const activeHandwrittenNoteId = openHandwrittenTabs.some((tab) => tab.id === projectTabs.activeHandwrittenNoteId)
+    ? projectTabs.activeHandwrittenNoteId ?? ""
+    : openHandwrittenTabs[0]?.id ?? "";
+  const activeWorkspaceTabId = [...normalizedOpenTabs, ...openHandwrittenTabs].some((tab) => tab.id === projectTabs.activeWorkspaceTabId)
+    ? projectTabs.activeWorkspaceTabId ?? ""
+    : activeHandwrittenNoteId || activeDocumentId;
 
   return {
     openTabs: normalizedOpenTabs,
     activeDocumentId,
+    openHandwrittenTabs,
+    activeHandwrittenNoteId,
+    activeWorkspaceTabId,
   };
 }
 
@@ -4835,10 +5637,20 @@ function describeError(error: unknown) {
 function areProjectTabsEqual(first: ProjectTabsConfig | undefined, second: ProjectTabsConfig) {
   if (!first) return false;
   if (first.activeDocumentId !== second.activeDocumentId) return false;
+  if ((first.activeHandwrittenNoteId ?? "") !== (second.activeHandwrittenNoteId ?? "")) return false;
+  if ((first.activeWorkspaceTabId ?? "") !== (second.activeWorkspaceTabId ?? "")) return false;
   if (first.openTabs.length !== second.openTabs.length) return false;
+  const firstHandwrittenTabs = first.openHandwrittenTabs ?? [];
+  const secondHandwrittenTabs = second.openHandwrittenTabs ?? [];
+  if (firstHandwrittenTabs.length !== secondHandwrittenTabs.length) return false;
 
-  return first.openTabs.every((tab, index) => {
+  const sameDocumentTabs = first.openTabs.every((tab, index) => {
     const otherTab = second.openTabs[index];
+    return tab.id === otherTab.id && tab.name === otherTab.name;
+  });
+  if (!sameDocumentTabs) return false;
+  return firstHandwrittenTabs.every((tab, index) => {
+    const otherTab = secondHandwrittenTabs[index];
     return tab.id === otherTab.id && tab.name === otherTab.name;
   });
 }
@@ -4928,11 +5740,29 @@ function collectDocuments(nodes: DocumentTreeNode[]): DocumentTreeNode[] {
   });
 }
 
+function collectHandwrittenNotes(nodes: DocumentTreeNode[]): DocumentTreeNode[] {
+  return nodes.flatMap((node) => {
+    if (node.type === "handwritten-note") return [node];
+    return node.children ? collectHandwrittenNotes(node.children) : [];
+  });
+}
+
 function findFirstDocument(nodes: DocumentTreeNode[]): DocumentTreeNode | null {
   for (const node of nodes) {
     if (node.type === "document") return node;
     if (node.children) {
       const child = findFirstDocument(node.children);
+      if (child) return child;
+    }
+  }
+  return null;
+}
+
+function findFirstHandwrittenNote(nodes: DocumentTreeNode[]): DocumentTreeNode | null {
+  for (const node of nodes) {
+    if (node.type === "handwritten-note") return node;
+    if (node.children) {
+      const child = findFirstHandwrittenNote(node.children);
       if (child) return child;
     }
   }

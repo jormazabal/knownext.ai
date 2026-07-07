@@ -39,3 +39,15 @@ The APK itself must not include workspace data, logs, credentials, generated AI 
 Browser development and automated tests may use isolated data directories and fixtures. Those fixtures must not be bundled into release assets or silently shown in normal product use.
 
 Release validation must run `pnpm bundle:check-clean` after building the frontend and must verify packaged Windows and Android artifacts do not contain runtime data or removed runtime markers.
+
+## Handwritten Notes
+
+Handwritten notes are first-class project documents stored as `.knote` files with MIME `application/vnd.knownext.handwritten-note+json`. They are part of the project tree, local history, sync status, search classification and AI context contracts in the same way as Markdown documents, but their source format remains the structured `.knote` JSON rather than Markdown.
+
+The `.knote` source file is versioned with the project. It stores schema version, stable note/page/stroke IDs, timestamps, page backgrounds, stroke points, derived vector paths, OCR/transcription text when available, bounds and thumbnail metadata. Runtime services must validate this structure before saving or exporting. Active pencil presets are app-level user preferences in `config.json` under `handwritten.toolPresets`; changing them must not mark an open `.knote` as dirty.
+
+Drafts for handwritten notes live in app data, not inside the project folder. Render caches and thumbnails also live in app data and are never versioned. A generated render is written into the project only when the user explicitly exports it or inserts a page into a Markdown document.
+
+Images inserted from a handwritten note are normal project assets under `assets/handwritten/`. The Markdown image title carries source metadata in the form `knownext-note:<noteId>#<pageId>` so the app can offer `Abrir nota original` behavior without treating the render as the source of truth. Moving generated images must follow the same Markdown reference rewrite rules as other project images.
+
+Clean-distribution checks must continue to reject runtime data and caches, including `.knote` drafts, render caches, OCR caches, thumbnails and generated assets that belong to a user's project rather than the application package.

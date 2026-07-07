@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 2,
+  "id": "knownext.handwritten_drawing",
+  "name": "Dibujo en knote",
+  "version": "1.0.0",
+  "source": "base",
+  "description": "Crea dibujos estructurados de alta legibilidad dentro de notas .knote mediante SceneSpec y render local a trazos.",
+  "categories": ["handwritten", "drawing", "visual"],
+  "capabilities": ["handwritten_drawing"],
+  "outputActions": ["draw_handwritten_note"],
+  "requires": [],
+  "validators": ["handwritten.scene", "handwritten.quality"],
+  "runtimeEnabled": true,
+  "modes": [
+    {
+      "id": "drawing_flow",
+      "name": "Flujo",
+      "description": "Procesos, pasos, decisiones y journeys compactos.",
+      "whenToUse": ["El usuario pide flujo, proceso, pasos, journey u onboarding."],
+      "whenNotToUse": ["El usuario necesita un diagrama Mermaid editable en Markdown."],
+      "supportedActions": ["draw_handwritten_note"],
+      "requiresCapabilities": ["handwritten_drawing"],
+      "validators": ["handwritten.scene", "handwritten.quality"],
+      "riskLevel": "medium",
+      "contextBudget": 2400
+    },
+    {
+      "id": "drawing_architecture",
+      "name": "Arquitectura",
+      "description": "Sistemas, componentes, capas y relaciones tecnicas estilo pizarra.",
+      "whenToUse": ["El usuario pide arquitectura, sistema, componentes o integracion."],
+      "whenNotToUse": ["La precision sintactica Mermaid es el objetivo principal."],
+      "supportedActions": ["draw_handwritten_note"],
+      "requiresCapabilities": ["handwritten_drawing"],
+      "validators": ["handwritten.scene", "handwritten.quality"],
+      "riskLevel": "medium",
+      "contextBudget": 2800
+    },
+    {
+      "id": "drawing_timeline",
+      "name": "Timeline",
+      "description": "Lineas temporales, hitos, fases y dependencias.",
+      "whenToUse": ["La peticion pide cronologia, fases, roadmap o hitos."],
+      "whenNotToUse": ["La salida debe ser una tabla de fechas."],
+      "supportedActions": ["draw_handwritten_note"],
+      "requiresCapabilities": ["handwritten_drawing"],
+      "validators": ["handwritten.scene", "handwritten.quality"],
+      "riskLevel": "medium",
+      "contextBudget": 2200
+    },
+    {
+      "id": "drawing_matrix",
+      "name": "Matriz",
+      "description": "Cuadrantes, priorizacion y comparativas visuales 2x2.",
+      "whenToUse": ["El usuario pide matriz, cuadrante, priorizacion o comparativa visual."],
+      "whenNotToUse": ["La informacion requiere muchas filas exactas."],
+      "supportedActions": ["draw_handwritten_note"],
+      "requiresCapabilities": ["handwritten_drawing"],
+      "validators": ["handwritten.scene", "handwritten.quality"],
+      "riskLevel": "medium",
+      "contextBudget": 2200
+    },
+    {
+      "id": "drawing_mindmap",
+      "name": "Mapa mental",
+      "description": "Mapas conceptuales, arboles de ideas y relaciones radiales.",
+      "whenToUse": ["La peticion pide mapa mental, conceptos o resumen visual."],
+      "whenNotToUse": ["El usuario pide jerarquia textual larga."],
+      "supportedActions": ["draw_handwritten_note"],
+      "requiresCapabilities": ["handwritten_drawing"],
+      "validators": ["handwritten.scene", "handwritten.quality"],
+      "riskLevel": "medium",
+      "contextBudget": 2600
+    },
+    {
+      "id": "drawing_wireframe",
+      "name": "Wireframe",
+      "description": "Bocetos UI, pantallas, layouts y componentes de producto.",
+      "whenToUse": ["El usuario pide bocetar una pantalla, UI o wireframe."],
+      "whenNotToUse": ["El usuario pide una implementacion frontend."],
+      "supportedActions": ["draw_handwritten_note"],
+      "requiresCapabilities": ["handwritten_drawing"],
+      "validators": ["handwritten.scene", "handwritten.quality"],
+      "riskLevel": "medium",
+      "contextBudget": 2800
+    },
+    {
+      "id": "drawing_creative_sketch",
+      "name": "Boceto creativo",
+      "description": "Explicaciones visuales creativas que se reconstruyen como SceneSpec limpio.",
+      "whenToUse": ["El usuario pide un boceto expresivo, pizarra visual o explicacion simple."],
+      "whenNotToUse": ["La fidelidad tecnica y texto exacto son prioritarios."],
+      "supportedActions": ["draw_handwritten_note"],
+      "requiresCapabilities": ["handwritten_drawing"],
+      "validators": ["handwritten.scene", "handwritten.quality"],
+      "riskLevel": "medium",
+      "contextBudget": 3000
+    }
+  ]
+}

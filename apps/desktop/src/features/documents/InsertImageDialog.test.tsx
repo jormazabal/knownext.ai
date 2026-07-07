@@ -17,7 +17,7 @@ describe("InsertImageDialog", () => {
     fireEvent.change(screen.getByLabelText(/Texto alternativo/), {
       target: { value: "Arquitectura" },
     });
-    fireEvent.change(screen.getByPlaceholderText("Buscar imagen del proyecto"), {
+    fireEvent.change(screen.getByPlaceholderText("Buscar imagen o nota"), {
       target: { value: "arquitectura" },
     });
     expect(screen.queryByRole("button", { name: "Logo.png" })).not.toBeInTheDocument();
@@ -122,6 +122,29 @@ describe("InsertImageDialog", () => {
 
     await waitFor(() => expect(onInsert).toHaveBeenCalledWith("![Arquitectura](assets/arquitectura.png)"));
   });
+
+  it("inserts a handwritten note as a visual project reference", async () => {
+    const onBuildReference = vi.fn();
+    const onBuildHandwrittenReference = vi.fn().mockResolvedValue({
+      markdown: "![Boceto](assets/handwritten/boceto-page-1.png)",
+      asset: { ...asset, id: "handwritten-render-1", name: "boceto-page-1.png", path: "assets/handwritten/boceto-page-1.png" },
+      noteId: "note-1",
+      pageId: "page-1",
+    });
+    const onInsert = vi.fn();
+
+    renderDialog({ onBuildReference, onBuildHandwrittenReference, onInsert });
+
+    fireEvent.change(screen.getByPlaceholderText("Buscar imagen o nota"), {
+      target: { value: "boceto" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Boceto.knote" }));
+    fireEvent.click(screen.getByRole("button", { name: "Insertar" }));
+
+    await waitFor(() => expect(onBuildHandwrittenReference).toHaveBeenCalledWith("doc-1", "note-1", "Boceto"));
+    expect(onBuildReference).not.toHaveBeenCalled();
+    expect(onInsert).toHaveBeenCalledWith("![Boceto](assets/handwritten/boceto-page-1.png)");
+  });
 });
 
 function renderDialog(overrides: Partial<Parameters<typeof InsertImageDialog>[0]> = {}) {
@@ -152,6 +175,12 @@ const tree: DocumentTreeNode[] = [
         name: "Notas.md",
         type: "document",
         path: "docs/Notas.md",
+      },
+      {
+        id: "note-1",
+        name: "Boceto.knote",
+        type: "handwritten-note",
+        path: "docs/Boceto.knote",
       },
       {
         id: "asset-1",

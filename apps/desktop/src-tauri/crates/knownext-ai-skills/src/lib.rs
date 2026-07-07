@@ -196,6 +196,11 @@ const BASE_SKILLS: &[BaseSkillSource] = &[
         )],
     },
     BaseSkillSource {
+        manifest_json: include_str!("base/knownext.handwritten_drawing/manifest.json"),
+        instructions_markdown: include_str!("base/knownext.handwritten_drawing/SKILL.md"),
+        examples: &[],
+    },
+    BaseSkillSource {
         manifest_json: include_str!("base/knownext.markdown/manifest.json"),
         instructions_markdown: include_str!("base/knownext.markdown/SKILL.md"),
         examples: &[(
@@ -923,6 +928,9 @@ fn prefilter_skills(payload: &Value) -> Vec<AiSkillSummary> {
         if skill.id == "knownext.mermaid" {
             return diagrams_enabled;
         }
+        if skill.id == "knownext.handwritten_drawing" {
+            return handwritten_drawing_enabled(payload);
+        }
         if !skill.runtime_enabled {
             return true;
         }
@@ -968,6 +976,9 @@ fn accept_choice(
         }
         if capability == "document_edit" && !permission_enabled(payload, "canEditDocument") {
             return Err("La edicion de documentos no esta permitida.".to_string());
+        }
+        if capability == "handwritten_drawing" && !handwritten_drawing_enabled(payload) {
+            return Err("El dibujo en knote esta desactivado.".to_string());
         }
     }
     Ok(AiSkillApplication {
@@ -1056,6 +1067,37 @@ fn deterministic_fallback(
             });
         }
     }
+    if (expected_action == "draw_handwritten_note"
+        || payload.get("targetKind").and_then(Value::as_str) == Some("handwritten_note"))
+        && handwritten_drawing_enabled(payload)
+        && applications.len() < limit
+    {
+        if candidates
+            .iter()
+            .any(|skill| skill.id == "knownext.handwritten_drawing")
+        {
+            let mode_id = handwritten_drawing_mode(payload);
+            applications.push(AiSkillApplication {
+                skill_id: "knownext.handwritten_drawing".to_string(),
+                mode_id: mode_id.to_string(),
+                action: "draw_handwritten_note".to_string(),
+                status: "applied".to_string(),
+                reason: "Fallback determinista para dibujar dentro de una knote activa."
+                    .to_string(),
+                confidence: "high".to_string(),
+            });
+            diagnostics.push(diagnostic(
+                "knownext.handwritten_drawing",
+                mode_id,
+                "applied",
+                "selection",
+                "info",
+                "Skill de dibujo aplicada",
+                vec!["El objetivo activo es una nota .knote dibujable.".to_string()],
+                None,
+            ));
+        }
+    }
     let expected_diagram_type = payload.get("diagramType").and_then(Value::as_str);
     if expected_diagram_type.is_some() && diagrams_enabled(payload) && applications.len() < limit {
         if candidates
@@ -1100,6 +1142,9 @@ fn compose_prompt_guidance(applications: &[AiSkillApplication], payload: &Value)
                 parts.push(research_report_prompt_guidance(payload, mode))
             }
             ("knownext.mermaid", mode) => parts.push(mermaid_prompt_guidance(payload, mode)),
+            ("knownext.handwritten_drawing", mode) => {
+                parts.push(handwritten_drawing_prompt_guidance(payload, mode))
+            }
             ("knownext.markdown", "table") => parts.push(markdown_table_guidance()),
             _ => {}
         }
@@ -1190,6 +1235,41 @@ fn mermaid_prompt_guidance(payload: &Value, mode_id: &str) -> String {
 
 fn markdown_table_guidance() -> String {
     "Skill Markdown activa en modo table. Usa tablas Markdown compactas cuando el usuario pida comparar, resumir o estructurar datos tabulares. Manten filas con el mismo numero de columnas, incluye cabecera y separador, y evita HTML salvo necesidad explicita.".to_string()
+}
+
+fn handwritten_drawing_prompt_guidance(payload: &Value, mode_id: &str) -> String {
+    let creative = payload
+        .pointer("/runtimeAi/handwrittenDrawing/creativeSketchEnabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    format!(
+        "Skill Dibujo en knote activa en modo {mode_id}. Devuelve action draw_handwritten_note con route precise_scene por defecto, drawingBrief y sceneSpec. No devuelvas strokes ni coordenadas finales. sceneSpec.elements debe usar tipos box, diagram_node, shape, arrow, connector, label, text_block, group, lane, timeline_event, mindmap_node, wireframe_component, icon_hint, freeform_shape, symbol, portrait, fill_region, shadow_region o annotation. Usa shape square/triangle/circle/ellipse/diamond/star para figuras, symbol house/sun/dog/cat/person/face/tree/cloud/server/laptop/database para dibujos simples, fill_region con target y fill marker_passes/hatching/cross_hatching/scribble para rellenos por trazos, y roles primary_outline, secondary_sketch, text, connector, accent, highlight, shadow, fill_light o fill_dense. Para retratos, animales u objetos figurativos usa portrait o symbol y evita labels/connectors salvo que el usuario pida un diagrama explicativo. Mantén textos cortos y jerarquia visual clara. creativeSketchEnabled: {creative}."
+    )
+}
+
+fn handwritten_drawing_enabled(payload: &Value) -> bool {
+    let config_enabled = payload
+        .pointer("/runtimeAi/handwrittenDrawing/enabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    config_enabled
+        && permission_enabled(payload, "drawHandwrittenNotes")
+        && permission_enabled(payload, "editHandwrittenNotes")
+}
+
+fn handwritten_drawing_mode(payload: &Value) -> &'static str {
+    match payload
+        .pointer("/intent/drawingMode")
+        .and_then(Value::as_str)
+    {
+        Some("drawing_architecture") => "drawing_architecture",
+        Some("drawing_timeline") => "drawing_timeline",
+        Some("drawing_matrix") => "drawing_matrix",
+        Some("drawing_mindmap") => "drawing_mindmap",
+        Some("drawing_wireframe") => "drawing_wireframe",
+        Some("drawing_creative_sketch") => "drawing_creative_sketch",
+        _ => "drawing_flow",
+    }
 }
 
 fn diagram_config(payload: &Value) -> Option<&Value> {
@@ -1357,6 +1437,8 @@ fn known_validators() -> BTreeSet<&'static str> {
         "research.report.structure",
         "research.report.citations",
         "research.report.visuals",
+        "handwritten.scene",
+        "handwritten.quality",
     ]
     .into_iter()
     .collect()
@@ -1375,6 +1457,7 @@ fn known_capabilities() -> BTreeSet<&'static str> {
         "citations",
         "image_generation",
         "report_format",
+        "handwritten_drawing",
     ]
     .into_iter()
     .collect()
@@ -1681,7 +1764,7 @@ mod tests {
     #[test]
     fn registry_loads_compact_base_skills_with_unique_valid_ids() {
         let skills = list_ai_skills();
-        assert_eq!(skills.len(), 8);
+        assert_eq!(skills.len(), 9);
         let ids = skills
             .iter()
             .map(|skill| skill.id.clone())
@@ -1689,6 +1772,7 @@ mod tests {
         assert_eq!(ids.len(), skills.len());
         assert!(ids.contains("knownext.research_report"));
         assert!(ids.contains("knownext.mermaid"));
+        assert!(ids.contains("knownext.handwritten_drawing"));
         assert!(ids.contains("knownext.markdown"));
         assert!(skills.iter().all(|skill| skill.status == "valid"));
         assert!(skills.iter().all(|skill| !skill.modes.is_empty()));

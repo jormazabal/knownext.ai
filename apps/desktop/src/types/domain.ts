@@ -69,7 +69,7 @@ export type ProjectVersioningStatus = {
 };
 
 export type ExternalChangeType = "added" | "modified" | "deleted" | "renamed";
-export type ExternalChangeKind = "folder" | "document" | "image" | "attachment" | "private" | "ignored" | "unsupported";
+export type ExternalChangeKind = "folder" | "document" | "handwritten-note" | "image" | "attachment" | "private" | "ignored" | "unsupported";
 export type ExternalChangeRisk = "safe" | "review" | "blocked";
 export type ExternalChangeDecision = "include" | "omit" | "review";
 export type ExternalChangeSetStatus = "none" | "safe" | "needs-review" | "blocked";
@@ -442,6 +442,8 @@ export type ExportDocumentResponse = {
 
 export type AiPermissionsConfig = {
   editDocuments: boolean;
+  editHandwrittenNotes: boolean;
+  drawHandwrittenNotes: boolean;
   createFolders: boolean;
   createDocuments: boolean;
   deleteDocumentsAndFolders: boolean;
@@ -538,6 +540,17 @@ export type AiDiagramConfig = {
   aiGenerationMode: DiagramAiGenerationMode;
 };
 
+export type AiDrawingRoute = "precise_scene" | "mermaid_vector" | "creative_sketch" | "debug_raw_strokes";
+
+export type AiHandwrittenDrawingConfig = {
+  enabled: boolean;
+  creativeSketchEnabled: boolean;
+  defaultStyle: "professional_whiteboard";
+  maxElements: number;
+  maxStrokes: number;
+  maxPagesPerRequest: number;
+};
+
 export type AiConfig = {
   provider: "openai";
   model: AiModelId;
@@ -548,6 +561,7 @@ export type AiConfig = {
   agentic: AiAgenticConfig;
   transcription: AiTranscriptionConfig;
   diagrams: AiDiagramConfig;
+  handwrittenDrawing: AiHandwrittenDrawingConfig;
 };
 
 export type AiConfigStatus = AiConfig & {
@@ -561,8 +575,11 @@ export type OpenAiKeyStatus = {
 };
 
 export type ProjectTabsConfig = {
-  openTabs: OpenDocumentTab[];
+  openTabs: OpenProjectTab[];
   activeDocumentId: string;
+  openHandwrittenTabs?: OpenProjectTab[];
+  activeHandwrittenNoteId?: string;
+  activeWorkspaceTabId?: string;
 };
 
 export type AppUtilityTabId = "release-notes" | "notes";
@@ -572,6 +589,7 @@ export type AppConfig = {
   layout: LayoutConfig;
   appearance: AppearanceConfig;
   diagnostics: DiagnosticsConfig;
+  handwritten: HandwrittenConfig;
   ai: AiConfig;
   tabsByProject: Record<string, ProjectTabsConfig>;
   treeOpenPathsByProject: Record<string, string[]>;
@@ -586,6 +604,7 @@ export type AppConfigUpdate = {
   layout?: LayoutConfig;
   appearance?: AppearanceConfig;
   diagnostics?: DiagnosticsConfig;
+  handwritten?: Partial<HandwrittenConfig>;
   ai?: AiConfig;
   tabsByProject?: Record<string, ProjectTabsConfig>;
   treeOpenPathsByProject?: Record<string, string[]>;
@@ -598,7 +617,7 @@ export type AppConfigUpdate = {
 export type DocumentTreeNode = {
   id: string;
   name: string;
-  type: "folder" | "document" | "image" | "attachment";
+  type: "folder" | "document" | "handwritten-note" | "image" | "attachment";
   path?: string;
   mimeType?: string | null;
   sizeBytes?: number | null;
@@ -612,7 +631,7 @@ export type DocumentTreeNode = {
 export type DocumentNameSearchResult = {
   id: string;
   name: string;
-  type: "folder" | "document" | "image" | "attachment";
+  type: "folder" | "document" | "handwritten-note" | "image" | "attachment";
   path: string[];
   parentIds: string[];
   matchRanges: Array<{ start: number; end: number }>;
@@ -652,6 +671,104 @@ export type DocumentRecord = {
   draftUpdatedAt?: string | null;
 };
 
+export type HandwrittenToolId = "pen" | "fountain" | "pencil" | "marker" | "highlighter" | "eraser" | "lasso";
+export type HandwrittenPencilType = Exclude<HandwrittenToolId, "eraser" | "lasso">;
+export type HandwrittenPageBackground = "blank" | "ruled" | "grid" | "dots" | "cornell";
+export type HandwrittenPageSizePreset = "A4" | "4:3" | "16:9" | "1:1" | "Letter" | "free";
+export type HandwrittenPageOrientation = "portrait" | "landscape";
+export type HandwrittenExportFormat = "knote" | "png" | "svg" | "pdf";
+
+export type HandwrittenPoint = [number, number, number, number, number?, number?];
+export type HandwrittenEraserMode = "stroke" | "partial";
+export type HandwrittenEraserConfig = {
+  width: number;
+  mode: HandwrittenEraserMode;
+};
+
+export type HandwrittenStroke = {
+  id: string;
+  tool: HandwrittenToolId;
+  color: string;
+  width: number;
+  opacity: number;
+  pressure: boolean;
+  pressureSensitivity?: number;
+  textureSeed?: string;
+  textureVersion?: 1;
+  points: HandwrittenPoint[];
+  path?: string | null;
+  bounds?: { x: number; y: number; width: number; height: number } | null;
+};
+
+export type HandwrittenToolPreset = {
+  id: string;
+  type?: HandwrittenPencilType;
+  label: string;
+  color: string;
+  width: number;
+  opacity: number;
+  pressure: boolean;
+  pressureSensitivity: number;
+  smoothing: number;
+};
+
+export type HandwrittenConfig = {
+  toolPresets: HandwrittenToolPreset[];
+  eraser: HandwrittenEraserConfig;
+};
+
+export type HandwrittenNotePage = {
+  id: string;
+  title?: string | null;
+  size: { width: number; height: number; unit: "px"; preset: HandwrittenPageSizePreset };
+  background: { type: HandwrittenPageBackground; spacing?: number | null };
+  strokes: HandwrittenStroke[];
+  generatedElements?: AiHandwrittenGeneratedElement[];
+  thumbnailHash?: string | null;
+  updatedAt: string;
+};
+
+export type HandwrittenNoteContent = {
+  schemaVersion: 1;
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  defaultPage: {
+    preset: HandwrittenPageSizePreset;
+    orientation: HandwrittenPageOrientation;
+    background: HandwrittenPageBackground;
+  };
+  toolPresets: HandwrittenToolPreset[];
+  pages: HandwrittenNotePage[];
+  ocr: {
+    status: "not-indexed" | "processing" | "updated" | "error";
+    updatedAt?: string | null;
+    textByPage: Record<string, string>;
+  };
+};
+
+export type HandwrittenNoteRecord = {
+  id: string;
+  name: string;
+  path: string;
+  projectId: string;
+  content: HandwrittenNoteContent;
+  diskContent?: HandwrittenNoteContent | null;
+  diskContentHash?: string | null;
+  savedContentHash?: string | null;
+  draftContentHash?: string | null;
+  pageCount: number;
+  updatedAt: string;
+  baseFingerprint?: DocumentFingerprint | null;
+  hasDraft?: boolean;
+  isDirty?: boolean;
+  diskChanged?: boolean;
+  orphaned?: boolean;
+  conflictStatus?: DocumentConflictStatus;
+  draftUpdatedAt?: string | null;
+};
+
 export type DocumentFingerprint = {
   mtimeNs?: number | null;
   size?: number | null;
@@ -665,8 +782,17 @@ export type OpenDocumentTab = {
   name: string;
 };
 
+export type OpenProjectTab = OpenDocumentTab & {
+  kind?: "document" | "handwritten-note";
+};
+
 export type DocumentWorkspaceTab = OpenDocumentTab & {
   kind: "document";
+};
+
+export type HandwrittenNoteWorkspaceTab = OpenDocumentTab & {
+  kind: "handwritten-note";
+  path?: string | null;
 };
 
 export type ReleaseNotesWorkspaceTab = {
@@ -707,7 +833,7 @@ export type AiConversationWorkspaceTab = {
   readonly: true;
 };
 
-export type WorkspaceTab = AiConversationWorkspaceTab | NotesWorkspaceTab | DocumentWorkspaceTab | ImageWorkspaceTab | ReferenceDocumentWorkspaceTab | ReleaseNotesWorkspaceTab;
+export type WorkspaceTab = AiConversationWorkspaceTab | NotesWorkspaceTab | DocumentWorkspaceTab | HandwrittenNoteWorkspaceTab | ImageWorkspaceTab | ReferenceDocumentWorkspaceTab | ReleaseNotesWorkspaceTab;
 
 export type UserNotes = {
   markdown: string;
@@ -820,7 +946,7 @@ export type AiInteractionMode = "document" | "project";
 export type AiInteractionStatus = "completed" | "blocked" | "error";
 export type AiInteractionDisplay = "bubble" | "conversation" | "none";
 export type AiUiPlacement = "document_bubble" | "conversation_tab" | "none";
-export type AiInteractionType = "chat" | "document_edit" | "project_operation" | "agentic_task" | "image_generation" | "clarification" | "mixed";
+export type AiInteractionType = "chat" | "document_edit" | "project_operation" | "agentic_task" | "image_generation" | "handwritten_drawing" | "clarification" | "mixed";
 export type AiConfidence = "high" | "medium" | "low";
 export type AiExecutionMode = "quick" | "reasoning";
 export type AiReasoningDepth = "light" | "medium" | "deep";
@@ -1241,6 +1367,9 @@ export type AiEditOperationPlacementType =
   | "document_end";
 export type AiOperationType =
   | "document_modified"
+  | "handwritten_modified"
+  | "handwritten_drawing_blocked"
+  | "handwritten_drawing_generated"
   | "folder_created"
   | "document_created"
   | "document_duplicated"
@@ -1260,6 +1389,9 @@ export type AiConversationEventType =
   | "user_message"
   | "assistant_message"
   | "document_modified"
+  | "handwritten_modified"
+  | "handwritten_drawing_blocked"
+  | "handwritten_drawing_generated"
   | "folder_created"
   | "document_created"
   | "document_duplicated"
@@ -1280,6 +1412,13 @@ export type AiInteractionRequest = {
   documentId?: string | null;
   prompt: string;
   activeMarkdown: string;
+  targetKind?: "markdown_document" | "notes" | "handwritten_note" | "project";
+  handwrittenNoteId?: string | null;
+  activeHandwrittenPageId?: string | null;
+  activeHandwrittenSummary?: Record<string, unknown> | string | null;
+  activeHandwrittenContentHash?: string | null;
+  activeHandwrittenBaseFingerprint?: DocumentFingerprint | null;
+  activeHandwrittenContent?: HandwrittenNoteContent | null;
   selectionFocus?: AiSelectionFocus | null;
   clientContext?: AiClientContext | null;
   intentAction?: AiIntentActionRequest | null;
@@ -1317,7 +1456,7 @@ export type AiSelectionFocus = {
   blockHash?: string | null;
 };
 
-export type AiContextSourceKind = "project_document" | "external_file" | "image";
+export type AiContextSourceKind = "project_document" | "handwritten_note" | "external_file" | "image";
 export type AiContextSourceStatus = "processing" | "ready" | "warning" | "error" | "expiring" | "expired";
 export type AiContextWeight = "light" | "medium" | "high" | "too_large";
 
@@ -1638,6 +1777,126 @@ export type AiUpdatedDocument = {
   summary: string;
 };
 
+export type AiHandwrittenDrawingIntent = {
+  action: "draw_handwritten_note";
+  route: AiDrawingRoute;
+  targetKind: "handwritten_note";
+  noteId?: string | null;
+  pageId?: string | null;
+  prompt?: string | null;
+};
+
+export type AiDrawingBrief = {
+  goal: string;
+  style?: string | null;
+  audience?: string | null;
+  constraints?: string[] | null;
+};
+
+export type AiDrawingSceneElementType =
+  | "box"
+  | "diagram_node"
+  | "shape"
+  | "arrow"
+  | "connector"
+  | "label"
+  | "text_block"
+  | "group"
+  | "lane"
+  | "timeline_event"
+  | "mindmap_node"
+  | "wireframe_component"
+  | "icon_hint"
+  | "freeform_shape"
+  | "symbol"
+  | "portrait"
+  | "fill_region"
+  | "shadow_region"
+  | "annotation";
+
+export type AiDrawingSceneElement = {
+  id: string;
+  type: AiDrawingSceneElementType;
+  shape?: "square" | "triangle" | "circle" | "ellipse" | "diamond" | "star" | null;
+  symbol?: "house" | "sun" | "dog" | "cat" | "person" | "face" | "tree" | "cloud" | "server" | "laptop" | "database" | "rocket" | "starship" | "spacecraft" | null;
+  target?: string | null;
+  fill?: "hatching" | "cross_hatching" | "scribble" | "marker_passes" | null;
+  text?: string | null;
+  role?: string | null;
+  priority?: number | null;
+  from?: string | null;
+  to?: string | null;
+  metadata?: Record<string, unknown> | null;
+};
+
+export type AiDrawingSceneSpec = {
+  route?: AiDrawingRoute | null;
+  family?: string | null;
+  elements: AiDrawingSceneElement[];
+  metadata?: Record<string, unknown> | null;
+};
+
+export type AiDrawingVectorPlan = {
+  pageId?: string | null;
+  route?: AiDrawingRoute | null;
+  items?: Array<Record<string, unknown>>;
+  elements?: Array<Record<string, unknown>>;
+  metadata?: Record<string, unknown> | null;
+};
+
+export type AiDrawingQualityReport = {
+  ok?: boolean;
+  status?: "passed" | "blocked" | "warning" | string;
+  message?: string | null;
+  attempts?: number;
+  issues?: string[];
+  warnings?: string[];
+  diagnostics?: Array<Record<string, unknown>>;
+  metrics?: Record<string, number | string | boolean | null>;
+};
+
+export type AiHandwrittenDrawingProposal = {
+  id?: string;
+  noteId: string;
+  targetPageId?: string | null;
+  route: AiDrawingRoute;
+  replacementPolicy:
+    | "append_only"
+    | "replace_selection"
+    | "replace_page"
+    | "clean_existing"
+    | "cleanup_existing";
+  summary: string;
+  drawingBrief: AiDrawingBrief;
+  sceneSpec: AiDrawingSceneSpec;
+  qualityReport?: AiDrawingQualityReport | null;
+};
+
+export type AiUpdatedHandwrittenNote = {
+  noteId: string;
+  content: HandwrittenNoteContent;
+  summary: string;
+  pageId?: string | null;
+  route?: AiDrawingRoute | null;
+  sceneSpec?: AiDrawingSceneSpec | null;
+  vectorPlan?: AiDrawingVectorPlan | null;
+  qualityReport?: AiDrawingQualityReport | null;
+};
+
+export type AiHandwrittenGeneratedElement = {
+  id: string;
+  source?: "ai";
+  route?: AiDrawingRoute | null;
+  sceneElementId?: string | null;
+  kind?: string | null;
+  type?: AiDrawingSceneElementType | string | null;
+  text?: string | null;
+  strokeIds: string[];
+  bounds?: { x: number; y: number; width: number; height: number } | null;
+  createdAt?: string | null;
+  metadata?: Record<string, unknown> | null;
+};
+
 export type AiGeneratedImage = {
   asset: AssetMetadata;
   prompt: string;
@@ -1743,6 +2002,8 @@ export type AiInteractionResponse = {
   conversationEvents: AiConversationEvent[];
   operations: AiOperation[];
   updatedDocument?: AiUpdatedDocument | null;
+  drawingProposal?: AiHandwrittenDrawingProposal | null;
+  updatedHandwrittenNote?: AiUpdatedHandwrittenNote | null;
   generatedImages?: AiGeneratedImage[];
   task?: AiAgenticTask | null;
   tree?: DocumentTreeNode[] | null;
@@ -1819,6 +2080,64 @@ export type SaveDraftPayload = {
   markdown: string;
   baseFingerprint?: DocumentFingerprint | null;
   baseContentHash?: string | null;
+};
+
+export type CreateHandwrittenNotePayload = {
+  parentId: string | null;
+  name: string;
+  background?: HandwrittenPageBackground | string | null;
+};
+
+export type SaveHandwrittenNotePayload = {
+  content: HandwrittenNoteContent;
+  baseFingerprint?: DocumentFingerprint | null;
+  force?: boolean;
+};
+
+export type SaveHandwrittenNoteDraftPayload = {
+  content: HandwrittenNoteContent;
+  baseFingerprint?: DocumentFingerprint | null;
+  baseContentHash?: string | null;
+};
+
+export type HandwrittenNoteDraftResponse = {
+  noteId: string;
+  draftUpdatedAt?: string | null;
+  isDirty: boolean;
+  hasDraft?: boolean;
+  diskContentHash?: string | null;
+  savedContentHash?: string | null;
+  draftContentHash?: string | null;
+};
+
+export type HandwrittenNoteExportPayload = {
+  format: HandwrittenExportFormat;
+  outputPath: string;
+  pageId?: string | null;
+  content?: HandwrittenNoteContent | null;
+};
+
+export type HandwrittenNoteRenderResponse = {
+  noteId: string;
+  pageId: string;
+  format: "png" | "svg";
+  contentType: string;
+  dataUrl: string;
+  renderedAt: string;
+};
+
+export type HandwrittenNoteInsertMarkdownPayload = {
+  documentId: string;
+  pageId: string;
+  altText?: string | null;
+  content?: HandwrittenNoteContent | null;
+};
+
+export type HandwrittenNoteInsertMarkdownResponse = {
+  markdown: string;
+  asset: AssetMetadata;
+  noteId: string;
+  pageId: string;
 };
 
 export type DraftResponse = {

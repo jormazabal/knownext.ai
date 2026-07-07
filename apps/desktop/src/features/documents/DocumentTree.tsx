@@ -16,6 +16,7 @@ import {
   Eye,
   Image,
   MoreVertical,
+  NotebookPen,
   Pencil,
   Plus,
   Search,
@@ -41,12 +42,14 @@ type DocumentTreeProps = {
   activeTreeNodeId?: string;
   hasActiveProject?: boolean;
   onOpenDocument: (documentId: string, name: string) => void;
+  onOpenHandwrittenNote?: (noteId: string, name: string) => void;
   onOpenImage?: (assetId: string, name: string, path: string) => void;
   onOpenReferenceDocument?: (nodeId: string, name: string, path: string) => void;
   onActivateTreeNode: (nodeId: string) => void;
   onSelectTreeNode: (nodeId: string, type: DocumentTreeNode["type"], name: string) => void;
   onCreateFolder: () => void;
   onCreateDocument: () => void;
+  onCreateHandwrittenNote?: () => void;
   onImportFile?: () => void;
   onExpandTree: () => void;
   onCollapseTree: () => void;
@@ -73,7 +76,7 @@ export type ProjectTreeStatus = {
   footerDetail?: string;
 };
 
-type TreeFilter = "all" | "documents" | "images";
+type TreeFilter = "all" | "documents" | "handwritten" | "images";
 type ExtendedTreeFilter = TreeFilter | "attachments";
 type TreeDropTarget = { id: string | null; valid: boolean; label: string };
 type TreeMouseDropTarget = TreeDropTarget & { targetFolderId?: string | null };
@@ -87,8 +90,10 @@ const CONTEXT_MENU_VIEWPORT_GAP = 8;
 export type DocumentTreeAction =
   | "create-folder"
   | "create-document"
+  | "create-handwritten-note"
   | "import-image"
   | "import-file"
+  | "open-handwritten-note"
   | "open-image"
   | "open-reference-document"
   | "insert-image"
@@ -99,6 +104,11 @@ export type DocumentTreeAction =
   | "export-md"
   | "export-pdf"
   | "export-docx"
+  | "export-knote"
+  | "export-note-png"
+  | "export-note-svg"
+  | "export-note-pdf"
+  | "add-handwritten-context"
   | "rename"
   | "delete"
   | "duplicate"
@@ -110,12 +120,14 @@ export function DocumentTree({
   activeTreeNodeId,
   hasActiveProject = true,
   onOpenDocument,
+  onOpenHandwrittenNote,
   onOpenImage,
   onOpenReferenceDocument,
   onActivateTreeNode,
   onSelectTreeNode,
   onCreateFolder,
   onCreateDocument,
+  onCreateHandwrittenNote,
   onImportFile,
   onExpandTree,
   onCollapseTree,
@@ -405,7 +417,7 @@ export function DocumentTree({
   }
 
   function canDropImageIntoDocument(node: DocumentTreeNode) {
-    return node.type === "image" && Boolean(onDropImageIntoActiveDocument);
+    return (node.type === "image" || node.type === "handwritten-note") && Boolean(onDropImageIntoActiveDocument);
   }
 
   function isOverPromptInput(clientX: number, clientY: number) {
@@ -472,6 +484,10 @@ export function DocumentTree({
       onOpenDocument(node.id, node.name);
       return;
     }
+    if (node.type === "handwritten-note") {
+      onOpenHandwrittenNote?.(node.id, node.name);
+      return;
+    }
     if (node.type === "image" && node.path) {
       onOpenImage?.(node.id, node.name, node.path);
       return;
@@ -497,6 +513,7 @@ export function DocumentTree({
         onShowFileExtensionsChange={setShowFileExtensions}
         onCreateFolder={onCreateFolder}
         onCreateDocument={onCreateDocument}
+        onCreateHandwrittenNote={onCreateHandwrittenNote}
         onImportFile={onImportFile}
         onSearch={() => setSearchOpen(true)}
         onExpandTree={onExpandTree}
@@ -524,6 +541,7 @@ export function DocumentTree({
               depth={0}
               activeNodeId={selectedNodeId}
               onOpenDocument={onOpenDocument}
+              onOpenHandwrittenNote={onOpenHandwrittenNote}
               onOpenImage={onOpenImage}
               onOpenReferenceDocument={onOpenReferenceDocument}
               onActivateTreeNode={onActivateTreeNode}
@@ -548,7 +566,7 @@ export function DocumentTree({
           ))
         ) : (
           <div className="px-3 py-2 text-[11px] leading-5 text-ink-secondary">
-            {filter === "attachments" ? "No hay archivos de apoyo en este proyecto." : filter === "images" ? "No hay imágenes en este proyecto." : filter === "documents" ? "No hay documentos Markdown en este filtro." : "No hay archivos compatibles en esta carpeta."}
+            {filter === "attachments" ? "No hay archivos de apoyo en este proyecto." : filter === "images" ? "No hay imágenes en este proyecto." : filter === "handwritten" ? "No hay notas a mano en este filtro." : filter === "documents" ? "No hay documentos Markdown en este filtro." : "No hay archivos compatibles en esta carpeta."}
           </div>
         )}
       </div>
@@ -637,6 +655,7 @@ type TreeNodeProps = {
   depth: number;
   activeNodeId: string;
   onOpenDocument: (documentId: string, name: string) => void;
+  onOpenHandwrittenNote?: (noteId: string, name: string) => void;
   onOpenImage?: (assetId: string, name: string, path: string) => void;
   onOpenReferenceDocument?: (nodeId: string, name: string, path: string) => void;
   onActivateTreeNode: (nodeId: string) => void;
@@ -664,6 +683,7 @@ function TreeNode({
   depth,
   activeNodeId,
   onOpenDocument,
+  onOpenHandwrittenNote,
   onOpenImage,
   onOpenReferenceDocument,
   onActivateTreeNode,
@@ -746,6 +766,8 @@ function TreeNode({
           <Folder size={15} className="mr-1.5 text-brand-orange" />
         ) : node.type === "image" ? (
           <Image size={14} className={["mr-1.5", isActive ? "text-brand-orange" : "text-ink-secondary"].join(" ")} />
+        ) : node.type === "handwritten-note" ? (
+          <NotebookPen size={14} className={["mr-1.5", isActive ? "text-brand-orange" : "text-ink-secondary"].join(" ")} />
         ) : node.type === "attachment" ? (
           <AttachmentIcon name={node.name} active={isActive} />
         ) : (
@@ -800,6 +822,7 @@ function TreeNode({
               depth={depth + 1}
               activeNodeId={activeNodeId}
               onOpenDocument={onOpenDocument}
+              onOpenHandwrittenNote={onOpenHandwrittenNote}
               onOpenImage={onOpenImage}
               onOpenReferenceDocument={onOpenReferenceDocument}
               onActivateTreeNode={onActivateTreeNode}
@@ -1014,7 +1037,7 @@ function DocumentNameSearchDialog({
                       result.type === "folder" ? "border-orange-200 bg-brand-hover text-brand-orange" : "border-line bg-white text-ink-secondary",
                     ].join(" ")}
                   >
-                    {result.type === "folder" ? <Folder size={15} /> : result.type === "image" ? <Image size={15} /> : result.type === "attachment" ? <AttachmentIcon name={result.name} active={index === activeIndex} size="md" /> : <FileText size={15} />}
+                    {result.type === "folder" ? <Folder size={15} /> : result.type === "image" ? <Image size={15} /> : result.type === "handwritten-note" ? <NotebookPen size={15} /> : result.type === "attachment" ? <AttachmentIcon name={result.name} active={index === activeIndex} size="md" /> : <FileText size={15} />}
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[12px] font-semibold text-ink-primary">
@@ -1080,6 +1103,7 @@ function DocumentTreeToolbar({
   onShowFileExtensionsChange,
   onCreateFolder,
   onCreateDocument,
+  onCreateHandwrittenNote,
   onImportFile,
   onSearch,
   onExpandTree,
@@ -1095,6 +1119,7 @@ function DocumentTreeToolbar({
   onShowFileExtensionsChange: (showFileExtensions: boolean) => void;
   onCreateFolder: () => void;
   onCreateDocument: () => void;
+  onCreateHandwrittenNote?: () => void;
   onImportFile?: () => void;
   onSearch: () => void;
   onExpandTree: () => void;
@@ -1173,6 +1198,7 @@ function DocumentTreeToolbar({
         <ToolbarMenu className="right-8 top-8 w-[214px]">
           <ToolbarMenuItem icon={FolderPlus} label="Nueva carpeta" description="Crea una carpeta en la raíz" onClick={() => runAction(onCreateFolder)} />
           <ToolbarMenuItem icon={FilePlus2} label="Nuevo Markdown" description="Crea un documento vacío" onClick={() => runAction(onCreateDocument)} />
+          <ToolbarMenuItem icon={NotebookPen} label="Nota a mano" description="Crea una libreta manuscrita" onClick={() => runAction(onCreateHandwrittenNote ?? onCreateDocument)} />
           <ToolbarMenuItem
             icon={FileUp}
             label="Importar archivo"
@@ -1186,6 +1212,7 @@ function DocumentTreeToolbar({
         <ToolbarMenu className="right-0 top-8 w-[218px]">
           <ToolbarMenuItem icon={Check} label="Ver todo" active={filter === "all"} onClick={() => runAction(() => onFilterChange("all"))} />
           <ToolbarMenuItem icon={FileText} label="Solo Markdown" active={filter === "documents"} onClick={() => runAction(() => onFilterChange("documents"))} />
+          <ToolbarMenuItem icon={NotebookPen} label="Notas a mano" active={filter === "handwritten"} onClick={() => runAction(() => onFilterChange("handwritten"))} />
           <ToolbarMenuItem icon={Image} label="Solo imágenes" active={filter === "images"} onClick={() => runAction(() => onFilterChange("images"))} />
           <ToolbarMenuItem icon={File} label="Solo archivos" active={filter === "attachments"} onClick={() => runAction(() => onFilterChange("attachments"))} />
           <div className="my-1 border-t border-line" />
@@ -1255,6 +1282,7 @@ function getToolbarToneClass(tone: ProjectTreeStatus["tone"]) {
 
 function getTreeFilterLabel(filter: ExtendedTreeFilter) {
   if (filter === "documents") return "Markdown";
+  if (filter === "handwritten") return "Notas";
   if (filter === "images") return "Imágenes";
   if (filter === "attachments") return "Archivos";
   return "Todo";
@@ -1324,7 +1352,7 @@ function ToolbarMenuItem({
 
 function filterTree(nodes: DocumentTreeNode[], filter: ExtendedTreeFilter): DocumentTreeNode[] {
   if (filter === "all") return nodes;
-  const acceptedType = filter === "documents" ? "document" : filter === "images" ? "image" : "attachment";
+  const acceptedType = filter === "documents" ? "document" : filter === "handwritten" ? "handwritten-note" : filter === "images" ? "image" : "attachment";
   return nodes.flatMap((node) => {
     if (node.type === acceptedType) return [node];
     if (node.type !== "folder") return [];
@@ -1419,9 +1447,10 @@ function isReferenceDocumentName(name: string) {
 
 function getContextMenuItemCount(type: DocumentTreeNode["type"]) {
   if (type === "document") return 5;
+  if (type === "handwritten-note") return 8;
   if (type === "image") return 7;
   if (type === "attachment") return 6;
-  return 6;
+  return 7;
 }
 
 function getContextMenuHeight(itemCount: number) {
@@ -1482,6 +1511,7 @@ function ContextMenu({
   const folderItems: ContextMenuItem[] = [
     { label: "Nueva carpeta", icon: FolderPlus, action: "create-folder" },
     { label: "Nuevo documento", icon: FilePlus2, action: "create-document" },
+    { label: "Nueva nota a mano", icon: NotebookPen, action: "create-handwritten-note" },
     { label: "Importar archivo", icon: FileUp, action: "import-file" },
     { label: "Renombrar", icon: Pencil, action: "rename" },
     { label: "Mover", icon: MoveRight, action: "move" },
@@ -1497,6 +1527,25 @@ function ContextMenu({
         { label: "DOCX", icon: Download, action: "export-docx" },
       ],
     },
+    { label: "Renombrar", icon: Pencil, action: "rename" },
+    { label: "Duplicar", icon: Copy, action: "duplicate" },
+    { label: "Mover", icon: MoveRight, action: "move" },
+    { label: "Eliminar", icon: Trash2, action: "delete" },
+  ];
+  const handwrittenItems: ContextMenuItem[] = [
+    { label: "Abrir", icon: NotebookPen, action: "open-handwritten-note" },
+    {
+      label: "Exportar",
+      icon: Download,
+      submenu: [
+        { label: "KNOTE", icon: Download, action: "export-knote" },
+        { label: "PDF", icon: Download, action: "export-note-pdf" },
+        { label: "PNG", icon: Download, action: "export-note-png" },
+        { label: "SVG", icon: Download, action: "export-note-svg" },
+      ],
+    },
+    { label: "Insertar en documento", icon: FileImage, action: "insert-image" },
+    { label: "Usar como contexto IA", icon: Copy, action: "add-handwritten-context" },
     { label: "Renombrar", icon: Pencil, action: "rename" },
     { label: "Duplicar", icon: Copy, action: "duplicate" },
     { label: "Mover", icon: MoveRight, action: "move" },
@@ -1519,7 +1568,7 @@ function ContextMenu({
     { label: "Mover", icon: MoveRight, action: "move" },
     { label: "Eliminar", icon: Trash2, action: "delete" },
   ];
-  const items: ContextMenuItem[] = type === "folder" ? folderItems : type === "image" ? imageItems : type === "attachment" ? attachmentItems : documentItems;
+  const items: ContextMenuItem[] = type === "folder" ? folderItems : type === "image" ? imageItems : type === "attachment" ? attachmentItems : type === "handwritten-note" ? handwrittenItems : documentItems;
   const submenuOpensLeft = x + CONTEXT_MENU_WIDTH + CONTEXT_SUBMENU_WIDTH + CONTEXT_MENU_VIEWPORT_GAP > (window.innerWidth || document.documentElement.clientWidth || 1024);
 
   return (

@@ -693,6 +693,8 @@ describe("AppSettingsDialog", () => {
     expect(onAiChange).toHaveBeenLastCalledWith(expect.objectContaining({
       permissions: {
         editDocuments: true,
+        editHandwrittenNotes: true,
+        drawHandwrittenNotes: true,
         createFolders: true,
         createDocuments: true,
         deleteDocumentsAndFolders: true,

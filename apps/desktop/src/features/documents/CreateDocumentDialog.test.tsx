@@ -21,7 +21,12 @@ describe("CreateDocumentDialog", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Crear documento" }));
 
-    expect(onCreate).toHaveBeenCalledWith("plan-producto.md", "requirements");
+    expect(onCreate).toHaveBeenCalledWith({
+      kind: "document",
+      name: "plan-producto.md",
+      template: "requirements",
+      background: "blank",
+    });
     expect(screen.getByLabelText(/Nombre del documento/)).toHaveValue("");
     expect(screen.getByLabelText(/Plantilla/)).toHaveValue("blank");
   });
@@ -33,7 +38,12 @@ describe("CreateDocumentDialog", () => {
 
     await userEvent.type(screen.getByLabelText(/Nombre del documento/), "atajo-enter{Enter}");
 
-    expect(onCreate).toHaveBeenCalledWith("atajo-enter.md", "blank");
+    expect(onCreate).toHaveBeenCalledWith({
+      kind: "document",
+      name: "atajo-enter.md",
+      template: "blank",
+      background: "blank",
+    });
   });
 
   it("creates a default Markdown document and closes from both controls", () => {
@@ -46,8 +56,34 @@ describe("CreateDocumentDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
     fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
 
-    expect(onCreate).toHaveBeenCalledWith("nuevo-documento.md", "blank");
+    expect(onCreate).toHaveBeenCalledWith({
+      kind: "document",
+      name: "nuevo-documento.md",
+      template: "blank",
+      background: "blank",
+    });
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it("creates a handwritten note with a knote extension and selected background", () => {
+    const onCreate = vi.fn();
+
+    render(<CreateDocumentDialog open initialKind="handwritten-note" onClose={vi.fn()} onCreate={onCreate} />);
+
+    fireEvent.change(screen.getByLabelText(/Nombre de la nota/), {
+      target: { value: "boceto-clase" },
+    });
+    fireEvent.change(screen.getByLabelText(/Fondo inicial/), {
+      target: { value: "cornell" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Crear nota" }));
+
+    expect(onCreate).toHaveBeenCalledWith({
+      kind: "handwritten-note",
+      name: "boceto-clase.knote",
+      template: "blank",
+      background: "cornell",
+    });
   });
 
   it("does not render when closed", () => {

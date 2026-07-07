@@ -36,10 +36,18 @@ Use `docs/development/functional-validation-matrix.md` to record which areas are
 - On a Git/GitHub project, confirm startup does not repeatedly open and close terminal windows while history and sync status are checked.
 - Create a project from the project selector.
 - Create a folder and Markdown document from tree menus.
+- Create a handwritten note from the tree add menu and from a folder context menu; confirm it opens directly in writing mode with one page ready.
 - Open multiple tabs, switch tabs, close tabs, and confirm the active document stays stable.
+- Open Markdown, image/reference and handwritten tabs together; switch between them with dirty handwritten changes and confirm drafts are preserved.
 - Use the tab context menu actions `Cerrar`, `Cerrar otras pestañas` and `Cerrar todas las pestañas`; with dirty tabs, confirm the confirmation dialog advances one document at a time and no tab is skipped.
 - Drag document tabs to reorder them; confirm the order persists while switching tabs and reopening the app.
 - Edit in Milkdown, save, close, reopen, and confirm Markdown content persists.
+- In a handwritten note, verify bolígrafo, pluma, lápiz, rotulador, subrayador, eraser and lasso; change color, width, opacity, pressure sensitivity and smoothing; confirm undo/redo works after writing, erasing and moving a lasso selection.
+- Verify handwritten page templates: blank, ruled, grid, dots and Cornell. Add pages, switch pages from thumbnails, collapse/expand the page rail, zoom and pan without losing the active tool.
+- With a Windows pen, confirm pressure changes stroke width, the stylus writes, a finger scrolls, two fingers zoom, palm contact does not create unwanted strokes, and a 20-page note remains responsive.
+- Save, close and reopen a handwritten note; confirm strokes, tool presets, page backgrounds, thumbnails and dirty state are preserved.
+- Export a handwritten note to `.knote`, PNG, SVG and PDF; confirm filenames/extensions are correct and the PDF contains rendered pages.
+- Insert a handwritten page into an active Markdown document; confirm the image is written under `assets/handwritten/`, renders in Milkdown, and offers a path back to the original note metadata.
 - Select a word, phrase and partial paragraph in Milkdown; apply each highlight color, change one highlight to another color, remove a highlight, save, reopen, view raw Markdown, and confirm MD/PDF/DOCX exports preserve the highlighted text.
 - Apply `Cita` from the Markdown toolbar to selected text, then apply it again and confirm the blockquote style is removed.
 - Edit a document without saving, force an orphaned draft by removing the backing Markdown file from disk, then open `Borradores recuperables`; confirm the draft is listed, can recreate the file, and disappears after restore or discard.
@@ -55,6 +63,8 @@ Use `docs/development/functional-validation-matrix.md` to record which areas are
 - Import or attach an image and confirm it renders in the document/reference viewer when supported.
 - Import a single Markdown/PDF/DOCX/XLSX file and confirm the imported file opens immediately as the active editable document or supported preview.
 - Insert an imported image into a Markdown document, then move the image, move the document, and move their containing folders; confirm Markdown image references are recalculated and remain valid.
+- Move, rename, duplicate and delete a handwritten note from the tree; confirm open tabs, sync/history rows and Markdown references to exported/inserted renders remain coherent.
+- Move an image generated from a handwritten note and then move the Markdown document that references it; confirm the Markdown image reference is recalculated like other local assets.
 - Hover an image in a Markdown document, click the bottom-center edit icon, then confirm the edit dialog can change the alt text, replace the image through project/upload/URL modes, and delete the image from the document.
 - Insert a Mermaid diagram from the Markdown toolbar, use the example catalog, validate it in the dialog, confirm it renders visually in the document, hover it and use `Editar` to reopen the dialog with the original code, then update and delete it.
 - In Settings > Capabilities, switch Mermaid profiles between maximum compatibility, local visual and controlled experimental. Confirm compatible mode blocks icon/image enriched diagrams, local visual mode allows bundled `lucide:*` icons, and beta examples show a warning or are blocked according to the beta policy.
@@ -62,6 +72,9 @@ Use `docs/development/functional-validation-matrix.md` to record which areas are
 - Reindex project images from settings and confirm the result reports the real number of project images and indexed images.
 - Open AI/capabilities settings and confirm image generation exposes `gpt-image-2`, model, size, quality, format, destination folder, document insertion, document-context and asset-permission controls.
 - Open AI/documental settings and confirm RAG exposes local index status, document counts, local index ID, `Reconstruir índice` and `Limpiar índice`; rebuild the index and confirm the document count updates.
+- Add a handwritten note as IA context; confirm the source chip appears, OCR/transcribed text is used when available, and the note is counted separately from Markdown documents in the local index status.
+- In an active `.knote`, ask IA to draw a 5-step flow, a 2x2 matrix, a timeline, a mind map and a wireframe. Confirm the result appears as editable handwritten strokes, the IA bubble reports a concrete summary/diagnostics, the note becomes dirty as a draft, and the `.knote` file is not saved until using Save.
+- In a `.knote` that already has strokes, ask IA to clean, replace or redraw existing content without selecting anything. Confirm the runtime blocks replacement and explains that explicit selection/lasso is required.
 - Open Settings > Skills de IA. Confirm the compact base skills list is visible, base skills show a `Base` badge, runtime status is visible, and selected base skill content is read-only with the copy `Skill base incluida con KnowNext.ai`.
 - Inspect `knownext.research_report` from Settings > Skills de IA. Confirm it appears as a base read-only skill named `Informe de investigación`, shows modes (`ejecutivo`, `profundo`, `comparativo`, `normativo`, `técnico`), and lists coordinated/auxiliary skills such as Markdown and Mermaid.
 - Inspect `knownext.mermaid` from Settings > Skills de IA. Confirm the summary, modes, instructions, manifest, examples, and diagnostic tabs render, then run validation and confirm the manifest reports a valid state.
@@ -118,6 +131,11 @@ Use `docs/development/functional-validation-matrix.md` to record which areas are
 - Create a project offline.
 - Create a folder and Markdown document.
 - Edit in Milkdown, save, close, reopen, and confirm content persists.
+- Create a handwritten note offline; write with stylus hardware when available and confirm pressure or graceful pressure fallback, finger scroll, two-finger zoom and palm rejection.
+- Rotate the device while a handwritten note has unsaved strokes; background and resume the app; confirm the recoverable draft and active tab survive.
+- Save, close and reopen a handwritten note on Android and confirm strokes, tools, page backgrounds and thumbnails persist.
+- Export a handwritten note to `.knote`, PNG, SVG and PDF on Android; confirm PDF export contains rendered pages, not fallback text.
+- Insert a handwritten page into Markdown on Android and confirm the local asset renders after save/reopen.
 - Use tabs and notes.
 - Import/export documents where Android permissions allow it.
 - Open supported reference previews or confirm unsupported previews fail with visible product errors.
