@@ -3,10 +3,13 @@ import type { DocumentPostSaveSyncState, DocumentSyncStatus, RemoteAccessState }
 
 type DocumentStatusBarProps = {
   isDirty: boolean;
-  saveState: "idle" | "saving" | "saved";
-  wordCount: number;
+  saveState: "idle" | "saving" | "saved" | "error";
+  wordCount?: number;
+  kindLabel?: string;
+  metricLabel?: string;
   gitEnabled: boolean;
   canSave: boolean;
+  canDiscard?: boolean;
   documentSyncStatus?: DocumentSyncStatus | null;
   remoteAccess?: RemoteAccessState;
   remotePaused?: boolean;
@@ -34,9 +37,12 @@ type FooterState = {
 export function DocumentStatusBar({
   isDirty,
   saveState,
-  wordCount,
+  wordCount = 0,
+  kindLabel = "Markdown",
+  metricLabel,
   gitEnabled,
   canSave,
+  canDiscard = true,
   documentSyncStatus,
   remoteAccess,
   remotePaused,
@@ -60,6 +66,7 @@ export function DocumentStatusBar({
     isSyncing,
     postSaveSyncState,
     canSave,
+    canDiscard,
   });
   const StatusIcon = state.tone === "ok" ? CheckCircle2 : state.tone === "danger" ? AlertCircle : RefreshCw;
 
@@ -68,10 +75,10 @@ export function DocumentStatusBar({
       <div className="hidden min-w-0 items-center gap-3 sm:flex">
         <span className="flex items-center gap-2">
           <FileCode2 size={15} />
-          Markdown
+          {kindLabel}
         </span>
         <span className="h-5 border-l border-line" />
-        <span>{wordCount} palabras</span>
+        <span>{metricLabel ?? `${wordCount} palabras`}</span>
       </div>
 
       <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5 sm:shrink-0 sm:gap-2">
@@ -156,9 +163,10 @@ function getFooterState({
   isSyncing,
   postSaveSyncState,
   canSave,
+  canDiscard,
 }: {
   isDirty: boolean;
-  saveState: "idle" | "saving" | "saved";
+  saveState: "idle" | "saving" | "saved" | "error";
   gitEnabled: boolean;
   documentSyncStatus?: DocumentSyncStatus | null;
   remoteAccess?: RemoteAccessState;
@@ -167,6 +175,7 @@ function getFooterState({
   isSyncing: boolean;
   postSaveSyncState: DocumentPostSaveSyncState;
   canSave: boolean;
+  canDiscard: boolean;
 }): FooterState {
   const postSaveSyncing = postSaveSyncState === "syncing-local" || postSaveSyncState === "syncing-remote";
   const busy = isSyncing || saveState === "saving" || postSaveSyncing;
@@ -183,13 +192,26 @@ function getFooterState({
         : remoteReason ?? "GitHub pausado";
   const syncAvailable = gitEnabled && localAhead && !githubPaused;
 
+  if (saveState === "error") {
+    return {
+      tone: "danger",
+      label: "No se pudo guardar",
+      detail: "Reintenta el guardado antes de cerrar el documento.",
+      showSave: canSave,
+      showDiscard: isDirty && canSave && canDiscard,
+      showSync: false,
+      showUpdate: false,
+      busy,
+    };
+  }
+
   if (isDirty) {
     return {
       tone: "warning",
       label: canSave ? undefined : "Cambios sin guardar",
       detail: canSave ? undefined : "Guarda el documento o descarta los cambios pendientes.",
       showSave: canSave,
-      showDiscard: canSave,
+      showDiscard: canSave && canDiscard,
       showSync: false,
       showUpdate: false,
       busy,

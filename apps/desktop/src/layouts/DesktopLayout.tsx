@@ -11,6 +11,7 @@ import { InsertImageDialog } from "../features/documents/InsertImageDialog";
 import { ExternalChangesDrawer, type OpenDocumentDraftState } from "../features/externalChanges/ExternalChangesDrawer";
 import { ImageViewer } from "../features/documents/ImageViewer";
 import { ReferenceDocumentViewer } from "../features/documentPreview/ReferenceDocumentViewer";
+import { HandwrittenEditor } from "../features/handwritten/HandwrittenEditor";
 import { MarkdownToolbar } from "../features/editor/MarkdownToolbar";
 import { MarkdownSourceViewer } from "../features/editor/MarkdownSourceViewer";
 import {
@@ -37,7 +38,7 @@ import { TitleBar } from "../components/window/TitleBar";
 import { getProjectImageContentUrl } from "../lib/api/projects";
 import { getDocumentTreeFileDragData } from "../lib/dragData";
 import { isMobileDeviceRuntime, isPhoneAppShell } from "../lib/runtime/platform";
-import type { ActivityEvent, AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiEditProposal, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiResearchBrief, AiResearchJob, AiSelectionFocus, AiSkillApplication, AiSkillDiagnostic, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentPostSaveSyncState, DocumentRecord, DocumentSyncStatus, DocumentTreeNode, ExportFormat, ExternalChangeDecision, ExternalChangeSet, InsertImageReferenceResponse, LayoutConfig, Project, ProjectFileSyncOverview, ProjectSyncState, ProjectSyncStatus, ProjectVersioningStatus, VersionRecord, WorkspaceTab } from "../types/domain";
+import type { ActivityEvent, AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiEditProposal, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiResearchBrief, AiResearchJob, AiSelectionFocus, AiSkillApplication, AiSkillDiagnostic, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentPostSaveSyncState, DocumentRecord, DocumentSyncStatus, DocumentTreeNode, ExportFormat, ExternalChangeDecision, ExternalChangeSet, HandwrittenEraserConfig, HandwrittenExportFormat, HandwrittenNoteContent, HandwrittenNoteInsertMarkdownResponse, HandwrittenNoteRecord, HandwrittenToolPreset, InsertImageReferenceResponse, LayoutConfig, Project, ProjectFileSyncOverview, ProjectSyncState, ProjectSyncStatus, ProjectVersioningStatus, VersionRecord, WorkspaceTab } from "../types/domain";
 
 const sidebarWidthConfig = {
   defaultWidth: 338,
@@ -82,6 +83,7 @@ type DesktopLayoutProps = {
   activeDocumentId: string;
   activeTreeNodeId: string;
   activeImageId: string;
+  activeHandwrittenNoteId: string;
   editorSessions: EditorDocumentSession[];
   notesMarkdown: string;
   notesUpdatedAt: string | null;
@@ -91,6 +93,12 @@ type DesktopLayoutProps = {
   releaseNotesMarkdown: string;
   activeDocument: DocumentRecord | null;
   activeMarkdown: string;
+  activeHandwrittenNote: HandwrittenNoteRecord | null;
+  activeHandwrittenContent: HandwrittenNoteContent | null;
+  handwrittenToolPresets: HandwrittenToolPreset[];
+  handwrittenEraserConfig: HandwrittenEraserConfig;
+  activeHandwrittenDirty: boolean;
+  activeHandwrittenSaveState: "idle" | "saving" | "saved" | "error";
   activeDocumentDirty: boolean;
   activeDocumentSyncStatus: DocumentSyncStatus | null;
   activeDocumentPostSaveSyncState: DocumentPostSaveSyncState;
@@ -130,6 +138,7 @@ type DesktopLayoutProps = {
   onExpandTree: () => void;
   onCollapseTree: () => void;
   onCreateDocument: () => void;
+  onCreateHandwrittenNote: () => void;
   onOpenRecoverableDrafts: () => void;
   onCheckForUpdates: () => void;
   onOpenReleaseNotes: () => void;
@@ -176,6 +185,7 @@ type DesktopLayoutProps = {
   onOpenAiConversation: () => void;
   isSyncingProject: boolean;
   onOpenDocument: (documentId: string, name: string) => void;
+  onOpenHandwrittenNote: (noteId: string, name: string) => void;
   onOpenImage: (assetId: string, name: string, path: string) => void;
   onOpenReferenceDocument: (nodeId: string, name: string, path: string) => void;
   onActivateTreeNode: (nodeId: string) => void;
@@ -186,9 +196,16 @@ type DesktopLayoutProps = {
   onReorderDocumentTabs: (draggedTabId: string, targetTabId: string, placement: "before" | "after") => void;
   onTreeContextAction: (action: DocumentTreeAction, node: DocumentTreeNode) => void;
   onExportDocument: (documentId: string, format: ExportFormat) => void | Promise<void>;
+  onHandwrittenChange: (noteId: string, content: HandwrittenNoteContent) => void;
+  onHandwrittenToolPresetsChange: (toolPresets: HandwrittenToolPreset[]) => void;
+  onHandwrittenEraserConfigChange: (eraser: HandwrittenEraserConfig) => void;
+  onSaveHandwrittenNote: (noteId?: string) => Promise<boolean>;
+  onExportHandwrittenNote: (noteId: string, format: HandwrittenExportFormat, pageId?: string) => void | Promise<void>;
+  onAddHandwrittenNoteContext: (noteId: string) => void | Promise<void>;
   onMoveTreeNode: (node: DocumentTreeNode, targetFolderId: string | null) => void | Promise<void>;
   onImportProjectImage: (parentId: string | null, file: File) => Promise<AssetImportResponse>;
   onBuildImageReference: (documentId: string, assetId: string, altText?: string | null) => Promise<InsertImageReferenceResponse>;
+  onBuildHandwrittenImageReference: (documentId: string, noteId: string, altText?: string | null) => Promise<HandwrittenNoteInsertMarkdownResponse>;
   onInsertImageIntoActiveDocument: (assetId: string) => void | Promise<void>;
   onMarkdownChange: (documentId: string, markdown: string, source?: MarkdownEditorChangeSource) => void;
   onNotesMarkdownChange: (markdown: string) => void;
@@ -240,12 +257,13 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   const [activeImageAsset, setActiveImageAsset] = useState<AssetMetadata | null>(null);
   const activeWorkspaceTab = props.tabs.find((tab) => tab.id === props.activeTabId);
   const hasOpenDocument = activeWorkspaceTab?.kind === "document" && Boolean(props.activeDocumentId);
+  const hasOpenHandwrittenNote = activeWorkspaceTab?.kind === "handwritten-note" && Boolean(props.activeHandwrittenNoteId);
   const hasOpenImage = activeWorkspaceTab?.kind === "image" && Boolean(props.activeImageId);
   const hasOpenReferenceDocument = activeWorkspaceTab?.kind === "reference-document";
   const hasReleaseNotes = activeWorkspaceTab?.kind === "release-notes";
   const hasNotes = activeWorkspaceTab?.kind === "notes";
   const hasAiConversation = activeWorkspaceTab?.kind === "ai-conversation";
-  const hasOpenTab = hasOpenDocument || hasOpenImage || hasOpenReferenceDocument || hasReleaseNotes || hasNotes || hasAiConversation;
+  const hasOpenTab = hasOpenDocument || hasOpenHandwrittenNote || hasOpenImage || hasOpenReferenceDocument || hasReleaseNotes || hasNotes || hasAiConversation;
   const activeEditorId = hasNotes ? "user-notes" : props.activeDocumentId;
   const activeEditorController = editorControllers[activeEditorId] ?? null;
   const activeEditorHistoryState = editorHistoryStates[activeEditorId] ?? emptyMarkdownEditorHistoryState;
@@ -335,13 +353,17 @@ export function DesktopLayout(props: DesktopLayoutProps) {
     setDiagramEditTarget(null);
   }, [activeEditorController, refreshActiveEditorState]);
 
-  const insertProjectImageAtEditorPoint = useCallback(async (assetId: string, clientX: number, clientY: number) => {
+  const insertProjectVisualAtEditorPoint = useCallback(async (nodeId: string, clientX: number, clientY: number) => {
     if (!activeEditorController || !props.activeProject || !props.activeDocumentId || !props.activeDocument?.path) return false;
 
     const cursorMoved = activeEditorController.setCursorAtClientPoint(clientX, clientY, { addToHistory: false });
     if (!cursorMoved) return false;
 
-    const reference = await props.onBuildImageReference(props.activeDocumentId, assetId, null);
+    const node = findNodeById(props.tree, nodeId);
+    if (!node || (node.type !== "image" && node.type !== "handwritten-note")) return false;
+    const reference = node.type === "image"
+      ? await props.onBuildImageReference(props.activeDocumentId, node.id, null)
+      : await props.onBuildHandwrittenImageReference(props.activeDocumentId, node.id, node.name.replace(/\.knote$/i, ""));
     const materializedMarkdown = materializeProjectImageReferences(
       reference.markdown,
       props.activeProject.id,
@@ -352,7 +374,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
 
     refreshActiveEditorState();
     return true;
-  }, [activeEditorController, props.activeDocument?.path, props.activeDocumentId, props.activeProject, props.onBuildImageReference, props.tree, refreshActiveEditorState]);
+  }, [activeEditorController, props.activeDocument?.path, props.activeDocumentId, props.activeProject, props.onBuildHandwrittenImageReference, props.onBuildImageReference, props.tree, refreshActiveEditorState]);
 
   const previewProjectImageDropAtEditorPoint = useCallback((assetId: string, clientX: number, clientY: number) => {
     if (!assetId || !activeEditorController || !hasOpenDocument) return;
@@ -361,7 +383,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
 
   const handleEditorImageDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     const projectFile = getDocumentTreeFileDragData(event.dataTransfer);
-    if (projectFile?.type !== "image" || !activeEditorController || !hasOpenDocument) return;
+    if (!isInsertableProjectVisual(projectFile?.type) || !activeEditorController || !hasOpenDocument) return;
 
     event.preventDefault();
     event.stopPropagation();
@@ -371,13 +393,13 @@ export function DesktopLayout(props: DesktopLayoutProps) {
 
   const handleEditorImageDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
     const projectFile = getDocumentTreeFileDragData(event.dataTransfer);
-    if (projectFile?.type !== "image" || !activeEditorController || !hasOpenDocument) return;
+    if (!isInsertableProjectVisual(projectFile?.type) || !activeEditorController || !hasOpenDocument) return;
 
     event.preventDefault();
     event.stopPropagation();
     event.dataTransfer.dropEffect = "copy";
-    void insertProjectImageAtEditorPoint(projectFile.id, event.clientX, event.clientY);
-  }, [activeEditorController, hasOpenDocument, insertProjectImageAtEditorPoint]);
+    void insertProjectVisualAtEditorPoint(projectFile.id, event.clientX, event.clientY);
+  }, [activeEditorController, hasOpenDocument, insertProjectVisualAtEditorPoint]);
 
   const handlePreviewDocumentDictation = useCallback((text: string) => {
     activeEditorController?.setTransientTextPreview(text);
@@ -614,12 +636,14 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 activeTreeNodeId={props.activeTreeNodeId}
                 hasActiveProject={Boolean(props.activeProject)}
                 onOpenDocument={handleOpenDocument}
+                onOpenHandwrittenNote={props.onOpenHandwrittenNote}
                 onOpenImage={props.onOpenImage}
                 onOpenReferenceDocument={props.onOpenReferenceDocument}
                 onActivateTreeNode={props.onActivateTreeNode}
                 onSelectTreeNode={props.onSelectTreeNode}
                 onCreateFolder={props.onCreateFolder}
                 onCreateDocument={props.onCreateDocument}
+                onCreateHandwrittenNote={props.onCreateHandwrittenNote}
                 onImportFile={props.onImportProjectFile}
                 onExpandTree={props.onExpandTree}
                 onCollapseTree={props.onCollapseTree}
@@ -631,7 +655,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 onMoveNode={props.onMoveTreeNode}
                 onAddNodeContext={props.onAddProjectDocumentContext}
                 onPreviewImageDropIntoActiveDocument={previewProjectImageDropAtEditorPoint}
-                onDropImageIntoActiveDocument={(assetId, clientX, clientY) => void insertProjectImageAtEditorPoint(assetId, clientX, clientY)}
+                onDropImageIntoActiveDocument={(nodeId, clientX, clientY) => void insertProjectVisualAtEditorPoint(nodeId, clientX, clientY)}
                 changeBadges={externalChangeBadges}
                 projectStatus={projectTreeStatus}
               />
@@ -709,7 +733,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             onCloseTabs={props.onCloseTabs}
             onReorderDocumentTabs={props.onReorderDocumentTabs}
           />
-              {hasReleaseNotes || hasAiConversation || hasOpenImage || hasOpenReferenceDocument ? null : (
+              {hasReleaseNotes || hasAiConversation || hasOpenImage || hasOpenReferenceDocument || hasOpenHandwrittenNote ? null : (
               <MarkdownToolbar
                 historyOpen={props.historyOpen}
                 historyEnabled={props.historyEnabled}
@@ -735,8 +759,8 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             <section className={["relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", hasOpenTab ? "bg-white" : "bg-panel"].join(" ")}>
               {hasOpenTab ? (
                 <>
-                  <div className={hasAiConversation || hasOpenImage || hasOpenReferenceDocument ? "min-h-0 flex-1 overflow-hidden pb-[54px]" : "min-h-0 flex-1 overflow-y-auto px-8 pt-4 mb-[50px]"}>
-                    <div className={hasAiConversation || hasOpenImage || hasOpenReferenceDocument ? "h-full min-h-0 w-full" : "mx-auto max-w-[900px]"}>
+                  <div className={hasAiConversation || hasOpenImage || hasOpenReferenceDocument || hasOpenHandwrittenNote ? "min-h-0 flex-1 overflow-hidden pb-[54px]" : "min-h-0 flex-1 overflow-y-auto px-8 pt-4 mb-[50px]"}>
+                    <div className={hasAiConversation || hasOpenImage || hasOpenReferenceDocument || hasOpenHandwrittenNote ? "h-full min-h-0 w-full" : "mx-auto max-w-[900px]"}>
                       {hasReleaseNotes ? (
                         <ReleaseNotesViewer markdown={props.releaseNotesMarkdown} />
                       ) : hasAiConversation ? (
@@ -754,6 +778,19 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                           onApplyEditProposal={props.onApplyAiEditProposal}
                           onDiscardEditProposal={props.onDiscardAiEditProposal}
                           onOpenDocument={props.onOpenDocument}
+                        />
+                      ) : hasOpenHandwrittenNote && activeWorkspaceTab?.kind === "handwritten-note" ? (
+                        <HandwrittenEditor
+                          noteId={activeWorkspaceTab.id}
+                          name={activeWorkspaceTab.name}
+                          content={props.activeHandwrittenContent}
+                          toolPresets={props.handwrittenToolPresets}
+                          eraserConfig={props.handwrittenEraserConfig}
+                          isDirty={props.activeHandwrittenDirty}
+                          saveState={props.activeHandwrittenSaveState}
+                          onChange={(nextContent) => props.onHandwrittenChange(activeWorkspaceTab.id, nextContent)}
+                          onToolPresetsChange={props.onHandwrittenToolPresetsChange}
+                          onEraserConfigChange={props.onHandwrittenEraserConfigChange}
                         />
                       ) : hasNotes ? (
                         props.notesLoaded ? (
@@ -922,7 +959,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 onAddContextSourceToProject={props.onAddAiContextSourceToProject}
               />
               ) : null}
-              {hasOpenDocument && !activeHistoryPreview ? (
+              {(hasOpenDocument || hasOpenHandwrittenNote) && !activeHistoryPreview ? (
                 <AiResponseBubble
                   bubble={props.aiBubble}
                   pendingIntent={props.aiPendingIntent}
@@ -946,6 +983,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                   onClose={() => setImageInsertOpen(false)}
                   onImportImage={props.onImportProjectImage}
                   onBuildReference={props.onBuildImageReference}
+                  onBuildHandwrittenReference={props.onBuildHandwrittenImageReference}
                   onInsert={(markdown) => {
                     const materializedMarkdown = materializeProjectImageReferences(
                       markdown,
@@ -972,6 +1010,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                   onClose={() => setImageEditTarget(null)}
                   onImportImage={props.onImportProjectImage}
                   onBuildReference={props.onBuildImageReference}
+                  onBuildHandwrittenReference={props.onBuildHandwrittenImageReference}
                   onInsert={(markdown) => handleReplaceActiveImage(imageEditTarget, markdown)}
                   onDelete={() => handleDeleteActiveImage(imageEditTarget)}
                 />
@@ -1049,6 +1088,21 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                   kind="MD"
                   title="Notas"
                   detail={`${countWords(props.notesMarkdown)} palabras · ${getNotesSaveDetail(props.notesSaveState, props.notesUpdatedAt)}`}
+                />
+              ) : hasOpenHandwrittenNote ? (
+                <DocumentStatusBar
+                  isDirty={props.activeHandwrittenDirty}
+                  saveState={props.activeHandwrittenSaveState}
+                  kindLabel="KNOTE"
+                  metricLabel={`${props.activeHandwrittenContent?.pages.length ?? 0} página(s)`}
+                  gitEnabled={false}
+                  canSave={Boolean(props.activeHandwrittenNoteId)}
+                  canDiscard={false}
+                  isSyncing={false}
+                  onSave={() => { void props.onSaveHandwrittenNote(props.activeHandwrittenNoteId); }}
+                  onSynchronize={() => undefined}
+                  onUpdateFromRemote={() => undefined}
+                  onDiscardPendingChanges={() => undefined}
                 />
               ) : hasOpenImage && activeWorkspaceTab?.kind === "image" ? (
                 <ImageWorkspaceStatusBar
@@ -1617,6 +1671,21 @@ function collectImages(nodes: DocumentTreeNode[]): DocumentTreeNode[] {
   });
 }
 
+function findNodeById(nodes: DocumentTreeNode[], nodeId: string): DocumentTreeNode | null {
+  for (const node of nodes) {
+    if (node.id === nodeId) return node;
+    if (node.children) {
+      const found = findNodeById(node.children, nodeId);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function isInsertableProjectVisual(type: DocumentTreeNode["type"] | undefined) {
+  return type === "image" || type === "handwritten-note";
+}
+
 const markdownImageReferencePattern = /!\[([^\]]*)\]\(([^)\n]+)\)/g;
 const htmlImageSourcePattern = /(<img\b[^>]*\bsrc=)(["'])([^"']+)(\2[^>]*>)/gi;
 
@@ -2127,6 +2196,7 @@ function WorkspaceStatusBar({ kind, title, detail }: { kind: string; title: stri
 function getWorkspaceStatusKind(kind: WorkspaceTab["kind"] | undefined) {
   if (kind === "release-notes") return "Notas";
   if (kind === "notes") return "MD";
+  if (kind === "handwritten-note") return "KNOTE";
   if (kind === "ai-conversation") return "IA";
   if (kind === "image") return "Imagen";
   return "Workspace";
@@ -2135,6 +2205,7 @@ function getWorkspaceStatusKind(kind: WorkspaceTab["kind"] | undefined) {
 function getWorkspaceStatusTitle(tab: WorkspaceTab | undefined, openaiKeyConfigured: boolean) {
   if (tab?.kind === "release-notes") return "Notas de release";
   if (tab?.kind === "notes") return "Notas";
+  if (tab?.kind === "handwritten-note") return tab.name;
   if (tab?.kind === "ai-conversation") return openaiKeyConfigured ? "Asistente documental activo" : "Asistente sin clave OpenAI";
   if (tab?.kind === "image") return tab.name;
   return tab?.name ?? "Vista activa";
@@ -2143,6 +2214,7 @@ function getWorkspaceStatusTitle(tab: WorkspaceTab | undefined, openaiKeyConfigu
 function getWorkspaceStatusDetail(tab: WorkspaceTab | undefined, projectName?: string) {
   if (tab?.kind === "release-notes") return "Solo lectura";
   if (tab?.kind === "notes") return "Autoguardado";
+  if (tab?.kind === "handwritten-note") return "Nota a mano";
   if (tab?.kind === "ai-conversation") return projectName ? `Proyecto: ${projectName}` : "Conversación del proyecto";
   if (tab?.kind === "image") return tab.path || "Activo del proyecto";
   return "Listo";

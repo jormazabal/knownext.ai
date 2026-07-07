@@ -257,6 +257,9 @@ impl LocalApi {
             ("POST", ["api", "projects", project_id, "documents"]) => {
                 ok(self.create_document(project_id, body)?)
             }
+            ("POST", ["api", "projects", project_id, "handwritten-notes"]) => {
+                ok(self.create_handwritten_note(project_id, body)?)
+            }
             ("POST", ["api", "projects", project_id, "attachments"]) => {
                 ok(self.import_file(project_id, &query, files, false)?)
             }
@@ -295,6 +298,29 @@ impl LocalApi {
             ("PUT", ["api", "documents", document_id]) => {
                 ok(self.save_document(document_id, body)?)
             }
+            ("GET", ["api", "handwritten-notes", note_id]) => {
+                ok(self.get_handwritten_note(note_id)?)
+            }
+            ("PUT", ["api", "handwritten-notes", note_id]) => {
+                ok(self.save_handwritten_note(note_id, body)?)
+            }
+            ("PUT", ["api", "handwritten-notes", note_id, "draft"]) => {
+                ok(self.save_handwritten_note_draft(note_id, body)?)
+            }
+            ("DELETE", ["api", "handwritten-notes", note_id, "draft"]) => {
+                self.delete_draft(note_id);
+                no_content()
+            }
+            ("POST", ["api", "handwritten-notes", note_id, "export"]) => {
+                ok(self.export_handwritten_note(note_id, body)?)
+            }
+            ("GET", ["api", "handwritten-notes", note_id, "pages", page_id, "render"]) => {
+                ok(self.render_handwritten_note_page(note_id, page_id, &query)?)
+            }
+            (
+                "POST",
+                ["api", "handwritten-notes", note_id, "pages", page_id, "insert-markdown"],
+            ) => ok(self.insert_handwritten_page_markdown(note_id, page_id, body)?),
             ("PUT", ["api", "documents", document_id, "draft"]) => {
                 ok(self.save_draft(document_id, body)?)
             }
@@ -416,6 +442,13 @@ impl LocalApi {
                     project_id,
                     body_id(&body, &["attachmentId", "documentId"]).unwrap_or("attachment"),
                     "external_file",
+                ))
+            }
+            ("POST", ["api", "projects", project_id, "ai", "context", "handwritten-notes"]) => {
+                ok(self.ai_source(
+                    project_id,
+                    body_id(&body, &["noteId", "documentId"]).unwrap_or("handwritten-note"),
+                    "handwritten_note",
                 ))
             }
             ("POST", ["api", "projects", project_id, "ai", "context", "files"]) => {
@@ -603,6 +636,11 @@ impl LocalApi {
                     &image_assets,
                     &export_template,
                 );
+                Ok(binary(200, content_type, Some(filename), bytes))
+            }
+            ["api", "handwritten-notes", note_id, "export", "content"] => {
+                let (content_type, filename, bytes) =
+                    self.handwritten_export_bytes(note_id, body, None)?;
                 Ok(binary(200, content_type, Some(filename), bytes))
             }
             ["api", "projects", project_id, "assets", asset_id, "content"] => {
@@ -1142,6 +1180,38 @@ impl LocalApi {
         self.file_result(project_id, Some(relative), vec![])
     }
 
+    fn create_handwritten_note(&self, project_id: &str, payload: Value) -> Result<Value, String> {
+        let parent =
+            self.node_relative(project_id, payload.get("parentId").and_then(Value::as_str))?;
+        let raw_name = payload
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("nota-a-mano.knote");
+        let name = handwritten_file_name(raw_name);
+        let relative = join_relative(parent.as_deref(), &name);
+        let note_id = doc_id(project_id, &relative);
+        let path = self.resolve_project_relative(project_id, &relative)?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let title = name.trim_end_matches(".knote");
+        let mut content = default_handwritten_note(&note_id, title);
+        let background = payload
+            .get("background")
+            .and_then(Value::as_str)
+            .filter(|value| matches!(*value, "blank" | "ruled" | "grid" | "dots" | "cornell"))
+            .unwrap_or("blank");
+        content["defaultPage"]["background"] = Value::from(background);
+        if let Some(first_page) = content["pages"]
+            .as_array_mut()
+            .and_then(|pages| pages.first_mut())
+        {
+            first_page["background"]["type"] = Value::from(background);
+        }
+        self.write_json_atomic(&path, &content)?;
+        self.file_result(project_id, Some(relative), vec![])
+    }
+
     fn import_file(
         &self,
         project_id: &str,
@@ -1370,6 +1440,157 @@ impl LocalApi {
         self.get_document(document_id)
     }
 
+    fn get_handwritten_note(&self, note_id: &str) -> Result<Value, String> {
+        let path = self.resolve_document_path(note_id)?;
+        let disk_content = self.read_json(&path, Value::Null);
+        if disk_content.is_null() {
+            return Err("Nota a mano no disponible.".to_string());
+        }
+        let (project_id, relative) = document_ref(note_id)?;
+        let normalized_disk = normalize_handwritten_note(
+            disk_content,
+            note_id,
+            path.file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or("Nota a mano"),
+        );
+        let disk_content_hash = handwritten_content_hash(&normalized_disk);
+        let draft = self.read_draft(note_id);
+        let draft_content = draft
+            .as_ref()
+            .and_then(|value| value.get("content").cloned())
+            .map(|content| {
+                normalize_handwritten_note(
+                    content,
+                    note_id,
+                    normalized_disk["title"].as_str().unwrap_or("Nota a mano"),
+                )
+            })
+            .unwrap_or_else(|| normalized_disk.clone());
+        let draft_content_hash = draft
+            .as_ref()
+            .map(|_| handwritten_content_hash(&draft_content));
+        let has_draft = draft_content_hash
+            .as_ref()
+            .map(|hash| hash != &disk_content_hash)
+            .unwrap_or(false);
+        if draft.is_some() && !has_draft {
+            self.delete_draft(note_id);
+        }
+        let active_content = if has_draft {
+            draft_content
+        } else {
+            normalized_disk.clone()
+        };
+        let page_count = active_content["pages"]
+            .as_array()
+            .map(Vec::len)
+            .unwrap_or(0);
+        let draft_updated_at = draft
+            .as_ref()
+            .and_then(|value| value["draftUpdatedAt"].as_str())
+            .map(Value::from)
+            .unwrap_or(Value::Null);
+        Ok(json!({
+            "id": note_id,
+            "name": path.file_name().and_then(|value| value.to_str()).unwrap_or("nota-a-mano.knote"),
+            "path": relative,
+            "projectId": project_id,
+            "content": active_content,
+            "diskContent": normalized_disk,
+            "pageCount": page_count,
+            "updatedAt": knownext_core::now_iso(),
+            "baseFingerprint": self.fingerprint(&path),
+            "diskContentHash": disk_content_hash,
+            "savedContentHash": disk_content_hash,
+            "draftContentHash": if has_draft { draft_content_hash.map(Value::from).unwrap_or(Value::Null) } else { Value::Null },
+            "hasDraft": has_draft,
+            "isDirty": has_draft,
+            "diskChanged": false,
+            "orphaned": false,
+            "conflictStatus": if has_draft { "draft" } else { "none" },
+            "draftUpdatedAt": if has_draft { draft_updated_at } else { Value::Null }
+        }))
+    }
+
+    fn save_handwritten_note(&self, note_id: &str, payload: Value) -> Result<Value, String> {
+        let path = self.resolve_document_path(note_id)?;
+        let title = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("Nota a mano");
+        let mut content = normalize_handwritten_note(
+            payload.get("content").cloned().unwrap_or(Value::Null),
+            note_id,
+            title,
+        );
+        content["updatedAt"] = Value::from(knownext_core::now_iso());
+        self.write_json_atomic(&path, &content)?;
+        self.delete_draft(note_id);
+        self.get_handwritten_note(note_id)
+    }
+
+    fn save_handwritten_note_draft(&self, note_id: &str, payload: Value) -> Result<Value, String> {
+        let note_path = self.resolve_document_path(note_id)?;
+        let title = note_path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("Nota a mano");
+        let mut content = normalize_handwritten_note(
+            payload.get("content").cloned().unwrap_or(Value::Null),
+            note_id,
+            title,
+        );
+        content["updatedAt"] = Value::from(knownext_core::now_iso());
+        let draft_content_hash = handwritten_content_hash(&content);
+        let disk_content = self.read_json(&note_path, Value::Null);
+        let disk_content_hash = if disk_content.is_null() {
+            None
+        } else {
+            Some(handwritten_content_hash(&normalize_handwritten_note(
+                disk_content,
+                note_id,
+                title,
+            )))
+        };
+        if disk_content_hash
+            .as_ref()
+            .map(|hash| hash == &draft_content_hash)
+            .unwrap_or(false)
+        {
+            self.delete_draft(note_id);
+            return ok_value(json!({
+                "noteId": note_id,
+                "draftUpdatedAt": Value::Null,
+                "isDirty": false,
+                "hasDraft": false,
+                "diskContentHash": disk_content_hash,
+                "savedContentHash": disk_content_hash,
+                "draftContentHash": Value::Null
+            }));
+        }
+        let draft_updated_at = knownext_core::now_iso();
+        self.write_json_atomic(&self.draft_path(note_id), &json!({
+            "documentId": note_id,
+            "content": content,
+            "baseFingerprint": payload.get("baseFingerprint").cloned().unwrap_or(Value::Null),
+            "baseContentHash": payload.get("baseContentHash").cloned().unwrap_or_else(|| disk_content_hash.clone().map(Value::from).unwrap_or(Value::Null)),
+            "diskContentHash": disk_content_hash,
+            "savedContentHash": disk_content_hash,
+            "draftContentHash": draft_content_hash,
+            "draftUpdatedAt": draft_updated_at
+        }))?;
+        ok_value(json!({
+            "noteId": note_id,
+            "draftUpdatedAt": draft_updated_at,
+            "isDirty": true,
+            "hasDraft": true,
+            "diskContentHash": disk_content_hash,
+            "savedContentHash": disk_content_hash,
+            "draftContentHash": draft_content_hash
+        }))
+    }
+
     fn save_draft(&self, document_id: &str, payload: Value) -> Result<Value, String> {
         let document_path = self.resolve_document_path(document_id)?;
         let markdown = payload
@@ -1577,6 +1798,174 @@ impl LocalApi {
         Ok(
             json!({ "documentId": document_id, "format": format, "outputPath": output, "exportedAt": knownext_core::now_iso() }),
         )
+    }
+
+    fn export_handwritten_note(&self, note_id: &str, payload: Value) -> Result<Value, String> {
+        let output = payload
+            .get("outputPath")
+            .and_then(Value::as_str)
+            .ok_or("Falta outputPath")?;
+        let (content_type, _filename, bytes) =
+            self.handwritten_export_bytes(note_id, payload.clone(), Some(output))?;
+        let _ = content_type;
+        std::fs::write(output, bytes).map_err(|error| error.to_string())?;
+        Ok(json!({
+            "noteId": note_id,
+            "format": payload.get("format").and_then(Value::as_str).unwrap_or("pdf"),
+            "outputPath": output,
+            "exportedAt": knownext_core::now_iso()
+        }))
+    }
+
+    fn handwritten_export_bytes(
+        &self,
+        note_id: &str,
+        payload: Value,
+        output_path: Option<&str>,
+    ) -> Result<(String, String, Vec<u8>), String> {
+        let record = self.get_handwritten_note(note_id)?;
+        let content = payload
+            .get("content")
+            .cloned()
+            .map(|content| {
+                normalize_handwritten_note(
+                    content,
+                    note_id,
+                    record["name"].as_str().unwrap_or("Nota a mano"),
+                )
+            })
+            .unwrap_or_else(|| record["content"].clone());
+        let format = payload
+            .get("format")
+            .and_then(Value::as_str)
+            .unwrap_or("pdf");
+        let page_id = payload.get("pageId").and_then(Value::as_str);
+        let base_name = output_path
+            .and_then(|path| Path::new(path).file_name())
+            .and_then(|value| value.to_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                record["name"]
+                    .as_str()
+                    .unwrap_or("nota-a-mano.knote")
+                    .to_string()
+            });
+        match format {
+            "knote" => Ok((
+                "application/vnd.knownext.handwritten-note+json".to_string(),
+                with_extension(&base_name, "knote"),
+                serde_json::to_vec_pretty(&content).map_err(|error| error.to_string())?,
+            )),
+            "svg" => {
+                let (_page_id, svg) = knownext_docs::handwritten_note_svg(&content, page_id)?;
+                Ok((
+                    "image/svg+xml".to_string(),
+                    with_extension(&base_name, "svg"),
+                    svg.into_bytes(),
+                ))
+            }
+            "png" => {
+                let (_page_id, png) = knownext_docs::handwritten_note_png(&content, page_id, 1.5)?;
+                Ok((
+                    "image/png".to_string(),
+                    with_extension(&base_name, "png"),
+                    png,
+                ))
+            }
+            "pdf" => Ok((
+                "application/pdf".to_string(),
+                with_extension(&base_name, "pdf"),
+                knownext_docs::handwritten_note_pdf(&content)?,
+            )),
+            _ => Err("Formato de nota a mano no soportado.".to_string()),
+        }
+    }
+
+    fn render_handwritten_note_page(
+        &self,
+        note_id: &str,
+        page_id: &str,
+        query: &BTreeMap<String, String>,
+    ) -> Result<Value, String> {
+        let record = self.get_handwritten_note(note_id)?;
+        let content = record["content"].clone();
+        let format = query.get("format").map(String::as_str).unwrap_or("png");
+        let (content_type, data_base64) = if format == "svg" {
+            let (_page_id, svg) = knownext_docs::handwritten_note_svg(&content, Some(page_id))?;
+            (
+                "image/svg+xml",
+                base64::engine::general_purpose::STANDARD.encode(svg.as_bytes()),
+            )
+        } else {
+            let (_page_id, png) =
+                knownext_docs::handwritten_note_png(&content, Some(page_id), 0.5)?;
+            (
+                "image/png",
+                base64::engine::general_purpose::STANDARD.encode(png),
+            )
+        };
+        Ok(json!({
+            "noteId": note_id,
+            "pageId": page_id,
+            "format": if format == "svg" { "svg" } else { "png" },
+            "contentType": content_type,
+            "dataUrl": format!("data:{content_type};base64,{data_base64}"),
+            "renderedAt": knownext_core::now_iso()
+        }))
+    }
+
+    fn insert_handwritten_page_markdown(
+        &self,
+        note_id: &str,
+        page_id: &str,
+        payload: Value,
+    ) -> Result<Value, String> {
+        let document_id = payload
+            .get("documentId")
+            .and_then(Value::as_str)
+            .ok_or("Falta documentId")?;
+        let record = self.get_handwritten_note(note_id)?;
+        let content = payload
+            .get("content")
+            .cloned()
+            .map(|content| {
+                normalize_handwritten_note(
+                    content,
+                    note_id,
+                    record["name"].as_str().unwrap_or("Nota a mano"),
+                )
+            })
+            .unwrap_or_else(|| record["content"].clone());
+        let (project_id, document_relative) = document_ref(document_id)?;
+        let note_name = record["name"].as_str().unwrap_or("nota-a-mano.knote");
+        let asset_file_name = format!(
+            "{}-{}.png",
+            safe_name(note_name.trim_end_matches(".knote")),
+            safe_name(page_id)
+        );
+        let asset_relative = join_relative(Some("assets/handwritten"), &asset_file_name);
+        let asset_path = self.resolve_project_relative(&project_id, &asset_relative)?;
+        if let Some(parent) = asset_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let (_rendered_page_id, png) =
+            knownext_docs::handwritten_note_png(&content, Some(page_id), 1.5)?;
+        std::fs::write(&asset_path, png).map_err(|error| error.to_string())?;
+        let alt_text = payload
+            .get("altText")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("Nota manuscrita");
+        let target = relative_markdown_target(&document_relative, &asset_relative);
+        let markdown = format!(
+            "![{}]({} \"knownext-note:{}#{}\")",
+            markdown_alt_escape(alt_text),
+            target,
+            note_id,
+            page_id
+        );
+        let asset = self.asset_metadata(&project_id, &doc_id(&project_id, &asset_relative))?;
+        Ok(json!({ "markdown": markdown, "asset": asset, "noteId": note_id, "pageId": page_id }))
     }
 
     fn export_image_assets(
@@ -3495,7 +3884,13 @@ impl LocalApi {
         let mime = resolved_path.as_ref().map(|path| mime_for_path(path));
         let text = resolved_path
             .as_ref()
-            .map(|path| knownext_docs::extract_plain_text(path))
+            .map(|path| {
+                if is_handwritten_note_path(path) {
+                    knownext_docs::handwritten_note_text(&self.read_json(path, Value::Null))
+                } else {
+                    knownext_docs::extract_plain_text(path)
+                }
+            })
             .unwrap_or_default();
         json!({
             "id": source_id,
@@ -3693,6 +4088,21 @@ impl LocalApi {
                 self.mark_ai_response_error(
                     project_id,
                     runtime_body.get("documentId").and_then(Value::as_str),
+                    &mut response,
+                    &error,
+                );
+            }
+        }
+        if response["status"].as_str() == Some("completed") {
+            if let Err(error) =
+                self.apply_ai_handwritten_drawings(project_id, &runtime_body, &mut response)
+            {
+                self.mark_ai_response_error(
+                    project_id,
+                    runtime_body
+                        .get("handwrittenNoteId")
+                        .or_else(|| runtime_body.get("documentId"))
+                        .and_then(Value::as_str),
                     &mut response,
                     &error,
                 );
@@ -5369,6 +5779,168 @@ impl LocalApi {
             Some(relative)
         })
     }
+    fn apply_ai_handwritten_drawings(
+        &self,
+        _project_id: &str,
+        runtime_body: &Value,
+        response: &mut Value,
+    ) -> Result<(), String> {
+        let config = self.read_config();
+        let ai = &config["ai"];
+        let drawing_config = &ai["handwrittenDrawing"];
+        let Some(operations) = response["operations"].as_array_mut() else {
+            return Ok(());
+        };
+        let mut updated_note = Value::Null;
+        let mut response_status: Option<&'static str> = None;
+        let mut response_answer: Option<String> = None;
+        for operation in operations.iter_mut().filter(|operation| {
+            operation["type"].as_str() == Some("handwritten_drawing_generated")
+                && operation["status"].as_str() == Some("ready")
+        }) {
+            if !drawing_config["enabled"].as_bool().unwrap_or(true)
+                || !ai["permissions"]["editHandwrittenNotes"]
+                    .as_bool()
+                    .unwrap_or(false)
+                || !ai["permissions"]["drawHandwrittenNotes"]
+                    .as_bool()
+                    .unwrap_or(false)
+            {
+                let message = "El dibujo en notas a mano esta desactivado en Ajustes > IA.";
+                operation["status"] = Value::from("blocked");
+                operation["type"] = Value::from("handwritten_drawing_blocked");
+                operation["message"] = Value::from(message);
+                response_status = Some("blocked");
+                response_answer = Some(message.to_string());
+                continue;
+            }
+            let note_id = operation["noteId"]
+                .as_str()
+                .or_else(|| operation["documentId"].as_str())
+                .or_else(|| {
+                    runtime_body
+                        .get("handwrittenNoteId")
+                        .and_then(Value::as_str)
+                })
+                .ok_or_else(|| "La operacion de dibujo no incluye noteId.".to_string())?
+                .to_string();
+            let record = self.get_handwritten_note(&note_id)?;
+            let active_content = runtime_body
+                .get("activeHandwrittenContent")
+                .filter(|value| value.is_object())
+                .cloned()
+                .unwrap_or_else(|| record["content"].clone());
+            let replacement_policy = operation["replacementPolicy"]
+                .as_str()
+                .unwrap_or("append_only");
+            if !matches!(
+                replacement_policy,
+                "append_only" | "clean_existing" | "replace_page" | "cleanup_existing"
+            ) {
+                let message = if replacement_policy == "replace_selection" {
+                    "La IA no puede reemplazar una seleccion de la knote porque aun no hay seleccion/lasso activa en el contexto."
+                } else {
+                    "La politica de reemplazo solicitada para la knote no esta soportada por el runtime local."
+                };
+                operation["status"] = Value::from("blocked");
+                operation["type"] = Value::from("handwritten_drawing_blocked");
+                operation["message"] = Value::from(message);
+                response_status = Some("blocked");
+                response_answer = Some(message.to_string());
+                continue;
+            }
+            let mut request = operation.clone();
+            if let Some(object) = request.as_object_mut() {
+                object.insert("content".to_string(), active_content);
+                object.insert(
+                    "targetPageId".to_string(),
+                    operation
+                        .get("targetPageId")
+                        .cloned()
+                        .or_else(|| runtime_body.get("activeHandwrittenPageId").cloned())
+                        .unwrap_or(Value::Null),
+                );
+                object.insert(
+                    "prompt".to_string(),
+                    runtime_body.get("prompt").cloned().unwrap_or(Value::Null),
+                );
+            }
+            let applied = knownext_drawing::apply_handwritten_drawing(
+                &record["content"],
+                &request,
+                drawing_config,
+            )?;
+            let content = applied["content"].clone();
+            let draft_payload = json!({
+                "content": content.clone(),
+                "baseFingerprint": runtime_body.get("activeHandwrittenBaseFingerprint").cloned().unwrap_or(Value::Null)
+            });
+            let _draft = self.save_handwritten_note_draft(&note_id, draft_payload)?;
+            let summary = operation["summary"]
+                .as_str()
+                .unwrap_or("Dibujo IA anadido a la nota a mano.")
+                .to_string();
+            let clears_target_page = matches!(
+                replacement_policy,
+                "clean_existing" | "replace_page" | "cleanup_existing"
+            );
+            let scene_element_count = operation
+                .pointer("/sceneSpec/elements")
+                .and_then(Value::as_array)
+                .map(Vec::len)
+                .unwrap_or(0);
+            let applied_message = if clears_target_page && scene_element_count == 0 {
+                format!("He limpiado la pagina activa como borrador: {summary}")
+            } else if clears_target_page {
+                format!("He limpiado la pagina activa y he aplicado el dibujo como borrador: {summary}")
+            } else {
+                format!("He aplicado el dibujo como borrador en la pagina activa: {summary}")
+            };
+            operation["status"] = Value::from("completed");
+            operation["type"] = Value::from("handwritten_modified");
+            operation["message"] = Value::from(applied_message.clone());
+            operation["documentId"] = Value::from(note_id.clone());
+            operation["noteId"] = Value::from(note_id.clone());
+            operation["nodeId"] = Value::from(note_id.clone());
+            operation["targetPageId"] = applied["pageId"].clone();
+            operation["qualityReport"] = applied["qualityReport"].clone();
+            updated_note = json!({
+                "noteId": note_id,
+                "content": content,
+                "summary": summary,
+                "pageId": applied["pageId"].clone(),
+                "route": applied["route"].clone(),
+                "sceneSpec": applied["sceneSpec"].clone(),
+                "vectorPlan": applied["vectorPlan"].clone(),
+                "qualityReport": applied["qualityReport"].clone()
+            });
+            response_status = Some("completed");
+            response_answer = Some(applied_message);
+        }
+        if let Some(status) = response_status {
+            response["status"] = Value::from(status);
+        }
+        if let Some(answer) = response_answer {
+            response["answer"] = Value::from(answer);
+        }
+        if !updated_note.is_null() {
+            response["updatedHandwrittenNote"] = updated_note;
+            response["drawingProposal"] = Value::Null;
+            let updated_summary = response["updatedHandwrittenNote"]["summary"].clone();
+            let updated_answer = response["answer"].clone();
+            if let Some(events) = response["conversationEvents"].as_array_mut() {
+                for event in events
+                    .iter_mut()
+                    .filter(|event| event["type"].as_str() == Some("handwritten_drawing_generated"))
+                {
+                    event["type"] = Value::from("handwritten_modified");
+                    event["content"] = updated_answer.clone();
+                    event["summary"] = updated_summary.clone();
+                }
+            }
+        }
+        Ok(())
+    }
     fn mark_ai_response_error(
         &self,
         project_id: &str,
@@ -5453,7 +6025,9 @@ impl LocalApi {
                 continue;
             }
             let relative = relative_from_root(&root, &path);
-            let text = if is_markdown_path(&path) || is_text_context_path(&path) {
+            let text = if is_handwritten_note_path(&path) {
+                knownext_docs::handwritten_note_text(&self.read_json(&path, Value::Null))
+            } else if is_markdown_path(&path) || is_text_context_path(&path) {
                 std::fs::read_to_string(&path).unwrap_or_default()
             } else {
                 knownext_docs::extract_plain_text(&path)
@@ -6101,6 +6675,7 @@ fn tree_node(project_id: &str, _root: &Path, path: &Path, relative: &str) -> Val
             .as_str()
         {
             "md" | "markdown" => "document",
+            "knote" => "handwritten-note",
             "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" => "image",
             _ => "attachment",
         }
@@ -6200,6 +6775,7 @@ fn file_sync_kind(path: &Path) -> &'static str {
         .as_str()
     {
         "md" | "markdown" | "txt" => "document",
+        "knote" => "handwritten-note",
         "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" => "image",
         "pdf" | "docx" | "xlsx" | "csv" => "attachment",
         _ => "attachment",
@@ -6242,7 +6818,14 @@ fn moved_markdown_affected_documents(
 ) -> Vec<Value> {
     moved_files
         .iter()
-        .filter(|(old_relative, new_relative)| is_markdown_path(Path::new(old_relative)) || is_markdown_path(Path::new(new_relative)))
+        .filter(|(old_relative, new_relative)| {
+            let old_path = Path::new(old_relative);
+            let new_path = Path::new(new_relative);
+            is_markdown_path(old_path)
+                || is_markdown_path(new_path)
+                || is_handwritten_note_path(old_path)
+                || is_handwritten_note_path(new_path)
+        })
         .map(|(old_relative, new_relative)| json!({
             "oldId": doc_id(project_id, old_relative),
             "newId": doc_id(project_id, new_relative),
@@ -6264,7 +6847,7 @@ fn deleted_markdown_affected_documents(
     };
     Ok(paths
         .into_iter()
-        .filter(|path| is_markdown_path(path))
+        .filter(|path| is_markdown_path(path) || is_handwritten_note_path(path))
         .map(|path| {
             let relative = relative_from_root(root, &path);
             json!({
@@ -6850,6 +7433,31 @@ fn join_relative(parent: Option<&str>, name: &str) -> String {
         Some(parent) => format!("{}/{}", parent.trim_matches('/'), name.trim_matches('/')),
         None => name.trim_matches('/').to_string(),
     }
+}
+
+fn is_handwritten_note_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.eq_ignore_ascii_case("knote"))
+        .unwrap_or(false)
+}
+
+fn relative_markdown_target(document_relative: &str, asset_relative: &str) -> String {
+    let document_parent = document_relative
+        .rsplit_once('/')
+        .map(|(parent, _)| parent)
+        .unwrap_or("");
+    if document_parent.is_empty() {
+        return asset_relative.to_string();
+    }
+    if let Some(stripped) = asset_relative.strip_prefix(&format!("{document_parent}/")) {
+        return stripped.to_string();
+    }
+    let parent_depth = document_parent
+        .split('/')
+        .filter(|segment| !segment.trim().is_empty())
+        .count();
+    format!("{}{}", "../".repeat(parent_depth), asset_relative)
 }
 
 fn public_version(version: &Value) -> Value {
@@ -7621,6 +8229,7 @@ fn classify_external_change(
     }
     match lower.rsplit('.').next().unwrap_or("") {
         "md" | "markdown" | "txt" => ("document", "safe", "include", Value::Null),
+        "knote" => ("handwritten-note", "safe", "include", Value::Null),
         "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" => {
             ("image", "safe", "include", Value::Null)
         }
@@ -7821,9 +8430,22 @@ fn flatten_nodes(nodes: &[Value], matches: &mut Vec<Value>, root: &Path, needle:
             false
         } else {
             let relative_path = PathBuf::from(path.replace('/', std::path::MAIN_SEPARATOR_STR));
-            std::fs::read_to_string(root.join(relative_path))
-                .map(|content| content.to_ascii_lowercase().contains(needle))
-                .unwrap_or(false)
+            let full_path = root.join(relative_path);
+            if is_handwritten_note_path(&full_path) {
+                std::fs::read_to_string(&full_path)
+                    .ok()
+                    .and_then(|content| serde_json::from_str::<Value>(&content).ok())
+                    .map(|note| {
+                        knownext_docs::handwritten_note_text(&note)
+                            .to_ascii_lowercase()
+                            .contains(needle)
+                    })
+                    .unwrap_or(false)
+            } else {
+                std::fs::read_to_string(full_path)
+                    .map(|content| content.to_ascii_lowercase().contains(needle))
+                    .unwrap_or(false)
+            }
         };
         if node["type"].as_str() != Some("folder")
             && (needle.is_empty()
@@ -7831,7 +8453,12 @@ fn flatten_nodes(nodes: &[Value], matches: &mut Vec<Value>, root: &Path, needle:
                 || path.to_ascii_lowercase().contains(needle)
                 || content_matches)
         {
-            matches.push(json!({ "documentId": node["id"], "name": name, "path": path, "kind": "project_document", "mimeType": node["mimeType"] }));
+            let kind = if node["type"].as_str() == Some("handwritten-note") {
+                "handwritten_note"
+            } else {
+                "project_document"
+            };
+            matches.push(json!({ "documentId": node["id"], "name": name, "path": path, "kind": kind, "mimeType": node["mimeType"] }));
         }
         if let Some(children) = node["children"].as_array() {
             flatten_nodes(children, matches, root, needle);
@@ -7843,7 +8470,10 @@ fn count_documents(nodes: &[Value]) -> usize {
     nodes
         .iter()
         .map(|node| {
-            let own = usize::from(node["type"].as_str() == Some("document"));
+            let own = usize::from(matches!(
+                node["type"].as_str(),
+                Some("document") | Some("handwritten-note")
+            ));
             let children = node["children"]
                 .as_array()
                 .map(|children| count_documents(children))
@@ -7877,6 +8507,7 @@ fn mime_for_path(path: &Path) -> String {
         "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "md" | "markdown" => "text/markdown",
+        "knote" => "application/vnd.knownext.handwritten-note+json",
         _ => "application/octet-stream",
     }
     .to_string()
@@ -7991,6 +8622,206 @@ fn safe_name(value: &str) -> String {
         .chars()
         .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
         .collect()
+}
+
+fn handwritten_file_name(value: &str) -> String {
+    let cleaned = value
+        .trim()
+        .chars()
+        .map(|ch| match ch {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '-',
+            ch if ch.is_control() => '-',
+            ch => ch,
+        })
+        .collect::<String>()
+        .trim_matches('.')
+        .trim()
+        .to_string();
+    let name = if cleaned.is_empty() {
+        "nota-a-mano".to_string()
+    } else {
+        cleaned
+    };
+    if name.to_ascii_lowercase().ends_with(".knote") {
+        name
+    } else {
+        format!("{name}.knote")
+    }
+}
+
+fn default_handwritten_note(note_id: &str, title: &str) -> Value {
+    let now = knownext_core::now_iso();
+    json!({
+        "schemaVersion": 1,
+        "id": note_id,
+        "title": if title.trim().is_empty() { "Nota a mano" } else { title },
+        "createdAt": now,
+        "updatedAt": now,
+        "defaultPage": { "preset": "A4", "orientation": "portrait", "background": "blank" },
+        "toolPresets": default_handwritten_tool_presets(),
+        "pages": [default_handwritten_page("page-1", "blank")],
+        "ocr": { "status": "not-indexed", "updatedAt": Value::Null, "textByPage": {} }
+    })
+}
+
+fn default_handwritten_tool_presets() -> Value {
+    json!([
+        { "id": "pencil-1", "type": "pen", "label": "Boligrafo", "color": "#111827", "width": 4.0, "opacity": 1.0, "pressure": true, "pressureSensitivity": 0.55, "smoothing": 0.62 },
+        { "id": "pencil-2", "type": "pencil", "label": "Lapiz", "color": "#374151", "width": 3.0, "opacity": 0.68, "pressure": true, "pressureSensitivity": 0.82, "smoothing": 0.48 },
+        { "id": "pencil-3", "type": "highlighter", "label": "Subrayador", "color": "#FACC15", "width": 18.0, "opacity": 0.36, "pressure": false, "pressureSensitivity": 0.2, "smoothing": 0.42 }
+    ])
+}
+
+fn default_handwritten_page(page_id: &str, background: &str) -> Value {
+    json!({
+        "id": page_id,
+        "title": Value::Null,
+        "size": { "width": 1190, "height": 1684, "unit": "px", "preset": "A4" },
+        "background": { "type": background, "spacing": 32 },
+        "strokes": [],
+        "thumbnailHash": Value::Null,
+        "updatedAt": knownext_core::now_iso()
+    })
+}
+
+fn normalize_handwritten_note(mut content: Value, note_id: &str, fallback_title: &str) -> Value {
+    if !content.is_object() {
+        return default_handwritten_note(note_id, fallback_title);
+    }
+    content["schemaVersion"] = Value::from(1);
+    if content["id"].as_str().unwrap_or("").is_empty() {
+        content["id"] = Value::from(note_id.to_string());
+    }
+    if content["title"].as_str().unwrap_or("").trim().is_empty() {
+        content["title"] = Value::from(if fallback_title.trim().is_empty() {
+            "Nota a mano"
+        } else {
+            fallback_title
+        });
+    }
+    if content["createdAt"].as_str().unwrap_or("").is_empty() {
+        content["createdAt"] = Value::from(knownext_core::now_iso());
+    }
+    if content["updatedAt"].as_str().unwrap_or("").is_empty() {
+        content["updatedAt"] = Value::from(knownext_core::now_iso());
+    }
+    if !content["defaultPage"].is_object() {
+        content["defaultPage"] =
+            json!({ "preset": "A4", "orientation": "portrait", "background": "blank" });
+    }
+    if !content["toolPresets"].is_array()
+        || content["toolPresets"]
+            .as_array()
+            .map(Vec::is_empty)
+            .unwrap_or(true)
+    {
+        content["toolPresets"] = default_handwritten_tool_presets();
+    }
+    if !content["pages"].is_array()
+        || content["pages"]
+            .as_array()
+            .map(Vec::is_empty)
+            .unwrap_or(true)
+    {
+        content["pages"] = json!([default_handwritten_page(
+            "page-1",
+            content["defaultPage"]["background"]
+                .as_str()
+                .unwrap_or("blank")
+        )]);
+    }
+    if let Some(pages) = content["pages"].as_array_mut() {
+        for (index, page) in pages.iter_mut().enumerate() {
+            if !page.is_object() {
+                *page = default_handwritten_page(&format!("page-{}", index + 1), "blank");
+            }
+            if page["id"].as_str().unwrap_or("").is_empty() {
+                page["id"] = Value::from(format!("page-{}", index + 1));
+            }
+            if !page["size"].is_object() {
+                page["size"] =
+                    json!({ "width": 1190, "height": 1684, "unit": "px", "preset": "A4" });
+            }
+            if !page["background"].is_object() {
+                page["background"] = json!({ "type": "blank", "spacing": 32 });
+            }
+            if !page["strokes"].is_array() {
+                page["strokes"] = Value::Array(vec![]);
+            }
+            normalize_handwritten_stroke_textures(&mut page["strokes"]);
+            if page["updatedAt"].as_str().unwrap_or("").is_empty() {
+                page["updatedAt"] = Value::from(knownext_core::now_iso());
+            }
+        }
+    }
+    if !content["ocr"].is_object() {
+        content["ocr"] =
+            json!({ "status": "not-indexed", "updatedAt": Value::Null, "textByPage": {} });
+    }
+    if !content["ocr"]["textByPage"].is_object() {
+        content["ocr"]["textByPage"] = json!({});
+    }
+    content
+}
+
+fn normalize_handwritten_stroke_textures(strokes: &mut Value) {
+    let Some(strokes) = strokes.as_array_mut() else {
+        return;
+    };
+    for stroke in strokes {
+        if stroke["tool"].as_str() != Some("pencil") {
+            continue;
+        }
+        if stroke["textureSeed"]
+            .as_str()
+            .unwrap_or("")
+            .trim()
+            .is_empty()
+        {
+            stroke["textureSeed"] = Value::from(handwritten_texture_seed(stroke));
+        }
+        stroke["textureVersion"] = Value::from(1);
+    }
+}
+
+fn handwritten_texture_seed(stroke: &Value) -> String {
+    let first_point = stroke["points"]
+        .as_array()
+        .and_then(|points| points.first())
+        .and_then(Value::as_array)
+        .map(|point| {
+            format!(
+                "{:.2},{:.2}",
+                point.first().and_then(Value::as_f64).unwrap_or(0.0),
+                point.get(1).and_then(Value::as_f64).unwrap_or(0.0)
+            )
+        })
+        .unwrap_or_else(|| "empty".to_string());
+    format!(
+        "{}:{}:{}:{:.2}:{}",
+        stroke["id"].as_str().unwrap_or("stroke"),
+        stroke["path"].as_str().unwrap_or(""),
+        stroke["color"].as_str().unwrap_or("#374151"),
+        stroke["width"].as_f64().unwrap_or(2.4),
+        first_point
+    )
+}
+
+fn handwritten_content_hash(content: &Value) -> String {
+    let bytes = serde_json::to_vec(content).unwrap_or_default();
+    sha256_hex(&bytes)
+}
+
+fn with_extension(file_name: &str, extension: &str) -> String {
+    let stem = file_name
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(file_name);
+    format!("{stem}.{extension}")
+}
+
+fn markdown_alt_escape(value: &str) -> String {
+    value.replace('[', "(").replace(']', ")").replace('\n', " ")
 }
 
 fn research_title_for_request(topic: &str) -> String {
@@ -9038,7 +9869,101 @@ fn normalize_config(config: &mut Value) {
     if config["activeUtilityTab"].is_null() {
         config["activeUtilityTab"] = Value::from("notes");
     }
+    normalize_handwritten_config(&mut config["handwritten"]);
     normalize_ai_config(&mut config["ai"]);
+}
+
+fn normalize_handwritten_config(handwritten: &mut Value) {
+    if !handwritten.is_object() {
+        *handwritten = default_handwritten_config();
+    } else {
+        let mut merged = default_handwritten_config();
+        merge(&mut merged, handwritten);
+        *handwritten = merged;
+    }
+
+    let mut normalized_presets = Vec::new();
+    let eraser_width = handwritten["eraser"]["width"]
+        .as_f64()
+        .unwrap_or(24.0)
+        .clamp(6.0, 72.0)
+        .round();
+    let eraser_mode = match handwritten["eraser"]["mode"].as_str().unwrap_or("stroke") {
+        "partial" => "partial",
+        _ => "stroke",
+    };
+    handwritten["eraser"] = json!({ "width": eraser_width, "mode": eraser_mode });
+
+    if let Some(presets) = handwritten["toolPresets"].as_array() {
+        for preset in presets {
+            if normalized_presets.len() >= 7 {
+                break;
+            }
+            let tool_type = preset["type"]
+                .as_str()
+                .or_else(|| preset["id"].as_str())
+                .filter(|value| {
+                    matches!(
+                        *value,
+                        "pen" | "fountain" | "pencil" | "marker" | "highlighter"
+                    )
+                });
+            let Some(tool_type) = tool_type else {
+                continue;
+            };
+            let fallback = default_pencil_preset_for_type(tool_type);
+            let id = preset["id"]
+                .as_str()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or(fallback["id"].as_str().unwrap_or("pencil-1"));
+            let label = preset["label"]
+                .as_str()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or(fallback["label"].as_str().unwrap_or("Boligrafo"));
+            let color = preset["color"]
+                .as_str()
+                .filter(|value| is_hex_color(value))
+                .unwrap_or(fallback["color"].as_str().unwrap_or("#111827"));
+            let width = preset["width"]
+                .as_f64()
+                .unwrap_or_else(|| fallback["width"].as_f64().unwrap_or(4.0))
+                .clamp(1.0, 38.0);
+            let opacity = preset["opacity"]
+                .as_f64()
+                .unwrap_or_else(|| fallback["opacity"].as_f64().unwrap_or(1.0))
+                .clamp(0.1, 1.0);
+            let smoothing = preset["smoothing"]
+                .as_f64()
+                .unwrap_or_else(|| fallback["smoothing"].as_f64().unwrap_or(0.62))
+                .clamp(0.0, 1.0);
+            let pressure_sensitivity = preset["pressureSensitivity"]
+                .as_f64()
+                .unwrap_or_else(|| fallback["pressureSensitivity"].as_f64().unwrap_or(0.55))
+                .clamp(0.0, 1.0);
+            normalized_presets.push(json!({
+                "id": id,
+                "type": tool_type,
+                "label": label,
+                "color": color,
+                "width": width,
+                "opacity": opacity,
+                "pressure": preset["pressure"].as_bool().unwrap_or_else(|| fallback["pressure"].as_bool().unwrap_or(true)),
+                "pressureSensitivity": pressure_sensitivity,
+                "smoothing": smoothing
+            }));
+        }
+    }
+
+    let defaults = default_handwritten_tool_presets();
+    if let Some(default_presets) = defaults.as_array() {
+        for preset in default_presets {
+            if normalized_presets.len() >= 3 {
+                break;
+            }
+            normalized_presets.push(preset.clone());
+        }
+    }
+    handwritten["toolPresets"] = Value::Array(normalized_presets);
 }
 
 fn normalize_ai_config(ai: &mut Value) {
@@ -9051,8 +9976,10 @@ fn normalize_ai_config(ai: &mut Value) {
         *ai = merged;
     }
     ai["provider"] = Value::from("openai");
+    normalize_ai_permissions(&mut ai["permissions"]);
     normalize_ai_image_generation_config(&mut ai["imageGeneration"]);
     normalize_ai_diagram_config(&mut ai["diagrams"]);
+    normalize_ai_handwritten_drawing_config(&mut ai["handwrittenDrawing"]);
     ai["rag"]["status"] = Value::from(
         match ai["rag"]["status"].as_str().unwrap_or("not-indexed") {
             "ready" | "updated" => "updated",
@@ -9080,6 +10007,64 @@ fn normalize_ai_config(ai: &mut Value) {
             .unwrap_or_else(|| {
                 legacy_research_visual_enabled(&original_agentic, "imagesEnabled", true)
             }),
+    );
+}
+
+fn normalize_ai_permissions(permissions: &mut Value) {
+    if !permissions.is_object() {
+        *permissions = default_ai_config()["permissions"].clone();
+    }
+    let defaults = default_ai_config()["permissions"].clone();
+    for key in [
+        "editDocuments",
+        "editHandwrittenNotes",
+        "drawHandwrittenNotes",
+        "createFolders",
+        "createDocuments",
+        "deleteDocumentsAndFolders",
+        "generateImages",
+        "createImageAssets",
+        "insertImagesIntoDocuments",
+        "useDocumentContextForImageGeneration",
+    ] {
+        permissions[key] = Value::Bool(
+            permissions[key]
+                .as_bool()
+                .unwrap_or_else(|| defaults[key].as_bool().unwrap_or(false)),
+        );
+    }
+}
+
+fn normalize_ai_handwritten_drawing_config(handwritten_drawing: &mut Value) {
+    if !handwritten_drawing.is_object() {
+        *handwritten_drawing = default_ai_config()["handwrittenDrawing"].clone();
+    }
+
+    handwritten_drawing["enabled"] =
+        Value::Bool(handwritten_drawing["enabled"].as_bool().unwrap_or(true));
+    handwritten_drawing["creativeSketchEnabled"] = Value::Bool(
+        handwritten_drawing["creativeSketchEnabled"]
+            .as_bool()
+            .unwrap_or(false),
+    );
+    handwritten_drawing["defaultStyle"] = Value::from("professional_whiteboard");
+    handwritten_drawing["maxElements"] = Value::from(
+        handwritten_drawing["maxElements"]
+            .as_u64()
+            .unwrap_or(48)
+            .clamp(4, 96),
+    );
+    handwritten_drawing["maxStrokes"] = Value::from(
+        handwritten_drawing["maxStrokes"]
+            .as_u64()
+            .unwrap_or(1400)
+            .clamp(100, 4000),
+    );
+    handwritten_drawing["maxPagesPerRequest"] = Value::from(
+        handwritten_drawing["maxPagesPerRequest"]
+            .as_u64()
+            .unwrap_or(1)
+            .clamp(1, 3),
     );
 }
 
@@ -9222,6 +10207,7 @@ fn default_config() -> Value {
         "layout": { "sidebarWidth": 338, "historyWidth": 320 },
         "appearance": { "language": "es", "zoomPercent": 100, "markdownExtendedUnderlineEnabled": true, "themeMode": "system", "primaryColor": "orange" },
         "diagnostics": { "traceLoggingEnabled": false },
+        "handwritten": default_handwritten_config(),
         "ai": default_ai_config(),
         "tabsByProject": {},
         "treeOpenPathsByProject": {},
@@ -9233,11 +10219,43 @@ fn default_config() -> Value {
     })
 }
 
+fn default_handwritten_config() -> Value {
+    json!({
+        "toolPresets": default_handwritten_tool_presets(),
+        "eraser": { "width": 24.0, "mode": "stroke" }
+    })
+}
+
+fn default_pencil_preset_for_type(tool_type: &str) -> Value {
+    match tool_type {
+        "fountain" => {
+            json!({ "id": "pencil-1", "type": "fountain", "label": "Pluma", "color": "#111827", "width": 5.0, "opacity": 1.0, "pressure": true, "pressureSensitivity": 0.72, "smoothing": 0.82 })
+        }
+        "pencil" => {
+            json!({ "id": "pencil-2", "type": "pencil", "label": "Lapiz", "color": "#374151", "width": 3.0, "opacity": 0.68, "pressure": true, "pressureSensitivity": 0.82, "smoothing": 0.48 })
+        }
+        "marker" => {
+            json!({ "id": "pencil-1", "type": "marker", "label": "Rotulador", "color": "#D85A12", "width": 9.0, "opacity": 0.92, "pressure": true, "pressureSensitivity": 0.38, "smoothing": 0.56 })
+        }
+        "highlighter" => {
+            json!({ "id": "pencil-3", "type": "highlighter", "label": "Subrayador", "color": "#FACC15", "width": 18.0, "opacity": 0.36, "pressure": false, "pressureSensitivity": 0.2, "smoothing": 0.42 })
+        }
+        _ => {
+            json!({ "id": "pencil-1", "type": "pen", "label": "Boligrafo", "color": "#111827", "width": 4.0, "opacity": 1.0, "pressure": true, "pressureSensitivity": 0.55, "smoothing": 0.62 })
+        }
+    }
+}
+
+fn is_hex_color(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 7 && bytes[0] == b'#' && bytes[1..].iter().all(|byte| byte.is_ascii_hexdigit())
+}
+
 fn default_ai_config() -> Value {
     json!({
         "provider": "openai",
         "model": "gpt-5.4-mini",
-        "permissions": { "editDocuments": true, "createFolders": false, "createDocuments": true, "deleteDocumentsAndFolders": false, "generateImages": true, "createImageAssets": true, "insertImagesIntoDocuments": true, "useDocumentContextForImageGeneration": true },
+        "permissions": { "editDocuments": true, "editHandwrittenNotes": true, "drawHandwrittenNotes": true, "createFolders": false, "createDocuments": true, "deleteDocumentsAndFolders": false, "generateImages": true, "createImageAssets": true, "insertImagesIntoDocuments": true, "useDocumentContextForImageGeneration": true },
         "rag": { "enabled": true, "vectorStoreId": null, "lastIndexedAt": null, "status": "not-indexed", "error": null },
         "vision": { "enabled": true, "model": "gpt-5.4-mini", "imageIndexingEnabled": false, "maxImagesPerPrompt": 4, "maxImageSizeMb": 12, "detail": "auto", "storeVisualDescriptions": true },
         "imageGeneration": { "enabled": true, "model": "gpt-image-2", "size": "auto", "quality": "auto", "outputFormat": "png", "defaultFolder": "document_folder", "customFolderPath": "assets/generated", "maxImagesPerPrompt": 1, "confirmBeforeDocumentInsert": false, "confirmBeforeUsingMultipleSources": true, "storePromptMetadata": true },
@@ -9259,7 +10277,8 @@ fn default_ai_config() -> Value {
             }
         },
         "transcription": { "enabled": true, "model": "gpt-4o-mini-transcribe", "defaultTarget": "prompt", "defaultLanguage": "auto", "favoriteLanguages": ["es", "en"] },
-        "diagrams": { "enabled": true, "visualProfile": "visual_local", "iconSet": "lucide", "imagePolicy": "project_assets", "betaPolicy": "ask", "defaultWidth": "wide", "aiGenerationMode": "visual" }
+        "diagrams": { "enabled": true, "visualProfile": "visual_local", "iconSet": "lucide", "imagePolicy": "project_assets", "betaPolicy": "ask", "defaultWidth": "wide", "aiGenerationMode": "visual" },
+        "handwrittenDrawing": { "enabled": true, "creativeSketchEnabled": false, "defaultStyle": "professional_whiteboard", "maxElements": 48, "maxStrokes": 1400, "maxPagesPerRequest": 1 }
     })
 }
 
@@ -10624,11 +11643,9 @@ mod tests {
 
         assert_eq!(image["name"], "Cronología visual del Mazda MX-5.png");
         assert_eq!(image["historyStatus"]["state"], "pending");
-        assert!(
-            files
-                .iter()
-                .all(|file| !file["path"].as_str().unwrap_or("").contains("Ã"))
-        );
+        assert!(files
+            .iter()
+            .all(|file| !file["path"].as_str().unwrap_or("").contains("Ã")));
     }
 
     #[test]
@@ -11181,6 +12198,356 @@ mod tests {
             .len(),
             1
         );
+    }
+
+    #[test]
+    fn handwritten_notes_create_save_render_export_insert_and_index() {
+        let api = api();
+        let (project_id, root) = create_project(&api);
+
+        let created = api
+            .handle(
+                "POST",
+                &format!("/api/projects/{project_id}/handwritten-notes"),
+                json!({
+                    "parentId": null,
+                    "name": "Boceto",
+                    "background": "cornell"
+                }),
+                vec![],
+            )
+            .unwrap();
+        let note_node = &created.body["node"];
+        let note_id = note_node["id"].as_str().unwrap().to_string();
+        assert_eq!(note_node["type"], "handwritten-note");
+        assert_eq!(note_node["name"], "Boceto.knote");
+        assert_eq!(
+            note_node["mimeType"],
+            "application/vnd.knownext.handwritten-note+json"
+        );
+
+        let loaded = api
+            .handle(
+                "GET",
+                &format!("/api/handwritten-notes/{note_id}"),
+                Value::Null,
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(loaded.body["pageCount"], 1);
+        assert_eq!(
+            loaded.body["content"]["pages"][0]["background"]["type"],
+            "cornell"
+        );
+
+        let mut content = loaded.body["content"].clone();
+        content["ocr"] = json!({
+            "status": "ready",
+            "updatedAt": knownext_core::now_iso(),
+            "textByPage": { "page-1": "Plan manuscrito con tareas pendientes" }
+        });
+        content["pages"][0]["strokes"] = json!([{
+            "id": "stroke-1",
+            "tool": "pen",
+            "color": "#111827",
+            "width": 4,
+            "opacity": 1.0,
+            "pressure": true,
+            "points": [[100, 100, 0.5, 0], [180, 150, 0.9, 16]],
+            "path": "M 100 100 L 180 150",
+            "bounds": { "x": 96, "y": 96, "width": 88, "height": 58 }
+        }]);
+        let saved = api
+            .handle(
+                "PUT",
+                &format!("/api/handwritten-notes/{note_id}"),
+                json!({ "content": content }),
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(saved.body["content"]["ocr"]["status"], "ready");
+
+        let rendered = api
+            .handle(
+                "GET",
+                &format!("/api/handwritten-notes/{note_id}/pages/page-1/render?format=svg"),
+                Value::Null,
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(rendered.body["contentType"], "image/svg+xml");
+        assert!(rendered.body["dataUrl"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:image/svg+xml;base64,"));
+
+        let png = api
+            .content(
+                &format!("/api/handwritten-notes/{note_id}/export/content"),
+                json!({ "format": "png", "pageId": "page-1" }),
+            )
+            .unwrap();
+        assert_eq!(png.content_type, "image/png");
+        let png_bytes = base64::engine::general_purpose::STANDARD
+            .decode(png.data_base64)
+            .unwrap();
+        assert!(png_bytes.starts_with(&[0x89, b'P', b'N', b'G']));
+
+        let pdf_path = root.join("exports").join("boceto.pdf");
+        std::fs::create_dir_all(pdf_path.parent().unwrap()).unwrap();
+        api.handle(
+            "POST",
+            &format!("/api/handwritten-notes/{note_id}/export"),
+            json!({ "format": "pdf", "outputPath": pdf_path.to_string_lossy() }),
+            vec![],
+        )
+        .unwrap();
+        assert!(std::fs::read(&pdf_path).unwrap().starts_with(b"%PDF"));
+
+        let document_id = create_document(&api, &project_id, "plan.md", "# Plan\n");
+        let inserted = api
+            .handle(
+                "POST",
+                &format!("/api/handwritten-notes/{note_id}/pages/page-1/insert-markdown"),
+                json!({ "documentId": document_id, "altText": "Boceto manuscrito" }),
+                vec![],
+            )
+            .unwrap();
+        let inserted_markdown = inserted.body["markdown"].as_str().unwrap();
+        assert!(inserted_markdown.contains("assets/handwritten/"));
+        assert!(inserted_markdown.contains("knownext-note:"));
+        assert_eq!(inserted.body["asset"]["mimeType"], "image/png");
+
+        let ai_source = api
+            .handle(
+                "POST",
+                &format!("/api/projects/{project_id}/ai/context/handwritten-notes"),
+                json!({ "noteId": note_id }),
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(ai_source.body["kind"], "handwritten_note");
+
+        let rebuilt = api
+            .handle(
+                "POST",
+                &format!("/api/projects/{project_id}/ai/index/rebuild"),
+                Value::Null,
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(rebuilt.body["documentCount"], 2);
+        assert_eq!(rebuilt.body["indexedDocumentCount"], 2);
+    }
+
+    #[test]
+    fn ai_handwritten_drawing_applies_as_draft_without_saving_disk_note() {
+        let api = api();
+        let (project_id, _root) = create_project(&api);
+        let created = api
+            .handle(
+                "POST",
+                &format!("/api/projects/{project_id}/handwritten-notes"),
+                json!({
+                    "parentId": null,
+                    "name": "Boceto IA",
+                    "background": "blank"
+                }),
+                vec![],
+            )
+            .unwrap();
+        let note_id = created.body["node"]["id"].as_str().unwrap().to_string();
+        let loaded = api
+            .handle(
+                "GET",
+                &format!("/api/handwritten-notes/{note_id}"),
+                Value::Null,
+                vec![],
+            )
+            .unwrap();
+        let mut response = json!({
+            "status": "completed",
+            "answer": "He preparado el dibujo.",
+            "drawingProposal": {},
+            "conversationEvents": [{
+                "id": "event",
+                "projectId": project_id,
+                "type": "handwritten_drawing_generated",
+                "role": "assistant",
+                "content": "He preparado el dibujo.",
+                "createdAt": knownext_core::now_iso(),
+                "documentId": note_id,
+                "path": null,
+                "paths": [],
+                "summary": "Flujo IA"
+            }],
+            "operations": [{
+                "type": "handwritten_drawing_generated",
+                "status": "ready",
+                "message": "Flujo IA",
+                "summary": "Flujo IA",
+                "documentId": note_id,
+                "noteId": note_id,
+                "nodeId": note_id,
+                "path": null,
+                "paths": [],
+                "route": "precise_scene",
+                "targetPageId": "page-1",
+                "replacementPolicy": "append_only",
+                "drawingBrief": { "goal": "flujo", "style": "professional_whiteboard" },
+                "sceneSpec": {
+                    "elements": [
+                        { "id": "a", "type": "box", "text": "Alta", "role": "primary", "priority": 1, "from": null, "to": null },
+                        { "id": "b", "type": "box", "text": "Activacion", "role": "primary", "priority": 2, "from": null, "to": null },
+                        { "id": "ab", "type": "arrow", "text": null, "role": "connector", "priority": 3, "from": "a", "to": "b" }
+                    ]
+                }
+            }]
+        });
+        let runtime_body = json!({
+            "prompt": "Dibuja un flujo de onboarding.",
+            "handwrittenNoteId": note_id,
+            "activeHandwrittenPageId": "page-1",
+            "activeHandwrittenContent": loaded.body["content"].clone(),
+            "activeHandwrittenBaseFingerprint": loaded.body["baseFingerprint"].clone()
+        });
+
+        api.apply_ai_handwritten_drawings(&project_id, &runtime_body, &mut response)
+            .unwrap();
+
+        assert_eq!(response["operations"][0]["type"], "handwritten_modified");
+        assert_eq!(response["conversationEvents"][0]["type"], "handwritten_modified");
+        assert!(response["answer"]
+            .as_str()
+            .unwrap()
+            .contains("He aplicado el dibujo como borrador"));
+        assert_eq!(response["conversationEvents"][0]["content"], response["answer"]);
+        assert!(response["drawingProposal"].is_null());
+        assert_eq!(response["updatedHandwrittenNote"]["noteId"], note_id);
+        assert!(
+            response["updatedHandwrittenNote"]["content"]["pages"][0]["strokes"]
+                .as_array()
+                .unwrap()
+                .len()
+                > 4
+        );
+        assert!(
+            !response["updatedHandwrittenNote"]["content"]["pages"][0]["generatedElements"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+
+        let after = api
+            .handle(
+                "GET",
+                &format!("/api/handwritten-notes/{note_id}"),
+                Value::Null,
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(after.body["hasDraft"], true);
+        assert!(
+            after.body["content"]["pages"][0]["strokes"]
+                .as_array()
+                .unwrap()
+                .len()
+                > 4
+        );
+        let disk_note = api.read_json(&api.resolve_document_path(&note_id).unwrap(), Value::Null);
+        assert!(disk_note["pages"][0]["strokes"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn ai_handwritten_drawing_can_clean_active_page_as_draft() {
+        let api = api();
+        let (project_id, _root) = create_project(&api);
+        let created = api
+            .handle(
+                "POST",
+                &format!("/api/projects/{project_id}/handwritten-notes"),
+                json!({
+                    "parentId": null,
+                    "name": "Hoja para limpiar",
+                    "background": "blank"
+                }),
+                vec![],
+            )
+            .unwrap();
+        let note_id = created.body["node"]["id"].as_str().unwrap().to_string();
+        let loaded = api
+            .handle(
+                "GET",
+                &format!("/api/handwritten-notes/{note_id}"),
+                Value::Null,
+                vec![],
+            )
+            .unwrap();
+        let mut active_content = loaded.body["content"].clone();
+        active_content["pages"][0]["strokes"] = json!([
+            { "id": "manual-stroke", "toolId": "pencil-1", "points": [{ "x": 20, "y": 20, "pressure": 0.5 }] }
+        ]);
+        let mut response = json!({
+            "status": "completed",
+            "answer": "He preparado una propuesta para limpiar la hoja.",
+            "drawingProposal": {},
+            "conversationEvents": [{
+                "id": "event",
+                "projectId": project_id,
+                "type": "handwritten_drawing_generated",
+                "role": "assistant",
+                "content": "He preparado una propuesta para limpiar la hoja.",
+                "createdAt": knownext_core::now_iso(),
+                "documentId": note_id,
+                "path": null,
+                "paths": [],
+                "summary": "Cuatro formas geometricas"
+            }],
+            "operations": [{
+                "type": "handwritten_drawing_generated",
+                "status": "ready",
+                "message": "Limpiar pagina",
+                "summary": "Limpiar pagina",
+                "documentId": note_id,
+                "noteId": note_id,
+                "nodeId": note_id,
+                "path": null,
+                "paths": [],
+                "route": "precise_scene",
+                "targetPageId": "page-1",
+                "replacementPolicy": "clean_existing",
+                "drawingBrief": { "goal": "limpiar pagina", "style": "professional_whiteboard" },
+                "sceneSpec": { "elements": [] }
+            }]
+        });
+        let runtime_body = json!({
+            "prompt": "Limpia toda la pagina.",
+            "handwrittenNoteId": note_id,
+            "activeHandwrittenPageId": "page-1",
+            "activeHandwrittenContent": active_content,
+            "activeHandwrittenBaseFingerprint": loaded.body["baseFingerprint"].clone()
+        });
+
+        api.apply_ai_handwritten_drawings(&project_id, &runtime_body, &mut response)
+            .unwrap();
+
+        assert_eq!(response["operations"][0]["type"], "handwritten_modified");
+        assert!(response["answer"]
+            .as_str()
+            .unwrap()
+            .contains("He limpiado la pagina activa"));
+        let strokes = response["updatedHandwrittenNote"]["content"]["pages"][0]["strokes"]
+            .as_array()
+            .unwrap();
+        assert!(strokes.is_empty());
+        let disk_note = api.read_json(&api.resolve_document_path(&note_id).unwrap(), Value::Null);
+        assert!(disk_note["pages"][0]["strokes"]
+            .as_array()
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

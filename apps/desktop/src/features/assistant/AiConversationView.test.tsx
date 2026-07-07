@@ -287,6 +287,7 @@ const config: AiConfigStatus = {
   provider: "openai",
   model: "gpt-5.4-mini",
   permissions: {
+    ...defaultAiConfig.permissions,
     editDocuments: true,
     createFolders: true,
     createDocuments: true,
@@ -351,6 +352,7 @@ const config: AiConfigStatus = {
     defaultWidth: "wide",
     aiGenerationMode: "visual",
   },
+  handwrittenDrawing: defaultAiConfig.handwrittenDrawing,
   openaiKeyConfigured: true,
   openaiKeyPreview: "sk-...",
 };

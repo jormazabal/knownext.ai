@@ -1081,10 +1081,19 @@ fn build_response_request(
         "{\"action\":\"replace_document\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"markdown\":\"documento markdown completo\"} solo para reescrituras completas explicitas. ",
         "{\"action\":\"create_document\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"name\":\"nombre.md\",\"markdown\":\"documento markdown completo\"} para crear un documento Markdown nuevo cuando el usuario lo pida. ",
         "{\"action\":\"generate_image\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"prompt\":\"prompt visual detallado\",\"name\":\"nombre.png\",\"altText\":\"texto alternativo\",\"insertIntoDocument\":true,\"placement\":{\"type\":\"after_heading\",\"headingPath\":[\"titulo del apartado\"],\"anchorExcerpt\":null}} para generar una imagen local como asset del proyecto e insertarla en el documento. ",
+        "{\"action\":\"draw_handwritten_note\",\"answer\":\"resumen para el usuario\",\"summary\":\"resumen breve\",\"route\":\"precise_scene\",\"targetPageId\":\"page-1\",\"replacementPolicy\":\"append_only\",\"drawingBrief\":{\"goal\":\"objetivo visual\",\"style\":\"professional_whiteboard\",\"audience\":\"usuario de la knote\",\"constraints\":[]},\"sceneSpec\":{\"elements\":[{\"id\":\"paso-1\",\"type\":\"box\",\"text\":\"Entrada\",\"role\":\"primary\",\"priority\":1,\"from\":null,\"to\":null},{\"id\":\"paso-2\",\"type\":\"box\",\"text\":\"Proceso\",\"role\":\"primary\",\"priority\":2,\"from\":null,\"to\":null},{\"id\":\"flecha-1\",\"type\":\"arrow\",\"text\":null,\"role\":\"connector\",\"priority\":3,\"from\":\"paso-1\",\"to\":\"paso-2\"}]}} para dibujar dentro de una knote activa. ",
         "No afirmes que has modificado archivos: devuelve una accion estructurada y el runtime la convertira en una propuesta revisable o una operacion validada segun permisos. ",
         "No afirmes que has creado archivos: propone el cambio con action create_document y el runtime lo validara contra permisos. ",
         "No afirmes que has generado imagenes: propone action generate_image y el runtime la creara, guardara e insertara si los permisos lo permiten. ",
+        "No afirmes que has dibujado en una knote: propone action draw_handwritten_note y el runtime local creara trazos validables. ",
         "KnowNext puede crear contenido con parrafos, listas, tablas Markdown, imagenes y diagramas Mermaid. Elige tablas para comparativas de datos, imagenes para contenido visual ilustrativo y diagramas Mermaid para procesos, arquitecturas, secuencias, estados, dependencias, journeys, organigramas, mapas conceptuales, datos ligeros y vistas tecnicas. ",
+        "Cuando targetKind sea handwritten_note, no uses Markdown ni Mermaid como salida principal: usa draw_handwritten_note con SceneSpec semantico, textos breves y route precise_scene salvo que el usuario pida convertir Mermaid. ",
+        "Para dibujos en knote usa tipos semanticos precisos: shape con shape square/triangle/circle/ellipse/diamond/star para figuras geometricas; symbol con house/sun/dog/cat/person/face/tree/cloud/server/laptop/database/rocket/starship/spacecraft para iconos u objetos dibujados; portrait para retrato simple; diagram_node y connector solo para diagramas; text_block o annotation para texto; fill_region o shadow_region con target para rellenos o sombras a trazos. ",
+        "Si el usuario pide un retrato, animal, objeto o dibujo figurativo, no lo descompongas en etiquetas, partes ni flechas salvo que pida expresamente un diagrama explicativo. Para 'retrato de perro' usa un unico elemento portrait con symbol dog o un symbol dog, sin connectors. Para 'retrato de gato' usa un unico elemento portrait con symbol cat o un symbol cat, sin connectors. ",
+        "Si el usuario pide una infografia, lamina explicativa o mostrar como es un objeto, crea una composicion editorial: un symbol o portrait principal grande con role primary_outline, varias annotation/text_block breves alrededor y conectores de llamada hacia el objeto; no uses cajas rectangulares como contenido principal ni un grafo de nodos salvo que pida expresamente un diagrama. Para Starship usa symbol starship como elemento principal y notas como etapa superior reutilizable, escudo termico, motores Raptor, aletas de control, tanques internos y compartimento de carga. ",
+        "No pidas ni devuelvas rellenos solidos: si el usuario pide rellenar una forma, devuelve fill_region con fill marker_passes, hatching, cross_hatching o scribble y role fill_light/fill_dense/highlight. ",
+        "Usa roles visuales para pencils: primary_outline, secondary_sketch, text, connector, accent, highlight, shadow, fill_light y fill_dense. ",
+        "Si el usuario pide limpiar, borrar, rehacer o sustituir la hoja activa de una knote, usa replacementPolicy clean_existing; si solo pide limpiar la pagina, devuelve sceneSpec.elements como array vacio; si pide limpiar y dibujar, incluye los elementos nuevos. Si solo pide anadir contenido, usa append_only. ",
         "Cuando un diagrama ayude a explicar el contenido, usa action insert_diagram o incluye bloques ```mermaid en markdown de create_document/replace_document/insert_at_cursor. En action insert_diagram, diagramCode debe contener Mermaid valido sin fences y sin explicaciones externas. ",
         "Si el usuario pide incluir, anadir, insertar o apoyar el texto con una imagen y hay documento activo, no preguntes ubicacion ni respondas con action answer: usa action generate_image, insertIntoDocument true, altText descriptivo, placement elegido por ti y un prompt visual basado en el texto seleccionado, el cursor o el apartado activo. ",
         "El texto seleccionado puede ser solo contexto: no asumas que la imagen debe ir justo despues de la seleccion. Decide proactivamente donde encaja mejor la imagen. Usa placement con at_cursor, after_selection, after_heading, after_paragraph o document_end segun el documento y la peticion. ",
@@ -1098,11 +1107,17 @@ fn build_response_request(
         intent_guidance,
     );
     let user_content = format!(
-        "Petición del usuario:\n{prompt}\n\nModo de ejecución:\n{} ({})\n\nPermisos runtime:\n{}\n\nDocumento activo Markdown:\n{active_markdown}\n\nSelección activa:\n{}\n\nFuentes de contexto:\n{}",
+        "Petición del usuario:\n{prompt}\n\nModo de ejecución:\n{} ({})\n\nTarget activo:\n{}\n\nPermisos runtime:\n{}\n\nDocumento activo Markdown:\n{active_markdown}\n\nSelección activa:\n{}\n\nResumen knote activo:\n{}\n\nFuentes de contexto:\n{}",
         execution_mode,
         reasoning_depth,
+        serde_json::to_string_pretty(&json!({
+            "targetKind": payload.get("targetKind").and_then(Value::as_str),
+            "handwrittenNoteId": payload.get("handwrittenNoteId").and_then(Value::as_str),
+            "activeHandwrittenPageId": payload.get("activeHandwrittenPageId").and_then(Value::as_str)
+        })).unwrap_or_else(|_| "{}".to_string()),
         serde_json::to_string_pretty(&permissions).unwrap_or_else(|_| "{}".to_string()),
         serde_json::to_string_pretty(&selection).unwrap_or_else(|_| "null".to_string()),
+        serde_json::to_string_pretty(payload.get("activeHandwrittenSummary").unwrap_or(&Value::Null)).unwrap_or_else(|_| "null".to_string()),
         serde_json::to_string_pretty(context_sources).unwrap_or_else(|_| "[]".to_string()),
     );
     json!({
@@ -1151,7 +1166,9 @@ fn build_skill_selector_request(payload: &Value, prompt: &str, model: &str) -> V
     let user_content = json!({
         "prompt": prompt,
         "executionMode": execution_mode,
+        "targetKind": payload.get("targetKind").and_then(Value::as_str),
         "hasActiveDocument": payload.get("documentId").and_then(Value::as_str).is_some(),
+        "hasActiveHandwrittenNote": payload.get("handwrittenNoteId").and_then(Value::as_str).is_some(),
         "hasSelection": selection.is_object(),
         "candidateSkills": candidates["candidateSkills"],
         "diagramConfig": payload.pointer("/clientContext/diagramConfig").or_else(|| payload.pointer("/runtimeAi/diagrams")).cloned().unwrap_or(Value::Null),
@@ -1169,7 +1186,8 @@ fn build_skill_selector_request(payload: &Value, prompt: &str, model: &str) -> V
                     "Devuelve JSON estricto con selected. ",
                     "En modo quick elige como maximo una skill; en reasoning como maximo dos. ",
                     "Selecciona knownext.markdown/table cuando la tarea pida tablas Markdown. ",
-                    "Selecciona knownext.mermaid con el modo diagram_* mas cercano cuando la tarea pida diagramas."
+                    "Selecciona knownext.mermaid con el modo diagram_* mas cercano cuando la tarea pida diagramas en Markdown. ",
+                    "Selecciona knownext.handwritten_drawing cuando targetKind sea handwritten_note o la tarea pida dibujar en una knote."
                 )
             },
             { "role": "user", "content": serde_json::to_string(&user_content).unwrap_or_else(|_| "{}".to_string()) }
@@ -1428,6 +1446,43 @@ fn structured_output_format() -> Value {
             "placement": { "anyOf": [placement_schema.clone(), { "type": "null" }] }
         }
     });
+    let drawing_brief_schema = json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["goal", "style", "audience", "constraints"],
+        "properties": {
+            "goal": nullable_string(),
+            "style": nullable_string(),
+            "audience": nullable_string(),
+            "constraints": string_array_or_null()
+        }
+    });
+    let scene_element_schema = json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "type", "shape", "symbol", "target", "fill", "text", "role", "priority", "from", "to"],
+        "properties": {
+            "id": nullable_string(),
+            "type": { "enum": ["box", "diagram_node", "shape", "arrow", "connector", "label", "text_block", "group", "lane", "timeline_event", "mindmap_node", "wireframe_component", "icon_hint", "freeform_shape", "symbol", "portrait", "fill_region", "shadow_region", "annotation"] },
+            "shape": { "anyOf": [{ "enum": ["square", "triangle", "circle", "ellipse", "diamond", "star"] }, { "type": "null" }] },
+            "symbol": { "anyOf": [{ "enum": ["house", "sun", "dog", "cat", "person", "face", "tree", "cloud", "server", "laptop", "database", "rocket", "starship", "spacecraft"] }, { "type": "null" }] },
+            "target": nullable_string(),
+            "fill": { "anyOf": [{ "enum": ["hatching", "cross_hatching", "scribble", "marker_passes"] }, { "type": "null" }] },
+            "text": nullable_string(),
+            "role": nullable_string(),
+            "priority": nullable_number(),
+            "from": nullable_string(),
+            "to": nullable_string()
+        }
+    });
+    let scene_spec_schema = json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["elements"],
+        "properties": {
+            "elements": { "type": "array", "items": scene_element_schema }
+        }
+    });
     json!({
         "type": "json_schema",
         "name": "knownext_ai_interaction",
@@ -1435,9 +1490,9 @@ fn structured_output_format() -> Value {
         "schema": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["action", "answer", "summary", "markdown", "replacementMarkdown", "name", "prompt", "assetId", "altText", "insertIntoDocument", "diagramSyntax", "diagramType", "diagramCode", "diagramCaption", "placement", "patches"],
+            "required": ["action", "answer", "summary", "markdown", "replacementMarkdown", "name", "prompt", "assetId", "altText", "insertIntoDocument", "diagramSyntax", "diagramType", "diagramCode", "diagramCaption", "placement", "patches", "route", "targetPageId", "replacementPolicy", "drawingBrief", "sceneSpec"],
             "properties": {
-                "action": { "enum": ["answer", "replace_selection", "insert_at_cursor", "edit_document", "edit_project", "replace_document", "create_document", "generate_image", "insert_image", "insert_diagram"] },
+                "action": { "enum": ["answer", "replace_selection", "insert_at_cursor", "edit_document", "edit_project", "replace_document", "create_document", "generate_image", "insert_image", "insert_diagram", "draw_handwritten_note"] },
                 "answer": nullable_string(),
                 "summary": nullable_string(),
                 "markdown": nullable_string(),
@@ -1452,7 +1507,12 @@ fn structured_output_format() -> Value {
                 "diagramCode": nullable_string(),
                 "diagramCaption": nullable_string(),
                 "placement": { "anyOf": [placement_schema.clone(), { "type": "null" }] },
-                "patches": { "anyOf": [{ "type": "array", "items": patch_schema }, { "type": "null" }] }
+                "patches": { "anyOf": [{ "type": "array", "items": patch_schema }, { "type": "null" }] },
+                "route": { "anyOf": [{ "enum": ["precise_scene", "mermaid_vector", "creative_sketch", "debug_raw_strokes"] }, { "type": "null" }] },
+                "targetPageId": nullable_string(),
+                "replacementPolicy": { "anyOf": [{ "enum": ["append_only", "replace_selection", "clean_existing"] }, { "type": "null" }] },
+                "drawingBrief": { "anyOf": [drawing_brief_schema, { "type": "null" }] },
+                "sceneSpec": { "anyOf": [scene_spec_schema, { "type": "null" }] }
             }
         }
     })
@@ -1662,6 +1722,23 @@ fn structured_interaction_response(
 
     if action == "generate_image" {
         return Some(generate_image_response(
+            project_id,
+            payload,
+            document_id,
+            interaction_id,
+            event_id,
+            created_at,
+            &decision,
+            answer,
+            execution_mode,
+            reasoning_depth,
+            mode,
+            context_sources,
+        ));
+    }
+
+    if action == "draw_handwritten_note" {
+        return Some(draw_handwritten_note_response(
             project_id,
             payload,
             document_id,
@@ -2492,6 +2569,199 @@ fn proposal_title(scope: &str, operation_count: usize) -> String {
         (_, 1) => "Cambio de documento preparado".to_string(),
         (_, count) => format!("{count} cambios de documento preparados"),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_handwritten_note_response(
+    project_id: &str,
+    payload: &Value,
+    document_id: Option<&str>,
+    interaction_id: &str,
+    event_id: &str,
+    created_at: &str,
+    decision: &Value,
+    answer: &str,
+    execution_mode: &str,
+    reasoning_depth: &str,
+    mode: &str,
+    context_sources: &Value,
+) -> Value {
+    let handwritten_note_id = payload
+        .get("handwrittenNoteId")
+        .and_then(Value::as_str)
+        .or_else(|| decision.get("handwrittenNoteId").and_then(Value::as_str));
+    let Some(note_id) = handwritten_note_id.filter(|value| !value.trim().is_empty()) else {
+        return permission_blocked_response(
+            project_id,
+            document_id,
+            interaction_id,
+            event_id,
+            created_at,
+            "La IA propuso dibujar, pero no hay una knote activa sobre la que aplicar el cambio.",
+            execution_mode,
+            reasoning_depth,
+            mode,
+        );
+    };
+    if !payload
+        .pointer("/runtimePermissions/editHandwrittenNotes")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || !payload
+            .pointer("/runtimePermissions/drawHandwrittenNotes")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    {
+        return permission_blocked_response(
+            project_id,
+            Some(note_id),
+            interaction_id,
+            event_id,
+            created_at,
+            "La IA ha preparado un dibujo, pero la edicion o dibujo en notas a mano esta desactivada en Ajustes > IA.",
+            execution_mode,
+            reasoning_depth,
+            mode,
+        );
+    }
+    let scene_spec = decision
+        .get("sceneSpec")
+        .cloned()
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({ "elements": [] }));
+    let replacement_policy = decision
+        .get("replacementPolicy")
+        .and_then(Value::as_str)
+        .unwrap_or("append_only");
+    let clears_target_page = matches!(
+        replacement_policy,
+        "clean_existing" | "replace_page" | "cleanup_existing"
+    );
+    let element_count = scene_spec["elements"].as_array().map(Vec::len).unwrap_or(0);
+    if element_count == 0 && !clears_target_page {
+        return permission_blocked_response(
+            project_id,
+            Some(note_id),
+            interaction_id,
+            event_id,
+            created_at,
+            "La IA propuso dibujar, pero no devolvio un SceneSpec con elementos visuales.",
+            execution_mode,
+            reasoning_depth,
+            mode,
+        );
+    }
+    let route = decision
+        .get("route")
+        .and_then(Value::as_str)
+        .unwrap_or("precise_scene");
+    if route == "debug_raw_strokes" {
+        return permission_blocked_response(
+            project_id,
+            Some(note_id),
+            interaction_id,
+            event_id,
+            created_at,
+            "La ruta debug_raw_strokes esta bloqueada para interacciones de producto.",
+            execution_mode,
+            reasoning_depth,
+            mode,
+        );
+    }
+    let summary = decision
+        .get("summary")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(answer);
+    let public_context_sources = public_context_sources(context_sources);
+    let assistant_event = json!({
+        "id": event_id,
+        "projectId": project_id,
+        "type": "handwritten_drawing_generated",
+        "role": "assistant",
+        "content": answer,
+        "createdAt": created_at,
+        "documentId": note_id,
+        "path": null,
+        "paths": [],
+        "summary": summary,
+        "sourcesUsed": public_context_sources,
+    });
+    let target_page_id = decision
+        .get("targetPageId")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            payload
+                .get("activeHandwrittenPageId")
+                .and_then(Value::as_str)
+        });
+    let drawing_brief = decision
+        .get("drawingBrief")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let drawing_proposal = json!({
+        "id": knownext_core::compact_id("drawing"),
+        "projectId": project_id,
+        "interactionId": interaction_id,
+        "noteId": note_id,
+        "pageId": target_page_id,
+        "route": route,
+        "title": summary,
+        "summary": summary,
+        "drawingBrief": drawing_brief,
+        "sceneSpec": scene_spec,
+        "replacementPolicy": replacement_policy,
+        "status": "ready",
+        "createdAt": created_at,
+        "updatedAt": created_at
+    });
+    json!({
+        "interactionId": interaction_id,
+        "status": "completed",
+        "display": "bubble",
+        "uiPlacement": "document_bubble",
+        "interactionType": "handwritten_drawing",
+        "confidence": "medium",
+        "executionMode": execution_mode,
+        "reasoningDepth": reasoning_depth,
+        "executionScope": "direct_action",
+        "routeToAiTab": false,
+        "needsUserClarification": false,
+        "pendingIntent": null,
+        "pendingIntentStatus": null,
+        "editProposal": null,
+        "editProposalStatus": null,
+        "drawingProposal": drawing_proposal.clone(),
+        "updatedHandwrittenNote": null,
+        "answer": answer,
+        "conversationEvents": [assistant_event],
+        "operations": [{
+            "type": "handwritten_drawing_generated",
+            "status": "ready",
+            "message": summary,
+            "documentId": note_id,
+            "noteId": note_id,
+            "nodeId": note_id,
+            "path": null,
+            "paths": [],
+            "summary": summary,
+            "task": null,
+            "confirmationId": null,
+            "route": route,
+            "targetPageId": target_page_id,
+            "replacementPolicy": replacement_policy,
+            "drawingBrief": drawing_proposal["drawingBrief"].clone(),
+            "sceneSpec": drawing_proposal["sceneSpec"].clone()
+        }],
+        "updatedDocument": null,
+        "generatedImages": [],
+        "task": null,
+        "tree": null,
+        "affectedDocuments": [],
+        "requiresConfirmation": null,
+        "contextSources": null,
+        "expiredContextSourceIds": []
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3576,6 +3846,112 @@ mod tests {
             .unwrap()
             .iter()
             .any(|skill| skill == "knownext.mermaid"));
+    }
+
+    #[test]
+    fn structured_handwritten_drawing_returns_runtime_proposal() {
+        let response = structured_interaction_response(
+            "project",
+            &json!({
+                "targetKind": "handwritten_note",
+                "handwrittenNoteId": "project::boceto.knote",
+                "activeHandwrittenPageId": "page-1",
+                "runtimePermissions": {
+                    "editHandwrittenNotes": true,
+                    "drawHandwrittenNotes": true
+                }
+            }),
+            Some("project::boceto.knote"),
+            "interaction",
+            "event",
+            "2026-06-04T00:00:00Z",
+            r##"{"action":"draw_handwritten_note","answer":"He preparado el dibujo.","summary":"Flujo de onboarding","route":"precise_scene","targetPageId":"page-1","replacementPolicy":"append_only","drawingBrief":{"goal":"onboarding","style":"professional_whiteboard"},"sceneSpec":{"elements":[{"id":"a","type":"box","text":"Alta","role":"primary","priority":1,"from":null,"to":null},{"id":"b","type":"box","text":"Activacion","role":"primary","priority":2,"from":null,"to":null},{"id":"ab","type":"arrow","text":null,"role":"connector","priority":3,"from":"a","to":"b"}]}}"##,
+            "quick",
+            "light",
+            "document",
+            &json!([]),
+        )
+        .unwrap();
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["interactionType"], "handwritten_drawing");
+        assert_eq!(response["drawingProposal"]["route"], "precise_scene");
+        assert_eq!(
+            response["operations"][0]["type"],
+            "handwritten_drawing_generated"
+        );
+        assert_eq!(response["operations"][0]["status"], "ready");
+        assert_eq!(response["operations"][0]["noteId"], "project::boceto.knote");
+        assert!(response["updatedHandwrittenNote"].is_null());
+    }
+
+    #[test]
+    fn structured_handwritten_clear_page_allows_empty_scene_spec() {
+        let response = structured_interaction_response(
+            "project",
+            &json!({
+                "targetKind": "handwritten_note",
+                "handwrittenNoteId": "project::boceto.knote",
+                "activeHandwrittenPageId": "page-1",
+                "runtimePermissions": {
+                    "editHandwrittenNotes": true,
+                    "drawHandwrittenNotes": true
+                }
+            }),
+            Some("project::boceto.knote"),
+            "interaction",
+            "event",
+            "2026-06-04T00:00:00Z",
+            r##"{"action":"draw_handwritten_note","answer":"Limpio la pagina.","summary":"Limpiar pagina","route":"precise_scene","targetPageId":"page-1","replacementPolicy":"clean_existing","drawingBrief":{"goal":"limpiar pagina","style":"professional_whiteboard"},"sceneSpec":{"elements":[]}}"##,
+            "quick",
+            "light",
+            "document",
+            &json!([]),
+        )
+        .unwrap();
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["operations"][0]["type"], "handwritten_drawing_generated");
+        assert_eq!(response["operations"][0]["replacementPolicy"], "clean_existing");
+        assert_eq!(
+            response["operations"][0]["sceneSpec"]["elements"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
+    }
+
+    #[test]
+    fn structured_handwritten_drawing_blocks_debug_raw_strokes() {
+        let response = structured_interaction_response(
+            "project",
+            &json!({
+                "targetKind": "handwritten_note",
+                "handwrittenNoteId": "project::boceto.knote",
+                "runtimePermissions": {
+                    "editHandwrittenNotes": true,
+                    "drawHandwrittenNotes": true
+                }
+            }),
+            Some("project::boceto.knote"),
+            "interaction",
+            "event",
+            "2026-06-04T00:00:00Z",
+            r##"{"action":"draw_handwritten_note","answer":"Dibujo.","summary":"Debug","route":"debug_raw_strokes","targetPageId":"page-1","replacementPolicy":"append_only","drawingBrief":{"goal":"debug"},"sceneSpec":{"elements":[{"id":"a","type":"box","text":"Alta","role":"primary","priority":1,"from":null,"to":null}]}}"##,
+            "quick",
+            "light",
+            "document",
+            &json!([]),
+        )
+        .unwrap();
+
+        assert_eq!(response["status"], "blocked");
+        assert_eq!(response["operations"][0]["type"], "permission_blocked");
+        assert!(response["answer"]
+            .as_str()
+            .unwrap()
+            .contains("debug_raw_strokes"));
     }
 
     #[test]

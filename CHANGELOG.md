@@ -2,6 +2,15 @@
 
 All KnowNext.ai releases use one monolithic application version for the frontend, Tauri shell, Rust runtime, Windows updater, and Android updater.
 
+## 2.5.3 - 2026-07-07
+
+- Added local-first handwritten `.knote` documents with project tree integration, tab sessions, dirty draft handling, save/export flows and compact drawing tools.
+- Added Rust-mediated AI drawing for `.knote` pages: structured `draw_handwritten_note` proposals, semantic SceneSpec contracts, deterministic layout, pencil stroke synthesis, visual QA and active-page draft application.
+- Added a `knownext-drawing` runtime crate plus the base `knownext.handwritten_drawing` skill so AI drawing routes stay out of React and resolve through typed Tauri/Rust services.
+- Improved generated drawing quality by rendering AI strokes through the same smoothed pencil texture pipeline as manual strokes, with deterministic jitter, pressure variation, sketch passes and non-solid stroke fills.
+- Added figurative and infographic drawing support, including cat/dog portrait routes and Starship-style hero illustrations with handwritten callouts instead of diagram boxes.
+- Expanded document/runtime support for handwritten note creation, import/export, web development local API fallbacks, settings permissions and manual validation coverage.
+
 ## 2.5.2 - 2026-07-03
 
 - Added controlled Markdown text highlighting with five rotulador colors, visual Milkdown toolbar controls, persisted `<mark data-knx-highlight="...">` markup, and MD/PDF/DOCX export support.

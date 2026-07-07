@@ -1,4 +1,5 @@
-import type { AiConfig, AiConfigStatus, AiImageGenerationModelId, AiModelId, AppConfig, AppConfigUpdate, AppearanceAccentColor, AppearanceConfig, AppearanceThemeMode, DiagnosticsConfig, ExportTemplateConfig, ExportTemplateUpdate, LayoutConfig, ProjectTabsConfig } from "../../types/domain";
+import type { AiConfig, AiConfigStatus, AiImageGenerationModelId, AiModelId, AppConfig, AppConfigUpdate, AppearanceAccentColor, AppearanceConfig, AppearanceThemeMode, DiagnosticsConfig, ExportTemplateConfig, ExportTemplateUpdate, HandwrittenConfig, LayoutConfig, ProjectTabsConfig } from "../../types/domain";
+import { DEFAULT_ERASER_CONFIG, DEFAULT_PENCILS, normalizeEraserConfig, normalizeToolPresets } from "../../features/handwritten/handwrittenModel";
 import { requestJson } from "./client";
 
 export const defaultLayoutConfig: LayoutConfig = {
@@ -16,6 +17,11 @@ export const defaultAppearanceConfig: AppearanceConfig = {
 
 export const defaultDiagnosticsConfig: DiagnosticsConfig = {
   traceLoggingEnabled: false,
+};
+
+export const defaultHandwrittenConfig: HandwrittenConfig = {
+  toolPresets: DEFAULT_PENCILS,
+  eraser: DEFAULT_ERASER_CONFIG,
 };
 
 export const defaultExportTemplateConfig: ExportTemplateConfig = {
@@ -83,6 +89,8 @@ export const defaultAiConfig: AiConfig = {
   model: "gpt-5.4-mini",
   permissions: {
     editDocuments: true,
+    editHandwrittenNotes: true,
+    drawHandwrittenNotes: true,
     createFolders: false,
     createDocuments: true,
     deleteDocumentsAndFolders: false,
@@ -153,18 +161,30 @@ export const defaultAiConfig: AiConfig = {
     defaultWidth: "wide",
     aiGenerationMode: "visual",
   },
+  handwrittenDrawing: {
+    enabled: true,
+    creativeSketchEnabled: false,
+    defaultStyle: "professional_whiteboard",
+    maxElements: 48,
+    maxStrokes: 1400,
+    maxPagesPerRequest: 1,
+  },
 };
 
 export const defaultProjectTabsConfig: ProjectTabsConfig = {
   openTabs: [],
   activeDocumentId: "",
+  openHandwrittenTabs: [],
+  activeHandwrittenNoteId: "",
+  activeWorkspaceTabId: "",
 };
 
 export const defaultAppConfig: AppConfig = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   layout: defaultLayoutConfig,
   appearance: defaultAppearanceConfig,
   diagnostics: defaultDiagnosticsConfig,
+  handwritten: defaultHandwrittenConfig,
   ai: defaultAiConfig,
   tabsByProject: {},
   treeOpenPathsByProject: {},
@@ -224,7 +244,12 @@ const localPreferencesKey = "knownext.app.preferences";
 type LocalAppPreferences = {
   appearance?: AppearanceConfig;
   diagnostics?: DiagnosticsConfig;
+  handwritten?: HandwrittenConfig;
   ai?: AiConfig;
+};
+
+type LocalAppPreferencesUpdate = Omit<LocalAppPreferences, "handwritten"> & {
+  handwritten?: Partial<HandwrittenConfig>;
 };
 
 export function readLocalAppPreferences(): LocalAppPreferences {
@@ -236,6 +261,7 @@ export function readLocalAppPreferences(): LocalAppPreferences {
     return {
       appearance: normalizeAppearance(parsed.appearance),
       diagnostics: normalizeDiagnostics(parsed.diagnostics),
+      handwritten: normalizeHandwrittenConfig(parsed.handwritten),
       ai: normalizeAi(parsed.ai),
     };
   } catch {
@@ -243,13 +269,14 @@ export function readLocalAppPreferences(): LocalAppPreferences {
   }
 }
 
-export function writeLocalAppPreferences(preferences: LocalAppPreferences) {
+export function writeLocalAppPreferences(preferences: LocalAppPreferencesUpdate) {
   const currentPreferences = readLocalAppPreferences();
   const nextPreferences = {
     ...currentPreferences,
     ...preferences,
     appearance: preferences.appearance ? normalizeAppearance(preferences.appearance) : currentPreferences.appearance,
     diagnostics: preferences.diagnostics ? normalizeDiagnostics(preferences.diagnostics) : currentPreferences.diagnostics,
+    handwritten: preferences.handwritten ? normalizeHandwrittenConfig(preferences.handwritten) : currentPreferences.handwritten,
     ai: preferences.ai ? normalizeAi(preferences.ai) : currentPreferences.ai,
   };
 
@@ -272,18 +299,63 @@ function normalizeAppConfig(config: AppConfig): AppConfig {
   const openUtilityTabs = normalizeUtilityTabs(config.openUtilityTabs);
   return {
     ...normalizedConfig,
-    schemaVersion: 3,
+    schemaVersion: 4,
     layout: config.layout ?? defaultLayoutConfig,
     appearance: normalizeAppearance(config.appearance) ?? defaultAppearanceConfig,
     diagnostics: normalizeDiagnostics(config.diagnostics) ?? defaultDiagnosticsConfig,
+    handwritten: normalizeHandwrittenConfig(config.handwritten) ?? defaultHandwrittenConfig,
     ai: normalizeAi(config.ai) ?? defaultAiConfig,
-    tabsByProject: config.tabsByProject ?? {},
+    tabsByProject: normalizeProjectTabsByProject(config.tabsByProject),
     treeOpenPathsByProject: normalizeTreeOpenPathsByProject(config.treeOpenPathsByProject),
     openUtilityTabs,
     activeUtilityTab: normalizeActiveUtilityTab(config.activeUtilityTab, openUtilityTabs),
     lastRunAppVersion: config.lastRunAppVersion ?? null,
     lastSeenReleaseNotesVersion: config.lastSeenReleaseNotesVersion ?? null,
   };
+}
+
+function normalizeHandwrittenConfig(handwritten: Partial<HandwrittenConfig> | undefined): HandwrittenConfig | undefined {
+  if (!handwritten) return undefined;
+  return {
+    toolPresets: normalizeToolPresets(handwritten.toolPresets),
+    eraser: normalizeEraserConfig(handwritten.eraser),
+  };
+}
+
+function normalizeProjectTabsByProject(value: unknown): Record<string, ProjectTabsConfig> {
+  if (!value || typeof value !== "object") return {};
+  const normalized: Record<string, ProjectTabsConfig> = {};
+  Object.entries(value as Record<string, unknown>).forEach(([projectId, rawConfig]) => {
+    if (!projectId || !rawConfig || typeof rawConfig !== "object") return;
+    const source = rawConfig as Partial<ProjectTabsConfig>;
+    const openTabs = normalizeOpenTabs(source.openTabs, "document");
+    const openHandwrittenTabs = normalizeOpenTabs(source.openHandwrittenTabs, "handwritten-note");
+    const activeDocumentId = openTabs.some((tab) => tab.id === source.activeDocumentId)
+      ? String(source.activeDocumentId)
+      : openTabs[0]?.id ?? "";
+    const activeHandwrittenNoteId = openHandwrittenTabs.some((tab) => tab.id === source.activeHandwrittenNoteId)
+      ? String(source.activeHandwrittenNoteId)
+      : "";
+    const activeWorkspaceTabId = [...openTabs, ...openHandwrittenTabs].some((tab) => tab.id === source.activeWorkspaceTabId)
+      ? String(source.activeWorkspaceTabId)
+      : activeDocumentId || activeHandwrittenNoteId || "";
+    normalized[projectId] = { openTabs, activeDocumentId, openHandwrittenTabs, activeHandwrittenNoteId, activeWorkspaceTabId };
+  });
+  return normalized;
+}
+
+function normalizeOpenTabs(value: unknown, kind: "document" | "handwritten-note") {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const raw = item as { id?: unknown; name?: unknown; kind?: unknown };
+    const id = typeof raw.id === "string" ? raw.id : "";
+    const name = typeof raw.name === "string" ? raw.name : "";
+    if (!id || !name || seen.has(id)) return [];
+    seen.add(id);
+    return [{ id, name, kind }];
+  });
 }
 
 function normalizeUtilityTabs(value: unknown): AppConfig["openUtilityTabs"] {
@@ -409,6 +481,8 @@ function normalizeAi(ai: AiConfig | undefined): AiConfig | undefined {
     model: normalizeAiModel(ai.model),
     permissions: {
       editDocuments: ai.permissions?.editDocuments !== false,
+      editHandwrittenNotes: ai.permissions?.editHandwrittenNotes !== false,
+      drawHandwrittenNotes: ai.permissions?.drawHandwrittenNotes !== false,
       createFolders: Boolean(ai.permissions?.createFolders),
       createDocuments: ai.permissions?.createDocuments !== false,
       deleteDocumentsAndFolders: Boolean(ai.permissions?.deleteDocumentsAndFolders),
@@ -448,6 +522,18 @@ function normalizeAi(ai: AiConfig | undefined): AiConfig | undefined {
     },
     transcription: normalizeTranscription(ai.transcription),
     diagrams: normalizeDiagramConfig(ai.diagrams),
+    handwrittenDrawing: normalizeHandwrittenDrawingConfig(ai.handwrittenDrawing),
+  };
+}
+
+function normalizeHandwrittenDrawingConfig(handwrittenDrawing: AiConfig["handwrittenDrawing"] | undefined): AiConfig["handwrittenDrawing"] {
+  return {
+    enabled: handwrittenDrawing?.enabled !== false,
+    creativeSketchEnabled: Boolean(handwrittenDrawing?.creativeSketchEnabled),
+    defaultStyle: "professional_whiteboard",
+    maxElements: clampNumber(handwrittenDrawing?.maxElements, 4, 96, defaultAiConfig.handwrittenDrawing.maxElements),
+    maxStrokes: clampNumber(handwrittenDrawing?.maxStrokes, 100, 4000, defaultAiConfig.handwrittenDrawing.maxStrokes),
+    maxPagesPerRequest: clampNumber(handwrittenDrawing?.maxPagesPerRequest, 1, 3, defaultAiConfig.handwrittenDrawing.maxPagesPerRequest),
   };
 }
 

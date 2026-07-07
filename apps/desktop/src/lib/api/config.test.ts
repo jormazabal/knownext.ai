@@ -4,6 +4,7 @@ import {
   defaultAiConfig,
   defaultAppearanceConfig,
   defaultExportTemplateConfig,
+  defaultHandwrittenConfig,
   getAppConfig,
   getAiConfig,
   getExportTemplate,
@@ -35,6 +36,12 @@ describe("app configuration contracts", () => {
         primaryColor: "purple",
       },
       diagnostics: { traceLoggingEnabled: 1 },
+      handwritten: {
+        toolPresets: [
+          { id: "marker", label: "Rotulador cliente", color: "#123456", width: 99, opacity: 0, pressure: false, smoothing: 0 },
+          { id: "eraser", label: "Borrador", color: "#FFFFFF", width: 24, opacity: 1, pressure: false, smoothing: 0.3 },
+        ],
+      },
       ai: minimalLegacyAiConfig({
       model: "gpt-5-mini" as never,
       transcription: {
@@ -49,6 +56,9 @@ describe("app configuration contracts", () => {
         "project-1": {
           openTabs: [{ id: "doc-1", name: "Doc.md" }],
           activeDocumentId: "doc-1",
+          openHandwrittenTabs: [{ id: "note-1", name: "Boceto.knote" }],
+          activeHandwrittenNoteId: "note-1",
+          activeWorkspaceTabId: "note-1",
         },
       },
       treeOpenPathsByProject: {
@@ -62,12 +72,26 @@ describe("app configuration contracts", () => {
 
     const config = await getAppConfig();
 
-    expect(config.schemaVersion).toBe(3);
+    expect(config.schemaVersion).toBe(4);
     expect(config.appearance).toEqual({
       ...defaultAppearanceConfig,
       zoomPercent: 125,
     });
     expect(config.diagnostics.traceLoggingEnabled).toBe(true);
+    expect(config.handwritten.toolPresets).toHaveLength(3);
+    expect(config.handwritten.toolPresets[0]).toMatchObject({
+      id: "marker",
+      type: "marker",
+      label: "Rotulador cliente",
+      color: "#123456",
+      width: 38,
+      opacity: 0.1,
+      pressure: false,
+      pressureSensitivity: 0.38,
+      smoothing: 0,
+    });
+    expect(config.handwritten.toolPresets.some((preset) => preset.id === "eraser")).toBe(false);
+    expect(config.handwritten.eraser).toEqual({ width: 24, mode: "stroke" });
     expect(config.ai.model).toBe("gpt-5.4-mini");
     expect(config.ai.transcription).toEqual({
       enabled: true,
@@ -76,7 +100,11 @@ describe("app configuration contracts", () => {
       defaultLanguage: "eu",
       favoriteLanguages: ["eu", "es"],
     });
+    expect(config.tabsByProject["project-1"]?.openTabs).toEqual([{ id: "doc-1", name: "Doc.md", kind: "document" }]);
     expect(config.tabsByProject["project-1"]?.activeDocumentId).toBe("doc-1");
+    expect(config.tabsByProject["project-1"]?.openHandwrittenTabs).toEqual([{ id: "note-1", name: "Boceto.knote", kind: "handwritten-note" }]);
+    expect(config.tabsByProject["project-1"]?.activeHandwrittenNoteId).toBe("note-1");
+    expect(config.tabsByProject["project-1"]?.activeWorkspaceTabId).toBe("note-1");
     expect(config.treeOpenPathsByProject).toEqual({
       "project-1": ["docs/AI", "docs/Legal"],
     });
@@ -129,6 +157,14 @@ describe("app configuration contracts", () => {
           imagePolicy: "external_confirm",
           aiGenerationMode: "visual",
         },
+        handwrittenDrawing: {
+          enabled: true,
+          creativeSketchEnabled: true,
+          defaultStyle: "professional_whiteboard",
+          maxElements: 999,
+          maxStrokes: 10,
+          maxPagesPerRequest: 12,
+        },
       }),
     });
 
@@ -142,6 +178,7 @@ describe("app configuration contracts", () => {
       primaryColor: "wine",
     });
     expect(preferences.diagnostics).toEqual({ traceLoggingEnabled: true });
+    expect(preferences.handwritten).toBeUndefined();
     expect(preferences.ai?.model).toBe("gpt-5.4");
     expect(preferences.ai?.permissions.generateImages).toBe(true);
     expect(preferences.ai?.permissions.createImageAssets).toBe(true);
@@ -161,6 +198,47 @@ describe("app configuration contracts", () => {
     expect(preferences.ai?.diagrams.iconSet).toBe("none");
     expect(preferences.ai?.diagrams.imagePolicy).toBe("disabled");
     expect(preferences.ai?.diagrams.aiGenerationMode).toBe("safe");
+    expect(preferences.ai?.handwrittenDrawing.enabled).toBe(true);
+    expect(preferences.ai?.handwrittenDrawing.creativeSketchEnabled).toBe(true);
+    expect(preferences.ai?.handwrittenDrawing.maxElements).toBe(96);
+    expect(preferences.ai?.handwrittenDrawing.maxStrokes).toBe(100);
+    expect(preferences.ai?.handwrittenDrawing.maxPagesPerRequest).toBe(3);
+  });
+
+  it("keeps handwritten presets in local browser preferences", () => {
+    writeLocalAppPreferences({
+      handwritten: {
+        toolPresets: [
+          { id: "custom-1", type: "fountain", label: "Firma", color: "#D85A12", width: 5, opacity: 0.9, pressure: true, pressureSensitivity: 0.74, smoothing: 0 },
+        ],
+      },
+    });
+
+    const preferences = readLocalAppPreferences();
+
+    expect(preferences.handwritten?.toolPresets[0]).toMatchObject({
+      id: "custom-1",
+      type: "fountain",
+      label: "Firma",
+      color: "#D85A12",
+      pressureSensitivity: 0.74,
+      smoothing: 0,
+    });
+    expect(preferences.handwritten?.toolPresets).toHaveLength(defaultHandwrittenConfig.toolPresets.length);
+    expect(preferences.handwritten?.eraser).toEqual(defaultHandwrittenConfig.eraser);
+  });
+
+  it("keeps handwritten eraser settings in local browser preferences", () => {
+    writeLocalAppPreferences({
+      handwritten: {
+        eraser: { width: 48, mode: "partial" },
+      },
+    });
+
+    const preferences = readLocalAppPreferences();
+
+    expect(preferences.handwritten?.eraser).toEqual({ width: 48, mode: "partial" });
+    expect(preferences.handwritten?.toolPresets).toHaveLength(defaultHandwrittenConfig.toolPresets.length);
   });
 
   it("normalizes AI config status returned by the Rust runtime", async () => {
@@ -336,6 +414,7 @@ function minimalLegacyAiConfig(overrides: Partial<AiConfig> = {}): AiConfig {
     agentic: { ...defaultAiConfig.agentic, ...overrides.agentic },
     transcription: { ...defaultAiConfig.transcription, ...overrides.transcription },
     diagrams: { ...defaultAiConfig.diagrams, ...overrides.diagrams },
+    handwrittenDrawing: { ...defaultAiConfig.handwrittenDrawing, ...overrides.handwrittenDrawing },
     provider: overrides.provider ?? defaultAiConfig.provider,
     model: overrides.model ?? defaultAiConfig.model,
   };

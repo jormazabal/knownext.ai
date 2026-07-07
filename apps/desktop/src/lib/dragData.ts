@@ -80,6 +80,7 @@ function parseJsonPayload(rawPayload: string, fileOnly: boolean): DocumentTreeDr
     if (
       parsedPayload.type !== "folder"
       && parsedPayload.type !== "document"
+      && parsedPayload.type !== "handwritten-note"
       && parsedPayload.type !== "image"
       && parsedPayload.type !== "attachment"
     ) return null;

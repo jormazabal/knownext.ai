@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Image as ImageIcon, Link, Search, Trash2, Upload, X } from "lucide-react";
+import { Check, Image as ImageIcon, Link, NotebookPen, Search, Trash2, Upload, X } from "lucide-react";
 import { getProjectImageContentUrl } from "../../lib/api/projects";
-import type { AssetImportResponse, DocumentTreeNode, InsertImageReferenceResponse } from "../../types/domain";
+import type { AssetImportResponse, DocumentTreeNode, HandwrittenNoteInsertMarkdownResponse, InsertImageReferenceResponse } from "../../types/domain";
 
 type InsertImageDialogProps = {
   variant?: "insert" | "edit";
@@ -14,6 +14,7 @@ type InsertImageDialogProps = {
   onClose: () => void;
   onImportImage: (parentId: string | null, file: File) => Promise<AssetImportResponse>;
   onBuildReference: (documentId: string, assetId: string, altText?: string | null) => Promise<InsertImageReferenceResponse>;
+  onBuildHandwrittenReference?: (documentId: string, noteId: string, altText?: string | null) => Promise<HandwrittenNoteInsertMarkdownResponse>;
   onInsert: (markdown: string) => void;
   onDelete?: () => void;
 };
@@ -29,30 +30,31 @@ export function InsertImageDialog({
   onClose,
   onImportImage,
   onBuildReference,
+  onBuildHandwrittenReference,
   onInsert,
   onDelete,
 }: InsertImageDialogProps) {
   const isEditMode = variant === "edit";
-  const images = useMemo(() => collectImages(tree), [tree]);
+  const projectVisuals = useMemo(() => collectProjectVisuals(tree), [tree]);
   const uploadParentId = useMemo(() => resolveDocumentParentFolderId(tree, activeDocumentPath), [tree, activeDocumentPath]);
-  const initialProjectAsset = useMemo(() => findImageByInitialUrl(images, activeProjectId, initialUrl), [activeProjectId, images, initialUrl]);
+  const initialProjectAsset = useMemo(() => findImageByInitialUrl(projectVisuals, activeProjectId, initialUrl), [activeProjectId, projectVisuals, initialUrl]);
   const [tabMode, setTabMode] = useState<"project" | "upload" | "url">(() => (initialProjectAsset ? "project" : isEditMode && isEditModeUrl(initialUrl) ? "url" : "project"));
   const [query, setQuery] = useState("");
   const [altText, setAltText] = useState(initialAltText);
   const [url, setUrl] = useState(initialUrl || "https://");
   const [busy, setBusy] = useState(false);
-  const [selectedAssetId, setSelectedAssetId] = useState(initialProjectAsset?.id ?? images[0]?.id ?? "");
+  const [selectedAssetId, setSelectedAssetId] = useState(initialProjectAsset?.id ?? projectVisuals[0]?.id ?? "");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const selectedAsset = images.find((image) => image.id === selectedAssetId) ?? null;
-  const previewSource = tabMode === "project" && selectedAsset
+  const selectedAsset = projectVisuals.find((visual) => visual.id === selectedAssetId) ?? null;
+  const previewSource = tabMode === "project" && selectedAsset?.type === "image"
     ? getProjectImageContentUrl(activeProjectId, selectedAsset.id)
     : tabMode === "url" && isPreviewableUrl(url)
       ? url.trim()
       : isPreviewableUrl(initialUrl)
         ? initialUrl.trim()
         : null;
-  const visibleImages = images.filter((image) => {
-    const value = `${image.name} ${image.path ?? ""}`.toLowerCase();
+  const visibleImages = projectVisuals.filter((visual) => {
+    const value = `${visual.name} ${visual.path ?? ""}`.toLowerCase();
     return value.includes(query.trim().toLowerCase());
   });
 
@@ -64,7 +66,12 @@ export function InsertImageDialog({
     if (!assetId) return;
     setBusy(true);
     try {
-      const reference = await onBuildReference(activeDocumentId, assetId, altText || null);
+      const visual = projectVisuals.find((item) => item.id === assetId);
+      if (!visual) return;
+      const reference = visual.type === "handwritten-note"
+        ? await onBuildHandwrittenReference?.(activeDocumentId, visual.id, altText || visual.name.replace(/\.knote$/i, ""))
+        : await onBuildReference(activeDocumentId, visual.id, altText || null);
+      if (!reference) return;
       onInsert(reference.markdown);
     } finally {
       setBusy(false);
@@ -95,7 +102,7 @@ export function InsertImageDialog({
           <div>
             <h2 className="text-[15px] font-semibold text-ink-primary">{isEditMode ? "Editar imagen" : "Insertar imagen"}</h2>
             <p className="mt-1 text-[11px] text-ink-secondary">
-              {isEditMode ? "Cambia la imagen, actualiza el texto alternativo o elimina la referencia." : "Usa una imagen del proyecto, sube una nueva o enlaza una URL externa."}
+              {isEditMode ? "Cambia la imagen, actualiza el texto alternativo o elimina la referencia." : "Usa una imagen o nota a mano del proyecto, sube una nueva o enlaza una URL externa."}
             </p>
           </div>
           <button className="grid h-8 w-8 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange" onClick={onClose} aria-label="Cerrar">
@@ -136,12 +143,12 @@ export function InsertImageDialog({
                     className="h-9 w-full rounded-md border border-line pl-9 pr-3 text-[12px] outline-none focus:border-brand-orange"
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Buscar imagen del proyecto"
+                    placeholder="Buscar imagen o nota"
                   />
                 </label>
                 <div className="mt-3 grid max-h-72 grid-cols-[repeat(auto-fill,minmax(132px,1fr))] gap-2 overflow-y-auto pr-1">
                   {visibleImages.length === 0 ? (
-                    <p className="col-span-full rounded-md border border-line bg-panel px-3 py-4 text-center text-[11px] text-ink-secondary">No hay imágenes que coincidan.</p>
+                    <p className="col-span-full rounded-md border border-line bg-panel px-3 py-4 text-center text-[11px] text-ink-secondary">No hay recursos visuales que coincidan.</p>
                   ) : (
                     visibleImages.map((image) => (
                       <button
@@ -152,11 +159,17 @@ export function InsertImageDialog({
                         aria-label={image.name}
                       >
                         <span className="grid aspect-[4/3] place-items-center bg-panel">
-                          <img className="max-h-full max-w-full object-contain" src={getProjectImageContentUrl(activeProjectId, image.id)} alt="" loading="lazy" />
+                          {image.type === "image" ? (
+                            <img className="max-h-full max-w-full object-contain" src={getProjectImageContentUrl(activeProjectId, image.id)} alt="" loading="lazy" />
+                          ) : (
+                            <span className="grid h-12 w-12 place-items-center rounded-md border border-orange-100 bg-white text-brand-orange">
+                              <NotebookPen size={22} />
+                            </span>
+                          )}
                         </span>
                         <span className="block min-w-0 px-2 py-2">
                           <span className="block truncate text-[11px] font-semibold text-ink-primary">{image.name}</span>
-                          <span className="mt-0.5 block truncate text-[9px] text-ink-secondary">{formatImageMeta(image)}</span>
+                          <span className="mt-0.5 block truncate text-[9px] text-ink-secondary">{formatVisualMeta(image)}</span>
                         </span>
                         {selectedAssetId === image.id ? (
                           <span className="absolute right-2 top-2 grid h-5 w-5 place-items-center rounded-full bg-brand-orange text-white">
@@ -203,10 +216,15 @@ export function InsertImageDialog({
             <div className="mt-2 grid aspect-[4/3] place-items-center overflow-hidden rounded-md border border-line bg-white">
               {previewSource ? (
                 <img className="max-h-full max-w-full object-contain" src={previewSource} alt={altText || selectedAsset?.name || "Vista previa"} />
+              ) : selectedAsset?.type === "handwritten-note" ? (
+                <div className="text-center text-[11px] text-ink-secondary">
+                  <NotebookPen size={24} className="mx-auto mb-2 text-brand-orange" />
+                  Nota a mano
+                </div>
               ) : (
                 <div className="text-center text-[11px] text-ink-secondary">
                   <ImageIcon size={22} className="mx-auto mb-2 text-brand-orange" />
-                  Selecciona una imagen
+                  Selecciona una imagen o nota
                 </div>
               )}
             </div>
@@ -257,16 +275,16 @@ export function InsertImageDialog({
   );
 }
 
-function collectImages(nodes: DocumentTreeNode[]): DocumentTreeNode[] {
+function collectProjectVisuals(nodes: DocumentTreeNode[]): DocumentTreeNode[] {
   return nodes.flatMap((node) => {
-    if (node.type === "image") return [node];
-    return node.children ? collectImages(node.children) : [];
+    if (node.type === "image" || node.type === "handwritten-note") return [node];
+    return node.children ? collectProjectVisuals(node.children) : [];
   });
 }
 
 function findImageByInitialUrl(images: DocumentTreeNode[], projectId: string, initialUrl: string) {
   if (!projectId || !initialUrl) return null;
-  return images.find((image) => initialUrl === getProjectImageContentUrl(projectId, image.id) || initialUrl.endsWith(encodeURIComponent(image.id)) || initialUrl.endsWith(image.path ?? "")) ?? null;
+  return images.find((image) => image.type === "image" && (initialUrl === getProjectImageContentUrl(projectId, image.id) || initialUrl.endsWith(encodeURIComponent(image.id)) || initialUrl.endsWith(image.path ?? ""))) ?? null;
 }
 
 function buildImageMarkup(alt: string, source: string) {
@@ -281,7 +299,10 @@ function isEditModeUrl(value: string) {
   return /^https?:\/\/.+/i.test(value.trim()) || /^(data:image|knownext-asset:)/i.test(value.trim());
 }
 
-function formatImageMeta(image: DocumentTreeNode) {
+function formatVisualMeta(image: DocumentTreeNode) {
+  if (image.type === "handwritten-note") {
+    return ["Nota a mano", image.path].filter(Boolean).join(" · ");
+  }
   const dimensions = image.width && image.height ? `${image.width} x ${image.height}px` : null;
   const size = image.sizeBytes ? formatBytes(image.sizeBytes) : null;
   return [dimensions, size, image.path].filter(Boolean).join(" · ");

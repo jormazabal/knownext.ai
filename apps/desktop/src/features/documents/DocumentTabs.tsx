@@ -276,7 +276,7 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
             key={tab.id}
             tab={tab}
             active={tab.id === activeTabId}
-            dirty={tab.kind === "document" && dirtyIds.has(tab.id)}
+            dirty={isDirtyTab(tab, dirtyIds)}
             dragging={tab.id === draggedDocumentTabId}
             draggedDocumentTabId={draggedDocumentTabId}
             dropPlacement={dropTarget?.tabId === tab.id ? dropTarget.placement : null}
@@ -332,7 +332,7 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
             <div className="absolute right-1 top-9 z-50 max-h-80 w-72 overflow-y-auto rounded-md border border-line bg-white p-1 shadow-lg">
               {tabs.map((tab) => {
                 const active = tab.id === activeTabId;
-                const dirty = tab.kind === "document" && dirtyIds.has(tab.id);
+                const dirty = isDirtyTab(tab, dirtyIds);
                 const Icon = getTabIcon(tab);
                 return (
                   <button
@@ -458,13 +458,13 @@ function CompactDocumentTabs({
           >
             {renderTabIcon(activeWorkspaceTab, activeWorkspaceTab.id === activeTabId)}
             <span className="min-w-0 flex-1 truncate">{activeWorkspaceTab.name}</span>
-            {activeWorkspaceTab.kind === "document" && dirtyIds.has(activeWorkspaceTab.id) ? <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-brand-orange" /> : null}
+            {isDirtyTab(activeWorkspaceTab, dirtyIds) ? <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-brand-orange" /> : null}
           </button>
           {!isFixedUtilityTab(activeWorkspaceTab) ? (
             <button
               className="grid h-full w-8 shrink-0 cursor-default place-items-center text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
               type="button"
-              aria-label={activeWorkspaceTab.kind === "document" && dirtyIds.has(activeWorkspaceTab.id) ? `Cerrar ${activeWorkspaceTab.name}, con cambios sin guardar` : `Cerrar ${activeWorkspaceTab.name}`}
+              aria-label={isDirtyTab(activeWorkspaceTab, dirtyIds) ? `Cerrar ${activeWorkspaceTab.name}, con cambios sin guardar` : `Cerrar ${activeWorkspaceTab.name}`}
               onClick={() => {
                 setOpen(false);
                 onCloseTab(activeWorkspaceTab.id);
@@ -549,7 +549,7 @@ function OpenTabsDialog({
           ) : (
             tabs.map((tab) => {
               const active = tab.id === activeTabId;
-              const dirty = tab.kind === "document" && dirtyIds.has(tab.id);
+              const dirty = isDirtyTab(tab, dirtyIds);
               return (
                 <div key={tab.id} className={["flex h-11 items-center gap-2 rounded-md px-2", active ? "bg-brand-hover text-brand-orange" : "text-ink-primary hover:bg-panel"].join(" ")}>
                   <button className="flex min-w-0 flex-1 items-center gap-2 text-left" type="button" onClick={() => onSelectTab(tab.id)}>
@@ -787,8 +787,12 @@ function isCloseableTab(tab: WorkspaceTab) {
   return !isFixedUtilityTab(tab);
 }
 
+function isDirtyTab(tab: WorkspaceTab, dirtyIds: Set<string>) {
+  return (tab.kind === "document" || tab.kind === "handwritten-note") && dirtyIds.has(tab.id);
+}
+
 function isReorderableWorkspaceTab(tab: WorkspaceTab) {
-  return tab.kind === "document" || tab.kind === "release-notes";
+  return tab.kind === "document" || tab.kind === "handwritten-note" || tab.kind === "release-notes";
 }
 
 function useCompactTabsMode() {
@@ -818,6 +822,7 @@ function renderTabIcon(tab: WorkspaceTab, active: boolean) {
 function getTabIcon(tab: WorkspaceTab) {
   if (tab.kind === "release-notes") return ScrollText;
   if (tab.kind === "notes") return NotebookPen;
+  if (tab.kind === "handwritten-note") return NotebookPen;
   if (tab.kind === "ai-conversation") return Sparkles;
   if (tab.kind === "image") return Image;
   if (tab.kind === "reference-document" && tab.format === "xlsx") return FileSpreadsheet;

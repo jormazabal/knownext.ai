@@ -14,6 +14,8 @@ KnowNext.ai is a compact local-first workspace for Markdown documentation. Users
 
 - Create, select, edit, rename, move, duplicate, and delete projects, folders, documents, images, and supported attachments.
 - Keep the main document as a single-column Milkdown editing surface.
+- Create and edit project-scoped handwritten notes as `.knote` documents. A handwritten note opens as a paginated notebook with stylus-first tools, pressure-aware strokes, page templates, autosave drafts, local history, export, Markdown insertion, and AI context actions.
+- Ask AI to draw inside an active `.knote`. The product should translate drawing intent into high-quality editable handwritten strokes through local composition and validation, applying append-only results as drafts rather than saving immediately.
 - Use tabs for documents and fixed utility areas such as IA and Notas.
 - Save Markdown to local project files and preserve drafts until explicit save or discard.
 - Maintain user notes outside the project document tree.
@@ -24,12 +26,14 @@ KnowNext.ai is a compact local-first workspace for Markdown documentation. Users
 - Configure Mermaid visual capability by profile: maximum compatibility, local visual enrichment, or controlled experimental use. The default product stance is local visual enrichment with bundled Lucide icons, project-local images only, no CDN dependency, validation before insertion, and PDF/DOCX export as rendered images.
 - Preview PDF, DOCX, and XLSX reference files when the Rust document services can extract or render them.
 - Export Markdown documents to MD, PDF, and DOCX.
+- Export handwritten notes as `.knote`, per-page PNG/SVG, and multipage PDF. Inserting a handwritten page into Markdown creates a project-local image asset under `assets/handwritten/` and keeps a title metadata reference to the original note/page.
 - Show runtime diagnostics and update status from the local Tauri/Rust runtime.
 
 ## AI
 
 - AI interactions are contextual to the active document and selected context sources.
 - Users can add documents, images, attachments, and uploads as explicit prompt context.
+- Users can add handwritten notes as explicit prompt context. The runtime should use OCR/transcribed text when available and page renders for model vision when the selected provider path supports it.
 - Prompt execution supports a quick direct mode and a reasoning direct mode. Reasoning mode may increase provider guidance and response budget, but it is not agentic and must not imply web access.
 - React captures user intent and displays results; Rust/Tauri services own provider credentials, request construction, permissions, context indexing, and deterministic execution.
 - Intent resolution must be structured: runtime state + LLM decision + validated operation.
@@ -44,7 +48,7 @@ KnowNext.ai is a compact local-first workspace for Markdown documentation. Users
 - OpenAI is the first supported provider when real execution is enabled. Credentials must be stored locally through runtime services and never exposed back to React after save.
 - AI image generation is Rust/Tauri mediated: the LLM may propose a structured image operation, and the runtime validates permissions, calls the provider, writes the generated asset locally, and inserts Markdown references when configured.
 - AI Mermaid diagram generation is Rust/Tauri mediated through structured edit operations. The runtime stores the diagram as portable Markdown fences with KnowNext metadata so it remains editable, visually renderable and exportable. The AI must not invent icon packs, remote icon URLs or external image dependencies.
-- RAG uses a local project index rebuilt from Markdown and supported text attachments. The runtime retrieves relevant local chunks for AI interactions; it must not create a remote vector store as part of the local-first workflow.
+- RAG uses a local project index rebuilt from Markdown, supported text attachments, and handwritten-note OCR/transcription text when available. The runtime retrieves relevant local chunks for AI interactions; it must not create a remote vector store as part of the local-first workflow.
 - Agentic web research controls must remain unavailable until Rust/Tauri uses them in AI interactions with validated source, cost, and permission contracts.
 
 ## Git And GitHub
@@ -84,4 +88,5 @@ KnowNext.ai is a compact local-first workspace for Markdown documentation. Users
 - AI image generation and local RAG are implemented through the Rust/Tauri runtime and still require hands-on validation with a real OpenAI key before release acceptance.
 - Agentic web research remains unavailable.
 - Document previews and exports are Rust-managed and best-effort for formats that require complex conversion.
+- Handwritten-note editing is implemented as a first production path using web Pointer Events. Hardware acceptance must still be run on real Windows pen and Android stylus devices before claiming release acceptance.
 - Any remaining service double must be centralized, routed through the runtime boundary, and documented in release notes.

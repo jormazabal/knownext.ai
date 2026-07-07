@@ -9,6 +9,7 @@ base64 = "0.22"
 knownext-ai = { path = "../knownext-ai" }
 knownext-ai-skills = { path = "../knownext-ai-skills" }
 knownext-core = { path = "../knownext-core" }
+knownext-drawing = { path = "../knownext-drawing" }
 knownext-docs = { path = "../knownext-docs" }
 knownext-research = { path = "../knownext-research" }
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "form", "json", "rustls"] }

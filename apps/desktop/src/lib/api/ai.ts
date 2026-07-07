@@ -180,6 +180,13 @@ export async function addProjectDocumentAiContextSource(projectId: string, docum
   });
 }
 
+export async function addProjectHandwrittenNoteAiContextSource(projectId: string, noteId: string): Promise<AiContextSource> {
+  return requestJson<AiContextSource>(`/api/projects/${projectId}/ai/context/handwritten-notes`, {
+    method: "POST",
+    body: JSON.stringify({ noteId }),
+  });
+}
+
 export async function addProjectImageAiContextSource(projectId: string, assetId: string): Promise<AiContextSource> {
   return requestJson<AiContextSource>(`/api/projects/${projectId}/ai/context/project-images`, {
     method: "POST",

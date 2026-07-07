@@ -35,6 +35,12 @@ const nodes: DocumentTreeNode[] = [
     sizeBytes: 640,
   },
   {
+    id: "note-boceto",
+    name: "Boceto.knote",
+    type: "handwritten-note",
+    path: "notes/Boceto.knote",
+  },
+  {
     id: "attachment-brief",
     name: "brief.pdf",
     type: "attachment",
@@ -508,7 +514,7 @@ describe("DocumentTree", () => {
 
   it("moves a file to the target file parent when dropped onto a file row", () => {
     const onMoveNode = vi.fn();
-    const attachmentNode = nodes[3];
+    const attachmentNode = nodes[4];
 
     render(
       <DocumentTree
@@ -814,7 +820,7 @@ describe("DocumentTree", () => {
     const onContextAction = vi.fn();
     const onActivateTreeNode = vi.fn();
     const onOpenReferenceDocument = vi.fn();
-    const attachmentNode = nodes[3];
+    const attachmentNode = nodes[4];
 
     render(
       <DocumentTree
@@ -897,6 +903,44 @@ describe("DocumentTree", () => {
     expect(onContextAction).toHaveBeenCalledWith("copy-image-reference", imageNode);
   });
 
+  it("dispatches handwritten note open and visual insert actions", async () => {
+    const onContextAction = vi.fn();
+    const onOpenDocument = vi.fn();
+    const onOpenHandwrittenNote = vi.fn();
+    const noteNode = nodes[3];
+
+    render(
+      <DocumentTree
+        nodes={nodes}
+        activeDocumentId=""
+        onOpenDocument={onOpenDocument}
+        onOpenHandwrittenNote={onOpenHandwrittenNote}
+        onActivateTreeNode={vi.fn()}
+        onSelectTreeNode={vi.fn()}
+        onCreateFolder={vi.fn()}
+        onCreateDocument={vi.fn()}
+        onExpandTree={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onConfigureProject={vi.fn()}
+        onRenameNode={vi.fn()}
+        onToggleNode={vi.fn()}
+        onContextAction={onContextAction}
+        onMoveNode={vi.fn()}
+      />,
+    );
+
+    await userEvent.dblClick(screen.getByText("Boceto.knote"));
+    expect(onOpenHandwrittenNote).toHaveBeenCalledWith("note-boceto", "Boceto.knote");
+    expect(onOpenDocument).not.toHaveBeenCalled();
+
+    await userEvent.hover(screen.getByRole("button", { name: /abrir menú de boceto\.knote/i }));
+    await waitFor(() => expect(screen.getByText("Insertar en documento")).toBeInTheDocument());
+    await userEvent.click(screen.getByText("Insertar en documento"));
+
+    expect(onContextAction).toHaveBeenCalledWith("insert-image", noteNode);
+    expect(screen.queryByText("Insertar página")).not.toBeInTheDocument();
+  });
+
   it("inserts a dragged image into the active document with the controlled mouse drag", () => {
     const onPreviewImageDropIntoActiveDocument = vi.fn();
     const onDropImageIntoActiveDocument = vi.fn();
@@ -949,6 +993,60 @@ describe("DocumentTree", () => {
 
     expect(onPreviewImageDropIntoActiveDocument).toHaveBeenCalledWith("image-diagram", 720, 360);
     expect(onDropImageIntoActiveDocument).toHaveBeenCalledWith("image-diagram", 720, 360);
+  });
+
+  it("inserts a dragged handwritten note into the active document with the controlled mouse drag", () => {
+    const onPreviewImageDropIntoActiveDocument = vi.fn();
+    const onDropImageIntoActiveDocument = vi.fn();
+    const editorTarget = document.createElement("div");
+    editorTarget.className = "knownext-editor";
+    document.body.appendChild(editorTarget);
+
+    render(
+      <DocumentTree
+        nodes={nodes}
+        activeDocumentId=""
+        onOpenDocument={vi.fn()}
+        onActivateTreeNode={vi.fn()}
+        onSelectTreeNode={vi.fn()}
+        onCreateFolder={vi.fn()}
+        onCreateDocument={vi.fn()}
+        onExpandTree={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onConfigureProject={vi.fn()}
+        onRenameNode={vi.fn()}
+        onToggleNode={vi.fn()}
+        onContextAction={vi.fn()}
+        onMoveNode={vi.fn()}
+        onPreviewImageDropIntoActiveDocument={onPreviewImageDropIntoActiveDocument}
+        onDropImageIntoActiveDocument={onDropImageIntoActiveDocument}
+      />,
+    );
+
+    const noteRow = screen.getByText("Boceto.knote").closest(".tree-row") as HTMLElement;
+    expect(noteRow).not.toBeNull();
+    expect(noteRow).toHaveAttribute("draggable", "false");
+
+    const originalElementsFromPoint = document.elementsFromPoint;
+    Object.defineProperty(document, "elementsFromPoint", {
+      configurable: true,
+      value: vi.fn(() => [editorTarget]),
+    });
+
+    try {
+      fireEvent.mouseDown(noteRow, { button: 0, clientX: 80, clientY: 80 });
+      fireEvent.mouseMove(window, { clientX: 720, clientY: 360 });
+      fireEvent.mouseUp(window, { clientX: 720, clientY: 360 });
+    } finally {
+      Object.defineProperty(document, "elementsFromPoint", {
+        configurable: true,
+        value: originalElementsFromPoint,
+      });
+      editorTarget.remove();
+    }
+
+    expect(onPreviewImageDropIntoActiveDocument).toHaveBeenCalledWith("note-boceto", 720, 360);
+    expect(onDropImageIntoActiveDocument).toHaveBeenCalledWith("note-boceto", 720, 360);
   });
 });
 

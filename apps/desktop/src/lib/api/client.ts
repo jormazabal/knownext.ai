@@ -117,7 +117,9 @@ export async function requestFormData<T>(path: string, formData: FormData, init?
 export async function requestBinary(path: string, init?: ApiRequestInit): Promise<Blob> {
   await initializeApiBaseUrl();
   if (!isTauriRuntime()) {
-    throw new ApiError(503, "Runtime unavailable", `KnowNext.ai ${APP_VERSION} requiere el runtime Tauri local.`);
+    const response = await handleWebDevLocalApiRequest<LocalApiContentResponse>(init?.method ?? "GET", path, parseBody(init?.body));
+    if (response.status >= 400) throw apiErrorFromResponse(response.status, response.body);
+    return base64ToBlob(response.body.dataBase64, response.body.contentType);
   }
 
   const response = await invoke<LocalApiContentResponse>("local_api_content", {

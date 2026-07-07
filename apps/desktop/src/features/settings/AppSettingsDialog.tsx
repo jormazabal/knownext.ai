@@ -99,6 +99,8 @@ type PermissionModeId = "conservative" | "assisted" | "productive" | "custom";
 const permissionModePresets: Record<Exclude<PermissionModeId, "custom">, AiConfigStatus["permissions"]> = {
   conservative: {
     editDocuments: false,
+    editHandwrittenNotes: false,
+    drawHandwrittenNotes: false,
     createFolders: false,
     createDocuments: false,
     deleteDocumentsAndFolders: false,
@@ -109,6 +111,8 @@ const permissionModePresets: Record<Exclude<PermissionModeId, "custom">, AiConfi
   },
   assisted: {
     editDocuments: true,
+    editHandwrittenNotes: true,
+    drawHandwrittenNotes: true,
     createFolders: false,
     createDocuments: true,
     deleteDocumentsAndFolders: false,
@@ -119,6 +123,8 @@ const permissionModePresets: Record<Exclude<PermissionModeId, "custom">, AiConfi
   },
   productive: {
     editDocuments: true,
+    editHandwrittenNotes: true,
+    drawHandwrittenNotes: true,
     createFolders: true,
     createDocuments: true,
     deleteDocumentsAndFolders: true,
@@ -833,6 +839,8 @@ function CapabilitiesSettings({
           <div className="grid md:grid-cols-2">
             <div className="divide-y divide-line md:border-r md:border-line">
               <CompactPermissionSwitch icon={<ImageIcon size={14} />} label={text.editDocuments} description={text.editDocumentsDescription} enabled={settingsAi.permissions.editDocuments} onToggle={() => updatePermissions({ editDocuments: !settingsAi.permissions.editDocuments })} />
+              <CompactPermissionSwitch icon={<Paintbrush size={14} />} label={text.editHandwrittenNotes} description={text.editHandwrittenNotesDescription} enabled={settingsAi.permissions.editHandwrittenNotes} onToggle={() => updatePermissions({ editHandwrittenNotes: !settingsAi.permissions.editHandwrittenNotes })} />
+              <CompactPermissionSwitch icon={<Paintbrush size={14} />} label={text.drawHandwrittenNotes} description={text.drawHandwrittenNotesDescription} enabled={settingsAi.permissions.drawHandwrittenNotes} onToggle={() => updatePermissions({ drawHandwrittenNotes: !settingsAi.permissions.drawHandwrittenNotes })} />
               <CompactPermissionSwitch icon={<FolderOpen size={14} />} label={text.createFolders} description={text.createFoldersDescription} enabled={settingsAi.permissions.createFolders} onToggle={() => updatePermissions({ createFolders: !settingsAi.permissions.createFolders })} />
               <CompactPermissionSwitch icon={<FileIcon />} label={text.createDocuments} description={text.createDocumentsDescription} enabled={settingsAi.permissions.createDocuments} onToggle={() => updatePermissions({ createDocuments: !settingsAi.permissions.createDocuments })} />
               <CompactPermissionSwitch icon={<Trash2 size={14} />} label={text.deleteDocuments} description={text.deleteDocumentsDescription} enabled={settingsAi.permissions.deleteDocumentsAndFolders} onToggle={() => updatePermissions({ deleteDocumentsAndFolders: !settingsAi.permissions.deleteDocumentsAndFolders })} />
@@ -934,6 +942,8 @@ function describeAgenticDepth(depth: AiConfigStatus["agentic"]["depth"], text: S
 function permissionsMatch(left: AiConfigStatus["permissions"], right: AiConfigStatus["permissions"]) {
   return (
     left.editDocuments === right.editDocuments &&
+    left.editHandwrittenNotes === right.editHandwrittenNotes &&
+    left.drawHandwrittenNotes === right.drawHandwrittenNotes &&
     left.createFolders === right.createFolders &&
     left.createDocuments === right.createDocuments &&
     left.deleteDocumentsAndFolders === right.deleteDocumentsAndFolders &&
@@ -1387,6 +1397,7 @@ function normalizeAiStatus(ai: Partial<AiConfigStatus> | null | undefined): AiCo
   const agentic = ai?.agentic as Partial<AiConfigStatus["agentic"]> | undefined;
   const transcription = ai?.transcription as Partial<AiConfigStatus["transcription"]> | undefined;
   const diagrams = ai?.diagrams as Partial<AiConfigStatus["diagrams"]> | undefined;
+  const handwrittenDrawing = ai?.handwrittenDrawing as Partial<AiConfigStatus["handwrittenDrawing"]> | undefined;
 
   const imageGenerationModel = normalizeImageGenerationModel(imageGeneration?.model);
   return {
@@ -1394,6 +1405,8 @@ function normalizeAiStatus(ai: Partial<AiConfigStatus> | null | undefined): AiCo
     model: normalizeAiModel(ai?.model),
     permissions: {
       editDocuments: permissions?.editDocuments ?? defaultAiConfig.permissions.editDocuments,
+      editHandwrittenNotes: permissions?.editHandwrittenNotes ?? defaultAiConfig.permissions.editHandwrittenNotes,
+      drawHandwrittenNotes: permissions?.drawHandwrittenNotes ?? defaultAiConfig.permissions.drawHandwrittenNotes,
       createFolders: permissions?.createFolders ?? defaultAiConfig.permissions.createFolders,
       createDocuments: permissions?.createDocuments ?? defaultAiConfig.permissions.createDocuments,
       deleteDocumentsAndFolders: permissions?.deleteDocumentsAndFolders ?? defaultAiConfig.permissions.deleteDocumentsAndFolders,
@@ -1445,6 +1458,14 @@ function normalizeAiStatus(ai: Partial<AiConfigStatus> | null | undefined): AiCo
     },
     transcription: normalizeTranscription(transcription),
     diagrams: normalizeDiagramSettings(diagrams),
+    handwrittenDrawing: {
+      enabled: handwrittenDrawing?.enabled ?? defaultAiConfig.handwrittenDrawing.enabled,
+      creativeSketchEnabled: handwrittenDrawing?.creativeSketchEnabled ?? defaultAiConfig.handwrittenDrawing.creativeSketchEnabled,
+      defaultStyle: "professional_whiteboard",
+      maxElements: clampSettingsNumber(handwrittenDrawing?.maxElements, 4, 96, defaultAiConfig.handwrittenDrawing.maxElements),
+      maxStrokes: clampSettingsNumber(handwrittenDrawing?.maxStrokes, 100, 4000, defaultAiConfig.handwrittenDrawing.maxStrokes),
+      maxPagesPerRequest: clampSettingsNumber(handwrittenDrawing?.maxPagesPerRequest, 1, 3, defaultAiConfig.handwrittenDrawing.maxPagesPerRequest),
+    },
     openaiKeyConfigured: Boolean(ai?.openaiKeyConfigured),
     openaiKeyPreview: ai?.openaiKeyPreview ?? null,
   };
@@ -3811,6 +3832,8 @@ const settingsCopy = {
     aiPermissionsHeading: "Permisos de acciones",
     aiPermissionsScope: "Límites de ejecución",
     editDocuments: "Editar documentos",
+    editHandwrittenNotes: "Editar notas a mano",
+    drawHandwrittenNotes: "Dibujar en notas a mano",
     createFolders: "Crear y mover carpetas",
     createDocuments: "Crear, duplicar y mover documentos",
     generateImages: "Generar imágenes",
@@ -4007,6 +4030,8 @@ const settingsCopy = {
     permissionModeCustom: "Personalizado",
     permissionModeCustomDescription: "Configura permisos uno a uno.",
     editDocumentsDescription: "Puede modificar el contenido de documentos.",
+    editHandwrittenNotesDescription: "Puede aplicar borradores en notas manuscritas abiertas.",
+    drawHandwrittenNotesDescription: "Puede generar trazos de dibujo dentro de una .knote activa.",
     createFoldersDescription: "Puede crear, duplicar y mover carpetas.",
     createDocumentsDescription: "Puede crear y organizar documentos del proyecto.",
     deleteDocumentsDescription: "Puede eliminar documentos y carpetas.",
@@ -4326,6 +4351,8 @@ const settingsCopy = {
     aiPermissionsHeading: "Action permissions",
     aiPermissionsScope: "Execution limits",
     editDocuments: "Edit documents",
+    editHandwrittenNotes: "Edit handwritten notes",
+    drawHandwrittenNotes: "Draw in handwritten notes",
     createFolders: "Create and move folders",
     createDocuments: "Create, duplicate, and move documents",
     generateImages: "Generate images",
@@ -4522,6 +4549,8 @@ const settingsCopy = {
     permissionModeCustom: "Custom",
     permissionModeCustomDescription: "Configure permissions one by one.",
     editDocumentsDescription: "Can modify document content.",
+    editHandwrittenNotesDescription: "Can apply drafts to open handwritten notes.",
+    drawHandwrittenNotesDescription: "Can generate drawing strokes inside an active .knote.",
     createFoldersDescription: "Can create, duplicate, and move folders.",
     createDocumentsDescription: "Can create and organize project documents.",
     deleteDocumentsDescription: "Can delete documents and folders.",
