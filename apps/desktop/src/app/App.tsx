@@ -1099,6 +1099,10 @@ export function App() {
   );
   const activeHandwrittenContent = activeHandwrittenSession?.content ?? null;
   const activeHandwrittenNote = activeHandwrittenSession?.note ?? null;
+  const currentCreationParentId = useMemo(
+    () => resolveCurrentCreationParentId(tree, activeTreeNodeId, [activeDocumentId, activeHandwrittenNoteId, activeImageId, activeReferenceDocumentId]),
+    [activeDocumentId, activeHandwrittenNoteId, activeImageId, activeReferenceDocumentId, activeTreeNodeId, tree],
+  );
 
   function persistTreeOpenState(projectId: string, nodes: DocumentTreeNode[]) {
     setTreeOpenPathsByProject((currentState) => updateTreeOpenPathsForProject(currentState, projectId, nodes));
@@ -1771,6 +1775,7 @@ export function App() {
           clientContext: {
             lastDocumentId: researchDocumentId,
             lastDocumentPath: researchDocumentPath,
+            targetParentId: currentCreationParentId,
             diagramConfig: aiConfig.diagrams,
           },
           clientMessageId: `client-${Date.now()}`,
@@ -1803,6 +1808,7 @@ export function App() {
         clientContext: {
           lastDocumentId: lastDocumentContextRef.current.id,
           lastDocumentPath: lastDocumentContextRef.current.path,
+          targetParentId: currentCreationParentId,
           diagramConfig: aiConfig.diagrams,
         },
         intent: options?.intent ?? null,
@@ -2000,7 +2006,7 @@ export function App() {
       const source = aiContextSources.find((item) => item.id === sourceId);
       const result = await addAiContextSourceToProject(activeProject.id, sourceId, {
         name: source?.name ? `${source.name.replace(/\.[^.]+$/, "")}.md` : undefined,
-        parentId: null,
+        parentId: currentCreationParentId,
       });
       if (result.tree && activeProject) setProjectTree(activeProject.id, result.tree);
       if (result.documentId) handleOpenDocument(result.documentId, result.path.split("/").pop() || result.path);
@@ -2024,6 +2030,7 @@ export function App() {
         clientContext: {
           lastDocumentId: lastDocumentContextRef.current.id,
           lastDocumentPath: lastDocumentContextRef.current.path,
+          targetParentId: currentCreationParentId,
           diagramConfig: aiConfig.diagrams,
         },
         intentAction: { type: action, intentId },
@@ -4461,19 +4468,19 @@ export function App() {
           if (activeProject) setEditProjectOpen(true);
         }}
         onOpenAppSettings={() => setAppSettingsOpen(true)}
-        onCreateFolder={() => void handleCreateFolder()}
-        onImportProjectFile={() => void promptImportProjectFile(null)}
+        onCreateFolder={(parentId) => void handleCreateFolder(parentId)}
+        onImportProjectFile={(parentId) => void promptImportProjectFile(parentId)}
         onRenameNode={handleRenameNode}
         onToggleNode={handleToggleNode}
         onExpandTree={handleExpandTree}
         onCollapseTree={handleCollapseTree}
-        onCreateDocument={() => {
-          setCreateDocumentParentId(null);
+        onCreateDocument={(parentId) => {
+          setCreateDocumentParentId(parentId);
           setCreateDocumentInitialKind("document");
           setCreateDocumentOpen(true);
         }}
-        onCreateHandwrittenNote={() => {
-          setCreateDocumentParentId(null);
+        onCreateHandwrittenNote={(parentId) => {
+          setCreateDocumentParentId(parentId);
           setCreateDocumentInitialKind("handwritten-note");
           setCreateDocumentOpen(true);
         }}
@@ -5723,6 +5730,35 @@ function findNodeById(nodes: DocumentTreeNode[], nodeId: string): DocumentTreeNo
     }
   }
   return null;
+}
+
+function findParentNodeId(nodes: DocumentTreeNode[], nodeId: string, parentId: string | null = null): string | null | undefined {
+  for (const node of nodes) {
+    if (node.id === nodeId) return parentId;
+    if (node.children) {
+      const childParentId = findParentNodeId(node.children, nodeId, node.id);
+      if (childParentId !== undefined) return childParentId;
+    }
+  }
+  return undefined;
+}
+
+function resolveCurrentCreationParentId(nodes: DocumentTreeNode[], activeTreeNodeId: string | null | undefined, fallbackNodeIds: Array<string | null | undefined>): string | null {
+  const selectedParentId = resolveNodeCreationParentId(nodes, activeTreeNodeId);
+  if (selectedParentId !== undefined) return selectedParentId;
+  for (const nodeId of fallbackNodeIds) {
+    const parentId = resolveNodeCreationParentId(nodes, nodeId);
+    if (parentId !== undefined) return parentId;
+  }
+  return null;
+}
+
+function resolveNodeCreationParentId(nodes: DocumentTreeNode[], nodeId: string | null | undefined): string | null | undefined {
+  if (!nodeId) return undefined;
+  const node = findNodeById(nodes, nodeId);
+  if (!node) return undefined;
+  if (node.type === "folder") return node.id;
+  return findParentNodeId(nodes, node.id) ?? null;
 }
 
 function markNodeEditing(nodes: DocumentTreeNode[], nodeId: string | null): DocumentTreeNode[] {

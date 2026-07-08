@@ -21,6 +21,7 @@ KnowNext.ai is a compact local-first workspace for Markdown documentation. Users
 - Maintain user notes outside the project document tree.
 - Show history/version state through product language without exposing branch names in the UI.
 - Import images and supported support files.
+- Create and import project items in the user's current tree location: the selected folder when a folder is selected, otherwise the parent folder of the active document/file, falling back to project root only when no tree context is available. AI-created documents and AI context sources added back into the project follow the same destination rule.
 - Work with imported and AI-generated images as local project assets.
 - Create, insert, edit, validate, render, and export Mermaid diagrams as first-class Markdown document content.
 - Configure Mermaid visual capability by profile: maximum compatibility, local visual enrichment, or controlled experimental use. The default product stance is local visual enrichment with bundled Lucide icons, project-local images only, no CDN dependency, validation before insertion, and PDF/DOCX export as rendered images.

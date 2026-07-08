@@ -13,6 +13,7 @@ The frontend is React + TypeScript and renders product state received through th
 ## State And Persistence
 
 - Project creation, editing, selection, and tree operations go through `src/lib/api/projects.ts`.
+- The document tree toolbar resolves new-folder, new-document, new-handwritten-note, import, and AI add-to-project destinations from product state before calling APIs: selected folder first, then the parent folder of the active file/document, then project root only when no current tree location exists.
 - Project file guard/sync overviews go through `src/lib/api/sync.ts` and are rendered as state; React does not inspect Git or the filesystem directly.
 - Layout, tabs, folder open state, notes, drafts, export templates, and settings go through API modules.
 - Handwritten pencil presets are application settings under `AppConfig.handwritten.toolPresets`. The handwritten editor receives them from app state and updates them through the config flow; opening a different `.knote` must not replace the active preset list.

@@ -653,12 +653,95 @@ describe("DocumentTree", () => {
     await userEvent.click(screen.getByRole("button", { name: "Ajustes del proyecto" }));
 
     expect(onCreateFolder).toHaveBeenCalledTimes(1);
+    expect(onCreateFolder).toHaveBeenCalledWith(null);
     expect(onCreateDocument).toHaveBeenCalledTimes(1);
+    expect(onCreateDocument).toHaveBeenCalledWith(null);
     expect(onImportFile).toHaveBeenCalledTimes(1);
+    expect(onImportFile).toHaveBeenCalledWith(null);
     expect(onExpandTree).toHaveBeenCalledTimes(1);
     expect(onCollapseTree).toHaveBeenCalledTimes(1);
     expect(onConfigureProject).toHaveBeenCalledTimes(1);
   }, 20_000);
+
+  it("creates and imports into the selected folder from the toolbar", async () => {
+    const onCreateFolder = vi.fn();
+    const onCreateDocument = vi.fn();
+    const onCreateHandwrittenNote = vi.fn();
+    const onImportFile = vi.fn();
+
+    render(
+      <DocumentTree
+        nodes={nodes}
+        activeDocumentId="doc-functional"
+        activeTreeNodeId="folder-archive"
+        onOpenDocument={vi.fn()}
+        onActivateTreeNode={vi.fn()}
+        onSelectTreeNode={vi.fn()}
+        onCreateFolder={onCreateFolder}
+        onCreateDocument={onCreateDocument}
+        onCreateHandwrittenNote={onCreateHandwrittenNote}
+        onImportFile={onImportFile}
+        onExpandTree={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onConfigureProject={vi.fn()}
+        onRenameNode={vi.fn()}
+        onToggleNode={vi.fn()}
+        onContextAction={vi.fn()}
+        onMoveNode={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Añadir" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Nueva carpeta/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Añadir" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Nuevo Markdown/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Añadir" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Nota a mano/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Añadir" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Importar archivo/ }));
+
+    expect(onCreateFolder).toHaveBeenCalledWith("folder-archive");
+    expect(onCreateDocument).toHaveBeenCalledWith("folder-archive");
+    expect(onCreateHandwrittenNote).toHaveBeenCalledWith("folder-archive");
+    expect(onImportFile).toHaveBeenCalledWith("folder-archive");
+  });
+
+  it("creates and imports beside the active document when no folder is selected", async () => {
+    const onCreateFolder = vi.fn();
+    const onCreateDocument = vi.fn();
+    const onImportFile = vi.fn();
+
+    render(
+      <DocumentTree
+        nodes={nodes}
+        activeDocumentId="doc-functional"
+        onOpenDocument={vi.fn()}
+        onActivateTreeNode={vi.fn()}
+        onSelectTreeNode={vi.fn()}
+        onCreateFolder={onCreateFolder}
+        onCreateDocument={onCreateDocument}
+        onImportFile={onImportFile}
+        onExpandTree={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onConfigureProject={vi.fn()}
+        onRenameNode={vi.fn()}
+        onToggleNode={vi.fn()}
+        onContextAction={vi.fn()}
+        onMoveNode={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Añadir" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Nueva carpeta/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Añadir" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Nuevo Markdown/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Añadir" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Importar archivo/ }));
+
+    expect(onCreateFolder).toHaveBeenCalledWith("folder-requirements");
+    expect(onCreateDocument).toHaveBeenCalledWith("folder-requirements");
+    expect(onImportFile).toHaveBeenCalledWith("folder-requirements");
+  });
 
   it("shows distinct support-file type badges and keeps toolbar outside the scroll region", () => {
     const { container } = render(

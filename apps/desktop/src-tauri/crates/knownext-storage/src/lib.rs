@@ -4073,7 +4073,7 @@ impl LocalApi {
             self.openai_key().as_deref(),
             self.ai_model().as_str(),
         );
-        if let Err(error) = self.apply_ai_document_creations(project_id, &mut response) {
+        if let Err(error) = self.apply_ai_document_creations(project_id, &runtime_body, &mut response) {
             self.mark_ai_response_error(
                 project_id,
                 runtime_body.get("documentId").and_then(Value::as_str),
@@ -5491,6 +5491,7 @@ impl LocalApi {
     fn apply_ai_document_creations(
         &self,
         project_id: &str,
+        runtime_body: &Value,
         response: &mut Value,
     ) -> Result<(), String> {
         let Some(operations) = response["operations"].as_array_mut() else {
@@ -5511,7 +5512,13 @@ impl LocalApi {
                 .get("markdown")
                 .and_then(Value::as_str)
                 .unwrap_or("");
-            let relative = self.unique_project_relative(project_id, None, name)?;
+            let parent = self.node_relative(
+                project_id,
+                runtime_body
+                    .pointer("/clientContext/targetParentId")
+                    .and_then(Value::as_str),
+            )?;
+            let relative = self.unique_project_relative(project_id, parent.as_deref(), name)?;
             let path = self.resolve_project_relative(project_id, &relative)?;
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -14257,7 +14264,7 @@ mod tests {
             "tree": null
         });
 
-        api.apply_ai_document_creations(&project_id, &mut response)
+        api.apply_ai_document_creations(&project_id, &json!({}), &mut response)
             .unwrap();
 
         let document_id = doc_id(&project_id, "plan.md");
@@ -14274,6 +14281,69 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(root.join("plan.md")).unwrap(),
             "# Plan\n\nCreado por IA."
+        );
+    }
+
+    #[test]
+    fn ai_document_creation_uses_target_parent_context() {
+        let api = api();
+        let (project_id, root) = create_project(&api);
+        let folder = api
+            .handle(
+                "POST",
+                &format!("/api/projects/{project_id}/folders"),
+                json!({ "parentId": null, "name": "IA" }),
+                vec![],
+            )
+            .unwrap();
+        let folder_id = folder.body["node"]["id"].as_str().unwrap();
+        let mut response = json!({
+            "status": "completed",
+            "answer": "He creado el documento.",
+            "conversationEvents": [{
+                "id": "event",
+                "projectId": project_id,
+                "type": "document_created",
+                "role": "assistant",
+                "content": "He creado el documento.",
+                "createdAt": "2026-06-05T00:00:00Z",
+                "documentId": null,
+                "path": null,
+                "paths": [],
+                "summary": "Documento creado",
+                "sourcesUsed": []
+            }],
+            "operations": [{
+                "type": "document_created",
+                "status": "ready",
+                "message": "Documento creado",
+                "documentId": null,
+                "nodeId": null,
+                "path": null,
+                "paths": [],
+                "summary": "Documento creado",
+                "task": null,
+                "confirmationId": null,
+                "name": "plan.md",
+                "markdown": "# Plan en IA\n"
+            }],
+            "tree": null
+        });
+
+        api.apply_ai_document_creations(
+            &project_id,
+            &json!({ "clientContext": { "targetParentId": folder_id } }),
+            &mut response,
+        )
+        .unwrap();
+
+        let document_id = doc_id(&project_id, "IA/plan.md");
+        assert_eq!(response["operations"][0]["documentId"], document_id);
+        assert_eq!(response["operations"][0]["path"], "IA/plan.md");
+        assert_eq!(response["conversationEvents"][0]["path"], "IA/plan.md");
+        assert_eq!(
+            std::fs::read_to_string(root.join("IA").join("plan.md")).unwrap(),
+            "# Plan en IA\n"
         );
     }
 }
