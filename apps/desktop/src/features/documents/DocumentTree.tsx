@@ -47,10 +47,10 @@ type DocumentTreeProps = {
   onOpenReferenceDocument?: (nodeId: string, name: string, path: string) => void;
   onActivateTreeNode: (nodeId: string) => void;
   onSelectTreeNode: (nodeId: string, type: DocumentTreeNode["type"], name: string) => void;
-  onCreateFolder: () => void;
-  onCreateDocument: () => void;
-  onCreateHandwrittenNote?: () => void;
-  onImportFile?: () => void;
+  onCreateFolder: (parentId: string | null) => void;
+  onCreateDocument: (parentId: string | null) => void;
+  onCreateHandwrittenNote?: (parentId: string | null) => void;
+  onImportFile?: (parentId: string | null) => void;
   onExpandTree: () => void;
   onCollapseTree: () => void;
   onConfigureProject: () => void;
@@ -166,6 +166,7 @@ export function DocumentTree({
   const [searchOpen, setSearchOpen] = useState(false);
   const visibleNodes = useMemo(() => filterTree(nodes, filter), [nodes, filter]);
   const selectedNodeId = activeTreeNodeId || activeDocumentId;
+  const currentParentId = resolveCurrentCreationParentId(nodes, activeTreeNodeId, activeDocumentId);
 
   useEffect(() => {
     if (!selectedNodeId) return;
@@ -511,10 +512,10 @@ export function DocumentTree({
         disabled={!hasActiveProject}
         onFilterChange={setFilter}
         onShowFileExtensionsChange={setShowFileExtensions}
-        onCreateFolder={onCreateFolder}
-        onCreateDocument={onCreateDocument}
-        onCreateHandwrittenNote={onCreateHandwrittenNote}
-        onImportFile={onImportFile}
+        onCreateFolder={() => onCreateFolder(currentParentId)}
+        onCreateDocument={() => onCreateDocument(currentParentId)}
+        onCreateHandwrittenNote={onCreateHandwrittenNote ? () => onCreateHandwrittenNote(currentParentId) : undefined}
+        onImportFile={onImportFile ? () => onImportFile(currentParentId) : undefined}
         onSearch={() => setSearchOpen(true)}
         onExpandTree={onExpandTree}
         onCollapseTree={onCollapseTree}
@@ -1095,6 +1096,20 @@ function getParentId(nodes: DocumentTreeNode[], nodeId: string, parentId: string
   return undefined;
 }
 
+function resolveCurrentCreationParentId(nodes: DocumentTreeNode[], activeTreeNodeId?: string, activeDocumentId?: string): string | null {
+  const selectedParentId = resolveNodeCreationParentId(nodes, activeTreeNodeId);
+  if (selectedParentId !== undefined) return selectedParentId;
+  return resolveNodeCreationParentId(nodes, activeDocumentId) ?? null;
+}
+
+function resolveNodeCreationParentId(nodes: DocumentTreeNode[], nodeId?: string | null): string | null | undefined {
+  if (!nodeId) return undefined;
+  const node = findNodeById(nodes, nodeId);
+  if (!node) return undefined;
+  if (node.type === "folder") return node.id;
+  return getParentId(nodes, node.id) ?? null;
+}
+
 function DocumentTreeToolbar({
   filter,
   showFileExtensions,
@@ -1196,13 +1211,13 @@ function DocumentTreeToolbar({
       </div>
       {openPanel === "create" ? (
         <ToolbarMenu className="right-8 top-8 w-[214px]">
-          <ToolbarMenuItem icon={FolderPlus} label="Nueva carpeta" description="Crea una carpeta en la raíz" onClick={() => runAction(onCreateFolder)} />
-          <ToolbarMenuItem icon={FilePlus2} label="Nuevo Markdown" description="Crea un documento vacío" onClick={() => runAction(onCreateDocument)} />
-          <ToolbarMenuItem icon={NotebookPen} label="Nota a mano" description="Crea una libreta manuscrita" onClick={() => runAction(onCreateHandwrittenNote ?? onCreateDocument)} />
+          <ToolbarMenuItem icon={FolderPlus} label="Nueva carpeta" description="Crea una carpeta en la ubicación actual" onClick={() => runAction(onCreateFolder)} />
+          <ToolbarMenuItem icon={FilePlus2} label="Nuevo Markdown" description="Crea un documento en la ubicación actual" onClick={() => runAction(onCreateDocument)} />
+          <ToolbarMenuItem icon={NotebookPen} label="Nota a mano" description="Crea una libreta manuscrita en la ubicación actual" onClick={() => runAction(onCreateHandwrittenNote ?? onCreateDocument)} />
           <ToolbarMenuItem
             icon={FileUp}
             label="Importar archivo"
-            description="Markdown, imagen o archivo de apoyo"
+            description="Importa Markdown, imagen o archivo aquí"
             disabled={!onImportFile}
             onClick={() => onImportFile && runAction(onImportFile)}
           />

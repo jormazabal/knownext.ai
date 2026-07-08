@@ -36,6 +36,7 @@ Use `docs/development/functional-validation-matrix.md` to record which areas are
 - On a Git/GitHub project, confirm startup does not repeatedly open and close terminal windows while history and sync status are checked.
 - Create a project from the project selector.
 - Create a folder and Markdown document from tree menus.
+- Select a folder, then use the tree `Añadir` menu to create a folder, Markdown document, handwritten note and imported file; confirm each item is created inside the selected folder. Open a document inside another folder, clear folder selection if needed, repeat create/import from `Añadir`, and confirm each item lands beside the active document instead of project root.
 - Create a handwritten note from the tree add menu and from a folder context menu; confirm it opens directly in writing mode with one page ready.
 - Open multiple tabs, switch tabs, close tabs, and confirm the active document stays stable.
 - Open Markdown, image/reference and handwritten tabs together; switch between them with dirty handwritten changes and confirm drafts are preserved.
@@ -106,7 +107,7 @@ Use `docs/development/functional-validation-matrix.md` to record which areas are
 - Review the completed investigation sources/quality in the IA card: it must show sources found/read/cited, evidence count, quality status, limitations and retry actions. Use the API endpoints for list, sources, quality, activity and coverage during release verification.
 - Simulate missing OpenAI key or disabled legacy web configuration, repeat an investigation, and confirm the job fails asynchronously with a clear action message without creating a document.
 - With architecture-beta enabled, force or simulate an invalid architecture-beta proposal that uses flowchart syntax such as `A --> B`; confirm Rust blocks the edit proposal and the AI response shows a `knownext.mermaid / diagram_structure` diagnostic instead of applying the invalid diagram.
-- Ask the AI to create a new document with document-creation permission enabled and confirm the request is visible in the IA tab conversation and the created document opens as the active tab.
+- Ask the AI to create a new document with document-creation permission enabled and confirm the request is visible in the IA tab conversation, the created document opens as the active tab, and the Markdown lands in the selected folder or beside the active document instead of project root.
 - In the IA tab conversation, confirm message bubbles show compact footers with document links, timestamp and copy action, are grouped by `Hoy`, `Ayer`, week or month separators, and initially render only the latest 40 messages with `Mostrar más` loading older messages.
 - Open settings > Capacidades and confirm Investigación exposes only the three global controls agreed for product use: max cost, diagrams and images.
 - Open settings, confirm Services shows `Runtime local`, `Contrato local`, `tauri://local-api/health`, no port control, no restart action, and no external executable.

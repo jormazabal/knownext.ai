@@ -2,6 +2,12 @@
 
 All KnowNext.ai releases use one monolithic application version for the frontend, Tauri shell, Rust runtime, Windows updater, and Android updater.
 
+## 2.5.4 - 2026-07-08
+
+- Fixed the project tree `Añadir` menu so new folders, Markdown documents, handwritten notes and imported files are created in the user's current location: selected folder first, otherwise the parent folder of the active document or file, with root used only as fallback.
+- Updated AI-created document materialization and AI context sources added back into the project so they honor the same current-folder destination instead of defaulting to the project root.
+- Updated product copy, architecture notes, manual validation steps and functional coverage for current-folder create/import behavior.
+
 ## 2.5.3 - 2026-07-07
 
 - Added local-first handwritten `.knote` documents with project tree integration, tab sessions, dirty draft handling, save/export flows and compact drawing tools.

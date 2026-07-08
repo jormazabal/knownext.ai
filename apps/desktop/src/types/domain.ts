@@ -1433,6 +1433,7 @@ export type AiInteractionRequest = {
 export type AiClientContext = {
   lastDocumentId?: string | null;
   lastDocumentPath?: string | null;
+  targetParentId?: string | null;
   diagramConfig?: AiDiagramConfig | null;
 };
 
