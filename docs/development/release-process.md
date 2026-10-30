@@ -154,3 +154,5 @@ The maintainer requested publication of 2.6.0 so the next recording tests can ru
 If Android infrastructure fails after Windows assets were built and verified, fix the workflow on `main` and dispatch `gh workflow run release.yml --ref main -f release_ref=v2.6.0 -F android_only=true` (replace the tag as needed). The recovery run checks out the original tag, validates it against `VERSION`, checks signing inputs and builds only Android. It does not move the tag or replace Windows assets. All seven assets and public endpoint checks remain required before publishing.
 
 The SDK setup explicitly requests `platform-tools`; the deprecated `tools` package is no longer distributed by Google and fails the old action default. The 2.6.0 initial run passed Windows but hit that SDK setup failure before compiling Android.
+
+Android release builds pin Temurin Java 21 instead of inheriting the runner default. The recovery build compiled Rust successfully but Gradle 8.14.3 rejected the newer runner Java with `Unsupported class file major version 69`; Java 21 matches the validated local Kotlin build.
