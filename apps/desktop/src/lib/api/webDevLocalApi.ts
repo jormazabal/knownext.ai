@@ -1,3 +1,4 @@
+import {openAiCatalog} from "../ai/modelCatalog";
 import { APP_VERSION } from "../appVersion";
 import type {
   ActivityEvent,
@@ -867,7 +868,7 @@ function defaultAppConfig(): AppConfig {
 function defaultAiConfigStatus(): AiConfigStatus {
   return {
     provider: "openai",
-    model: "gpt-5.4-mini",
+    model: openAiCatalog.defaults.text,
     permissions: {
       editDocuments: true,
       editHandwrittenNotes: true,
@@ -883,7 +884,7 @@ function defaultAiConfigStatus(): AiConfigStatus {
     rag: { enabled: true, vectorStoreId: null, lastIndexedAt: null, status: "not-indexed", error: null },
     vision: {
       enabled: true,
-      model: "gpt-5.4-mini",
+      model: openAiCatalog.defaults.vision,
       imageIndexingEnabled: false,
       maxImagesPerPrompt: 4,
       maxImageSizeMb: 12,
@@ -892,7 +893,7 @@ function defaultAiConfigStatus(): AiConfigStatus {
     },
     imageGeneration: {
       enabled: true,
-      model: "gpt-image-2",
+      model: openAiCatalog.defaults.image,
       size: "auto",
       quality: "auto",
       outputFormat: "png",
@@ -922,7 +923,7 @@ function defaultAiConfigStatus(): AiConfigStatus {
     },
     transcription: {
       enabled: true,
-      model: "gpt-4o-mini-transcribe",
+      model: openAiCatalog.defaults.transcription,
       defaultTarget: "prompt",
       defaultLanguage: "auto",
       favoriteLanguages: ["es", "en"],

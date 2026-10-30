@@ -1,3 +1,4 @@
+import {openAiCatalog} from "../ai/modelCatalog";
 import type { AiConfig, AiConfigStatus, AiImageGenerationModelId, AiModelId, AppConfig, AppConfigUpdate, AppearanceAccentColor, AppearanceConfig, AppearanceThemeMode, DiagnosticsConfig, ExportTemplateConfig, ExportTemplateUpdate, HandwrittenConfig, LayoutConfig, ProjectTabsConfig } from "../../types/domain";
 import { DEFAULT_ERASER_CONFIG, DEFAULT_PENCILS, normalizeEraserConfig, normalizeToolPresets } from "../../features/handwritten/handwrittenModel";
 import { requestJson } from "./client";
@@ -86,7 +87,7 @@ const exportTextFormats = new Set(["normal", "bold", "underline", "bold_underlin
 
 export const defaultAiConfig: AiConfig = {
   provider: "openai",
-  model: "gpt-5.4-mini",
+  model: openAiCatalog.defaults.text,
   permissions: {
     editDocuments: true,
     editHandwrittenNotes: true,
@@ -108,7 +109,7 @@ export const defaultAiConfig: AiConfig = {
   },
   vision: {
     enabled: true,
-    model: "gpt-5.4-mini",
+    model: openAiCatalog.defaults.vision,
     imageIndexingEnabled: false,
     maxImagesPerPrompt: 4,
     maxImageSizeMb: 12,
@@ -117,7 +118,7 @@ export const defaultAiConfig: AiConfig = {
   },
   imageGeneration: {
     enabled: true,
-    model: "gpt-image-2",
+    model: openAiCatalog.defaults.image,
     size: "auto",
     quality: "auto",
     outputFormat: "png",
@@ -147,7 +148,7 @@ export const defaultAiConfig: AiConfig = {
   },
   transcription: {
     enabled: true,
-    model: "gpt-4o-mini-transcribe",
+    model: openAiCatalog.defaults.transcription,
     defaultTarget: "prompt",
     defaultLanguage: "auto",
     favoriteLanguages: ["es", "en"],
@@ -623,16 +624,14 @@ function normalizeRagStatus(status: unknown): AiConfig["rag"]["status"] {
 }
 
 function normalizeImageGenerationModel(model: unknown): AiImageGenerationModelId {
-  return ["gpt-image-2", "gpt-image-1.5", "gpt-image-1", "gpt-image-1-mini"].includes(String(model))
-    ? model as AiImageGenerationModelId
-    : defaultAiConfig.imageGeneration.model;
+ return typeof model === "string" && model.trim() ? model : defaultAiConfig.imageGeneration.model;
 }
 
 function normalizeImageGenerationSizeForModel(model: AiImageGenerationModelId, size: unknown): AiConfig["imageGeneration"]["size"] {
   const normalized = ["auto", "1024x1024", "1536x1024", "1024x1536", "2048x2048", "2048x1152", "3840x2160", "2160x3840"].includes(String(size))
     ? size as AiConfig["imageGeneration"]["size"]
     : defaultAiConfig.imageGeneration.size;
-  if (model === "gpt-image-2" || ["auto", "1024x1024", "1536x1024", "1024x1536"].includes(normalized)) {
+  if (model.startsWith("gpt-image-2") || ["auto", "1024x1024", "1536x1024", "1024x1536"].includes(normalized)) {
     return normalized;
   }
   return "auto";
@@ -665,26 +664,11 @@ function normalizeAiModel(model: unknown): AiModelId {
 
 function normalizeAiVisionModel(model: unknown) {
   const normalized = normalizeLegacyAiModel(model);
-  return normalized && normalized !== "gpt-5.4-nano" ? normalized : defaultAiConfig.vision.model;
+  return normalized ?? defaultAiConfig.vision.model;
 }
 
 function normalizeLegacyAiModel(model: unknown): AiModelId | null {
-  switch (String(model)) {
-    case "gpt-5.5":
-    case "gpt-5.2":
-      return "gpt-5.5";
-    case "gpt-5.4":
-    case "gpt-5":
-      return "gpt-5.4";
-    case "gpt-5.4-mini":
-    case "gpt-5-mini":
-      return "gpt-5.4-mini";
-    case "gpt-5.4-nano":
-    case "gpt-5-nano":
-      return "gpt-5.4-nano";
-    default:
-      return null;
-  }
+  return typeof model === "string" && model.trim() ? model : null;
 }
 
 function normalizeAgenticDepth(depth: unknown) {
@@ -727,7 +711,7 @@ function normalizeTranscription(transcription: AiConfig["transcription"] | undef
 
   return {
     enabled: transcription?.enabled !== false,
-    model: ["gpt-4o-mini-transcribe", "gpt-realtime-whisper"].includes(String(transcription?.model)) ? "gpt-4o-mini-transcribe" : defaultAiConfig.transcription.model,
+    model: transcription?.model || defaultAiConfig.transcription.model,
     defaultTarget: transcription?.defaultTarget === "document" ? "document" : "prompt",
     defaultLanguage: isTranscriptionLanguage(transcription?.defaultLanguage) ? transcription.defaultLanguage : defaultAiConfig.transcription.defaultLanguage,
     favoriteLanguages: uniqueFavoriteLanguages.slice(0, 6),

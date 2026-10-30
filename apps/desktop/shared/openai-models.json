@@ -1,0 +1,527 @@
+{
+  "version": 1,
+  "checkedAt": "2026-10-30",
+  "defaults": {
+    "text": "gpt-6.1-sol",
+    "vision": "gpt-6.1-terra",
+    "image": "gpt-image-2.5-flare",
+    "transcription": "gpt-transcribe"
+  },
+  "models": [
+    {
+      "id": "gpt-6.1-sol",
+      "name": "GPT-6.1 Sol",
+      "description": "Documentación y trabajo complejo",
+      "capabilities": [
+        "text",
+        "vision"
+      ],
+      "endpoint": "responses",
+      "status": "active",
+      "shutdown": null,
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "pricing": {
+        "unit": "millionTokens",
+        "input": 2,
+        "cachedInput": 0.1,
+        "output": 10,
+        "longContextThreshold": 272000
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol"
+    },
+    {
+      "id": "gpt-6.1-terra",
+      "name": "GPT-6.1 Terra",
+      "description": "Visión y análisis de documentos",
+      "capabilities": [
+        "text",
+        "vision"
+      ],
+      "endpoint": "responses",
+      "status": "active",
+      "shutdown": null,
+      "reasoning": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "pricing": {
+        "unit": "millionTokens",
+        "input": 1,
+        "cachedInput": 0.05,
+        "output": 5,
+        "longContextThreshold": 272000
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-6.1-terra"
+    },
+    {
+      "id": "gpt-6-astra",
+      "name": "GPT-6 Astra",
+      "description": "Razonamiento exigente",
+      "capabilities": [
+        "text",
+        "vision"
+      ],
+      "endpoint": "responses",
+      "status": "active",
+      "shutdown": null,
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "pricing": {
+        "unit": "millionTokens",
+        "input": 10,
+        "cachedInput": 1,
+        "output": 50,
+        "longContextThreshold": 272000
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-6-astra"
+    },
+    {
+      "id": "gpt-6-luna",
+      "name": "GPT-6 Luna",
+      "description": "Tareas acotadas y alto volumen",
+      "capabilities": [
+        "text",
+        "vision"
+      ],
+      "endpoint": "responses",
+      "status": "active",
+      "shutdown": null,
+      "reasoning": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "pricing": {
+        "unit": "millionTokens",
+        "input": 0.1,
+        "cachedInput": 0.01,
+        "output": 0.5,
+        "longContextThreshold": 272000
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-6-luna"
+    },
+    {
+      "id": "gpt-5.5",
+      "name": "GPT-5.5",
+      "description": "Modelo anterior compatible",
+      "capabilities": [
+        "text",
+        "vision"
+      ],
+      "endpoint": "responses",
+      "status": "active",
+      "shutdown": null,
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "pricing": {
+        "unit": "millionTokens",
+        "input": 5,
+        "cachedInput": 0.5,
+        "output": 30,
+        "longContextThreshold": null
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-5.5"
+    },
+    {
+      "id": "gpt-5.4",
+      "name": "GPT-5.4",
+      "description": "Modelo anterior compatible",
+      "capabilities": [
+        "text",
+        "vision"
+      ],
+      "endpoint": "responses",
+      "status": "active",
+      "shutdown": null,
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "pricing": {
+        "unit": "millionTokens",
+        "input": 2.5,
+        "cachedInput": 0.25,
+        "output": 15,
+        "longContextThreshold": null
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-5.4"
+    },
+    {
+      "id": "gpt-5.4-mini",
+      "name": "GPT-5.4 mini",
+      "description": "Modelo anterior compatible",
+      "capabilities": [
+        "text",
+        "vision"
+      ],
+      "endpoint": "responses",
+      "status": "active",
+      "shutdown": null,
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "pricing": {
+        "unit": "millionTokens",
+        "input": 0.75,
+        "cachedInput": 0.075,
+        "output": 4.5,
+        "longContextThreshold": null
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-5.4-mini"
+    },
+    {
+      "id": "gpt-5.4-nano",
+      "name": "GPT-5.4 nano",
+      "description": "Retirada anunciada",
+      "capabilities": [
+        "text",
+        "vision"
+      ],
+      "endpoint": "responses",
+      "status": "deprecated",
+      "shutdown": "2027-04-01",
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "pricing": {
+        "unit": "millionTokens",
+        "input": 0.2,
+        "cachedInput": 0.02,
+        "output": 1.25,
+        "longContextThreshold": null
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-5.4-nano"
+    },
+    {
+      "id": "gpt-image-2.5-flare",
+      "name": "GPT Image-2.5-flare",
+      "description": "Generación y edición de imágenes",
+      "capabilities": [
+        "image"
+      ],
+      "endpoint": "images",
+      "status": "active",
+      "shutdown": null,
+      "qualities": [
+        "auto",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "sizes": [
+        "auto",
+        "1024x1024",
+        "1536x1024",
+        "1024x1536",
+        "2048x2048",
+        "2048x1152",
+        "3840x2160",
+        "2160x3840"
+      ],
+      "formats": [
+        "png",
+        "jpeg",
+        "webp"
+      ],
+      "pricing": {
+        "unit": "millionTokens",
+        "input": 5,
+        "cachedInput": 1.25,
+        "imageInput": 8,
+        "cachedImageInput": 2,
+        "output": 30
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-image-2.5-flare"
+    },
+    {
+      "id": "gpt-image-2.5-sunburst",
+      "name": "GPT Image-2.5-sunburst",
+      "description": "Generación y edición de imágenes",
+      "capabilities": [
+        "image"
+      ],
+      "endpoint": "images",
+      "status": "active",
+      "shutdown": null,
+      "qualities": [
+        "auto",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "sizes": [
+        "auto",
+        "1024x1024",
+        "1536x1024",
+        "1024x1536",
+        "2048x2048",
+        "2048x1152",
+        "3840x2160",
+        "2160x3840"
+      ],
+      "formats": [
+        "png",
+        "jpeg",
+        "webp"
+      ],
+      "pricing": {
+        "unit": "millionTokens",
+        "input": 5,
+        "cachedInput": 1.25,
+        "imageInput": 8,
+        "cachedImageInput": 2,
+        "output": 30
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-image-2.5-sunburst"
+    },
+    {
+      "id": "gpt-image-2",
+      "name": "GPT Image-2",
+      "description": "Generación y edición de imágenes",
+      "capabilities": [
+        "image"
+      ],
+      "endpoint": "images",
+      "status": "active",
+      "shutdown": null,
+      "qualities": [
+        "auto",
+        "low",
+        "medium",
+        "high"
+      ],
+      "sizes": [
+        "auto",
+        "1024x1024",
+        "1536x1024",
+        "1024x1536",
+        "2048x2048",
+        "2048x1152",
+        "3840x2160",
+        "2160x3840"
+      ],
+      "formats": [
+        "png",
+        "jpeg",
+        "webp"
+      ],
+      "pricing": {
+        "unit": "millionTokens",
+        "input": 5,
+        "cachedInput": 1.25,
+        "imageInput": 8,
+        "cachedImageInput": 2,
+        "output": 30
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-image-2"
+    },
+    {
+      "id": "gpt-image-1.5",
+      "name": "GPT Image-1.5",
+      "description": "Generación y edición de imágenes",
+      "capabilities": [
+        "image"
+      ],
+      "endpoint": "images",
+      "status": "deprecated",
+      "shutdown": "2026-12-01",
+      "qualities": [
+        "auto",
+        "low",
+        "medium",
+        "high"
+      ],
+      "sizes": [
+        "auto",
+        "1024x1024",
+        "1536x1024",
+        "1024x1536"
+      ],
+      "formats": [
+        "png",
+        "jpeg",
+        "webp"
+      ],
+      "pricing": null,
+      "source": "https://developers.openai.com/api/docs/models/gpt-image-1.5"
+    },
+    {
+      "id": "gpt-image-1-mini",
+      "name": "GPT Image-1-mini",
+      "description": "Generación y edición de imágenes",
+      "capabilities": [
+        "image"
+      ],
+      "endpoint": "images",
+      "status": "deprecated",
+      "shutdown": "2026-12-01",
+      "qualities": [
+        "auto",
+        "low",
+        "medium",
+        "high"
+      ],
+      "sizes": [
+        "auto",
+        "1024x1024",
+        "1536x1024",
+        "1024x1536"
+      ],
+      "formats": [
+        "png",
+        "jpeg",
+        "webp"
+      ],
+      "pricing": null,
+      "source": "https://developers.openai.com/api/docs/models/gpt-image-1-mini"
+    },
+    {
+      "id": "gpt-image-1",
+      "name": "GPT Image-1",
+      "description": "Generación y edición de imágenes",
+      "capabilities": [
+        "image"
+      ],
+      "endpoint": "images",
+      "status": "retired",
+      "shutdown": "2026-10-23",
+      "qualities": [
+        "auto",
+        "low",
+        "medium",
+        "high"
+      ],
+      "sizes": [
+        "auto",
+        "1024x1024",
+        "1536x1024",
+        "1024x1536"
+      ],
+      "formats": [
+        "png",
+        "jpeg",
+        "webp"
+      ],
+      "pricing": null,
+      "source": "https://developers.openai.com/api/docs/models/gpt-image-1"
+    },
+    {
+      "id": "gpt-transcribe",
+      "name": "gpt-transcribe",
+      "description": "Transcripción de audio sin diarización",
+      "capabilities": [
+        "transcription"
+      ],
+      "endpoint": "audio/transcriptions",
+      "status": "active",
+      "shutdown": null,
+      "languageParameter": "languages[]",
+      "formats": [
+        "json"
+      ],
+      "pricing": {
+        "unit": "minute",
+        "input": 0.0045
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-transcribe"
+    },
+    {
+      "id": "gpt-4o-mini-transcribe",
+      "name": "gpt-4o-mini-transcribe",
+      "description": "Transcripción de audio sin diarización",
+      "capabilities": [
+        "transcription"
+      ],
+      "endpoint": "audio/transcriptions",
+      "status": "deprecated",
+      "shutdown": "2027-02-26",
+      "languageParameter": "language",
+      "formats": [
+        "json"
+      ],
+      "pricing": {
+        "unit": "minute",
+        "input": 0.003
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-4o-mini-transcribe"
+    },
+    {
+      "id": "gpt-4o-transcribe",
+      "name": "gpt-4o-transcribe",
+      "description": "Transcripción de audio sin diarización",
+      "capabilities": [
+        "transcription"
+      ],
+      "endpoint": "audio/transcriptions",
+      "status": "deprecated",
+      "shutdown": "2027-02-26",
+      "languageParameter": "language",
+      "formats": [
+        "json"
+      ],
+      "pricing": {
+        "unit": "minute",
+        "input": 0.006
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-4o-transcribe"
+    },
+    {
+      "id": "whisper-1",
+      "name": "whisper-1",
+      "description": "Transcripción de audio sin diarización",
+      "capabilities": [
+        "transcription"
+      ],
+      "endpoint": "audio/transcriptions",
+      "status": "deprecated",
+      "shutdown": "2027-02-26",
+      "languageParameter": "language",
+      "formats": [
+        "json"
+      ],
+      "pricing": {
+        "unit": "minute",
+        "input": 0.006
+      },
+      "source": "https://developers.openai.com/api/docs/models/whisper-1"
+    }
+  ]
+}

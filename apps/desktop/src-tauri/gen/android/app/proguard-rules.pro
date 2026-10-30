@@ -19,3 +19,7 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+# JNI entry points and reflective Tauri plugin registration.
+-keep class ai.knownext.mobile.RecordingBridge { *; }
+-keep class ai.knownext.mobile.RecordingPlugin { *; }
+-keep class ai.knownext.mobile.RecordingArgs { *; }

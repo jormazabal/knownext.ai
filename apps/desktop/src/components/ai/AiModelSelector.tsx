@@ -9,8 +9,6 @@ export type AiModelSelectorOption<ModelId extends string = string> = {
   name: string;
   providerLabel?: string;
   description: string;
-  capability: number;
-  cost: number;
   inputPrice: string;
   outputPrice: string;
   priceUnit?: string;
@@ -47,7 +45,7 @@ export function AiModelSelector<ModelId extends string = string>({
 }: AiModelSelectorProps<ModelId>) {
   const [open, setOpen] = useState(false);
   const [recommendedOnly, setRecommendedOnly] = useState(false);
-  const selected = options.find((option) => option.id === value) ?? options[0];
+  const selected = options.find((option) => option.id === value) ?? { id: value, name: value, description: "Modelo desconocido: selecciona uno compatible", inputPrice: "Sin tarifa", outputPrice: "" };
   const visibleOptions = useMemo(
     () => recommendedOnly ? options.filter((option) => option.recommended) : options,
     [options, recommendedOnly],
@@ -85,10 +83,6 @@ export function AiModelSelector<ModelId extends string = string>({
           <p className="mt-1 text-[10px] text-ink-secondary">{selected.priceUnit ?? "por 1M tokens"}</p>
         </div>
         <ChevronDown size={16} className={["shrink-0 text-ink-secondary transition", open ? "rotate-180" : ""].join(" ")} />
-        <div className="col-start-2 col-end-5 grid min-w-0 grid-cols-2 gap-3 border-t border-line/70 pt-2">
-          <ModelMetric label="Capacidad" value={selected.capability} />
-          <ModelMetric label="Coste" value={selected.cost} color="green" />
-        </div>
       </button>
 
       {open ? (
@@ -181,10 +175,6 @@ function ModelOptionList<ModelId extends string>({
                 {option.tag ? <ModelTag label={option.tag.label} tone={option.tag.tone} /> : null}
               </div>
               <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{option.name} · {option.description}</p>
-              <div className="mt-2 grid max-w-[280px] grid-cols-2 gap-3">
-                <ModelMetric label="Capacidad" value={option.capability} />
-                <ModelMetric label="Coste" value={option.cost} color="green" />
-              </div>
             </div>
             <div className="min-w-[86px] text-right">
               <p className="text-[11px] font-semibold text-ink-primary">{formatPrice(option)}</p>
@@ -216,31 +206,7 @@ function formatPrice<ModelId extends string>(option: AiModelSelectorOption<Model
   return option.outputPrice ? `${option.inputPrice} / ${option.outputPrice}` : option.inputPrice;
 }
 
-function ModelMetric({ label, value, color = "orange" }: { label: string; value: number; color?: "orange" | "green" }) {
-  return (
-    <div className="min-w-0">
-      <p className="text-[10px] font-semibold text-ink-secondary">{label}</p>
-      <Meter value={value} color={color} />
-    </div>
-  );
-}
 
-function Meter({ value, color = "orange" }: { value: number; color?: "orange" | "green" }) {
-  const activeClass = color === "green" ? "bg-emerald-500" : "bg-brand-orange";
-  return (
-    <span className="mt-1 grid grid-cols-6 gap-1" aria-hidden="true">
-      {Array.from({ length: 6 }, (_, index) => (
-        <span
-          key={index}
-          className={[
-            "h-1.5 rounded-full",
-            index < value ? activeClass : "bg-slate-200",
-          ].join(" ")}
-        />
-      ))}
-    </span>
-  );
-}
 
 function ModelTag({ label, tone = "neutral" }: { label: string; tone?: AiModelSelectorTone }) {
   const toneClass =

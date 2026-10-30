@@ -590,6 +590,7 @@ function AiUsagePanel({
         </button>
       </div>
 
+      {summary?.costNote && <div className="my-3 rounded border border-line p-3 text-xs text-ink-secondary"><p>{summary.costNote}</p><p>Registros heredados: {summary.legacyEntries ?? 0} · Sin importe EUR disponible: {summary.unpricedEntries ?? 0}</p><p>Estimación USD disponible: ${(summary.totalEstimatedCostUsd ?? 0).toFixed(4)}</p>{summary.exchangeRate?.usdPerEur ? <p>Cambio aplicado por trabajo. Última referencia: 1 EUR = {summary.exchangeRate.usdPerEur} USD · {summary.exchangeRate.date} {summary.exchangeRate.source && <a href={summary.exchangeRate.source} target="_blank" rel="noreferrer">BCE</a>}</p> : <p>EUR no disponible hasta obtener la referencia del BCE.</p>}</div>}
       {hasUsage ? (
         <div className="mt-3 space-y-1.5">
           {activeRows.length > 0 ? (

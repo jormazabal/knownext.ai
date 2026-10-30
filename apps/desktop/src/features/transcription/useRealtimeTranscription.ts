@@ -1,3 +1,4 @@
+import {dictationLease} from "../../lib/api/recordings";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AiTranscriptionLanguage, AiTranscriptionTarget } from "../../types/domain";
 import { transcribePcmAudio } from "../../lib/api/transcription";
@@ -19,6 +20,7 @@ export type StartRealtimeTranscriptionOptions = {
 };
 
 export function useRealtimeTranscription() {
+  const leaseOwner=useRef(crypto.randomUUID());
   const [status, setStatus] = useState<RealtimeTranscriptionStatus>("idle");
   const [activeTarget, setActiveTarget] = useState<AiTranscriptionTarget | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -36,8 +38,11 @@ export function useRealtimeTranscription() {
     const capture = captureRef.current;
     captureRef.current = null;
     if (capture) await capture.stop().catch(() => undefined);
+    await dictationLease(false, leaseOwner.current).catch(() => undefined);
     setActiveTarget(null);
   }, []);
+
+  useEffect(() => () => {void cleanup();}, [cleanup]);
 
   const stop = useCallback(async () => {
     if (statusRef.current !== "listening" && statusRef.current !== "connecting") return;
@@ -45,6 +50,7 @@ export function useRealtimeTranscription() {
     const capture = captureRef.current;
     captureRef.current = null;
     if (capture) await capture.stop().catch(() => undefined);
+    await dictationLease(false, leaseOwner.current).catch(() => undefined);
 
     const chunks = chunksRef.current;
     chunksRef.current = [];
@@ -84,6 +90,7 @@ export function useRealtimeTranscription() {
     chunksRef.current = [];
 
     try {
+      await dictationLease(true, leaseOwner.current);
       const capture = await startPcmAudioCapture((chunk) => {
         chunksRef.current.push(chunk.slice(0));
       });

@@ -1,8 +1,13 @@
 {
   "identifier": "mobile",
   "description": "Minimal permissions for the KnowNext.ai Android shell.",
-  "platforms": ["android"],
-  "windows": ["main"],
+  "platforms": [
+    "android"
+  ],
+  "windows": [
+    "main",
+    "recordings"
+  ],
   "permissions": [
     "core:default",
     "dialog:default",

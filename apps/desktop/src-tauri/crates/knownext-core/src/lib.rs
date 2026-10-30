@@ -85,3 +85,22 @@ mod tests {
         );
     }
 }
+pub mod model_catalog;
+
+/// HTTP also works in an Android WorkManager process with no Activity/WebView.
+/// Public Mozilla roots avoid requiring a JVM-hosted platform verifier.
+pub fn http_client_builder() -> reqwest::blocking::ClientBuilder {
+    let builder = reqwest::blocking::Client::builder();
+    #[cfg(target_os = "android")]
+    {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let roots =
+            rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        let config = rustls::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        builder.use_preconfigured_tls(config)
+    }
+    #[cfg(not(target_os = "android"))]
+    builder
+}

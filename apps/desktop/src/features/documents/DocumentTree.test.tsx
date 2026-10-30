@@ -59,6 +59,20 @@ const nodes: DocumentTreeNode[] = [
 afterEach(() => cleanup());
 
 describe("DocumentTree", () => {
+  it("opens folder recording with the right mouse button without the browser menu", () => {
+    const onContextAction=vi.fn();
+    render(<DocumentTree nodes={nodes} activeDocumentId="" onOpenDocument={vi.fn()} onActivateTreeNode={vi.fn()} onSelectTreeNode={vi.fn()} onCreateFolder={vi.fn()} onCreateDocument={vi.fn()} onExpandTree={vi.fn()} onCollapseTree={vi.fn()} onConfigureProject={vi.fn()} onRenameNode={vi.fn()} onToggleNode={vi.fn()} onContextAction={onContextAction} onMoveNode={vi.fn()} />);
+    expect(fireEvent.contextMenu(screen.getByText("Requisitos"))).toBe(false);
+    fireEvent.keyDown(document,{key:"Escape"});
+    expect(screen.queryByRole("button",{name:"Grabar audio y crear documento…"})).not.toBeInTheDocument();
+    fireEvent.contextMenu(screen.getByText("Requisitos"));
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole("button",{name:"Grabar audio y crear documento…"})).not.toBeInTheDocument();
+    fireEvent.contextMenu(screen.getByText("Requisitos"));
+    fireEvent.click(screen.getByRole("button",{name:"Grabar audio y crear documento…"}));
+    expect(onContextAction).toHaveBeenCalledWith("record-audio",nodes[0]);
+  });
+
   it("focuses tree rows on single click and opens or toggles them on double click", async () => {
     const onOpenDocument = vi.fn();
     const onToggleNode = vi.fn();

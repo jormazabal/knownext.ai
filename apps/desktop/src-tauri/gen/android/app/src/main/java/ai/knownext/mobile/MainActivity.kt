@@ -25,10 +25,23 @@ private const val MAX_UPDATE_MANIFEST_BYTES = 256 * 1024
 private const val MAX_UPDATE_REDIRECTS = 5
 
 class MainActivity : TauriActivity() {
+    private var recordingWebView: WebView? = null
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if(intent.getBooleanExtra("recordings",false)) recordingWebView?.post { recordingWebView?.evaluateJavascript("window.dispatchEvent(new Event('knownext-open-recordings'))",null) }
+    }
+    @JavascriptInterface fun consumeRecordingIntent(): Boolean {
+        val open = intent.getBooleanExtra("recordings",false)
+        intent.removeExtra("recordings")
+        return open
+    }
     private var updaterBridge: KnowNextAndroidUpdater? = null
 
     override fun onWebViewCreate(webView: WebView) {
         super.onWebViewCreate(webView)
+        recordingWebView = webView
+        webView.addJavascriptInterface(this,"KnownextRecordingIntent")
         updaterBridge = KnowNextAndroidUpdater(this, webView)
         webView.addJavascriptInterface(updaterBridge!!, "KnownextAndroidUpdater")
     }

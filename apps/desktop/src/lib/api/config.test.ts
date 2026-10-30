@@ -92,10 +92,10 @@ describe("app configuration contracts", () => {
     });
     expect(config.handwritten.toolPresets.some((preset) => preset.id === "eraser")).toBe(false);
     expect(config.handwritten.eraser).toEqual({ width: 24, mode: "stroke" });
-    expect(config.ai.model).toBe("gpt-5.4-mini");
+    expect(config.ai.model).toBe("gpt-5-mini");
     expect(config.ai.transcription).toEqual({
       enabled: true,
-      model: "gpt-4o-mini-transcribe",
+      model: "gpt-realtime-whisper",
       defaultTarget: "document",
       defaultLanguage: "eu",
       favoriteLanguages: ["eu", "es"],
@@ -179,7 +179,7 @@ describe("app configuration contracts", () => {
     });
     expect(preferences.diagnostics).toEqual({ traceLoggingEnabled: true });
     expect(preferences.handwritten).toBeUndefined();
-    expect(preferences.ai?.model).toBe("gpt-5.4");
+    expect(preferences.ai?.model).toBe("gpt-5");
     expect(preferences.ai?.permissions.generateImages).toBe(true);
     expect(preferences.ai?.permissions.createImageAssets).toBe(true);
     expect(preferences.ai?.permissions.insertImagesIntoDocuments).toBe(true);
@@ -268,7 +268,7 @@ describe("app configuration contracts", () => {
 
     const ai = await getAiConfig();
 
-    expect(ai.model).toBe("gpt-5.4");
+    expect(ai.model).toBe("gpt-5");
     expect(ai.imageGeneration.model).toBe("gpt-image-2");
     expect(ai.imageGeneration.size).toBe("3840x2160");
     expect(ai.imageGeneration.customFolderPath).toBe(defaultAiConfig.imageGeneration.customFolderPath);
@@ -313,7 +313,7 @@ describe("app configuration contracts", () => {
       method: "PUT",
       body: JSON.stringify(defaultAiConfig),
     });
-    expect(ai.vision.model).toBe(defaultAiConfig.vision.model);
+    expect(ai.vision.model).toBe("gpt-5-nano");
     expect(ai.openaiKeyPreview).toBeNull();
   });
 

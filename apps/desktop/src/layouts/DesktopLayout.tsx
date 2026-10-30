@@ -138,6 +138,7 @@ type DesktopLayoutProps = {
   onExpandTree: () => void;
   onCollapseTree: () => void;
   onCreateDocument: (parentId: string | null) => void;
+  onRecordAudio?: (parentId: string | null) => void;
   onCreateHandwrittenNote: (parentId: string | null) => void;
   onOpenRecoverableDrafts: () => void;
   onCheckForUpdates: () => void;
@@ -643,6 +644,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 onSelectTreeNode={props.onSelectTreeNode}
                 onCreateFolder={props.onCreateFolder}
                 onCreateDocument={props.onCreateDocument}
+                onRecordAudio={props.onRecordAudio}
                 onCreateHandwrittenNote={props.onCreateHandwrittenNote}
                 onImportFile={props.onImportProjectFile}
                 onExpandTree={props.onExpandTree}

@@ -1,4 +1,5 @@
 import {
+  Mic,
   ChevronDown,
   ChevronRight,
   ChevronUp,
@@ -49,6 +50,7 @@ type DocumentTreeProps = {
   onSelectTreeNode: (nodeId: string, type: DocumentTreeNode["type"], name: string) => void;
   onCreateFolder: (parentId: string | null) => void;
   onCreateDocument: (parentId: string | null) => void;
+  onRecordAudio?: (parentId: string | null) => void;
   onCreateHandwrittenNote?: (parentId: string | null) => void;
   onImportFile?: (parentId: string | null) => void;
   onExpandTree: () => void;
@@ -81,13 +83,14 @@ type ExtendedTreeFilter = TreeFilter | "attachments";
 type TreeDropTarget = { id: string | null; valid: boolean; label: string };
 type TreeMouseDropTarget = TreeDropTarget & { targetFolderId?: string | null };
 
-const CONTEXT_MENU_WIDTH = 176;
+const CONTEXT_MENU_WIDTH = 244;
 const CONTEXT_SUBMENU_WIDTH = 150;
 const CONTEXT_MENU_ITEM_HEIGHT = 28;
 const CONTEXT_MENU_PADDING = 8;
 const CONTEXT_MENU_VIEWPORT_GAP = 8;
 
 export type DocumentTreeAction =
+  | "record-audio"
   | "create-folder"
   | "create-document"
   | "create-handwritten-note"
@@ -127,6 +130,7 @@ export function DocumentTree({
   onSelectTreeNode,
   onCreateFolder,
   onCreateDocument,
+  onRecordAudio,
   onCreateHandwrittenNote,
   onImportFile,
   onExpandTree,
@@ -181,6 +185,22 @@ export function DocumentTree({
     return () => window.cancelAnimationFrame(frame);
   }, [filter, nodes, selectedNodeId, visibleNodes]);
 
+  useEffect(() => {
+    if (!openMenu) return;
+    const closeOutside = (event: globalThis.PointerEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest("[data-document-tree-menu]")) setOpenMenu(null);
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); setOpenMenu(null); }
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [openMenu?.node.id]);
+
   function clearCloseTimer() {
     if (closeTimer.current !== null) {
       window.clearTimeout(closeTimer.current);
@@ -193,7 +213,7 @@ export function DocumentTree({
     closeTimer.current = window.setTimeout(() => setOpenMenu(null), 120);
   }
 
-  function handleMenuEnter(node: DocumentTreeNode, event: MouseEvent<HTMLButtonElement>) {
+  function handleMenuEnter(node: DocumentTreeNode, event: MouseEvent<HTMLElement>) {
     clearCloseTimer();
     const rect = event.currentTarget.getBoundingClientRect();
     const itemCount = getContextMenuItemCount(node.type);
@@ -514,6 +534,7 @@ export function DocumentTree({
         onShowFileExtensionsChange={setShowFileExtensions}
         onCreateFolder={() => onCreateFolder(currentParentId)}
         onCreateDocument={() => onCreateDocument(currentParentId)}
+        onRecordAudio={onRecordAudio ? () => onRecordAudio(currentParentId) : undefined}
         onCreateHandwrittenNote={onCreateHandwrittenNote ? () => onCreateHandwrittenNote(currentParentId) : undefined}
         onImportFile={onImportFile ? () => onImportFile(currentParentId) : undefined}
         onSearch={() => setSearchOpen(true)}
@@ -665,7 +686,7 @@ type TreeNodeProps = {
   menuNodeId?: string;
   draggedNodeId?: string;
   dropTarget: { id: string | null; valid: boolean; label: string } | null;
-  onMenuEnter: (node: DocumentTreeNode, event: MouseEvent<HTMLButtonElement>) => void;
+  onMenuEnter: (node: DocumentTreeNode, event: MouseEvent<HTMLElement>) => void;
   onMenuLeave: () => void;
   onDragStart: (node: DocumentTreeNode, event: DragEvent<HTMLDivElement>) => void;
   onNodeDrag: (node: DocumentTreeNode, event: DragEvent<HTMLDivElement>) => void;
@@ -741,6 +762,13 @@ function TreeNode({
         onDrop={(event) => onNodeDrop(node, event)}
         onMouseDown={(event) => onMouseDragStart(node, event)}
         data-tree-node-id={node.id}
+        onContextMenu={(event) => {
+          if (node.isEditing) return;
+          event.preventDefault();
+          event.stopPropagation();
+          onActivateTreeNode(node.id);
+          onMenuEnter(node, event);
+        }}
         onClick={() => onNodeClick(node)}
         onDoubleClick={(event) => {
           event.stopPropagation();
@@ -801,7 +829,7 @@ function TreeNode({
               </span>
             ) : null}
             <button
-              className="grid h-5 w-5 place-items-center rounded-md opacity-0 hover:bg-white group-hover:opacity-100"
+              className="grid h-5 w-5 place-items-center rounded-md opacity-0 hover:bg-white group-hover:opacity-100 focus:opacity-100 [@media(pointer:coarse)]:opacity-100 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
               aria-label={`Abrir menú de ${displayName}`}
               onClick={(event) => {
                 event.stopPropagation();
@@ -1118,6 +1146,7 @@ function DocumentTreeToolbar({
   onShowFileExtensionsChange,
   onCreateFolder,
   onCreateDocument,
+  onRecordAudio,
   onCreateHandwrittenNote,
   onImportFile,
   onSearch,
@@ -1134,6 +1163,7 @@ function DocumentTreeToolbar({
   onShowFileExtensionsChange: (showFileExtensions: boolean) => void;
   onCreateFolder: () => void;
   onCreateDocument: () => void;
+  onRecordAudio?: () => void;
   onCreateHandwrittenNote?: () => void;
   onImportFile?: () => void;
   onSearch: () => void;
@@ -1211,6 +1241,7 @@ function DocumentTreeToolbar({
       </div>
       {openPanel === "create" ? (
         <ToolbarMenu className="right-8 top-8 w-[214px]">
+          {onRecordAudio && <ToolbarMenuItem icon={Mic} label="Grabar audio y crear documento…" description="Graba una reunión en esta carpeta" onClick={() => runAction(onRecordAudio)} />}
           <ToolbarMenuItem icon={FolderPlus} label="Nueva carpeta" description="Crea una carpeta en la ubicación actual" onClick={() => runAction(onCreateFolder)} />
           <ToolbarMenuItem icon={FilePlus2} label="Nuevo Markdown" description="Crea un documento en la ubicación actual" onClick={() => runAction(onCreateDocument)} />
           <ToolbarMenuItem icon={NotebookPen} label="Nota a mano" description="Crea una libreta manuscrita en la ubicación actual" onClick={() => runAction(onCreateHandwrittenNote ?? onCreateDocument)} />
@@ -1349,7 +1380,7 @@ function ToolbarMenuItem({
   return (
     <button
       className={[
-        "flex min-h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] transition",
+        "flex min-h-8 [@media(pointer:coarse)]:min-h-11 w-full items-center gap-2 rounded px-2 text-left text-[11px] transition",
         active ? "bg-brand-hover text-brand-orange" : "hover:bg-brand-hover",
         disabled ? "cursor-not-allowed opacity-50" : "",
       ].join(" ")}
@@ -1465,7 +1496,7 @@ function getContextMenuItemCount(type: DocumentTreeNode["type"]) {
   if (type === "handwritten-note") return 8;
   if (type === "image") return 7;
   if (type === "attachment") return 6;
-  return 7;
+  return 8;
 }
 
 function getContextMenuHeight(itemCount: number) {
@@ -1524,6 +1555,7 @@ function ContextMenu({
   };
   const [openSubmenu, setOpenSubmenu] = useState<string | null>(null);
   const folderItems: ContextMenuItem[] = [
+    { label: "Grabar audio y crear documento…", icon: Mic, action: "record-audio" },
     { label: "Nueva carpeta", icon: FolderPlus, action: "create-folder" },
     { label: "Nuevo documento", icon: FilePlus2, action: "create-document" },
     { label: "Nueva nota a mano", icon: NotebookPen, action: "create-handwritten-note" },
@@ -1588,7 +1620,8 @@ function ContextMenu({
 
   return (
     <div
-      className="fixed z-50 w-[176px] overflow-y-auto rounded-md border border-line bg-white p-1 shadow-menu"
+      data-document-tree-menu="true"
+      className="fixed z-50 w-[244px] max-w-[calc(100vw-16px)] overflow-y-auto rounded-md border border-line bg-white p-1 shadow-menu"
       style={{ left: x, top: y, maxHeight: `calc(100vh - ${CONTEXT_MENU_VIEWPORT_GAP * 2}px)` }}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
@@ -1606,7 +1639,7 @@ function ContextMenu({
         return (
           <div key={item.label} className="group relative">
             <button
-              className="flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover focus:bg-brand-hover focus:outline-none"
+              className="flex h-7 [@media(pointer:coarse)]:h-11 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover focus:bg-brand-hover focus:outline-none"
               aria-haspopup={hasSubmenu ? "menu" : undefined}
               aria-expanded={hasSubmenu ? isOpen : undefined}
               onMouseEnter={() => setOpenSubmenu(hasSubmenu ? item.label : null)}
@@ -1641,7 +1674,7 @@ function ContextMenu({
                 {submenu.map((submenuItem) => (
                   <button
                     key={submenuItem.action}
-                    className="flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover focus:bg-brand-hover focus:outline-none"
+                    className="flex h-7 [@media(pointer:coarse)]:h-11 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover focus:bg-brand-hover focus:outline-none"
                     role="menuitem"
                     onClick={() => onSelect(submenuItem.action)}
                   >

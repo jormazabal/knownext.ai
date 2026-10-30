@@ -2,6 +2,16 @@
 
 All KnowNext.ai releases use one monolithic application version for the frontend, Tauri shell, Rust runtime, Windows updater, and Android updater.
 
+## 2.6.0 - 2026-10-30
+
+- Added meeting recording from the Windows system tray, the application and project folders, with microphone/system audio selection, signal meters, pause/resume and Markdown transcription using the existing OpenAI credential.
+- Added persistent recording sessions, crash recovery, resumable transcription jobs, local playback and configurable audio retention (seven days by default after document creation).
+- Added Android microphone recording through a native foreground service with notification controls, and recoverable WorkManager transcription jobs.
+- Updated the shared OpenAI model catalogue, preserved configured model choices and validated model capabilities before requests.
+- Corrected AI cost estimates to use model-specific USD tariffs and dated ECB conversion to EUR, keeping legacy estimates separate.
+- Fixed folder right-click recording, document name collisions, hidden recovery metadata and development WebView coexistence with the installed app.
+- Verified short Windows loopback recordings from folders and the tray, pause exclusion, deferred destination, Markdown creation and opening. Real meeting, microphone/headset and Android physical-device validation continues after updating.
+
 ## 2.5.4 - 2026-07-08
 
 - Fixed the project tree `Añadir` menu so new folders, Markdown documents, handwritten notes and imported files are created in the user's current location: selected folder first, otherwise the parent folder of the active document or file, with root used only as fallback.

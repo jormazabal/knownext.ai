@@ -55,8 +55,8 @@ describe("AiModelSelector", () => {
     fireEvent.click(screen.getByRole("button", { name: /cheap/ }));
 
     expect(screen.getByRole("button", { name: /cheap/ })).toHaveTextContent("Económico");
-    expect(screen.getAllByText("Capacidad").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Coste").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Capacidad")).not.toBeInTheDocument();
+    expect(screen.queryByText("Coste")).not.toBeInTheDocument();
     expect(screen.getAllByText("$0.15 / $0.60").length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: /Ver guía de modelos/ }));
@@ -72,8 +72,6 @@ const modelOptions: Array<AiModelSelectorOption<"balanced" | "reasoning" | "chea
     id: "balanced",
     name: "Equilibrado",
     description: "Modelo general para documentación",
-    capability: 4,
-    cost: 3,
     inputPrice: "$1.25",
     outputPrice: "$10.00",
     recommended: true,
@@ -83,8 +81,6 @@ const modelOptions: Array<AiModelSelectorOption<"balanced" | "reasoning" | "chea
     id: "reasoning",
     name: "Razonamiento",
     description: "Modelo para análisis complejo",
-    capability: 6,
-    cost: 5,
     inputPrice: "$5.00",
     outputPrice: "$25.00",
     recommended: false,
@@ -94,8 +90,6 @@ const modelOptions: Array<AiModelSelectorOption<"balanced" | "reasoning" | "chea
     id: "cheap",
     name: "Económico",
     description: "Modelo de bajo coste",
-    capability: 3,
-    cost: 1,
     inputPrice: "$0.15",
     outputPrice: "$0.60",
     recommended: true,

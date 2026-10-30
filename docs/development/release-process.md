@@ -27,7 +27,7 @@ Before tagging a release, run:
 pnpm release:check
 ```
 
-This validates version consistency, builds the frontend, checks the client bundle for runtime-data and legacy-server markers, runs frontend tests, and runs Rust contract tests.
+This validates version consistency, builds the frontend, checks the client bundle for runtime-data and legacy-server markers, runs frontend tests, and runs Rust contract tests. Vitest uses a bounded pool of three workers so the gate remains stable on both developer workstations and CI runners.
 
 Manual acceptance must also pass using `docs/development/manual-test-checklist.md`. For packaged releases, run the checklist against packaged Windows and Android apps, not only the browser dev server.
 
@@ -142,3 +142,8 @@ Invoke-WebRequest -UseBasicParsing -Method Head -Uri "https://github.com/jormaza
 For updater changes, install the previous release and update through the in-app updater. Confirm app data survives and the updated app relaunches with the new visible version. Android acceptance must include offline operation with no workstation app or external service running.
 
 Do not tag or publish a release if `pnpm release:check` fails, packaged Windows/Android builds fail, manual critical acceptance fails, update manifests point to the previous version, or the working tree contains unrelated changes that should not ship.
+
+
+## 2.6.0 acceptance scope
+
+The maintainer requested publication of 2.6.0 so the next recording tests can run in real meetings on the installed version. Windows loopback, tray and folder capture, pause/resume and Markdown creation have been exercised with synthetic speech and the existing provider key. Headset/microphone combinations, long meetings, Basque/bilingual accuracy and Android physical-device behaviour remain explicitly pending after the update; this is not evidence of their acceptance. Signing, complete release assets and both public update manifests remain mandatory publication gates.

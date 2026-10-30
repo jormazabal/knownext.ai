@@ -1,3 +1,7 @@
+import {listen as listenRecordingEvent} from "@tauri-apps/api/event";
+import { Mic as RecordingIcon } from "lucide-react";
+import { RecordingPanel } from "../features/recordings/RecordingPanel";
+import type {RecordingDestination} from "../types/recording";
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import type { DocumentTreeAction } from "../features/documents/DocumentTree";
 import type { MarkdownEditorChangeSource, MarkdownEditorExternalOperation, MarkdownEditorSelection } from "../features/editor/editorTypes";
@@ -282,6 +286,24 @@ export function App() {
   const [authStatus, setAuthStatus] = useState<AuthStatus>({ isAuthenticated: false, provider: null, user: null, scopes: [] });
   const [projectCapabilities, setProjectCapabilities] = useState<ProjectCapabilities | null>(null);
   const [versioningStatus, setVersioningStatus] = useState<ProjectVersioningStatus | null>(null);
+  const [recordingPanel, setRecordingPanel] = useState(false);
+  useEffect(()=>{
+    const open=()=>setRecordingPanel(true);
+    window.addEventListener("knownext-open-recordings",open);
+    const bridge=(window as Window & {KnownextRecordingIntent?: {consumeRecordingIntent:()=>boolean}}).KnownextRecordingIntent;
+    if(bridge?.consumeRecordingIntent()) open();
+    return ()=>window.removeEventListener("knownext-open-recordings",open);
+  },[]);
+
+  const [pendingRecordingDocument,setPendingRecordingDocument]=useState<{id:string;projectId:string}|null>(null);
+  useEffect(()=>{
+    if(pendingRecordingDocument && activeProject?.id===pendingRecordingDocument.projectId) {
+      handleOpenDocument(pendingRecordingDocument.id,pendingRecordingDocument.id.split("/").pop()??"Transcripción");
+      setPendingRecordingDocument(null);setRecordingPanel(false);
+    }
+  },[pendingRecordingDocument,activeProject?.id]);
+  const [recordingNotice,setRecordingNotice]=useState<{id:string}|null>(null);
+  const [recordingDestination, setRecordingDestination] = useState<RecordingDestination | null>(null);
   const [tree, setTree] = useState<DocumentTreeNode[]>([]);
   const [tabs, setTabs] = useState<OpenDocumentTab[]>(defaultProjectTabsConfig.openTabs);
   const [activeDocumentId, setActiveDocumentId] = useState(defaultProjectTabsConfig.activeDocumentId);
@@ -1144,6 +1166,18 @@ export function App() {
     setActiveTreeNodeId(nodeId);
   }
 
+  async function openRecordingDocument(documentId:string) {
+    const projectId=documentId.split("::")[0];
+    const project=projects.find(p=>p.id===projectId);
+    if(!project) { showError(new Error("El proyecto de la transcripción ya no está disponible."),"No se pudo abrir la transcripción."); return; }
+    if(project.id!==activeProject?.id) {
+      setPendingRecordingDocument({id:documentId,projectId:project.id});
+      await handleSelectProject(project);
+      return;
+    }
+    handleOpenDocument(documentId,documentId.split("/").pop()??"Transcripción");
+    setRecordingPanel(false);
+  }
   function handleOpenDocument(documentId: string, name: string) {
     if (activeHandwrittenNoteId && handwrittenSessions[activeHandwrittenNoteId]) {
       void persistHandwrittenDraft(activeHandwrittenNoteId, handwrittenSessions[activeHandwrittenNoteId]);
@@ -3738,7 +3772,18 @@ export function App() {
     }
   }
 
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let alive=true;const unlisteners:Array<()=>void>=[];
+    void listenRecordingEvent<{id:string}>("recording-document-created",event=>{setRecordingNotice({id:event.payload.id});if(activeProject)void getProjectTree(activeProject.id).then(nodes=>{if(alive)setTree(nodes);});}).then(unlisten=>{if(alive)unlisteners.push(unlisten);else unlisten();});
+    void listenRecordingEvent("recording-create-project",()=>{setRecordingPanel(false);setCreateProjectOpen(true);}).then(unlisten=>{if(alive)unlisteners.push(unlisten);else unlisten();});
+    void listenRecordingEvent("recording-changed",()=>{if(activeProject)void getProjectTree(activeProject.id).then(nodes=>{if(alive)setTree(nodes);});}).then(unlisten=>{if(alive)unlisteners.push(unlisten);else unlisten();});
+    void listenRecordingEvent<{id:string}>("recording-open-document",event=>{void openRecordingDocument(event.payload.id);}).then(unlisten=>{if(alive)unlisteners.push(unlisten);else unlisten();});
+    return()=>{alive=false;unlisteners.forEach(f=>f());};
+  },[activeProject?.id]);
+
   function handleTreeContextAction(action: DocumentTreeAction, node: DocumentTreeNode) {
+    if (action === "record-audio" && activeProject) { setRecordingDestination({projectId:activeProject.id,folderId:node.id,name:`Reunión ${new Date().toISOString().slice(0,16).replace(/:/g,"-")}.md`}); setRecordingPanel(true); return; }
     if (action === "export-md" || action === "export-pdf" || action === "export-docx") {
       const format = action === "export-md" ? "md" : action === "export-pdf" ? "pdf" : "docx";
       void handleExportDocument(node.id, format);
@@ -4474,6 +4519,7 @@ export function App() {
         onToggleNode={handleToggleNode}
         onExpandTree={handleExpandTree}
         onCollapseTree={handleCollapseTree}
+        onRecordAudio={parentId => {if(activeProject){setRecordingDestination({projectId:activeProject.id,folderId:parentId,name:`Reunión ${new Date().toISOString().slice(0,16).replace(/:/g,"-")}.md`});setRecordingPanel(true);}}}
         onCreateDocument={(parentId) => {
           setCreateDocumentParentId(parentId);
           setCreateDocumentInitialKind("document");
@@ -4586,7 +4632,11 @@ export function App() {
         onRetry={handleRetryLocalRuntimeRecovery}
       />
       <AppNoticeBanner notice={notice} onClose={() => setNotice(null)} />
+      {recordingNotice && <div role="status" className="fixed bottom-20 right-4 z-[130] flex items-center gap-3 rounded-lg border border-line bg-white p-3 text-sm shadow-lg"><span>Transcripción guardada</span><button className="min-h-11 text-brand-orange" onClick={()=>{void openRecordingDocument(recordingNotice.id);setRecordingNotice(null);}}>Abrir documento</button><button className="min-h-11 px-2" aria-label="Cerrar aviso de transcripción" onClick={()=>setRecordingNotice(null)}>×</button></div>}
+      {recordingPanel && <div className="fixed inset-0 z-[110] flex justify-end bg-black/20"><div className="relative h-full w-full max-w-[520px] border-l border-line bg-white shadow-xl"><RecordingPanel initialDestination={recordingDestination} onClose={() => {setRecordingPanel(false); if(activeProject) void getProjectTree(activeProject.id).then(setTree);}} onOpenDocument={id => {void openRecordingDocument(id);}} /></div></div>}
+      <button type="button" aria-label="Abrir Grabaciones" title="Grabaciones" className="fixed bottom-4 right-4 z-40 grid h-11 w-11 place-items-center rounded-full border border-line bg-white text-brand-orange shadow-md" onClick={() => {setRecordingDestination(null);setRecordingPanel(true);}}><RecordingIcon size={20}/></button>
       <AppSettingsDialog
+        onOpenRecordings={() => {setRecordingDestination(null);setRecordingPanel(true);}}
         open={appSettingsOpen}
         appearance={appearanceConfig}
         diagnostics={diagnosticsConfig}

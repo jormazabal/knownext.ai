@@ -64,6 +64,107 @@ type ApiResult = Result<LocalApiResponse, String>;
 const AI_CONVERSATION_MAX_EVENTS: usize = 2_000;
 
 impl LocalApi {
+    pub fn model_access(key: &str, model: &str) -> Result<Value, String> {
+        let descriptor = knownext_core::model_catalog::model(model)
+            .ok_or("Modelo desconocido en el catálogo")?;
+        let response = knownext_core::http_client_builder()
+            .timeout(Duration::from_secs(20))
+            .build()
+            .map_err(|e| e.to_string())?
+            .get(format!("https://api.openai.com/v1/models/{model}"))
+            .bearer_auth(key)
+            .send()
+            .map_err(|_| "No se pudo comprobar el acceso a OpenAI".to_string())?;
+        Ok(
+            json!({"model":model,"catalogAvailable":true,"status":descriptor["status"],"accountVisible":response.status().is_success(),"httpStatus":response.status().as_u16(),"requestValidated":false,"message":"La visibilidad en la cuenta no confirma una generación. No se ha realizado una petición de generación facturable."}),
+        )
+    }
+    /// Local-only credential snapshot for background jobs. Never sent to React.
+    pub fn recording_credential(&self) -> Result<String, String> {
+        self.openai_key()
+            .ok_or_else(|| "Configura la clave de OpenAI en IA documental".into())
+    }
+
+    pub fn create_recording_document(
+        &self,
+        session_id: &str,
+        project_id: &str,
+        folder_id: Option<&str>,
+        name: &str,
+        markdown: &str,
+    ) -> Result<String, String> {
+        use std::io::{Read, Write};
+        let parent = self.node_relative(project_id, folder_id)?;
+        let root = self
+            .project_root(project_id)?
+            .canonicalize()
+            .map_err(|e| e.to_string())?;
+        let directory = self
+            .resolve_project_relative(project_id, parent.as_deref().unwrap_or(""))?
+            .canonicalize()
+            .map_err(|_| "La carpeta de destino ya no está disponible. Elige otra.".to_string())?;
+        if !directory.is_dir() || !directory.starts_with(&root) {
+            return Err("Destino fuera del proyecto".into());
+        }
+        if let Some(folder) = folder_id {
+            if !folder.starts_with(&format!("{project_id}::")) {
+                return Err("La carpeta no pertenece al proyecto".into());
+            }
+        }
+        let stem = name.trim().trim_end_matches(".md");
+        if stem.is_empty()
+            || stem.len() > 150
+            || stem
+                .chars()
+                .any(|c| c.is_control() || "<>:\"/\\|?*".contains(c))
+            || stem == "."
+            || stem == ".."
+        {
+            return Err("Nombre de documento inválido".into());
+        }
+        let markers = [format!("[knownext-recording:{session_id}]: #"),format!("<!-- knownext-recording:{session_id} -->")];
+        // Recover a crash after publication but before updating the manifest.
+        for entry in std::fs::read_dir(&directory)
+            .map_err(|e| e.to_string())?
+            .flatten()
+        {
+            if entry.path().extension().is_some_and(|e| e == "md") {
+                if let Ok(mut file) = std::fs::File::open(entry.path()) {
+                    let mut head = [0u8; 256];
+                    let read=file.read(&mut head).map_err(|e|e.to_string())?;
+                    if markers.iter().any(|marker|head[..read].starts_with(marker.as_bytes())) {
+                        return Ok(doc_id(
+                            project_id,
+                            &join_relative(parent.as_deref(), &entry.file_name().to_string_lossy()),
+                        ));
+                    }
+                }
+            }
+        }
+        for suffix in 0..10000 {
+            let filename = if suffix == 0 {
+                format!("{stem}.md")
+            } else {
+                format!("{stem} ({suffix}).md")
+            };
+            let mut temp =
+                tempfile::NamedTempFile::new_in(&directory).map_err(|e| e.to_string())?;
+            temp.write_all(markdown.as_bytes())
+                .map_err(|e| e.to_string())?;
+            temp.as_file().sync_all().map_err(|e| e.to_string())?;
+            match temp.persist_noclobber(directory.join(&filename)) {
+                Ok(_) => {
+                    return Ok(doc_id(
+                        project_id,
+                        &join_relative(parent.as_deref(), &filename),
+                    ))
+                }
+                Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+        Err("No se ha encontrado un nombre libre".into())
+    }
     pub fn new(app_data_dir: PathBuf, version: String, profile: String) -> Self {
         let _ = std::fs::create_dir_all(&app_data_dir);
         Self {
@@ -2229,6 +2330,9 @@ impl LocalApi {
         };
         let response = knownext_ai::transcribe_audio(
             self.openai_key().as_deref(),
+            self.read_config()["ai"]["transcription"]["model"]
+                .as_str()
+                .unwrap_or("gpt-transcribe"),
             body.get("language").and_then(Value::as_str),
             bytes,
         );
@@ -4073,7 +4177,9 @@ impl LocalApi {
             self.openai_key().as_deref(),
             self.ai_model().as_str(),
         );
-        if let Err(error) = self.apply_ai_document_creations(project_id, &runtime_body, &mut response) {
+        if let Err(error) =
+            self.apply_ai_document_creations(project_id, &runtime_body, &mut response)
+        {
             self.mark_ai_response_error(
                 project_id,
                 runtime_body.get("documentId").and_then(Value::as_str),
@@ -4411,7 +4517,11 @@ impl LocalApi {
             .cloned()
             .unwrap_or_else(|| self.ai_research_brief(project_id, body.clone()));
         let now = knownext_core::now_iso();
+        let current_ai=self.read_config()["ai"].clone();
+        let ai_snapshot:serde_json::Map<String,Value>=["model","vision","imageGeneration","transcription","agentic","permissions","rag","diagrams"].into_iter().filter_map(|key| current_ai.get(key).map(|v|(key.to_string(),v.clone()))).collect();
         let job = json!({
+            "aiConfigSnapshot": ai_snapshot,
+            "exchangeRateSnapshot": currency::read(&self.app_data_dir),
             "id": knownext_core::compact_id("research"),
             "projectId": project_id,
             "brief": brief,
@@ -4517,7 +4627,8 @@ impl LocalApi {
         if job["status"].as_str() == Some("cancelled") {
             return Ok(());
         }
-        let config = self.read_config();
+        let config = if job["aiConfigSnapshot"].is_object() {json!({"ai":job["aiConfigSnapshot"]})} else {self.read_config()};
+        let model=config["ai"]["model"].as_str().unwrap_or("gpt-6.1-sol");
         if !config["ai"]["agentic"]["webResearchEnabled"]
             .as_bool()
             .unwrap_or(false)
@@ -4544,6 +4655,10 @@ impl LocalApi {
             return Ok(());
         }
 
+        if !currency::valid(&currency::read(&self.app_data_dir)) {
+            self.fail_ai_research_job_with_status(project_id,job_id,"failed_runtime","exchange_rate_required","Se necesita una referencia EUR/USD del BCE de los últimos siete días antes de consumir el presupuesto en euros.",true);
+            return Ok(());
+        }
         let job = self.ai_research_job(project_id, job_id);
         let request = job.get("request").cloned().unwrap_or_else(|| json!({}));
         let context_sources = self.resolve_ai_context_sources(project_id, &request);
@@ -4612,7 +4727,7 @@ impl LocalApi {
             );
             let step = knownext_ai::run_research_step(
                 self.openai_key().as_deref(),
-                self.ai_model().as_str(),
+                model,
                 "search",
                 &json!({
                     "brief": job["brief"],
@@ -4750,7 +4865,7 @@ impl LocalApi {
             );
             let evidence_step = knownext_ai::run_research_step(
                 self.openai_key().as_deref(),
-                self.ai_model().as_str(),
+                model,
                 "evidence",
                 &json!({
                     "brief": research_brief_for_worker(&job["brief"]),
@@ -4818,7 +4933,7 @@ impl LocalApi {
         );
         let synthesize_step = knownext_ai::run_research_step(
             self.openai_key().as_deref(),
-            self.ai_model().as_str(),
+            model,
             "synthesize",
             &json!({
                 "brief": research_brief_for_worker(&job["brief"]),
@@ -4876,7 +4991,7 @@ impl LocalApi {
         let allowed_visuals = job["brief"]["reportProfile"].clone();
         let write_step = knownext_ai::run_research_step(
             self.openai_key().as_deref(),
-            self.ai_model().as_str(),
+            model,
             "write",
             &json!({
                 "brief": research_brief_for_worker(&job["brief"]),
@@ -5191,7 +5306,7 @@ impl LocalApi {
         self.ai_research_job(project_id, job_id)["status"].as_str() == Some("cancelled")
     }
     fn read_ai_research_sources(&self, sources: &[Value]) -> Vec<Value> {
-        let client = Client::builder()
+        let client = knownext_core::http_client_builder()
             .timeout(Duration::from_secs(12))
             .build()
             .unwrap_or_else(|_| Client::new());
@@ -5735,11 +5850,7 @@ impl LocalApi {
                 "reasoningTokens": 0,
                 "embeddingTokens": 0,
                 "totalTokens": 0,
-                "estimatedCost": image_estimated_cost(
-                    generated["model"].as_str().unwrap_or_else(|| image_config["model"].as_str().unwrap_or("gpt-image-2")),
-                    generated["size"].as_str().unwrap_or_else(|| image_config["size"].as_str().unwrap_or("auto")),
-                    generated["quality"].as_str().unwrap_or_else(|| image_config["quality"].as_str().unwrap_or("auto")),
-                ),
+                "providerUsage": generated["usage"],
                 "usageSource": "estimated"
             }));
             generated_any = true;
@@ -5899,7 +6010,9 @@ impl LocalApi {
             let applied_message = if clears_target_page && scene_element_count == 0 {
                 format!("He limpiado la pagina activa como borrador: {summary}")
             } else if clears_target_page {
-                format!("He limpiado la pagina activa y he aplicado el dibujo como borrador: {summary}")
+                format!(
+                    "He limpiado la pagina activa y he aplicado el dibujo como borrador: {summary}"
+                )
             } else {
                 format!("He aplicado el dibujo como borrador en la pagina activa: {summary}")
             };
@@ -6242,6 +6355,9 @@ impl LocalApi {
                     );
                 }
             }
+            let job=self.ai_research_job(project_id,interaction_id);
+            let rate=if job["exchangeRateSnapshot"].is_object() {job["exchangeRateSnapshot"].clone()} else {currency::read(&self.app_data_dir)};
+            currency::price_entry(&mut entry, &rate);
             self.accumulate_ai_research_usage(project_id, interaction_id, &entry);
             self.record_ai_usage(entry);
         }
@@ -6287,6 +6403,7 @@ impl LocalApi {
     }
 
     fn record_ai_usage(&self, mut entry: Value) {
+        currency::price_entry(&mut entry, &currency::read(&self.app_data_dir));
         let now = knownext_core::now_iso();
         let month = entry
             .get("createdAt")
@@ -6361,7 +6478,31 @@ impl LocalApi {
             .map(|model| model["estimatedCost"].as_f64().unwrap_or(0.0))
             .sum::<f64>();
 
+        let entries: Vec<_> = usage["entries"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|e| e["month"].as_str() == Some(month.as_str()))
+            .collect();
+        let legacy = entries
+            .iter()
+            .filter(|e| e["costSchemaVersion"] != 2)
+            .count();
+        let unavailable = entries
+            .iter()
+            .filter(|e| e["costSchemaVersion"] == 2 && e["estimatedCostEur"].is_null())
+            .count();
+        let usd: f64 = entries
+            .iter()
+            .filter(|e| e["costSchemaVersion"] == 2)
+            .filter_map(|e| e["estimatedCostUsd"].as_f64())
+            .sum();
         json!({
+            "legacyEntries": legacy,
+            "unpricedEntries": unavailable,
+            "totalEstimatedCostUsd": usd,
+            "exchangeRate": currency::read(&self.app_data_dir),
+            "costNote": "Estimaciones. Los registros heredados y sin conversión no se incluyen en el total EUR.",
             "month": month,
             "currency": "EUR",
             "estimated": true,
@@ -6495,7 +6636,9 @@ fn accumulate_usage(accumulator: &mut AiUsageAccumulator, entry: &Value) {
     accumulator.reasoning_tokens += value_u64(entry.get("reasoningTokens"));
     accumulator.embedding_tokens += value_u64(entry.get("embeddingTokens"));
     accumulator.total_tokens += value_u64(entry.get("totalTokens"));
-    accumulator.estimated_cost += entry["estimatedCost"].as_f64().unwrap_or(0.0);
+    if entry["costSchemaVersion"] == 2 {
+        accumulator.estimated_cost += entry["estimatedCostEur"].as_f64().unwrap_or(0.0);
+    }
     accumulator.usage_sources.insert(
         entry["usageSource"]
             .as_str()
@@ -6587,38 +6730,8 @@ fn text_estimated_cost(
     cached_input_tokens: u64,
     output_tokens: u64,
 ) -> f64 {
-    let (input_per_million, output_per_million) = match model {
-        "gpt-5.5" => (5.00, 30.00),
-        "gpt-5.4" => (2.50, 15.00),
-        "gpt-5.4-nano" => (0.20, 1.25),
-        _ => (0.75, 4.50),
-    };
-    let billable_input = input_tokens.saturating_sub(cached_input_tokens) as f64;
-    let cached_input = cached_input_tokens as f64 * 0.25;
-    ((billable_input + cached_input) / 1_000_000.0 * input_per_million)
-        + (output_tokens as f64 / 1_000_000.0 * output_per_million)
-}
-
-fn image_estimated_cost(model: &str, size: &str, quality: &str) -> f64 {
-    let (low, high) = match model {
-        "gpt-image-1.5" => (0.009, 0.133),
-        "gpt-image-1-mini" => (0.005, 0.036),
-        "gpt-image-1" => (0.011, 0.167),
-        _ => (0.006, 0.211),
-    };
-    let quality_factor: f64 = match quality {
-        "low" => 0.0,
-        "medium" => 0.45,
-        "high" => 1.0,
-        _ => 0.35,
-    };
-    let size_factor: f64 = match size {
-        "3840x2160" | "2160x3840" => 1.0,
-        "2048x2048" | "2048x1152" => 0.72,
-        "1536x1024" | "1024x1536" => 0.45,
-        _ => 0.25,
-    };
-    low + ((high - low) * quality_factor.max(size_factor))
+    knownext_core::model_catalog::text_usd(model, input_tokens, cached_input_tokens, output_tokens)
+        .unwrap_or(0.0)
 }
 
 fn round_cost(value: f64) -> f64 {
@@ -8561,7 +8674,7 @@ fn github_http_client() -> Client {
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, HeaderValue::from_static("KnowNext.ai"));
     headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
-    Client::builder()
+    knownext_core::http_client_builder()
         .default_headers(headers)
         .timeout(Duration::from_secs(20))
         .build()
@@ -10171,23 +10284,21 @@ fn normalize_ai_diagram_config(diagrams: &mut Value) {
 }
 
 fn normalize_ai_image_generation_config(image_generation: &mut Value) {
-    let model = match image_generation["model"].as_str().unwrap_or("gpt-image-2") {
-        "gpt-image-2" => "gpt-image-2",
-        "gpt-image-1.5" => "gpt-image-1.5",
-        "gpt-image-1" => "gpt-image-1",
-        "gpt-image-1-mini" => "gpt-image-1-mini",
-        _ => "gpt-image-2",
-    };
-    image_generation["model"] = Value::from(model);
+    let model = image_generation["model"]
+        .as_str()
+        .filter(|m| !m.trim().is_empty())
+        .unwrap_or("gpt-image-2.5-flare")
+        .to_string();
+    image_generation["model"] = Value::from(model.clone());
 
     let size = match image_generation["size"].as_str().unwrap_or("auto") {
         "1024x1024" => "1024x1024",
         "1536x1024" => "1536x1024",
         "1024x1536" => "1024x1536",
-        "2048x2048" if model == "gpt-image-2" => "2048x2048",
-        "2048x1152" if model == "gpt-image-2" => "2048x1152",
-        "3840x2160" if model == "gpt-image-2" => "3840x2160",
-        "2160x3840" if model == "gpt-image-2" => "2160x3840",
+        "2048x2048" if model.starts_with("gpt-image-2") => "2048x2048",
+        "2048x1152" if model.starts_with("gpt-image-2") => "2048x1152",
+        "3840x2160" if model.starts_with("gpt-image-2") => "3840x2160",
+        "2160x3840" if model.starts_with("gpt-image-2") => "2160x3840",
         _ => "auto",
     };
     image_generation["size"] = Value::from(size);
@@ -10261,11 +10372,11 @@ fn is_hex_color(value: &str) -> bool {
 fn default_ai_config() -> Value {
     json!({
         "provider": "openai",
-        "model": "gpt-5.4-mini",
+        "model": knownext_core::model_catalog::catalog()["defaults"]["text"],
         "permissions": { "editDocuments": true, "editHandwrittenNotes": true, "drawHandwrittenNotes": true, "createFolders": false, "createDocuments": true, "deleteDocumentsAndFolders": false, "generateImages": true, "createImageAssets": true, "insertImagesIntoDocuments": true, "useDocumentContextForImageGeneration": true },
         "rag": { "enabled": true, "vectorStoreId": null, "lastIndexedAt": null, "status": "not-indexed", "error": null },
-        "vision": { "enabled": true, "model": "gpt-5.4-mini", "imageIndexingEnabled": false, "maxImagesPerPrompt": 4, "maxImageSizeMb": 12, "detail": "auto", "storeVisualDescriptions": true },
-        "imageGeneration": { "enabled": true, "model": "gpt-image-2", "size": "auto", "quality": "auto", "outputFormat": "png", "defaultFolder": "document_folder", "customFolderPath": "assets/generated", "maxImagesPerPrompt": 1, "confirmBeforeDocumentInsert": false, "confirmBeforeUsingMultipleSources": true, "storePromptMetadata": true },
+        "vision": { "enabled": true, "model": knownext_core::model_catalog::catalog()["defaults"]["vision"], "imageIndexingEnabled": false, "maxImagesPerPrompt": 4, "maxImageSizeMb": 12, "detail": "auto", "storeVisualDescriptions": true },
+        "imageGeneration": { "enabled": true, "model": knownext_core::model_catalog::catalog()["defaults"]["image"], "size": "auto", "quality": "auto", "outputFormat": "png", "defaultFolder": "document_folder", "customFolderPath": "assets/generated", "maxImagesPerPrompt": 1, "confirmBeforeDocumentInsert": false, "confirmBeforeUsingMultipleSources": true, "storePromptMetadata": true },
         "agentic": {
             "depth": "guided",
             "webResearchEnabled": true,
@@ -10283,7 +10394,7 @@ fn default_ai_config() -> Value {
                 "currentDocument": { "candidateSourceLimit": 10, "diagramsEnabled": true, "imagesEnabled": false }
             }
         },
-        "transcription": { "enabled": true, "model": "gpt-4o-mini-transcribe", "defaultTarget": "prompt", "defaultLanguage": "auto", "favoriteLanguages": ["es", "en"] },
+        "transcription": { "enabled": true, "model": knownext_core::model_catalog::catalog()["defaults"]["transcription"], "defaultTarget": "prompt", "defaultLanguage": "auto", "favoriteLanguages": ["es", "en"] },
         "diagrams": { "enabled": true, "visualProfile": "visual_local", "iconSet": "lucide", "imagePolicy": "project_assets", "betaPolicy": "ask", "defaultWidth": "wide", "aiGenerationMode": "visual" },
         "handwrittenDrawing": { "enabled": true, "creativeSketchEnabled": false, "defaultStyle": "professional_whiteboard", "maxElements": 48, "maxStrokes": 1400, "maxPagesPerRequest": 1 }
     })
@@ -10449,6 +10560,39 @@ mod tests {
     fn api() -> LocalApi {
         let root = std::env::temp_dir().join(knownext_core::compact_id("knownext-test"));
         LocalApi::new(root, "2.0.4".to_string(), "desktop".to_string())
+    }
+
+    #[test]
+    fn recording_documents_are_idempotent_and_never_replace_existing_files() {
+        let api = api();
+        let (project, root) = create_project(&api);
+        std::fs::write(root.join("Reunión.md"), "Original").unwrap();
+        let text = "[knownext-recording:session-test]: #\n\n# Reunión\nTexto";
+        let first = api
+            .create_recording_document("session-test", &project, None, "Reunión.md", text)
+            .unwrap();
+        let again = api
+            .create_recording_document("session-test", &project, None, "Reunión.md", text)
+            .unwrap();
+        assert_eq!(first, again);
+        assert!(first.ends_with("Reunión (1).md"));
+        assert_eq!(
+            std::fs::read_to_string(root.join("Reunión.md")).unwrap(),
+            "Original"
+        );
+        assert!(api
+            .create_recording_document(
+                "other",
+                &project,
+                Some(&format!("{project}::missing")),
+                "Missing.md",
+                text
+            )
+            .is_err());
+        assert!(!root.join("missing").exists());
+        assert!(api
+            .create_recording_document("other", &project, None, "../escape.md", text)
+            .is_err());
     }
 
     fn create_project(api: &LocalApi) -> (String, PathBuf) {
@@ -11688,8 +11832,28 @@ mod tests {
     }
 
     #[test]
+    fn legacy_usage_never_becomes_verified_euros() {
+        let api = api();
+        std::fs::create_dir_all(api.app_data_dir.join("ai")).unwrap();
+        api.write_json(&api.ai_usage_path(), &json!({"entries":[{"createdAt":"2026-06-08T10:00:00Z","model":"gpt-5.4-mini","capability":"document_ai","estimatedCost":99.0,"totalTokens":1500,"month":"2026-06"}]})).unwrap();
+        let query = BTreeMap::from([("month".into(), "2026-06".into())]);
+        let result = api.ai_usage_summary(&query);
+        assert_eq!(result["legacyEntries"], 1);
+        assert_eq!(result["totalEstimatedCost"], 0.0);
+        let stored = api.read_json(&api.ai_usage_path(), Value::Null);
+        assert_eq!(stored["entries"][0]["estimatedCost"], 99.0);
+        assert!(stored["entries"][0]["exchangeRate"].is_null());
+    }
+
+    #[test]
     fn ai_usage_summary_reads_recorded_monthly_provider_and_estimated_usage() {
         let api = api();
+        std::fs::write(
+            api.app_data_dir.join("eur-usd.json"),
+            json!({"date":knownext_core::now_iso()[..10],"usdPerEur":1.25,"source":"fixture"})
+                .to_string(),
+        )
+        .unwrap();
         api.record_ai_usage(json!({
             "createdAt": "2026-06-08T10:00:00Z",
             "projectId": "project",
@@ -11717,7 +11881,7 @@ mod tests {
             "reasoningTokens": 0,
             "embeddingTokens": 0,
             "totalTokens": 0,
-            "estimatedCost": image_estimated_cost("gpt-image-2", "2048x2048", "high"),
+            "providerUsage": {"input_tokens_details":{"text_tokens":100,"image_tokens":0},"output_tokens":1000},
             "usageSource": "estimated"
         }));
         api.record_ai_usage(json!({
@@ -12423,12 +12587,18 @@ mod tests {
             .unwrap();
 
         assert_eq!(response["operations"][0]["type"], "handwritten_modified");
-        assert_eq!(response["conversationEvents"][0]["type"], "handwritten_modified");
+        assert_eq!(
+            response["conversationEvents"][0]["type"],
+            "handwritten_modified"
+        );
         assert!(response["answer"]
             .as_str()
             .unwrap()
             .contains("He aplicado el dibujo como borrador"));
-        assert_eq!(response["conversationEvents"][0]["content"], response["answer"]);
+        assert_eq!(
+            response["conversationEvents"][0]["content"],
+            response["answer"]
+        );
         assert!(response["drawingProposal"].is_null());
         assert_eq!(response["updatedHandwrittenNote"]["noteId"], note_id);
         assert!(
@@ -14347,3 +14517,4 @@ mod tests {
         );
     }
 }
+pub mod currency;
