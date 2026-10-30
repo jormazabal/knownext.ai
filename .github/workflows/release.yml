@@ -5,6 +5,15 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      release_ref:
+        description: Existing release tag to build (empty uses the selected workflow ref)
+        type: string
+        default: ""
+      android_only:
+        description: Recover Android assets without rebuilding verified Windows installers
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -17,6 +26,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_ref || github.ref }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -27,6 +38,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - name: Validate Android recovery tag
+        if: ${{ inputs.android_only }}
+        shell: bash
+        env:
+          REQUESTED_REF: ${{ inputs.release_ref }}
+        run: |
+          test "$REQUESTED_REF" = "v$(cat VERSION)" || { echo "Android recovery requires the exact VERSION tag." >&2; exit 1; }
+          test "$(git describe --tags --exact-match HEAD)" = "$REQUESTED_REF"
+          node scripts/check-version.mjs
 
       - name: Check signing inputs
         env:
@@ -43,10 +64,13 @@ jobs:
     name: Build and publish Windows release
     runs-on: windows-latest
     needs: release-preflight
+    if: ${{ inputs.android_only != true }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_ref || github.ref }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -124,6 +148,7 @@ jobs:
 
   release-android:
     name: Build and upload Android private APK
+    if: ${{ !cancelled() && needs.release-preflight.result == 'success' && (needs.release-windows.result == 'success' || (inputs.android_only && needs.release-windows.result == 'skipped')) }}
     runs-on: ubuntu-latest
     needs:
       - release-preflight
@@ -132,6 +157,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_ref || github.ref }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -151,6 +178,9 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
 
       - name: Install Android SDK packages
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358"
