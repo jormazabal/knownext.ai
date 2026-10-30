@@ -79,3 +79,10 @@ pnpm test
 pnpm rust:test
 pnpm release:check
 ```
+
+
+### Validar grabación sin enviar audio personal
+
+Las pruebas de `knownext-recording` usan PCM sintético y no abren dispositivos ni llaman a OpenAI. Las pruebas de componentes usan contratos simulados. Para validar WASAPI/AudioRecord, sigue la sección de grabación del checklist manual y utiliza una muestra preparada. La compilación de desarrollo no registra autoinicio; sus grabaciones usan `recordings-dev`.
+
+La comprobación independiente de Kotlin es `:app:compileArm64DebugKotlin -x rustBuildArm64Debug` en `src-tauri/gen/android`; debe acompañarse de la compilación Rust para Android. Si Java 21 falla con `Unable to establish loopback connection`, esta máquina ha requerido una ruta temporal corta mediante `-Djdk.net.unixdomain.tmpdir` y `-Djava.nio.channels.spi.SelectorProvider=sun.nio.ch.WindowsSelectorProvider`. Es un ajuste del entorno de compilación, no del producto.

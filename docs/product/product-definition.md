@@ -91,3 +91,12 @@ KnowNext.ai is a compact local-first workspace for Markdown documentation. Users
 - Document previews and exports are Rust-managed and best-effort for formats that require complex conversion.
 - Handwritten-note editing is implemented as a first production path using web Pointer Events. Hardware acceptance must still be run on real Windows pen and Android stylus devices before claiming release acceptance.
 - Any remaining service double must be centralized, routed through the runtime boundary, and documented in release notes.
+
+
+## Grabaciones de reuniones
+
+La aplicación incorpora Configuración → Audio (preferencias), Grabaciones (operación y recuperación) y una miniventana de bandeja Windows. El menú de carpetas y la raíz permiten «Grabar audio y crear documento…». Desde un destino concreto se crea allí el Markdown; desde el acceso general se elige proyecto/carpeta al parar. Cancelar esa selección conserva la sesión.
+
+Pausar no transcribe ni elimina audio. Parar finaliza la captura y permite la transcripción con GPT-Transcribe, sin atribución de hablantes. La clave OpenAI existente se reutiliza por dispositivo. Los ajustes se aplican a sesiones nuevas; los controles de entrada de la sesión permiten silenciar y cambiar dispositivo estando en pausa. El inicio con Windows no inicia grabaciones.
+
+La bandeja es naranja mientras graba, gris en reposo/transcripción y gris con pausa cuando está pausada. Cerrar la miniventana la oculta. El panel ofrece pendientes, reproducción local, reintentos, destino, conservación y eliminación de audio independiente del documento. Consulta los límites y contratos en [Grabación de reuniones](../architecture/recording-runtime.md).

@@ -163,3 +163,38 @@ Use `docs/development/functional-validation-matrix.md` to record which areas are
 - Some document previews may be best-effort depending on Rust conversion support.
 
 Any limitation here must be repeated in `docs/releases/2.3.0.md` before publication.
+
+
+## Grabación y catálogo OpenAI — aceptación pendiente en dispositivos
+
+- [ ] Windows: Teams con auriculares; micrófono solo, salida sola y ambas. Verificar nombres efectivos, niveles y ausencia de reproducción del micrófono.
+- [ ] Pausa: contador detenido, barras apagadas, ninguna muestra capturada; reanudar mantiene sesión. Desactivar última entrada pausa sin reanudar al activarla.
+- [ ] Desconectar dispositivo, cambiarlo estando pausado y suspender el equipo: interrupción visible, audio recuperable, sin reanudación automática.
+- [ ] Bandeja gris/naranja/pausa, X oculta, instancia instalada y desarrollo independientes, autoinicio sin captura y fallo de registro visible.
+- [ ] Carpeta/raíz, destino al parar, cancelar selector, cero proyectos, carpeta eliminada y nombres coincidentes. No sobrescribir ni cambiar destino silenciosamente.
+- [ ] Reunión de dos horas con pausas y funcionamiento offline: memoria acotada, duración correcta y sincronía entre fuentes.
+- [ ] Android físico: pantalla bloqueada, cambio de aplicación, rotación, llamada entrante, micrófono ocupado, permisos denegados/revocados, notificación y controles.
+- [ ] Android: matar proceso tras parar; WorkManager recupera fragmentos sin WebView; abrir Grabaciones desde la notificación. Probar ahorro de batería.
+- [ ] Castellano, euskera y bilingüe con fixture autorizado: integridad de palabras en cortes; no prometer diarización.
+- [ ] Cancelación durante envío, timeout con resultado desconocido, reintento explícito, fallo solo al guardar: conservar resultados y no duplicar documentos.
+- [ ] Audio retenido siete días desde documento, Conservar, eliminación manual, limpieza con reproducción/procesamiento activo. El MD permanece.
+- [ ] Teclado, Escape/foco de diálogos, 200 % de escala, pantalla pequeña y controles táctiles de 44 px; estados comprensibles sin color.
+- [ ] Catálogo: desconocido/retirado visible sin sustitución; parámetros compatibles; comprobar acceso sin generación facturable.
+- [ ] Coste: USD, conversión BCE fechada, sin cambio, referencia >7 días, históricos separados y presupuesto EUR detenido sin referencia válida.
+- [ ] Mantener edición Milkdown, navegación, guardado, selector de proyectos, menús de árbol, pestañas, historial, IA, importación/exportación y previsualizaciones durante procesamiento.
+- [ ] Regresión de ajustes, actualización Windows y Android offline. Esta tarea no publica ni instala una release.
+
+
+### Evidencia parcial Windows del 30/10/2026
+
+- [x] Loopback Realtek con voz sintética, inicio desde PRUEBAS, pausa/continuación en una sesión y Markdown correcto.
+- [x] PCM sin cambios durante la pausa; las frases de pausa no aparecen en las dos transcripciones reales.
+- [x] Inicio general, destino diferido, cancelación conservadora y recuperación desde el historial.
+- [x] Guardado con nombre coincidente crea sufijo (1) y conserva el original.
+- [x] Botón derecho de carpeta y Markdown nuevo sin identificador técnico visible.
+- [x] Miniventana abierta por el usuario desde la bandeja; inicio, pausa, continuación, parada, selección de destino, transcripción y apertura del Markdown verificados.
+- [x] Panel principal y miniventana muestran la misma sesión y contador.
+- [x] Barras con señal durante reproducción sintética; PCM y SHA-256 estables durante la pausa de la sesión de bandeja.
+- [ ] Inspección específica del cambio de color del icono en el área de notificaciones.
+
+Detalle y alcance: [validación de grabación](recording-validation.md#prueba-nativa-windows--30-de-octubre-de-2026).

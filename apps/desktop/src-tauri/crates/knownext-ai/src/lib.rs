@@ -12,6 +12,10 @@ pub fn answer_interaction(
     openai_key: Option<&str>,
     model: &str,
 ) -> Value {
+    if let Err(message) = knownext_core::model_catalog::validate(model, "text") {
+        return json!({"status":"failed","error":"invalid_model","message":message,"answer":message,"usageRecords":[]});
+    }
+
     let prompt = payload
         .get("prompt")
         .and_then(Value::as_str)
@@ -237,6 +241,10 @@ pub fn run_research(
     openai_key: Option<&str>,
     model: &str,
 ) -> Value {
+    if let Err(message) = knownext_core::model_catalog::validate(model, "text") {
+        return json!({"status":"failed","error":"invalid_model","message":message,"answer":message,"usageRecords":[]});
+    }
+
     let Some(openai_key) = openai_key.filter(|value| !value.trim().is_empty()) else {
         return json!({
             "status": "failed",
@@ -336,6 +344,10 @@ pub fn run_research_step(
     payload: &Value,
     use_web: bool,
 ) -> Value {
+    if let Err(message) = knownext_core::model_catalog::validate(model, "text") {
+        return json!({"status":"failed","error":"invalid_model","message":message,"answer":message,"usageRecords":[]});
+    }
+
     let Some(openai_key) = openai_key.filter(|value| !value.trim().is_empty()) else {
         return json!({
             "status": "failed",
@@ -824,9 +836,14 @@ fn prompt_payload(prompt: &str, active_markdown: &str, document_id: Option<&str>
 
 pub fn transcribe_audio(
     openai_key: Option<&str>,
+    model: &str,
     language: Option<&str>,
     wav_bytes: Vec<u8>,
 ) -> Value {
+    if let Err(message) = knownext_core::model_catalog::validate(model, "transcription") {
+        return json!({"status":"error","transcript":"","message":message});
+    }
+
     let Some(openai_key) = openai_key.filter(|value| !value.trim().is_empty()) else {
         return json!({
             "status": "error",
@@ -846,7 +863,7 @@ pub fn transcribe_audio(
     }
 
     let mut form = multipart::Form::new()
-        .text("model", "gpt-4o-mini-transcribe")
+        .text("model", model.to_string())
         .text("response_format", "json")
         .part(
             "file",
@@ -856,7 +873,14 @@ pub fn transcribe_audio(
                 .unwrap_or_else(|_| multipart::Part::bytes(Vec::new())),
         );
     if let Some(language) = language.filter(|value| *value != "auto" && !value.is_empty()) {
-        form = form.text("language", language.to_string());
+        form = form.text(
+            if model == "gpt-transcribe" {
+                "languages[]"
+            } else {
+                "language"
+            },
+            language.to_string(),
+        );
     }
 
     let response = openai_client(openai_key)
@@ -912,6 +936,24 @@ pub fn generate_image(openai_key: Option<&str>, config: &Value, prompt: &str) ->
             .and_then(Value::as_str)
             .unwrap_or("gpt-image-2"),
     );
+    let capabilities = match knownext_core::model_catalog::validate(model, "image") {
+        Ok(m) => m,
+        Err(message) => return json!({"status":"error","message":message}),
+    };
+    for (field, capability) in [
+        ("size", "sizes"),
+        ("quality", "qualities"),
+        ("outputFormat", "formats"),
+    ] {
+        if let Some(value) = config[field].as_str() {
+            if !capabilities[capability]
+                .as_array()
+                .is_some_and(|a| a.iter().any(|v| v == value))
+            {
+                return json!({"status":"error","message":format!("{model} no admite {field}: {value}")});
+            }
+        }
+    }
     let mut request = json!({
         "model": model,
         "prompt": prompt,
@@ -957,6 +999,7 @@ pub fn generate_image(openai_key: Option<&str>, config: &Value, prompt: &str) ->
                     "status": "completed",
                     "mimeType": mime_for_image_format(request["output_format"].as_str().unwrap_or("png")),
                     "dataBase64": data_base64,
+                    "usage": body["usage"],
                     "revisedPrompt": item.get("revised_prompt").and_then(Value::as_str),
                     "model": request["model"].as_str().unwrap_or("gpt-image-2"),
                     "size": request.get("size").and_then(Value::as_str).unwrap_or("auto"),
@@ -3336,14 +3379,8 @@ fn normalize_image_file_name(raw: &str, default_format: &str) -> String {
     name
 }
 
-fn normalize_image_model(model: &str) -> &'static str {
-    match model {
-        "gpt-image-2" => "gpt-image-2",
-        "gpt-image-1.5" => "gpt-image-1.5",
-        "gpt-image-1" => "gpt-image-1",
-        "gpt-image-1-mini" => "gpt-image-1-mini",
-        _ => "gpt-image-2",
-    }
+fn normalize_image_model(model: &str) -> &str {
+    model
 }
 
 fn normalize_image_size(size: &str) -> &'static str {
@@ -3361,7 +3398,7 @@ fn normalize_image_size(size: &str) -> &'static str {
 
 fn normalize_image_size_for_model(model: &str, size: &str) -> &'static str {
     let normalized = normalize_image_size(size);
-    if model == "gpt-image-2"
+    if model.starts_with("gpt-image-2")
         || matches!(normalized, "auto" | "1024x1024" | "1536x1024" | "1024x1536")
     {
         normalized
@@ -3375,6 +3412,8 @@ fn normalize_image_quality(quality: &str) -> &'static str {
         "low" => "low",
         "medium" => "medium",
         "high" => "high",
+        "xhigh" => "xhigh",
+        "max" => "max",
         _ => "auto",
     }
 }
@@ -3402,7 +3441,7 @@ fn openai_client(openai_key: &str) -> Client {
     if let Ok(value) = HeaderValue::from_str(&format!("Bearer {openai_key}")) {
         headers.insert(AUTHORIZATION, value);
     }
-    Client::builder()
+    knownext_core::http_client_builder()
         .default_headers(headers)
         .timeout(Duration::from_secs(90))
         .build()
@@ -3489,18 +3528,8 @@ fn usage_number(value: &Value, keys: &[&str]) -> u64 {
         .unwrap_or(0)
 }
 
-fn normalize_text_model(model: &str) -> &'static str {
-    match model {
-        "gpt-5.5" => "gpt-5.5",
-        "gpt-5.4" => "gpt-5.4",
-        "gpt-5.4-mini" => "gpt-5.4-mini",
-        "gpt-5.4-nano" => "gpt-5.4-nano",
-        "gpt-5.2" => "gpt-5.5",
-        "gpt-5" => "gpt-5.4",
-        "gpt-5-mini" => "gpt-5.4-mini",
-        "gpt-5-nano" => "gpt-5.4-nano",
-        _ => "gpt-5.4-mini",
-    }
+fn normalize_text_model(model: &str) -> &str {
+    model
 }
 
 fn summarize_error_detail(detail: &str) -> String {
@@ -3911,8 +3940,14 @@ mod tests {
         .unwrap();
 
         assert_eq!(response["status"], "completed");
-        assert_eq!(response["operations"][0]["type"], "handwritten_drawing_generated");
-        assert_eq!(response["operations"][0]["replacementPolicy"], "clean_existing");
+        assert_eq!(
+            response["operations"][0]["type"],
+            "handwritten_drawing_generated"
+        );
+        assert_eq!(
+            response["operations"][0]["replacementPolicy"],
+            "clean_existing"
+        );
         assert_eq!(
             response["operations"][0]["sceneSpec"]["elements"]
                 .as_array()
@@ -4239,7 +4274,11 @@ mod tests {
     #[test]
     fn gpt_image_2_is_the_supported_default_image_generation_model() {
         assert_eq!(normalize_image_model("gpt-image-2"), "gpt-image-2");
-        assert_eq!(normalize_image_model("unknown-image-model"), "gpt-image-2");
+        assert_eq!(
+            normalize_image_model("unknown-image-model"),
+            "unknown-image-model"
+        );
+        assert!(knownext_core::model_catalog::validate("unknown-image-model", "image").is_err());
         assert_eq!(normalize_image_size("2048x2048"), "2048x2048");
         assert_eq!(normalize_image_size("2048x1152"), "2048x1152");
         assert_eq!(normalize_image_size("3840x2160"), "3840x2160");

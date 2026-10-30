@@ -5,6 +5,9 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::http::{header, Response, StatusCode, Uri};
 use tauri::Manager;
+#[cfg(target_os = "android")]
+mod android_recording;
+mod recording;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 static TRACE_LOG_LOCK: Mutex<()> = Mutex::new(());
@@ -392,10 +395,32 @@ fn text_response(status: StatusCode, message: &str) -> Response<Vec<u8>> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // A separate WebView profile lets the installed app and development build coexist.
+    #[cfg(all(windows, debug_assertions))]
+    if std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_none() {
+        if let Some(local)=std::env::var_os("LOCALAPPDATA") {
+            std::env::set_var("WEBVIEW2_USER_DATA_FOLDER",PathBuf::from(local).join("ai.knownext.desktop").join("webview-recording-dev"));
+        }
+    }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     install_mobile_crypto_provider();
 
     let builder = tauri::Builder::default();
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(android_recording::plugin());
+    #[cfg(all(desktop, not(debug_assertions)))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    }));
+    #[cfg(desktop)]
+    let builder = builder.plugin(
+        tauri_plugin_autostart::Builder::new()
+            .args(["--background"])
+            .build(),
+    );
 
     builder
         .register_uri_scheme_protocol("knownext-asset", |ctx, request| {
@@ -417,12 +442,40 @@ pub fn run() {
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
 
             let app_data_dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&app_data_dir)?;
+            let currency_root = app_data_dir.clone();
+            std::thread::spawn(move || loop {
+                let _ = knownext_storage::currency::refresh(&currency_root);
+                std::thread::sleep(std::time::Duration::from_secs(3600));
+            });
+            let recording_root = app_data_dir.join(if cfg!(debug_assertions) {
+                "recordings-dev"
+            } else {
+                "recordings"
+            });
+            #[cfg(not(target_os = "android"))]
+            let recordings = knownext_recording::RecordingService::new(recording_root)
+                .map_err(std::io::Error::other)?;
+            #[cfg(target_os = "android")]
+            let recordings = android_recording::init_runtime(app_data_dir.clone())
+                .map_err(std::io::Error::other)?;
+            app.manage(recordings);
             let api = LocalApi::new(
                 app_data_dir,
                 env!("CARGO_PKG_VERSION").to_string(),
                 runtime_profile().to_string(),
             );
             app.manage(LocalApiState(Mutex::new(api)));
+            #[cfg(desktop)]
+            {
+                recording::setup_tray(app.handle())?;
+                recording::initialize(app.handle());
+                if std::env::args().any(|a| a == "--background") {
+                    if let Some(w) = app.get_webview_window("main") {
+                        let _ = w.hide();
+                    }
+                }
+            }
 
             Ok(())
         })
@@ -432,8 +485,35 @@ pub fn run() {
             get_trace_log_status,
             record_trace_log,
             open_folder,
-            get_runtime_service_status
+            get_runtime_service_status,
+            recording::recording_request,
+            recording::recording_audio,
+            recording::openai_model_access
         ])
+        .on_window_event(|window, event| {
+            #[cfg(desktop)]
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let snapshot = window
+                    .state::<knownext_recording::RecordingService>()
+                    .request("snapshot", serde_json::json!({}))
+                    .ok();
+                let keep = snapshot.as_ref().is_some_and(|s| {
+                    s["settings"]["keepInTray"] == true
+                        || !s["captureOwner"].is_null()
+                        || s["sessions"].as_array().is_some_and(|a| {
+                            a.iter()
+                                .any(|s| s["status"] == "transcribing" || s["status"] == "queued")
+                        })
+                });
+                if window.label() == "recordings" || keep {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    let _ = window
+                        .state::<knownext_recording::RecordingService>()
+                        .request("preview-stop", serde_json::json!({}));
+                }
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running KnowNext.ai");
 }

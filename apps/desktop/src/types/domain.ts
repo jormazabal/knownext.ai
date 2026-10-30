@@ -461,7 +461,7 @@ export type AiRagConfig = {
   error?: string | null;
 };
 
-export type AiVisionModelId = "gpt-5.4-mini" | "gpt-5.4" | "gpt-5.5";
+export type AiVisionModelId = string;
 
 export type AiVisionConfig = {
   enabled: boolean;
@@ -473,7 +473,7 @@ export type AiVisionConfig = {
   storeVisualDescriptions: boolean;
 };
 
-export type AiImageGenerationModelId = "gpt-image-2" | "gpt-image-1.5" | "gpt-image-1" | "gpt-image-1-mini";
+export type AiImageGenerationModelId = string;
 
 export type AiImageGenerationConfig = {
   enabled: boolean;
@@ -489,7 +489,7 @@ export type AiImageGenerationConfig = {
   storePromptMetadata: boolean;
 };
 
-export type AiModelId = "gpt-5.5" | "gpt-5.4" | "gpt-5.4-mini" | "gpt-5.4-nano";
+export type AiModelId = string;
 export type AiAgenticDepth = "quick" | "guided" | "deep" | "bounded_autonomous";
 export type AiResearchPresetId = "quick" | "deep" | "compare" | "currentDocument";
 export type AiResearchReportLength = "brief" | "standard" | "wide" | "exhaustive";
@@ -500,7 +500,7 @@ export type AiResearchPresetConfig = {
 };
 export type AiTranscriptionTarget = "prompt" | "document";
 export type AiTranscriptionLanguage = "auto" | "es" | "en" | "fr" | "de" | "it" | "pt" | "ca" | "eu" | "gl";
-export type AiTranscriptionModelId = "gpt-4o-mini-transcribe";
+export type AiTranscriptionModelId = string;
 
 export type AiAgenticConfig = {
   depth: AiAgenticDepth;
@@ -2062,6 +2062,11 @@ export type AiUsageCapabilitySummary = {
 };
 
 export type AiUsageSummaryResponse = {
+  legacyEntries?: number;
+  unpricedEntries?: number;
+  totalEstimatedCostUsd?: number;
+  exchangeRate?: {date?:string; usdPerEur?:number; source?:string};
+  costNote?:string;
   month: string;
   currency: "EUR";
   estimated: boolean;

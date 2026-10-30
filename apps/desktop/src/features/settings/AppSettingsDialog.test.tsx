@@ -72,7 +72,7 @@ describe("AppSettingsDialog", () => {
     expect(screen.getByText("Modelos de IA utilizados")).toBeInTheDocument();
     expect(screen.getAllByText("Imágenes (generación)").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Imágenes (visión)").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("gpt-image-2").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("gpt-image-2.5-flare").length).toBeGreaterThan(0);
     expect(screen.getByText("Sin cambios pendientes")).toBeInTheDocument();
     expect(screen.queryByText("Imágenes (generación y visión)")).not.toBeInTheDocument();
     expect(screen.queryByText("Vector store")).not.toBeInTheDocument();
@@ -361,10 +361,10 @@ describe("AppSettingsDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: /limpiar índice/i }));
     expect(onRebuildAiIndex).toHaveBeenCalledTimes(1);
     expect(onDeleteAiIndex).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("button", { name: /gpt-5.4-mini/i })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: /gpt-6.1-sol/i })).toHaveAttribute("aria-expanded", "false");
 
-    fireEvent.click(screen.getByRole("button", { name: /gpt-5.4-mini/i }));
-    const selectedModelOption = screen.getAllByRole("option", { name: /gpt-5.4-mini/i }).find((option) => option.getAttribute("aria-selected") === "true");
+    fireEvent.click(screen.getByRole("button", { name: /gpt-6.1-sol/i }));
+    const selectedModelOption = screen.getAllByRole("option", { name: /gpt-6.1-sol/i }).find((option) => option.getAttribute("aria-selected") === "true");
     expect(selectedModelOption).toBeTruthy();
     expect(screen.getByText("Ver guía de modelos")).toBeInTheDocument();
 
@@ -418,16 +418,16 @@ describe("AppSettingsDialog", () => {
     expect(screen.getByText("Generación de imágenes")).toBeInTheDocument();
     expect(screen.getByText("Modelo imagen")).toBeInTheDocument();
     const imageModelButton = screen.getByRole("button", { name: "Modelo imagen" });
-    expect(screen.getByText("gpt-image-2")).toBeInTheDocument();
-    expect(screen.getByText("$0.006-$0.211")).toBeInTheDocument();
-    expect(screen.getByText("por imagen 1K")).toBeInTheDocument();
+    expect(screen.getByText("gpt-image-2.5-flare")).toBeInTheDocument();
+    expect(screen.getByText("$5 / $30")).toBeInTheDocument();
+    expect(screen.getAllByText("USD / 1 M tokens · entrada / salida").length).toBeGreaterThan(0);
     expect(screen.queryByText("Calculadora")).not.toBeInTheDocument();
     expect(screen.getByRole("option", { name: "2048 x 2048" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "3840 x 2160" })).toBeInTheDocument();
     expect(screen.getByLabelText("Carpeta destino")).toBeInTheDocument();
     fireEvent.click(imageModelButton);
-    expect(screen.getByText(/calidad anterior/i)).toBeInTheDocument();
-    expect(screen.getByText("$0.009-$0.133")).toBeInTheDocument();
+    expect(screen.getAllByText(/Retirada anunciada/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Tarifa no disponible").length).toBeGreaterThan(0);
     const previousImageModelOption = screen.getAllByRole("option", { name: /gpt-image-1.5/i }).find((option) => option.tagName === "BUTTON");
     expect(previousImageModelOption).toBeTruthy();
     fireEvent.click(previousImageModelOption!);

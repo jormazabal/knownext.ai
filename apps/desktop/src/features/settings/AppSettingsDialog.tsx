@@ -1,3 +1,6 @@
+import { ModelAccessCheck } from "../../components/ai/ModelAccessCheck";
+import { AudioSettings } from "../recordings/AudioSettings";
+import { modelOptions as catalogOptions, openAiCatalog } from "../../lib/ai/modelCatalog";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Activity, ArrowRight, Brain, Check, ChevronDown, Copy, Download, Eye, FileText, FolderOpen, Gauge, Grid2X2, Image as ImageIcon, Info, KeyRound, Languages, ListChecks, Mic, Monitor, Moon, Paintbrush, RefreshCw, RotateCcw, Server, Settings, ShieldCheck, Sparkles, Sun, Trash2, Type as TypeIcon, Underline, Workflow, Wrench, X } from "lucide-react";
@@ -9,7 +12,7 @@ import type { AiConfigStatus, AiImageGenerationModelId, AiIndexStatusResponse, A
 import type { TraceLogStatus } from "../../lib/runtime/logging";
 import type { RuntimeServicesStatus } from "../../lib/runtime/services";
 
-type AppSettingsSection = "summary" | "interface" | "export" | "ai" | "skills" | "capabilities" | "system";
+type AppSettingsSection = "audio" | "summary" | "interface" | "export" | "ai" | "skills" | "capabilities" | "system";
 export type AppSettingsSaveState = "idle" | "saving" | "saved" | "error" | "local-only";
 
 const exportFontOptions: Array<[string, string]> = [
@@ -24,6 +27,7 @@ const exportFontOptions: Array<[string, string]> = [
 ];
 
 type AppSettingsDialogProps = {
+  onOpenRecordings?: () => void;
   open: boolean;
   appearance: AppearanceConfig;
   diagnostics: DiagnosticsConfig;
@@ -52,47 +56,17 @@ type AppSettingsDialogProps = {
   onRefreshRuntimeServices: () => void;
 };
 
-const aiModelIds: AiModelId[] = ["gpt-5.4-mini", "gpt-5.4", "gpt-5.5", "gpt-5.4-nano"];
-const aiVisionModelIds: AiVisionModelId[] = ["gpt-5.4-mini", "gpt-5.4", "gpt-5.5"];
-const aiImageGenerationModelIds: AiImageGenerationModelId[] = ["gpt-image-2", "gpt-image-1.5", "gpt-image-1-mini", "gpt-image-1"];
+const aiModelIds = catalogOptions("text").map(m=>m.id);
+const aiVisionModelIds = catalogOptions("vision").map(m=>m.id);
+const aiImageGenerationModelIds = catalogOptions("image").map(m=>m.id);
 const baseImageGenerationSizeOptions: AiConfigStatus["imageGeneration"]["size"][] = ["auto", "1024x1024", "1536x1024", "1024x1536"];
 const gptImage2SizeOptions: AiConfigStatus["imageGeneration"]["size"][] = [...baseImageGenerationSizeOptions, "2048x2048", "2048x1152", "3840x2160", "2160x3840"];
 const transcriptionLanguages: AiTranscriptionLanguage[] = ["auto", "es", "en", "fr", "de", "it", "pt", "ca", "eu", "gl"];
 
-const aiModelMeter: Record<AiModelId, { intelligence: number; cost: number }> = {
-  "gpt-5.5": { intelligence: 6, cost: 5 },
-  "gpt-5.4": { intelligence: 5, cost: 3 },
-  "gpt-5.4-mini": { intelligence: 4, cost: 2 },
-  "gpt-5.4-nano": { intelligence: 2, cost: 1 },
-};
 
-const aiModelPriceParts: Record<AiModelId, { input: string; output: string }> = {
-  "gpt-5.5": { input: "$5.00", output: "$30.00" },
-  "gpt-5.4": { input: "$2.50", output: "$15.00" },
-  "gpt-5.4-mini": { input: "$0.75", output: "$4.50" },
-  "gpt-5.4-nano": { input: "$0.20", output: "$1.25" },
-};
 
-const aiModelTagTone: Record<AiModelId, AiModelSelectorTone> = {
-  "gpt-5.5": "maximum",
-  "gpt-5.4": "advanced",
-  "gpt-5.4-mini": "recommended",
-  "gpt-5.4-nano": "economy",
-};
 
-const aiImageGenerationModelMeter: Record<AiImageGenerationModelId, { quality: number; cost: number }> = {
-  "gpt-image-2": { quality: 6, cost: 5 },
-  "gpt-image-1.5": { quality: 5, cost: 3 },
-  "gpt-image-1-mini": { quality: 3, cost: 1 },
-  "gpt-image-1": { quality: 4, cost: 5 },
-};
 
-const aiImageGenerationModelTagTone: Record<AiImageGenerationModelId, AiModelSelectorTone> = {
-  "gpt-image-2": "recommended",
-  "gpt-image-1.5": "advanced",
-  "gpt-image-1-mini": "economy",
-  "gpt-image-1": "neutral",
-};
 
 type PermissionModeId = "conservative" | "assisted" | "productive" | "custom";
 
@@ -136,6 +110,7 @@ const permissionModePresets: Record<Exclude<PermissionModeId, "custom">, AiConfi
 };
 
 export function AppSettingsDialog({
+  onOpenRecordings,
   open,
   appearance,
   diagnostics,
@@ -169,6 +144,7 @@ export function AppSettingsDialog({
     { id: "summary", label: text.summaryNav, description: text.summaryNavDescription, icon: Grid2X2 },
     { id: "interface", label: text.interfaceNav, description: text.interfaceNavDescription, icon: Monitor },
     { id: "ai", label: text.aiNav, description: text.aiNavDescription, icon: Brain },
+    { id: "audio", label: "Audio", description: "Grabación y transcripción de reuniones", icon: Mic },
     { id: "skills", label: text.skillsNav, description: text.skillsNavDescription, icon: Sparkles },
     { id: "capabilities", label: text.capabilitiesNav, description: text.capabilitiesNavDescription, icon: Wrench },
     { id: "export", label: text.exportNav, description: text.exportNavDescription, icon: Download },
@@ -252,6 +228,8 @@ export function AppSettingsDialog({
                 text={text}
                 onSelectSection={setActiveSection}
               />
+            ) : activeSection === "audio" ? (
+              <AudioSettings onOpenRecordings={() => { onClose(); onOpenRecordings?.(); }} onCredentials={() => setActiveSection("ai")} />
             ) : activeSection === "interface" ? (
               <AppearanceSettings appearance={appearance} text={text} onAppearanceChange={onAppearanceChange} />
             ) : activeSection === "export" ? (
@@ -357,14 +335,9 @@ function SummarySettings({
 }) {
   const settingsAi = normalizeAiStatus(ai);
   const runtimeService = runtimeServicesStatus?.services.find((service) => service.id === "local-runtime") ?? runtimeServicesStatus?.services[0] ?? null;
-  const model = text.aiModels[settingsAi.model];
-  const modelMeter = aiModelMeter[settingsAi.model];
-  const modelPrice = aiModelPriceParts[settingsAi.model];
-  const imageGenerationModel = text.imageGenerationModels[settingsAi.imageGeneration.model];
-  const imageGenerationMeter = aiImageGenerationModelMeter[settingsAi.imageGeneration.model];
-  const visionModel = text.aiModels[settingsAi.vision.model];
-  const visionMeter = aiModelMeter[settingsAi.vision.model];
-  const visionPrice = aiModelPriceParts[settingsAi.vision.model];
+  const model = (text.aiModels[settingsAi.model as keyof typeof text.aiModels] ?? { name: settingsAi.model, description: "Modelo OpenAI", recommended: false });
+  const imageGenerationModel = (text.imageGenerationModels[settingsAi.imageGeneration.model as keyof typeof text.imageGenerationModels] ?? { name: settingsAi.imageGeneration.model, description: "Generación de imágenes", recommended: false, price: "Según tokens utilizados", tag: "Disponible" });
+  const visionModel = (text.aiModels[settingsAi.vision.model as keyof typeof text.aiModels] ?? { name: settingsAi.vision.model, description: "Modelo OpenAI", recommended: false });
   const permissionMode = getPermissionMode(settingsAi.permissions);
   const accentPalette = accentPalettes.find((palette) => palette.id === appearance.primaryColor) ?? accentPalettes[0];
   const documentCount = aiIndexStatus?.documentCount ?? 0;
@@ -489,9 +462,9 @@ function SummarySettings({
           <p className="mt-1 text-[11px] text-ink-secondary">{text.summaryModelsDescription}</p>
         </div>
         <div className="overflow-hidden rounded-md border border-line">
-          <SummaryModelRow label={text.summaryMainAi} description={text.aiModelHeading} modelId={settingsAi.model} capability={modelMeter.intelligence} cost={modelMeter.cost} price={`${modelPrice.input} / ${modelPrice.output}`} tag={model.recommended ? text.recommendedModel : null} capabilityLabel={text.summaryCapabilityMetric} costLabel={text.summaryCostMetric} priceUnit={text.summaryTokenPriceUnit} />
-          <SummaryModelRow label={text.summaryImageGenerationAi} description={text.imageGenerationModelHeading} modelId={settingsAi.imageGeneration.model} capability={imageGenerationMeter.quality} cost={imageGenerationMeter.cost} price={imageGenerationModel.price} tag={imageGenerationModel.recommended ? imageGenerationModel.tag : null} capabilityLabel={text.summaryCapabilityMetric} costLabel={text.summaryCostMetric} priceUnit={text.imageGenerationPricePer1kImage} />
-          <SummaryModelRow label={text.summaryVisionAi} description={text.visionHeading} modelId={settingsAi.vision.model} capability={visionMeter.intelligence} cost={visionMeter.cost} price={`${visionPrice.input} / ${visionPrice.output}`} tag={visionModel.recommended ? text.recommendedModel : null} capabilityLabel={text.summaryCapabilityMetric} costLabel={text.summaryCostMetric} priceUnit={text.summaryTokenPriceUnit} />
+          <SummaryModelRow label={text.summaryMainAi} description={text.aiModelHeading} modelId={settingsAi.model} price="" tag={model.recommended ? text.recommendedModel : null} capabilityLabel={text.summaryCapabilityMetric} costLabel={text.summaryCostMetric} priceUnit={text.summaryTokenPriceUnit} />
+          <SummaryModelRow label={text.summaryImageGenerationAi} description={text.imageGenerationModelHeading} modelId={settingsAi.imageGeneration.model} price={imageGenerationModel.price} tag={imageGenerationModel.recommended ? imageGenerationModel.tag : null} capabilityLabel={text.summaryCapabilityMetric} costLabel={text.summaryCostMetric} priceUnit={text.imageGenerationPricePer1kImage} />
+          <SummaryModelRow label={text.summaryVisionAi} description={text.visionHeading} modelId={settingsAi.vision.model} price="" tag={visionModel.recommended ? text.recommendedModel : null} capabilityLabel={text.summaryCapabilityMetric} costLabel={text.summaryCostMetric} priceUnit={text.summaryTokenPriceUnit} />
           <SummaryModelRow label={text.summaryAudioAi} description={text.transcriptionHeading} modelId={settingsAi.transcription.model} capability={2} cost={1} price={text.summaryAudioPricing} tag={text.summaryEconomy} capabilityLabel={text.summaryCapabilityMetric} costLabel={text.summaryCostMetric} priceUnit={text.summaryTokenPriceUnit} />
         </div>
       </section>
@@ -1172,7 +1145,7 @@ function CompactPermissionSwitch({
   );
 }
 
-function CapabilityModelCard({ modelId, name, description, capability, cost, inputPrice, outputPrice, tag }: { modelId: string; name: string; description: string; capability: number; cost: number; inputPrice: string; outputPrice: string; tag: string }) {
+function CapabilityModelCard({ modelId, name, description, capability, cost, inputPrice, outputPrice, tag }: { modelId: string; name: string; description: string; capability?: number; cost?: number; inputPrice: string; outputPrice: string; tag: string }) {
   return (
     <div className="rounded-md border border-brand-orange bg-brand-hover/60 px-4 py-3">
       <div className="flex items-start justify-between gap-3">
@@ -1189,58 +1162,14 @@ function CapabilityModelCard({ modelId, name, description, capability, cost, inp
           <p className="mt-1 text-[10px] text-ink-secondary">por 1M tokens</p>
         </div>
       </div>
-      <div className="mt-3 grid grid-cols-2 gap-4">
-        <SummaryMetric label="Capacidad" value={capability} />
-        <SummaryMetric label="Coste" value={cost} color="green" />
-      </div>
+
     </div>
   );
 }
 
-function buildVisionModelOptions(text: SettingsCopy): Array<AiModelSelectorOption<AiVisionModelId>> {
-  return aiVisionModelIds.map((modelId) => {
-    const model = text.aiModels[modelId];
-    const meter = aiModelMeter[modelId];
-    const price = aiModelPriceParts[modelId];
-    return {
-      id: modelId,
-      name: model.name,
-      description: model.description,
-      capability: meter.intelligence,
-      cost: meter.cost,
-      inputPrice: price.input,
-      outputPrice: price.output,
-      recommended: model.recommended,
-      tag: {
-        label: model.recommended ? text.recommendedModel : model.name,
-        tone: aiModelTagTone[modelId],
-      },
-    };
-  });
-}
+function buildVisionModelOptions(_text: SettingsCopy): Array<AiModelSelectorOption<AiVisionModelId>> { return catalogOptions("vision"); }
 
-function buildImageGenerationModelOptions(text: SettingsCopy): Array<AiModelSelectorOption<AiImageGenerationModelId>> {
-  return aiImageGenerationModelIds.map((modelId) => {
-    const model = text.imageGenerationModels[modelId];
-    const meter = aiImageGenerationModelMeter[modelId];
-    return {
-      id: modelId,
-      name: model.name,
-      description: model.description,
-      capability: meter.quality,
-      cost: meter.cost,
-      inputPrice: model.price,
-      outputPrice: "",
-      priceUnit: text.imageGenerationPricePer1kImage,
-      recommended: model.recommended,
-      tag: {
-        label: model.tag,
-        tone: aiImageGenerationModelTagTone[modelId],
-      },
-      icon: <ImageIcon size={16} />,
-    };
-  });
-}
+function buildImageGenerationModelOptions(_text: SettingsCopy): Array<AiModelSelectorOption<AiImageGenerationModelId>> { return catalogOptions("image"); }
 
 function FileIcon() {
   return (
@@ -1323,9 +1252,11 @@ function SummaryCapability({ icon, title, description, value, tone }: { icon: Re
   );
 }
 
-function SummaryModelRow({ label, description, modelId, capability, cost, price, tag, capabilityLabel, costLabel, priceUnit }: { label: string; description: string; modelId: string; capability: number; cost: number; price: string; tag?: string | null; capabilityLabel: string; costLabel: string; priceUnit: string }) {
+function SummaryModelRow({ label, description, modelId, capability, cost, price, tag, capabilityLabel, costLabel, priceUnit }: { label: string; description: string; modelId: string; capability?: number; cost?: number; price: string; tag?: string | null; capabilityLabel: string; costLabel: string; priceUnit: string }) {
+  const option=catalogOptions("text").concat(catalogOptions("image")).find(m=>m.id===modelId);
+  if(option){price=[option.inputPrice,option.outputPrice].filter(Boolean).join(" / ");priceUnit=option.priceUnit??"";}
   return (
-    <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(120px,0.8fr)_minmax(90px,0.7fr)_minmax(90px,0.7fr)_auto] items-center gap-3 border-b border-line px-3 py-3 last:border-b-0">
+    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-3 border-b border-line px-3 py-3 last:border-b-0">
       <div className="min-w-0">
         <p className="truncate text-[11px] font-semibold text-ink-primary">{label}</p>
         <p className="mt-1 truncate text-[10px] text-ink-secondary">{description}</p>
@@ -1334,8 +1265,6 @@ function SummaryModelRow({ label, description, modelId, capability, cost, price,
         <span className="truncate font-mono text-[11px] font-semibold text-ink-primary">{modelId}</span>
         {tag ? <span className="rounded bg-brand-hover px-2 py-0.5 text-[9px] font-semibold text-brand-orange">{tag}</span> : null}
       </div>
-      <SummaryMetric label={capabilityLabel} value={capability} />
-      <SummaryMetric label={costLabel} value={cost} color="green" />
       <div className="text-right">
         <p className="text-[11px] font-semibold text-ink-primary">{price}</p>
         <p className="mt-1 text-[10px] text-ink-secondary">{priceUnit}</p>
@@ -1344,14 +1273,6 @@ function SummaryModelRow({ label, description, modelId, capability, cost, price,
   );
 }
 
-function SummaryMetric({ label, value, color = "orange" }: { label: string; value: number; color?: "orange" | "green" }) {
-  return (
-    <div className="min-w-0">
-      <p className="truncate text-[10px] font-semibold text-ink-secondary">{label}</p>
-      <SummaryMeter value={value} color={color} className="mt-1" />
-    </div>
-  );
-}
 
 function SummaryMeter({ value, color = "orange", className = "" }: { value: number; color?: "orange" | "green"; className?: string }) {
   return (
@@ -1537,31 +1458,12 @@ function CapabilityUnavailablePanel({
 
 function normalizeAiVisionModel(model: unknown): AiVisionModelId {
   const normalized = normalizeLegacyAiModel(model);
-  return normalized && normalized !== "gpt-5.4-nano" ? normalized : defaultAiConfig.vision.model;
+  return normalized ?? defaultAiConfig.vision.model;
 }
 
-function normalizeLegacyAiModel(model: unknown): AiModelId | null {
-  switch (String(model)) {
-    case "gpt-5.5":
-    case "gpt-5.2":
-      return "gpt-5.5";
-    case "gpt-5.4":
-    case "gpt-5":
-      return "gpt-5.4";
-    case "gpt-5.4-mini":
-    case "gpt-5-mini":
-      return "gpt-5.4-mini";
-    case "gpt-5.4-nano":
-    case "gpt-5-nano":
-      return "gpt-5.4-nano";
-    default:
-      return null;
-  }
-}
+function normalizeLegacyAiModel(model: unknown): AiModelId | null { return typeof model === "string" && model.trim() ? model : null; }
 
-function normalizeImageGenerationModel(model: unknown): AiImageGenerationModelId {
-  return aiImageGenerationModelIds.includes(model as AiImageGenerationModelId) ? model as AiImageGenerationModelId : defaultAiConfig.imageGeneration.model;
-}
+function normalizeImageGenerationModel(model: unknown): AiImageGenerationModelId { return typeof model === "string" && model.trim() ? model : defaultAiConfig.imageGeneration.model; }
 
 function normalizeImageGenerationSize(size: unknown): AiConfigStatus["imageGeneration"]["size"] {
   return gptImage2SizeOptions.includes(size as AiConfigStatus["imageGeneration"]["size"])
@@ -1575,7 +1477,7 @@ function normalizeImageGenerationSizeForModel(model: AiImageGenerationModelId, s
 }
 
 function imageGenerationSizeOptions(model: AiImageGenerationModelId): AiConfigStatus["imageGeneration"]["size"][] {
-  return model === "gpt-image-2" ? gptImage2SizeOptions : baseImageGenerationSizeOptions;
+  return model.startsWith("gpt-image-2") ? gptImage2SizeOptions : baseImageGenerationSizeOptions;
 }
 
 function formatImageGenerationSize(size: AiConfigStatus["imageGeneration"]["size"], text: SettingsCopy): string {
@@ -1682,7 +1584,7 @@ function normalizeTranscription(transcription: Partial<AiConfigStatus["transcrip
   const uniqueFavorites = Array.from(new Set(favorites.length ? favorites : defaultAiConfig.transcription.favoriteLanguages));
   return {
     enabled: transcription?.enabled ?? defaultAiConfig.transcription.enabled,
-    model: ["gpt-4o-mini-transcribe", "gpt-realtime-whisper"].includes(String(transcription?.model)) ? "gpt-4o-mini-transcribe" : defaultAiConfig.transcription.model,
+    model: transcription?.model || defaultAiConfig.transcription.model,
     defaultTarget: transcription?.defaultTarget === "document" ? "document" : "prompt",
     defaultLanguage: isTranscriptionLanguage(transcription?.defaultLanguage) ? transcription.defaultLanguage : defaultAiConfig.transcription.defaultLanguage,
     favoriteLanguages: uniqueFavorites.slice(0, 6),
@@ -1727,25 +1629,7 @@ function AiDocumentalSettings({
   const documentCount = aiIndexStatus?.documentCount ?? 0;
   const failedCount = aiIndexStatus?.failedDocumentCount ?? 0;
   const openAiKeySuffix = settingsAi.openaiKeyPreview?.slice(-4) ?? "";
-  const modelOptions: Array<AiModelSelectorOption<AiModelId>> = aiModelIds.map((modelId) => {
-    const model = text.aiModels[modelId];
-    const meter = aiModelMeter[modelId];
-    const price = aiModelPriceParts[modelId];
-    return {
-      id: modelId,
-      name: model.name,
-      description: model.description,
-      capability: meter.intelligence,
-      cost: meter.cost,
-      inputPrice: price.input,
-      outputPrice: price.output,
-      recommended: model.recommended,
-      tag: {
-        label: model.recommended ? text.recommendedModel : model.name,
-        tone: aiModelTagTone[modelId],
-      },
-    };
-  });
+  const modelOptions = catalogOptions("text", settingsAi.model);
 
   useEffect(() => {
     const normalizedAi = normalizeAiStatus(ai);
@@ -1902,6 +1786,7 @@ function AiDocumentalSettings({
           guideLabel={text.aiModelGuide}
           guideDescription={text.aiModelGuideDescription}
         />
+          <ModelAccessCheck model={settingsAi.model}/>
       </SettingsPanel>
 
       <SettingsPanel>
@@ -2961,25 +2846,7 @@ function AiSettings({
       ? `${text.openAiKeyConfiguredPlaceholder} ${openAiKeySuffix}`
       : text.openAiKeyConfiguredGenericPlaceholder
     : text.openAiKeyMissingPlaceholder;
-  const modelOptions: Array<AiModelSelectorOption<AiModelId>> = aiModelIds.map((modelId) => {
-    const model = text.aiModels[modelId];
-    const meter = aiModelMeter[modelId];
-    const price = aiModelPriceParts[modelId];
-    return {
-      id: modelId,
-      name: model.name,
-      description: model.description,
-      capability: meter.intelligence,
-      cost: meter.cost,
-      inputPrice: price.input,
-      outputPrice: price.output,
-      recommended: model.recommended,
-      tag: {
-        label: model.recommended ? text.recommendedModel : model.name,
-        tone: aiModelTagTone[modelId],
-      },
-    };
-  });
+  const modelOptions = catalogOptions("text", settingsAi.model);
 
   useEffect(() => {
     const normalizedAi = normalizeAiStatus(ai);
@@ -3216,7 +3083,7 @@ function AiSettings({
               value={settingsAi.transcription.model}
               onChange={(event) => updateTranscription({ model: event.target.value as AiConfigStatus["transcription"]["model"] })}
             >
-              <option value="gpt-4o-mini-transcribe">gpt-4o-mini-transcribe</option>
+              <option value="gpt-transcribe">GPT-Transcribe</option><option value="gpt-4o-mini-transcribe">gpt-4o-mini-transcribe</option>
             </select>
           </label>
           <label className="block min-w-0">
@@ -3720,7 +3587,7 @@ const settingsCopy = {
     imageGenerationAvailableDescription: "Genera imágenes con OpenAI, guárdalas en el proyecto e insértalas en el documento cuando esté permitido.",
     imageGenerationModelHeading: "Modelo imagen",
     imageGenerationModelSelectorTitle: "Elige el modelo de imagen según calidad, coste y compatibilidad.",
-    imageGenerationModelGuideDescription: "Los importes son rangos orientativos por imagen 1K; tamaños 2K/4K y calidad alta elevan el coste. gpt-image-2 prioriza calidad, no coste mínimo.",
+    imageGenerationModelGuideDescription: "Tarifas oficiales por tokens de entrada y salida. El consumo depende del modelo, tamaño y calidad; no se estima mediante una escala de puntuaciones.",
     imageGenerationPricePerImage: "por imagen",
     imageGenerationPricePer1kImage: "por imagen 1K",
     imageGenerationSizeHeading: "Tamaño",
