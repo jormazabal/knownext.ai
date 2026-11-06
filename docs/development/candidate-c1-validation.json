@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 1,
+  "version": "3.0.0",
+  "candidate": "C1",
+  "status": "local-installed-QA-closed-not-published",
+  "recordedAt": "2026-11-06T08:54:47.857231+00:00",
+  "commits": {
+    "implementationConsolidation": "fe416299",
+    "applicationBuild": "736e7484",
+    "installerDefinition": "a4dc873b"
+  },
+  "provenance": "Application binary built before the installer-only fixes. Only packaging was repeated; final installed binary SHA is unchanged and its UI evidence is reused.",
+  "windows": {
+    "identity": "ai.knownext.desktop.v3candidate",
+    "profile": "optimized native Windows QA/per-user MSI",
+    "msi": {
+      "relativePath": "apps/desktop/src-tauri/target/release/bundle/msi/KnowNext.ai C1_3.0.0_x64_en-US.msi",
+      "sha256": "dac25f7befa709546c788b8831a09a183455e0bf36ab2b92949314a683c24845",
+      "productCode": "{F78D67D5-3B11-4661-B869-B8735A2EC4CD}",
+      "upgradeCode": "{BD86FD5F-4124-45B6-967A-EC0BB72BF5ED}",
+      "name": "KnowNext.ai C1"
+    },
+    "installedExitCode": 0,
+    "resolvedHkcuLicenseKey": "Software\\knownext\\KnowNext.ai C1\\Components",
+    "licenseMatchesSource": true,
+    "installedExecutableSha256": "ed789dc3c7420a6932a90d316a4a57294f8a6c39ec3c7d6fcd290fadad2fe433",
+    "applicationBinaryUnchanged": true,
+    "documentSha256": "7ee119262b6b4328d0ea6bdf6b6e459abf69bd98fbf7acfa617e3cc821d92e6d",
+    "ui": {
+      "createLocalGitProjectWithoutAccount": true,
+      "milkdownEditAndSave": true,
+      "keyboardSaveViaCommandPalette": true,
+      "localSvgPreview": true,
+      "contextualSettings": true,
+      "runtimeDiagnostics": true,
+      "reopenWithSavedSourceUnchanged": true
+    },
+    "postInstallStartupAndNativeRead": true,
+    "qaStoppedAfterCheck": true,
+    "normal26InstallationNotReplaced": true,
+    "distributionSigned": false
+  },
+  "android": {
+    "identity": "ai.knownext.mobile.v3qa",
+    "profile": "debug/emulator API36 x86_64/QA",
+    "versionName": "3.0.0",
+    "versionCode": 3000000,
+    "apk": {
+      "relativePath": "output/KnowNext.ai-3.0.0-C1-android-x86_64-qa.apk",
+      "sha256": "8386f3aa85057e24b0d7d57eb65296c9412ac4c86206a0fd5b10615ac438c19b"
+    },
+    "nativeLibraryMatchesBuild": true,
+    "fontLicenseMatchesSource": true,
+    "qaCertificatePreserved": true,
+    "qaUidPreserved": true,
+    "priorWitnessPreservedOnUpgrade": true,
+    "milkdownSaveAndReopen": true,
+    "oneTrustedTouchOpen": true,
+    "basicAdvancedSettingsAndDocumentReturn": true,
+    "documentSha256": "023f7cb4d47f0558a25f0007af47ae1fe5e00668fd2e957334f89fb25f61d84e",
+    "offlineDuringAcceptance": true,
+    "qaStopped": true,
+    "networkRestored": true,
+    "ownedEmulatorClosed": true,
+    "distributionSigned": false,
+    "baselineWasPublic26": false
+  },
+  "verificationPolicy": {
+    "fullSuitesRepeated": false,
+    "inheritedRegression139": {
+      "frontendPassed": 1158,
+      "rustPassed": 740,
+      "explicitBenchmarksPassed": 2
+    },
+    "installerGuardCasesPassedPreviouslyAndReused": 3,
+    "actualBundlerRejectsIncompatibleResourceOverride": true,
+    "noAiExpense": true,
+    "noRealProviderEvaluation": true,
+    "noPushTagReleaseWorkflowOrPublication": true
+  },
+  "remainingGates": [
+    "Existing distribution signatures and official Windows/ARM64 assets",
+    "Production-identity installation/update and real public2.6 migration/rollback acceptance",
+    "Physical devices, SAF/Keystore restoration, audio/suspension/failures, IME/DPI/accessibility/pen",
+    "Human pilot U16",
+    "Real-provider AI campaign T17 remains deferred with no expense"
+  ],
+  "localEvidence": {
+    "output/candidate-windows-package-final-140.json": {
+      "sha256": "3cde270340e7794b3d2eeacf79be8c22d2c3e79d935d061d6cd17226aa649bf0",
+      "bytes": 788,
+      "availability": "local ignored output; not included in a clean clone"
+    },
+    "output/candidate-windows-final-install-140.json": {
+      "sha256": "17da4be2b659ab6f0b34b3fefd56797d5771e6b0e9e031c43329c9058cf96c9d",
+      "bytes": 635,
+      "availability": "local ignored output; not included in a clean clone"
+    },
+    "output/candidate-windows-postinstall-final-140.json": {
+      "sha256": "558de1539a2bef3f2021117a444449fac2162ec75f0a2e5105cd302c41a79961",
+      "bytes": 548,
+      "availability": "local ignored output; not included in a clean clone"
+    },
+    "output/candidate-windows-ui-140.json": {
+      "sha256": "ddcf1b0ccbbe3f82314d49292a84dbee3e491be2418f58468773033d87b60cb5",
+      "bytes": 2263,
+      "availability": "local ignored output; not included in a clean clone"
+    },
+    "output/candidate-msi-final-review-140.md": {
+      "sha256": "3ff8e57aad22355a5f20ccc853573837db64a8a03c6cc6ef132087a77f48caa6",
+      "bytes": 11219,
+      "availability": "local ignored output; not included in a clean clone"
+    },
+    "output/candidate-windows-bundle-msi-hkcu-final-140.log": {
+      "sha256": "ca4993571755a7a81e323955b53b296e97963c2da55dfa543ac6718f0c57bc80",
+      "bytes": 5644,
+      "availability": "local ignored output; not included in a clean clone"
+    },
+    "output/candidate-installer-negative-140.log": {
+      "sha256": "5ce9ffba8012edd55ffca6898712902533034b87ab3a2ecf4c9d5c520d0afbff",
+      "bytes": 1307,
+      "availability": "local ignored output; not included in a clean clone"
+    },
+    "output/candidate-android-package-140.json": {
+      "sha256": "4e46d5a64e1263fe9a79414fb4b424aaed23512caa1e3cb5a6e91aae0d1d02d2",
+      "bytes": 554,
+      "availability": "local ignored output; not included in a clean clone"
+    },
+    "output/candidate-android-140.final.json": {
+      "sha256": "3512839a543699d68bf4a79a9610973a35236d73352d1c326ffff2a594a3bd04",
+      "bytes": 3680,
+      "availability": "local ignored output; not included in a clean clone"
+    },
+    "output/candidate-android-140.summary.md": {
+      "sha256": "3ed7e176f0bb767cd3a1b3ab1ec7931291d869111d3116f47bc4642d2137d762",
+      "bytes": 6529,
+      "availability": "local ignored output; not included in a clean clone"
+    },
+    "output/candidate-android-140.baseline.json": {
+      "sha256": "c2336e3e60fd33c3d35a03dce10842a46e73eaed0186847174af7b5babd38fb9",
+      "bytes": 4666,
+      "availability": "local ignored output; not included in a clean clone"
+    },
+    "output/candidate-android-140.upgrade.json": {
+      "sha256": "3dbc86b8aa802380ffa1ecf6c6440573e62e943e00c9362736b6c492efa78c27",
+      "bytes": 6120,
+      "availability": "local ignored output; not included in a clean clone"
+    },
+    "output/candidate-gradle-preflight-140.exit.json": {
+      "sha256": "1d06080f276e34999528bbc46e946f53ef3a28f8013117f1e9099584f7c269a2",
+      "bytes": 521,
+      "availability": "local ignored output; not included in a clean clone"
+    },
+    "output/candidate-android-kotlin-140.exit.json": {
+      "sha256": "022f5dd1ea5efc9a2232c6051823f4954714b25cf795d106f87e659241d44f35",
+      "bytes": 647,
+      "availability": "local ignored output; not included in a clean clone"
+    },
+    "output/v3-final-regression-verification.json": {
+      "sha256": "1e9a8528a8133d30c8a98a35f80f709fa44d1c2749dea37ac549d5966f8118b0",
+      "bytes": 2540,
+      "availability": "local ignored output; not included in a clean clone"
+    }
+  }
+}

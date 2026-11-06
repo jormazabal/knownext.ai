@@ -1155,3 +1155,21 @@ La regresión local139 está cerrada; se reutilizan sus resultados mientras no c
 - [ ] Conservar T17 real aplazada sin gasto; no enviar documentación personal ni activar proveedores para sustituirla. Documentar límites de5.000archivos/búsqueda parcial, PDF sin OCR automático y capacidades de audio/tinta condicionadas.
 
 Sólo marcar resultados realmente observados y asociados a la candidata concreta. El coordinador incorpora evidencia y límites al reporte de la entrega; una captura de desarrollo o un cargo check no sustituye una aceptación instalada.
+
+
+## Resultado QA instalado140 · Etapa acotada cerrada, no aceptación de release productiva
+
+Esta tabla concreta el alcance observado y no marca como superadas las casillas amplias anteriores que incluyen hardware, migración productiva o personas. Evidencia Windows definitiva: output/candidate-windows-package-final-140.json y output/candidate-windows-final-install-140.json; UI de runtime reutilizada: output/candidate-windows-ui-140.json. Los registros iniciales de empaquetado/instalación se conservan como pasos intermedios. Candidata3.0.0, fuente del runtime736e7484 y datos sintéticos; el ajuste WXS posterior sólo afecta a empaquetado.
+
+- [x] MSI Windows C1 final reinstalado, exit0, identidad/UpgradeCode/perfil separados y proceso normal2.6 conservado; clave de licencia OFL/HKCU resuelta y licencia instalada coincidente. MSI SHA256DAC25F7BEFA709546C788B8831A09A183455E0BF36AB2B92949314A683C24845. No se usa el hash inicial como candidata definitiva. Sin firma updater de distribución.
+- [x] Ventana activada y puente Tauri real con healthok, versión3.0.0 y appDataDir ai.knownext.desktop.v3candidate; no interfaz de desarrollo con transporte simulado.
+- [x] Botón Guardar escribe el Markdown en disco y limpia dirty/draft. Guardado por teclado comprobado mediante Ctrl+Shift+P → Guardar documento activo → Enter; no se afirma Ctrl+S ni Tab+Enter.
+- [x] Vista previa SVG cargada, navegación de ajustes y vuelta visible al documento; diagnóstico local sin inicio de proveedor.
+- [x] Reapertura tras detención forzada posterior a guardado durable: Markdown idéntico, testigo conservado y documento limpio. No acredita salida normal con borrador pendiente, cierre con cambios ni recuperación de trabajo no guardado.
+- [x] Android QA final: paquete3.0.0/3000000 instalado en emulador API36/x86_64, mismo UID/certificado debug, testigo intacto tras actualizar QA. APK instalado coincide por SHA256 con el verificado por apksigner. Edición real/botón Guardar y reapertura exacta comprobados; finalJSONreutiliza esos resultados y no escribe nuevos documentos. Evidencias output/candidate-android-140.upgrade.json y output/candidate-android-140.final.json.
+- [x] Android offline antes de lanzar, sin ruta por defecto; Sistema móvil/Vista avanzada/diagnóstico visibles, retorno a básica y al mismo documento sin mutación. Tras la campaña, QA force-stopped sin workers y red restituida al estado inicial. No acredita ARM físico ni el actualizador productivo.
+- [x] Paquete final e instalación enlazados por el mismo SHA256; EXE instaladoED789DC3C7420A6932A90D316A4A57294F8A6C39EC3C7D6FCD290FADAD2FE433 idéntico al contrastado, documento7EE119262B6B4328D0EA6BDF6B6E459ABF69BD98FBF7ACFA617E3CC821D92E6D conservado. Se reutiliza el recorrido UI previo sin repetirlo ni afirmar una nueva observación de todos los recorridos.
+- [ ] Mantener como aceptación posterior la actualización/migración productiva con las firmas existentes, ARM físico/SAF/Keystore y fallos físicos, DPI/IME/lectores, lápiz/tacto/audio reales y personas U16. T17 real permanece aplazada sin gasto; no hay publicación.
+
+
+Cierre de esta etapa QA140: Windows MSI paralelo y Android QA/emulador aceptados sólo en los recorridos comprobados anteriores. No se marcan como completas las casillas amplias que incluyen migración/actualizador productivos, firma oficial, ARM físico/SAF/Keystore/hardware o personas. T17 real continúa aplazada sin gasto; publicación excluida. P10 mantiene abiertas esas aceptaciones generales.

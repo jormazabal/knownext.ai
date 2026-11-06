@@ -12,10 +12,10 @@ Autoridad: petición del usuario de completar la consolidación y después prepa
 ## Candidata
 
 - [x] Versionado coherente3.0.0 y etiqueta de candidata local C1 y notas de candidata sin anunciar publicación.
-- [ ] Paquete Windows QA con identidad, nombre y UpgradeCode separados; no sustituir2.6 ni migrar su perfil.
-- [ ] APK QA instalado en emulador, revisión del identificador antes de instalar y datos conservados.
-- [ ] Recorridos críticos con runtime real, persistencia/reapertura y capturas; repetir sólo comprobaciones afectadas.
-- [ ] Consolidar resultados reales, hashes de artefactos, limitaciones y pendientes de aceptación.
+- [x] Paquete Windows QA con identidad, nombre y UpgradeCode separados; no sustituir2.6 ni migrar su perfil.
+- [x] APK QA instalado en emulador, revisión del identificador antes de instalar y datos conservados.
+- [x] Recorridos críticos con runtime real, persistencia/reapertura y capturas; repetir sólo comprobaciones afectadas.
+- [x] Consolidar resultados reales, hashes de artefactos, limitaciones y pendientes de aceptación.
 
 ## Condiciones conocidas
 
@@ -25,3 +25,6 @@ Tres subagentes reales con archivos exclusivos: consolidation_docs(documentació
 
 
 Consolidación completada en fe416299. Candidata C1 usaVERSION3.0.0(sin sufijo prerelease) para mantener el cálculo Android versionCode3000000 y compatibilidad MSI; el estado no publicado se conserva en las notas. No hay ampliación funcional nueva.
+
+
+Cierre140 verificado: arreglo MSI a4dc873b consolidado y reinstalado(DAC25…4845), AndroidQA terminado, [reporte final](avance-140.md) y [recibo](../../development/candidate-c1-validation.json). Sólo se cierra la aceptación QA local definida; no puertas productivas/físicas/humanas ni firmas/publicación.
