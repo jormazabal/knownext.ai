@@ -3,6 +3,13 @@ import type { AiEditOperation } from "../types/domain";
 import { applyAiEditOperationToMarkdown } from "./aiEditProposalApplication";
 
 describe("applyAiEditOperationToMarkdown", () => {
+  it("rejects a complete replacement when the request base changed, including an empty base", () => {
+    expect(applyAiEditOperationToMarkdown(operation({ action: "replace_document", expectedMarkdown: "Original", markdown: "AI output" }), "New typing")).toEqual({ applied: false, reason: "source_changed" });
+    expect(applyAiEditOperationToMarkdown(operation({ action: "insert_at_cursor", expectedMarkdown: "", markdown: "AI output", placement: { type: "document_end" } }), "New typing")).toEqual({ applied: false, reason: "source_changed" });
+  });
+  it("allows an explicitly empty replacement only on its unchanged base", () => {
+    expect(applyAiEditOperationToMarkdown(operation({ action: "replace_document", expectedMarkdown: "Original", markdown: "" }), "Original")).toEqual({ applied: true, markdown: "" });
+  });
   it("replaces a unique selected excerpt without treating editor positions as markdown offsets", () => {
     const result = applyAiEditOperationToMarkdown(
       operation({

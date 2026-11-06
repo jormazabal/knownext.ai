@@ -14,7 +14,7 @@ pub enum Status {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Destination {
     pub project_id: String,
     pub folder_id: Option<String>,
@@ -22,7 +22,7 @@ pub struct Destination {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default,deny_unknown_fields)]
 pub struct Settings {
     pub microphone: bool,
     pub system_audio: bool,
@@ -51,8 +51,12 @@ impl Default for Settings {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Chunk {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_receipt: Option<knownext_core::recording_usage::RecordingUsageReceipt>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub usage_recorded: bool,
     #[serde(default)]
     pub sha256: Option<String>,
     pub start: u64,
@@ -63,8 +67,10 @@ pub struct Chunk {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Session {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub portable_origin: Option<knownext_core::recording_portability::PortableRecordingOrigin>,
     pub id: String,
     pub revision: u64,
     pub created_at: String,
@@ -86,6 +92,7 @@ pub struct Session {
 impl Session {
     pub fn new(settings: Settings, destination: Option<Destination>) -> Self {
         Self {
+            portable_origin: None,
             id: uuid::Uuid::new_v4().to_string(),
             revision: 1,
             created_at: time::OffsetDateTime::now_utc()
@@ -112,7 +119,7 @@ impl Session {
         }
         self.completed_at
             .zip(self.settings.retention_days)
-            .map(|(date, days)| date + days as i64 * 86400)
+            .and_then(|(date, days)| date.checked_add(days as i64 * 86400))
     }
 }
 
@@ -127,6 +134,9 @@ pub struct Device {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    pub settings_error:Option<String>,
+    pub settings_recovery_revision:Option<String>,
+    pub unavailable_sessions:usize,
     pub revision: u64,
     pub sessions: Vec<Session>,
     pub settings: Settings,

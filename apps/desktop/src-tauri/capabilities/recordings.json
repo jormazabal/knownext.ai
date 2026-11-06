@@ -1,0 +1,18 @@
+{
+  "identifier": "recordings",
+  "description": "Controls for the compact recorder; no updater, process or shell permissions.",
+  "platforms": ["windows", "linux", "macOS"],
+  "windows": ["recordings"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-close",
+    "core:window:allow-outer-position",
+    "core:window:allow-outer-size",
+    "core:window:allow-set-position",
+    "core:window:allow-set-size",
+    "core:window:allow-start-dragging",
+    "core:window:allow-start-resize-dragging",
+    "core:window:allow-show",
+    "core:window:allow-set-focus"
+  ]
+}

@@ -1,0 +1,63 @@
+.workspace-v3 { --app-panel: var(--app-surface); }
+.workspace-v3 .knownext-editor .ProseMirror :is(p, li) { font-size: 15px !important; line-height: 1.65; }
+.workspace-v3 .tree-row { height: 32px; font-size: 12px; }
+.workspace-v3 .tree-row .truncate { font-size: 12px; }
+.workspace-v3 [role="treeitem"]:focus { outline: none; }
+.workspace-v3 [role="treeitem"]:focus > .tree-row { outline: 2px solid rgb(var(--accent-ring)); outline-offset: -2px; }
+@media (pointer: coarse) { .workspace-v3 .tree-row { min-height: 44px; } }
+.workspace-v3 .workspace-navigation { border-right: 0; box-shadow: none; }
+.workspace-panel-controls { display: flex; align-items: center; flex: none; min-height: 40px; padding: 0 12px; gap: 12px; }
+.workspace-panel-controls button, .workspace-context-header button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 0 8px; border-radius: 5px; font-size: 12px; }
+.workspace-panel-controls button:hover, .workspace-context-header button:hover { background: rgb(var(--accent-soft)); }
+.workspace-v3 :is(button, select, input, textarea):focus-visible { outline: 2px solid rgb(var(--accent-ring)); outline-offset: 2px; }
+.workspace-v3 .workspace-command-search:focus-within { outline: 2px solid rgb(var(--accent-ring)); outline-offset: 0; }
+.workspace-v3 .workspace-command-search input:focus-visible { outline: none; }
+.workspace-activity { margin-left: auto; font-size: 12px; color: rgb(var(--app-muted)); }
+.workspace-panel-controls button > .workspace-result-count { display: none; }
+.workspace-context { position: relative; display: flex; flex-direction: column; flex: none; min-width: 280px; max-width: 42vw; min-height: 0; padding: 0 12px 12px; background: rgb(var(--app-surface)); }
+.workspace-context[hidden], .workspace-context [hidden] { display: none !important; }
+.workspace-context-header { display: flex; align-items: center; flex: none; gap: 4px; min-height: 40px; }
+.workspace-context-header select { flex: 1; min-width: 0; min-height: 32px; background: transparent; color: inherit; font-size: 13px; }
+.workspace-context-content { min-height: 0; flex: 1; overflow-y: auto; padding: 8px 0; }
+  .workspace-v3.knownext-mobile-shell .workspace-context-header select,
+  .workspace-v3.knownext-mobile-shell .workspace-context-header button,
+  .workspace-v3.knownext-mobile-shell .workspace-context-content summary { min-height: 44px; }
+  .workspace-v3.knownext-mobile-shell .workspace-context-header button { min-width: 44px; }
+.workspace-context-scope { font-size: 12px; color: rgb(var(--app-muted)); margin-bottom: 12px; overflow-wrap: anywhere; }
+.workspace-configure-ai { min-height: 36px; font-size: 13px; text-decoration: underline; margin-bottom: 12px; }
+.workspace-v3 .workspace-prompt-embedded { position: static; inset: auto; width: 100%; pointer-events: auto; }
+.workspace-v3 .workspace-prompt-embedded > .knownext-ai-prompt { width: 100%; border-radius: 8px; box-shadow: none; }
+.workspace-v3 .workspace-prompt-embedded > .absolute { position: static; margin: 0 0 8px; width: 100%; min-width: 0; }
+.workspace-v3 .workspace-prompt-embedded .knownext-ai-prompt-row { flex-wrap: wrap; }
+.workspace-v3 .workspace-prompt-embedded textarea { flex-basis: calc(100% - 48px); min-height: 120px; max-height: 260px; }
+.workspace-context-resize { position: absolute; top: 0; bottom: 0; left: -4px; }
+.document-tools-panel { display: flex; flex-direction: column; gap: 12px; font-size: 13px; }
+.document-tools-panel label { display: flex; flex-direction: column; gap: 4px; }
+.document-tools-panel input { min-width: 0; width: 100%; min-height: 36px; border: 1px solid #7b8088; border-radius: 5px; padding: 4px 8px; background: rgb(var(--app-surface)); color: inherit; }
+.document-tools-panel button { min-height: 32px; padding: 4px 8px; border-radius: 5px; }
+.document-tools-panel button:hover { background: rgb(var(--accent-soft)); }
+.document-tools-panel button:disabled { opacity: .45; }
+.document-tools-panel nav { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
+.document-tools-panel nav button { text-align: left; overflow-wrap: anywhere; }
+.document-tools-panel summary { cursor: pointer; min-height: 32px; }
+.document-tools-panel .document-search-options { display: flex; flex-wrap: wrap; gap: 0 12px; }
+.document-tools-panel .document-search-options label { flex-direction: row; align-items: center; min-height: 36px; gap: 8px; }
+.document-tools-panel .document-search-options input { width: 16px; height: 16px; min-height: 0; padding: 0; accent-color: rgb(var(--accent)); }
+.document-tools-panel p { overflow-wrap: anywhere; }
+@media (pointer: coarse), (max-width: 639px) {
+  .document-tools-panel :is(button, summary, input:not([type="checkbox"])), .document-tools-panel .document-search-options label { min-height: 44px; }
+}
+.workspace-v3 [role="separator"] > div:last-child { opacity: 0; }
+.workspace-v3 [role="separator"]:hover > div:last-child, .workspace-v3 [role="separator"]:focus-visible > div:last-child { opacity: 1; }
+@media (max-width: 1279px) {
+  .workspace-context { position: absolute; right: 0; top: 0; bottom: 0; z-index: 45; max-width: 100%; width: min(420px, 100%) !important; box-shadow: -12px 0 30px rgb(0 0 0 / 0.08); }
+  .workspace-context-resize { display: none; }
+}
+@media (max-width: 639px) {
+  .workspace-panel-controls { gap: 4px; padding: 0 8px; min-height: 44px; }
+  .workspace-panel-controls button { min-width: 44px; min-height: 44px; flex: none; }
+  .workspace-panel-controls button > span { display: none; }
+  .workspace-panel-controls button > .workspace-result-count { display: inline-grid; position: absolute; top: 0; right: 0; place-items: center; min-width: 16px; height: 16px; padding: 0 2px; border-radius: 999px; background: rgb(var(--accent)); color: rgb(var(--accent-foreground)); font-size: 10px; line-height: 1; }
+  .workspace-activity { max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+@media (prefers-reduced-motion: reduce) { .workspace-v3 * { scroll-behavior: auto !important; } }

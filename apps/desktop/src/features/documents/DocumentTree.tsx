@@ -34,7 +34,9 @@ import {
 import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { DocumentNameSearchResult, DocumentTreeNode } from "../../types/domain";
+import type { SelectionAction } from "../../types/fileBatch";
 import { clearDocumentTreeDragData, getDocumentTreeDragData, setDocumentTreeDragData } from "../../lib/dragData";
+import { ModalFrame } from "../../components/ui/ModalFrame";
 import { getInlineNameCompletion, searchDocumentTreeByName } from "./documentNameSearch";
 
 type DocumentTreeProps = {
@@ -61,6 +63,7 @@ type DocumentTreeProps = {
   onToggleNode: (nodeId: string) => void;
   onContextAction: (action: DocumentTreeAction, node: DocumentTreeNode) => void;
   onMoveNode: (node: DocumentTreeNode, targetFolderId: string | null) => void | Promise<void>;
+  onBatchAction?: (action: SelectionAction, nodeIds: string[], targetFolderId?:string|null) => void;
   onAddNodeContext?: (nodeId: string) => void | Promise<void>;
   onPreviewImageDropIntoActiveDocument?: (assetId: string, clientX: number, clientY: number) => void;
   onDropImageIntoActiveDocument?: (assetId: string, clientX: number, clientY: number) => void | Promise<void>;
@@ -141,6 +144,7 @@ export function DocumentTree({
   onToggleNode,
   onContextAction,
   onMoveNode,
+  onBatchAction,
   onAddNodeContext,
   onPreviewImageDropIntoActiveDocument,
   onDropImageIntoActiveDocument,
@@ -169,6 +173,34 @@ export function DocumentTree({
   const [showFileExtensions, setShowFileExtensions] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const visibleNodes = useMemo(() => filterTree(nodes, filter), [nodes, filter]);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selection, setSelection] = useState<Set<string>>(new Set());
+  const selectionAnchor = useRef<string | null>(null);
+  function flatten(items: DocumentTreeNode[], visibleOnly = false): DocumentTreeNode[] {
+    return items.flatMap(item => [item, ...((!visibleOnly || item.open) && item.children ? flatten(item.children, visibleOnly) : [])]);
+  }
+  const allIds = new Set(flatten(nodes).map(node => node.id));
+  const selectedIds = [...selection].filter(id => allIds.has(id));
+  const draggedSelection=useRef<string[]>([]);
+  function moveDragged(node:DocumentTreeNode,target:string|null){
+    if(draggedSelection.current.length>1&&onBatchAction){onBatchAction("move",draggedSelection.current,target);return;}
+    void onMoveNode(node,target);
+  }
+  function dragCanMove(node:DocumentTreeNode,target:string|null){const ids=draggedSelection.current.length>1?draggedSelection.current:[node.id];return ids.every(id=>{const source=findNodeById(nodes,id);return source&&canMoveToParent(nodes,source,target);});}
+  const visibleIds = new Set(flatten(visibleNodes, true).map(node => node.id));
+  const hiddenCount = selectedIds.filter(id => !visibleIds.has(id)).length;
+  function toggleSelection(id: string, range = false) {
+    const rows = flatten(visibleNodes, true).map(node => node.id);
+    const start = selectionAnchor.current ? rows.indexOf(selectionAnchor.current) : -1;
+    const end = rows.indexOf(id);
+    setSelection(current => {
+      const next = new Set([...current].filter(id => allIds.has(id)));
+      if (range && start >= 0 && end >= 0) rows.slice(Math.min(start,end), Math.max(start,end) + 1).forEach(id => next.add(id));
+      else if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+    selectionAnchor.current = id;
+  }
   const selectedNodeId = activeTreeNodeId || activeDocumentId;
   const currentParentId = resolveCurrentCreationParentId(nodes, activeTreeNodeId, activeDocumentId);
 
@@ -239,6 +271,7 @@ export function DocumentTree({
   }
 
   function startDrag(node: DocumentTreeNode, event: DragEvent<HTMLDivElement>) {
+    draggedSelection.current=selectionMode&&selectedIds.includes(node.id)?selectedIds:[node.id];
     if (node.isEditing) {
       event.preventDefault();
       return;
@@ -249,9 +282,9 @@ export function DocumentTree({
     setDraggedNode(node);
     updateDragPreview(node, event.clientX, event.clientY, event.currentTarget);
     event.dataTransfer.effectAllowed = node.type === "folder" ? "move" : "copyMove";
-    setDocumentTreeDragData(event.dataTransfer, node);
+    setDocumentTreeDragData(event.dataTransfer, node,draggedSelection.current);
     const ghost = document.createElement("div");
-    ghost.textContent = node.name;
+    ghost.textContent = draggedSelection.current.length>1?`${draggedSelection.current.length} elementos`:node.name;
     ghost.style.position = "fixed";
     ghost.style.top = "-1000px";
     ghost.style.left = "-1000px";
@@ -275,6 +308,7 @@ export function DocumentTree({
   }
 
   function finishDrag() {
+    draggedSelection.current=[];
     clearExpandTimer();
     autoExpandedNodeIds.current.clear();
     draggedNodeRef.current = null;
@@ -302,7 +336,7 @@ export function DocumentTree({
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
     updateDragPreview(activeDraggedNode, event.clientX, event.clientY);
-    const valid = canMoveToParent(nodes, activeDraggedNode, null);
+    const valid = dragCanMove(activeDraggedNode, null);
     setDropTarget({
       id: null,
       valid,
@@ -315,8 +349,8 @@ export function DocumentTree({
     if (!activeDraggedNode) return;
     if (isDragOverTreeRow(event)) return;
     event.preventDefault();
-    const valid = canMoveToParent(nodes, activeDraggedNode, null);
-    if (valid) void onMoveNode(activeDraggedNode, null);
+    const valid = dragCanMove(activeDraggedNode, null);
+    if (valid) moveDragged(activeDraggedNode, null);
     finishDrag();
   }
 
@@ -327,7 +361,7 @@ export function DocumentTree({
     event.stopPropagation();
     updateDragPreview(activeDraggedNode, event.clientX, event.clientY);
     const targetFolderId = getNodeDropTargetFolderId(nodes, activeDraggedNode, targetNode);
-    const valid = targetFolderId !== undefined;
+    const valid = targetFolderId !== undefined&&dragCanMove(activeDraggedNode,targetFolderId);
     event.dataTransfer.dropEffect = valid ? "move" : "none";
     setDropTarget({ id: targetNode.id, valid, label: targetNode.name });
 
@@ -346,13 +380,14 @@ export function DocumentTree({
     event.preventDefault();
     event.stopPropagation();
     const targetFolderId = getNodeDropTargetFolderId(nodes, activeDraggedNode, targetNode);
-    if (targetFolderId !== undefined) {
-      void onMoveNode(activeDraggedNode, targetFolderId);
+    if (targetFolderId !== undefined&&dragCanMove(activeDraggedNode,targetFolderId)) {
+      moveDragged(activeDraggedNode, targetFolderId);
     }
     finishDrag();
   }
 
   function startMouseDrag(node: DocumentTreeNode, event: MouseEvent<HTMLDivElement>) {
+    draggedSelection.current=selectionMode&&selectedIds.includes(node.id)?selectedIds:[node.id];
     if (node.isEditing || event.button !== 0) return;
     if (event.target instanceof Element && event.target.closest("button,input,textarea")) return;
     event.preventDefault();
@@ -405,7 +440,7 @@ export function DocumentTree({
     const overDocumentEditor = drag.dragging && canDropImageIntoDocument(drag.node) && (isOverMarkdownEditor(event.clientX, event.clientY) || mouseDocumentDropRef.current);
     if (overPrompt) {
       suppressNextNodeClickRef.current = true;
-      void onAddNodeContext?.(drag.node.id);
+      if(draggedSelection.current.length>1&&onBatchAction)onBatchAction("context",draggedSelection.current);else void onAddNodeContext?.(drag.node.id);
       finishDrag();
       return;
     }
@@ -418,12 +453,13 @@ export function DocumentTree({
     const target = drag.dragging ? findMouseDropTarget(event.clientX, event.clientY, drag.node) ?? mouseDropTargetRef.current : null;
     if (drag.dragging) suppressNextNodeClickRef.current = true;
     if (target?.valid && target.targetFolderId !== undefined) {
-      void onMoveNode(drag.node, target.targetFolderId);
+      if(dragCanMove(drag.node,target.targetFolderId))moveDragged(drag.node, target.targetFolderId);
     }
     finishDrag();
   }
 
   function canDropNodeIntoPrompt(node: DocumentTreeNode) {
+    if(draggedSelection.current.length>1&&onBatchAction)return true;
     return node.type !== "folder" && Boolean(onAddNodeContext);
   }
 
@@ -434,10 +470,11 @@ export function DocumentTree({
       clientX = rect.left + 12;
       clientY = rect.top + Math.max(12, Math.min(18, rect.height / 2 || 12));
     }
-    setDragPreview({ label: node.name, x: clientX, y: clientY });
+    setDragPreview({ label: draggedSelection.current.length>1?`${draggedSelection.current.length} elementos`:node.name, x: clientX, y: clientY });
   }
 
   function canDropImageIntoDocument(node: DocumentTreeNode) {
+    if(draggedSelection.current.length>1)return false;
     return (node.type === "image" || node.type === "handwritten-note") && Boolean(onDropImageIntoActiveDocument);
   }
 
@@ -460,7 +497,7 @@ export function DocumentTree({
       const targetFolderId = getNodeDropTargetFolderId(nodes, activeDraggedNode, targetNode);
       return {
         id: targetNode.id,
-        valid: targetFolderId !== undefined,
+        valid: targetFolderId !== undefined&&dragCanMove(activeDraggedNode,targetFolderId),
         label: targetNode.name,
         targetFolderId,
       };
@@ -470,7 +507,7 @@ export function DocumentTree({
     if (!rootRect || clientX < rootRect.left || clientX > rootRect.right || clientY < rootRect.top || clientY > rootRect.bottom) {
       return null;
     }
-    const valid = canMoveToParent(nodes, activeDraggedNode, null);
+    const valid = dragCanMove(activeDraggedNode, null);
     return { id: null, valid, label: "Raíz del proyecto", targetFolderId: valid ? null : undefined };
   }
 
@@ -485,12 +522,13 @@ export function DocumentTree({
     }, 600);
   }
 
-  function handleNodeClick(node: DocumentTreeNode) {
+  function handleNodeClick(node: DocumentTreeNode, touch = false) {
     if (suppressNextNodeClickRef.current) {
       suppressNextNodeClickRef.current = false;
       return;
     }
     if (node.isEditing) return;
+    if (touch) { handleNodeDoubleClick(node); return; }
     onActivateTreeNode(node.id);
   }
 
@@ -544,8 +582,28 @@ export function DocumentTree({
         onOpenProjectStatus={onOpenProjectStatus}
         projectStatus={projectStatus}
       />
+      {onBatchAction && <div className="px-2 pb-2 text-xs">
+        <div className="flex items-center justify-between gap-1"><button className="min-h-8 rounded px-2 hover:bg-brand-hover" aria-pressed={selectionMode} onClick={() => { setSelectionMode(!selectionMode); setSelection(new Set()); }}>{selectionMode ? "Cancelar selección" : "Seleccionar"}</button>
+          {selectionMode && <span role="status" className="text-right text-ink-secondary">{selectedIds.length} seleccionados{hiddenCount > 0 ? ` · ${hiddenCount} ocultos` : ""}</span>}
+        </div>
+        {selectionMode && <div className="flex flex-wrap gap-1">
+          <button disabled={!selectedIds.length} className="flex min-h-11 items-center gap-2 rounded px-2 hover:bg-brand-hover disabled:opacity-40" onClick={() => onBatchAction("move",selectedIds)}><MoveRight size={14}/>Mover a…</button>
+          <button disabled={!selectedIds.length} className="flex min-h-11 items-center gap-2 rounded px-2 hover:bg-brand-hover disabled:opacity-40" onClick={() => onBatchAction("trash",selectedIds)}><Trash2 size={14}/>Papelera</button>
+          <select aria-label="Más acciones de selección" disabled={!selectedIds.length} value="" className="min-h-11 min-w-0 max-w-full rounded border border-line bg-white px-2" onChange={event=>{const action=event.target.value as SelectionAction;if(action)onBatchAction(action,selectedIds);}}><option value="">Más acciones…</option><option value="duplicate">Duplicar lo guardado</option><option value="rename">Renombrar…</option><option value="export">Exportar selección…</option><option value="context">Añadir al contexto IA…</option></select>
+        </div>}
+      </div>}
       <div
         ref={rootDropRef}
+        role="tree"
+        aria-multiselectable={selectionMode || undefined}
+        onKeyDown={event => { if (event.key === "Escape" && selectionMode) { event.preventDefault(); setSelectionMode(false); setSelection(new Set()); } }}
+        aria-label="Archivos del proyecto"
+        tabIndex={0}
+        onFocus={event => {
+          if (event.target !== event.currentTarget) return;
+          const item = event.currentTarget.querySelector<HTMLElement>('[role="treeitem"][aria-selected="true"]') ?? event.currentTarget.querySelector<HTMLElement>('[role="treeitem"]');
+          item?.focus();
+        }}
         className={[
           "min-h-0 flex-1 overflow-y-auto overflow-x-hidden pb-2",
           draggedNode && dropTarget?.id === null && dropTarget.valid ? "rounded-md bg-brand-hover/45" : "",
@@ -560,6 +618,8 @@ export function DocumentTree({
             <TreeNode
               key={node.id}
               node={node}
+              selection={selectionMode ? selection : undefined}
+              onToggleSelection={toggleSelection}
               depth={0}
               activeNodeId={selectedNodeId}
               onOpenDocument={onOpenDocument}
@@ -618,7 +678,7 @@ export function DocumentTree({
             const activeDraggedNode = getActiveDraggedNode(event.dataTransfer);
             if (!activeDraggedNode) return;
             updateDragPreview(activeDraggedNode, event.clientX, event.clientY);
-            const valid = canMoveToParent(nodes, activeDraggedNode, null);
+            const valid = dragCanMove(activeDraggedNode, null);
             event.dataTransfer.dropEffect = valid ? "move" : "none";
             setDropTarget({ id: null, valid, label: "Raíz del proyecto" });
           }}
@@ -673,6 +733,8 @@ export function DocumentTree({
 }
 
 type TreeNodeProps = {
+  selection?: Set<string>;
+  onToggleSelection?: (id: string, range?: boolean) => void;
   node: DocumentTreeNode;
   depth: number;
   activeNodeId: string;
@@ -694,13 +756,15 @@ type TreeNodeProps = {
   onNodeDragOver: (node: DocumentTreeNode, event: DragEvent<HTMLDivElement>) => void;
   onNodeDrop: (node: DocumentTreeNode, event: DragEvent<HTMLDivElement>) => void;
   onMouseDragStart: (node: DocumentTreeNode, event: MouseEvent<HTMLDivElement>) => void;
-  onNodeClick: (node: DocumentTreeNode) => void;
+  onNodeClick: (node: DocumentTreeNode, touch?: boolean) => void;
   onNodeDoubleClick: (node: DocumentTreeNode) => void;
   changeBadges: Record<string, string>;
   showFileExtensions: boolean;
 };
 
 function TreeNode({
+  selection,
+  onToggleSelection,
   node,
   depth,
   activeNodeId,
@@ -737,7 +801,28 @@ function TreeNode({
   const displayName = getTreeNodeDisplayName(node, showFileExtensions);
 
   return (
-    <div>
+    <div role="treeitem" aria-label={displayName} aria-level={depth + 1}
+      aria-expanded={isFolder ? Boolean(node.open) : undefined} aria-selected={selection ? selection.has(node.id) : isActive}
+      tabIndex={isActive ? 0 : -1} data-focus-node-id={node.id}
+      onFocus={event => { if (event.target === event.currentTarget) onActivateTreeNode(node.id); }}
+      onKeyDown={event => {
+        if (event.target !== event.currentTarget || node.isEditing) return;
+        const tree = event.currentTarget.closest('[role="tree"]');
+        const items = Array.from(tree?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? []);
+        const index = items.indexOf(event.currentTarget);
+        const focus = (target: HTMLElement | undefined | null) => target?.focus();
+        if (event.key === "ArrowDown") { event.preventDefault(); focus(items[Math.min(items.length - 1, index + 1)]); }
+        else if (event.key === "ArrowUp") { event.preventDefault(); focus(items[Math.max(0, index - 1)]); }
+        else if (event.key === "Home") { event.preventDefault(); focus(items[0]); }
+        else if (event.key === "End") { event.preventDefault(); focus(items[items.length - 1]); }
+        else if (event.key === "ArrowRight" && isFolder) { event.preventDefault(); if (!node.open) onToggleNode(node.id); else if (node.children?.length) focus(items[index + 1]); }
+        else if (event.key === "ArrowLeft") { event.preventDefault(); if (isFolder && node.open) onToggleNode(node.id); else focus(event.currentTarget.parentElement?.closest<HTMLElement>('[role="treeitem"]')); }
+        else if (event.key === " " && selection) { event.preventDefault(); onToggleSelection?.(node.id, event.shiftKey); }
+        else if (event.key === "Enter") { event.preventDefault(); onNodeDoubleClick(node); }
+        else if (event.key === " " && isFolder) { event.preventDefault(); onToggleNode(node.id); }
+        else if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) { event.preventDefault(); event.currentTarget.querySelector<HTMLButtonElement>('button[aria-label^="Abrir men"]')?.click(); }
+      }}>
+
       <div
         className={[
           "tree-row group relative flex h-6 select-none items-center rounded-md border pr-1.5 transition",
@@ -760,7 +845,7 @@ function TreeNode({
         onDragEnd={onDragEnd}
         onDragOver={(event) => onNodeDragOver(node, event)}
         onDrop={(event) => onNodeDrop(node, event)}
-        onMouseDown={(event) => onMouseDragStart(node, event)}
+        onMouseDown={(event) => { if (!selection) onMouseDragStart(node, event); }}
         data-tree-node-id={node.id}
         onContextMenu={(event) => {
           if (node.isEditing) return;
@@ -769,15 +854,16 @@ function TreeNode({
           onActivateTreeNode(node.id);
           onMenuEnter(node, event);
         }}
-        onClick={() => onNodeClick(node)}
+        onClick={event => { if (selection) onToggleSelection?.(node.id,event.shiftKey); else onNodeClick(node, (event.nativeEvent as globalThis.PointerEvent).pointerType === "touch"); }}
         onDoubleClick={(event) => {
           event.stopPropagation();
-          onNodeDoubleClick(node);
+          if (!selection) onNodeDoubleClick(node);
         }}
       >
+        {selection && <input type="checkbox" tabIndex={-1} aria-label={`Seleccionar ${displayName}`} checked={selection.has(node.id)} onClick={event => { event.stopPropagation(); onToggleSelection?.(node.id,event.shiftKey); }} onChange={() => {}} className="mr-1 h-4 w-4 shrink-0 accent-brand-orange"/>}
         <span className="mr-0.5 grid h-5 w-4 place-items-center">
           {isFolder ? (
-            <button
+            <button tabIndex={-1}
               type="button"
               className="grid h-5 w-4 place-items-center rounded text-ink-secondary transition hover:bg-brand-hover hover:text-brand-orange"
               aria-label={`${node.open ? "Contraer" : "Expandir"} ${displayName}`}
@@ -828,7 +914,7 @@ function TreeNode({
                 {changeBadge}
               </span>
             ) : null}
-            <button
+            <button tabIndex={-1}
               className="grid h-5 w-5 place-items-center rounded-md opacity-0 hover:bg-white group-hover:opacity-100 focus:opacity-100 [@media(pointer:coarse)]:opacity-100 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
               aria-label={`Abrir menú de ${displayName}`}
               onClick={(event) => {
@@ -844,10 +930,12 @@ function TreeNode({
         )}
       </div>
       {shouldRenderChildren
-        ? node.children!.map((child) => (
+        ? <div role="group">{node.children!.map((child) => (
             <TreeNode
               key={child.id}
               node={child}
+              selection={selection}
+              onToggleSelection={onToggleSelection}
               depth={depth + 1}
               activeNodeId={activeNodeId}
               onOpenDocument={onOpenDocument}
@@ -873,7 +961,7 @@ function TreeNode({
               changeBadges={changeBadges}
               showFileExtensions={showFileExtensions}
             />
-          ))
+          ))}</div>
         : null}
     </div>
   );
@@ -956,17 +1044,12 @@ function DocumentNameSearchDialog({
   onClose: () => void;
   onSelect: (result: DocumentNameSearchResult) => void;
 }) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const results = useMemo(() => searchDocumentTreeByName(nodes, query), [nodes, query]);
   const activeResult = results[activeIndex] ?? results[0];
   const completion = getInlineNameCompletion(query, results[0]);
   const hasMore = query.trim().length > 0 && searchDocumentTreeByName(nodes, query, 11).length > results.length;
-
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
 
   useEffect(() => {
     setActiveIndex(0);
@@ -977,11 +1060,6 @@ function DocumentNameSearchDialog({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
-      return;
-    }
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setActiveIndex((currentIndex) => (results.length === 0 ? 0 : (currentIndex + 1) % results.length));
@@ -992,7 +1070,7 @@ function DocumentNameSearchDialog({
       setActiveIndex((currentIndex) => (results.length === 0 ? 0 : (currentIndex - 1 + results.length) % results.length));
       return;
     }
-    if (event.key === "Enter" || event.key === "Tab") {
+    if (event.key === "Enter" || event.key === "Tab" && !event.shiftKey) {
       if (!activeResult) return;
       event.preventDefault();
       selectResult(activeResult);
@@ -1000,29 +1078,28 @@ function DocumentNameSearchDialog({
   }
 
   return (
-    <div className="knownext-modal-overlay fixed inset-0 z-[90] flex items-start justify-center bg-black/20 px-4 pt-[11vh]" onMouseDown={onClose}>
+    <ModalFrame label="Buscar archivos y carpetas" onClose={onClose} className="!z-[180]">
+      <div className="absolute inset-0" aria-hidden="true" onMouseDown={onClose} />
       <section
-        className="w-[min(560px,calc(100vw-32px))] overflow-hidden rounded-lg border border-line bg-white shadow-menu"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="document-name-search-title"
+        className="relative flex max-h-[min(520px,calc(100dvh-24px))] w-[min(560px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center gap-2 border-b border-line px-3 py-2.5">
+        <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2.5">
           <Search size={16} className="shrink-0 text-ink-secondary" />
           <label id="document-name-search-title" className="sr-only">
             Buscar archivos y carpetas
           </label>
           <div className="relative min-w-0 flex-1">
             {completion ? (
-              <div className="pointer-events-none absolute inset-0 z-0 flex h-9 items-center overflow-hidden whitespace-pre px-1 text-[13px] text-ink-secondary/35" aria-hidden="true">
+              <div className="pointer-events-none absolute inset-0 z-0 flex h-11 items-center overflow-hidden whitespace-pre px-1 text-[13px] text-ink-secondary/35" aria-hidden="true">
                 {query}
                 {completion}
               </div>
             ) : null}
             <input
-              ref={inputRef}
-              className="relative z-10 h-9 w-full bg-transparent px-1 text-[13px] text-ink-primary caret-brand-orange outline-none placeholder:text-ink-secondary/70"
+              data-autofocus
+              aria-label="Buscar archivos y carpetas"
+              className="relative z-10 h-11 w-full bg-transparent px-1 text-[13px] text-ink-primary caret-brand-orange outline-none placeholder:text-ink-secondary/70"
               value={query}
               placeholder="Buscar archivos y carpetas"
               aria-autocomplete="list"
@@ -1032,7 +1109,7 @@ function DocumentNameSearchDialog({
             />
           </div>
           <button
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
             type="button"
             data-tooltip="Cerrar"
             aria-label="Cerrar búsqueda"
@@ -1041,7 +1118,7 @@ function DocumentNameSearchDialog({
             <X size={16} />
           </button>
         </div>
-        <div id="document-name-search-results" className="max-h-[360px] overflow-y-auto p-1.5" role="listbox">
+        <div id="document-name-search-results" className="min-h-0 max-h-[360px] overflow-y-auto p-1.5" role="listbox">
           {query.trim().length === 0 ? (
             <div className="px-3 py-8 text-center text-[11px] text-ink-secondary">Empieza a escribir un nombre.</div>
           ) : results.length === 0 ? (
@@ -1081,7 +1158,7 @@ function DocumentNameSearchDialog({
           )}
         </div>
       </section>
-    </div>
+    </ModalFrame>
   );
 }
 

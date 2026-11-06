@@ -1,0 +1,7 @@
+import {expect,it} from "vitest";
+import {createDefaultHandwrittenContent} from "../features/handwritten/handwrittenModel";
+import {updatePageTranscription} from "../features/handwritten/pageTranscription";
+import {mergeOcrText} from "./handwrittenOcrApplication";
+it("preserves later edits to another page when the OCR acknowledgement arrives",()=>{const before=createDefaultHandwrittenContent("note","Original"),id=before.pages[0].id;const result=updatePageTranscription(before,id,"","Texto reconocido");const live={...before,title:"Título manual posterior",pages:[...before.pages,{...before.pages[0],id:"manual-page"}]};const merged=mergeOcrText(before,live,result,id);expect(merged.title).toBe(live.title);expect(merged.pages).toEqual(live.pages);expect(merged.ocr.textByPage[id]).toBe("Texto reconocido");});
+it("refuses to replace a page changed while its OCR write awaited confirmation",()=>{const before=createDefaultHandwrittenContent("note","Original"),id=before.pages[0].id;const result=updatePageTranscription(before,id,"","OCR");expect(()=>mergeOcrText(before,{...before,pages:[{...before.pages[0],title:"Cambio manual"}]},result,id)).toThrow(/página cambió/);});
+it("keeps a later manually corrected transcript instead of a stale OCR acknowledgement",()=>{const before=createDefaultHandwrittenContent("note","Original"),id=before.pages[0].id;const result=updatePageTranscription(before,id,"","OCR"),live=updatePageTranscription(before,id,"","Mi corrección");expect(()=>mergeOcrText(before,live,result,id)).toThrow(/transcripción cambió/);});

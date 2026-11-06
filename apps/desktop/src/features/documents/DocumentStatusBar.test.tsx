@@ -19,6 +19,15 @@ const defaultProps = {
 afterEach(() => cleanup());
 
 describe("DocumentStatusBar", () => {
+  it("keeps an incompatible source distinct from saved without offering save or discard",()=>{
+    render(<DocumentStatusBar {...defaultProps} isDirty blockedSaveReason="Se conserva la fuente y el borrador local."/>);expect(screen.getByText('Fuente por revisar')).toBeInTheDocument();expect(screen.getByTitle('Se conserva la fuente y el borrador local.')).toBeInTheDocument();expect(screen.queryByRole('button',{name:'Guardar'})).not.toBeInTheDocument();expect(screen.queryByRole('button',{name:'Deshacer cambios'})).not.toBeInTheDocument();expect(screen.queryByText('OK · Guardado')).not.toBeInTheDocument();
+  });
+  it("does not announce saved or offer mutation while loading or after a failed load",()=>{
+    const view=render(<DocumentStatusBar {...defaultProps} isDirty isLoading/>);
+    expect(screen.getByText("Cargando documento…")).toBeInTheDocument();expect(screen.queryByText("OK · Guardado")).not.toBeInTheDocument();expect(screen.queryByRole("button",{name:"Guardar"})).not.toBeInTheDocument();
+    view.rerender(<DocumentStatusBar {...defaultProps} loadError="Owned read failure"/>);expect(screen.getByText("Carga no confirmada")).toBeInTheDocument();expect(screen.getByTitle("Owned read failure")).toBeInTheDocument();expect(screen.queryByText("OK · Guardado")).not.toBeInTheDocument();
+    view.rerender(<DocumentStatusBar {...defaultProps}/>);expect(screen.getByText("OK · Guardado")).toBeInTheDocument();
+  });
   it("hides the save button when the active document has no pending changes", () => {
     render(<DocumentStatusBar {...defaultProps} />);
 

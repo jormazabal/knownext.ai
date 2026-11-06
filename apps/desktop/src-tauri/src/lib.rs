@@ -1,91 +1,36 @@
 use base64::Engine;
-use knownext_storage::{LocalApi, LocalApiContentResponse, LocalApiFile, LocalApiResponse};
-use std::io::Write;
+use knownext_storage::{LocalApi, LocalApiResponse};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::http::{header, Response, StatusCode, Uri};
 use tauri::Manager;
 #[cfg(target_os = "android")]
 mod android_recording;
+#[cfg(target_os = "android")]
+mod android_credentials;
+#[cfg(target_os = "android")]
+mod android_exports;
 mod recording;
+mod template_transfer;
+mod ai_usage;
+mod recovery;
+mod project_transfer;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
-static TRACE_LOG_LOCK: Mutex<()> = Mutex::new(());
 
-struct LocalApiState(Mutex<LocalApi>);
+mod runtime_dispatch;
+mod scheduled_backup_runtime;
+mod navigation_policy;
+mod operations;
+mod managed_native;
+mod restart;
+mod workspace_exit;
+mod runtime_services;
+use runtime_dispatch::{LocalApiRequest, LocalApiState};
+static PROJECT_LOCATION_GATE:Mutex<()> = Mutex::new(());
 
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LocalApiRequest {
-    method: String,
-    path: String,
-    body: Option<serde_json::Value>,
-    files: Option<Vec<LocalApiFile>>,
-}
-
-#[derive(serde::Serialize)]
-struct RuntimeServicesStatus {
-    services: Vec<RuntimeServiceStatus>,
-    #[serde(rename = "checkedAt")]
-    checked_at: String,
-}
-
-#[derive(serde::Serialize)]
-struct RuntimeServiceStatus {
-    id: String,
-    name: String,
-    status: String,
-    #[serde(rename = "statusLabel")]
-    status_label: String,
-    description: String,
-    endpoint: String,
-    #[serde(rename = "expectedVersion")]
-    expected_version: String,
-    version: Option<String>,
-    #[serde(rename = "expectedProfile")]
-    expected_profile: String,
-    profile: Option<String>,
-    #[serde(rename = "expectedAppDataDir")]
-    expected_app_data_dir: String,
-    #[serde(rename = "appDataDir")]
-    app_data_dir: Option<String>,
-    #[serde(rename = "managedBy")]
-    managed_by: Option<String>,
-    #[serde(rename = "instanceId")]
-    instance_id: Option<String>,
-    #[serde(rename = "startedAt")]
-    started_at: Option<String>,
-    #[serde(rename = "lastError")]
-    last_error: Option<String>,
-}
-
-#[derive(serde::Serialize)]
-struct TraceLogStatus {
-    enabled: bool,
-    #[serde(rename = "folderPath")]
-    folder_path: String,
-    #[serde(rename = "filePath")]
-    file_path: String,
-}
-
-fn trace_log_paths(app: &tauri::AppHandle) -> Result<(PathBuf, PathBuf), String> {
-    let log_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| error.to_string())?
-        .join("logs");
-    let log_file = log_dir.join("knownext.log");
-    Ok((log_dir, log_file))
-}
-
-fn trace_log_status(app: &tauri::AppHandle, enabled: bool) -> Result<TraceLogStatus, String> {
-    let (log_dir, log_file) = trace_log_paths(app)?;
-    std::fs::create_dir_all(&log_dir).map_err(|error| error.to_string())?;
-    Ok(TraceLogStatus {
-        enabled,
-        folder_path: log_dir.to_string_lossy().to_string(),
-        file_path: log_file.to_string_lossy().to_string(),
-    })
+fn require_workspace_window(window:&tauri::WebviewWindow)->Result<(),String> {
+    if knownext_core::window_policy::allows_workspace_command(window.label()) {Ok(())} else {Err("Esta operación requiere el espacio principal".into())}
 }
 
 fn trace_timestamp() -> String {
@@ -94,56 +39,34 @@ fn trace_timestamp() -> String {
         .unwrap_or_else(|_| "unknown-time".to_string())
 }
 
-fn append_trace_log(
-    app: &tauri::AppHandle,
-    level: &str,
-    source: &str,
-    message: &str,
-    detail: Option<&str>,
-) -> Result<TraceLogStatus, String> {
-    let (log_dir, log_file) = trace_log_paths(app)?;
-    std::fs::create_dir_all(&log_dir).map_err(|error| error.to_string())?;
-    let _guard = TRACE_LOG_LOCK.lock().map_err(|error| error.to_string())?;
-    let normalized_level = if level.is_empty() { "error" } else { level };
-    let mut entry = format!(
-        "{} [{}] {}\nMessage: {}\n",
-        trace_timestamp(),
-        normalized_level.to_uppercase(),
-        source,
-        message
-    );
-    if let Some(detail) = detail.filter(|value| !value.trim().is_empty()) {
-        entry.push_str("Detail:\n");
-        entry.push_str(detail.trim_end());
-        entry.push('\n');
-    }
-    entry.push_str("---\n");
-
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_file)
-        .map_err(|error| error.to_string())?;
-    file.write_all(entry.as_bytes())
-        .map_err(|error| error.to_string())?;
-
-    trace_log_status(app, true)
-}
+fn runtime_reply<T:serde::Serialize>(id:&str,result:Result<T,String>)->Result<serde_json::Value,String>{let mut value=serde_json::to_value(result?).map_err(|_|"invalid-runtime-response")?;let object=value.as_object_mut().ok_or("invalid-runtime-response")?;object.insert("protocolVersion".into(),serde_json::json!(1));object.insert("operationId".into(),serde_json::json!(id));object.insert("completedAt".into(),serde_json::json!(knownext_core::now_iso()));Ok(value)}
 
 #[tauri::command]
 async fn local_api_request(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     request: LocalApiRequest,
-) -> Result<LocalApiResponse, String> {
+    operation_id: Option<String>,
+) -> Result<serde_json::Value, String> {
+    if !knownext_core::window_policy::allows_local_api(window.label(),&request.method,&request.path) {
+        return Err("Esta operación no está disponible desde esta ventana".into());
+    }
     tauri::async_runtime::spawn_blocking(move || {
+        let operation_id=operations::admit(&app,&request,operation_id)?;
         let api = app.state::<LocalApiState>();
-        let api = api.0.lock().map_err(|error| error.to_string())?;
-        api.handle(
-            &request.method,
-            &request.path,
-            request.body.unwrap_or(serde_json::Value::Null),
-            request.files.unwrap_or_default(),
-        )
+        let running=operations::start(&app,&operation_id)?;
+        let _context=running.bind();
+        let result=(|| {
+        let owner=knownext_storage::reviewed_location_owner(&request.method,&request.path,request.body.as_ref().unwrap_or(&serde_json::Value::Null));
+        let _location_guard=if owner.is_some(){Some(PROJECT_LOCATION_GATE.lock().map_err(|_|"No se puede revisar la actividad del proyecto")?)}else{None};
+        if let Some(owner)=owner {
+            let snapshot=app.state::<knownext_recording::RecordingService>().request("snapshot",serde_json::json!({}))?;
+            if knownext_storage::location_recording_blocker(&snapshot,&owner){return Err("El proyecto tiene grabaciones pendientes o en curso. Finalízalas o cambia su destino antes de revincularlo".into());}
+        }
+        api.request(request)
+        })();
+        operations::finish(running,result.as_ref().ok().map(|response|response.status<400));
+        runtime_reply(&operation_id,result)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -152,38 +75,80 @@ async fn local_api_request(
 #[tauri::command]
 async fn local_api_content(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     request: LocalApiRequest,
-) -> Result<LocalApiContentResponse, String> {
+    operation_id: Option<String>,
+) -> Result<serde_json::Value, String> {
+    if !knownext_core::window_policy::allows_workspace_command(window.label()) {return Err("El contenido documental solo está disponible en el espacio principal".into());}
     tauri::async_runtime::spawn_blocking(move || {
+        let operation_id=operations::admit_content(&app,&request,operation_id)?;
         let api = app.state::<LocalApiState>();
-        let api = api.0.lock().map_err(|error| error.to_string())?;
-        api.content(
+        let running=operations::start(&app,&operation_id)?;
+        let _context=running.bind();
+        let result=(|| {
+        if knownext_storage::is_export_content_request(&request.method,&request.path) {
+            return knownext_storage::dispatch_export_content(&api.0,&api.3,&request.path,request.body.unwrap_or(serde_json::Value::Null));
+        }
+        // Remaining content routes only read assets or render a preview from a
+        // snapshot. Neither needs to hold the document mutation authority.
+        api.1.content(
             &request.path,
             request.body.unwrap_or(serde_json::Value::Null),
         )
+        })();
+        operations::finish(running,result.as_ref().ok().map(|response|response.status<400));
+        runtime_reply(&operation_id,result)
     })
     .await
     .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn get_trace_log_status(app: tauri::AppHandle) -> Result<TraceLogStatus, String> {
-    trace_log_status(&app, true)
+async fn export_document_mobile(app:tauri::AppHandle,window:tauri::WebviewWindow,request:LocalApiRequest)->Result<serde_json::Value,String> {
+    require_workspace_window(&window)?;
+    if !knownext_storage::is_export_content_request(&request.method,&request.path){return Err("La entrega móvil necesita una exportación documental válida".into());}
+    #[cfg(target_os="android")]
+    return tauri::async_runtime::spawn_blocking(move||{
+        let request_id=knownext_core::compact_id("export");
+        let cache=app.path().app_cache_dir().map_err(|error|error.to_string())?;
+        let api=app.state::<LocalApiState>();
+        let staged=knownext_storage::stage_export_content(&api.0,&api.3,&request.path,request.body.unwrap_or(serde_json::Value::Null),&cache)?;
+        let mut result=android_exports::save(&app,&staged)?;
+        if !matches!(result["status"].as_str(),Some("saved"|"cancelled")){return Err("No se pudo confirmar el resultado de la entrega".into());}
+        result["requestId"]=serde_json::json!(request_id);result["completedAt"]=serde_json::json!(knownext_core::now_iso());Ok(result)
+    }).await.map_err(|error|error.to_string())?;
+    #[cfg(not(target_os="android"))]
+    {let _=(app,request);Err("La entrega móvil solo está disponible en Android".into())}
+}
+#[tauri::command]
+async fn open_mobile_export(app:tauri::AppHandle,window:tauri::WebviewWindow,export_id:String)->Result<serde_json::Value,String> {
+    require_workspace_window(&window)?;
+    #[cfg(target_os="android")]
+    return tauri::async_runtime::spawn_blocking(move||{
+        let mut result=android_exports::open(&app,&export_id)?;
+        result["exportId"]=serde_json::json!(export_id);result["completedAt"]=serde_json::json!(knownext_core::now_iso());Ok(result)
+    }).await.map_err(|error|error.to_string())?;
+    #[cfg(not(target_os="android"))]
+    {let _=(app,export_id);Err("La entrega móvil solo está disponible en Android".into())}
 }
 
 #[tauri::command]
-fn record_trace_log(
-    app: tauri::AppHandle,
-    level: String,
-    source: String,
-    message: String,
-    detail: Option<String>,
-) -> Result<TraceLogStatus, String> {
-    append_trace_log(&app, &level, &source, &message, detail.as_deref())
+async fn get_trace_log_status(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<serde_json::Value, String> {
+    require_workspace_window(&window)?;
+    tauri::async_runtime::spawn_blocking(move||app.state::<LocalApiState>().1.safe_diagnostic_status()).await.map_err(|_|"No se pudo consultar el diagnóstico")?
 }
 
 #[tauri::command]
-fn open_folder(folder_path: String) -> Result<(), String> {
+async fn record_trace_log(app: tauri::AppHandle, window: tauri::WebviewWindow, level: String, source: String, message: Option<String>, detail: Option<String>) -> Result<serde_json::Value, String> {
+    require_workspace_window(&window)?;
+    // Old clients may still send these fields; neither enters the event store.
+    let _=(message,detail);
+    tauri::async_runtime::spawn_blocking(move||app.state::<LocalApiState>().1.record_safe_diagnostic(serde_json::json!({"level":level,"source":source}))).await.map_err(|_|"No se pudo registrar el diagnóstico")?
+}
+
+#[tauri::command]
+fn open_folder(window: tauri::WebviewWindow, folder_path: String) -> Result<(), String> {
+    require_workspace_window(&window)?;
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = folder_path;
@@ -214,103 +179,6 @@ fn open_folder(folder_path: String) -> Result<(), String> {
 
         Ok(())
     }
-}
-
-#[tauri::command]
-fn get_runtime_service_status(app: tauri::AppHandle) -> Result<RuntimeServicesStatus, String> {
-    let api = app.state::<LocalApiState>();
-    let api = api.0.lock().map_err(|error| error.to_string())?;
-    let health = api.health();
-    let git = api.git_diagnostics();
-    let app_data_dir = health["appDataDir"].as_str().unwrap_or("").to_string();
-    let git_available = git["gitAvailable"].as_bool().unwrap_or(false);
-    let git_initialized = git["gitInitialized"].as_bool().unwrap_or(false);
-    let github_configured = git["githubConfigured"].as_bool().unwrap_or(false);
-    let github_authenticated = git["githubAuthenticated"].as_bool().unwrap_or(false);
-    let remote_access = git["remoteAccess"].as_str().unwrap_or("unknown");
-    let git_status = if git_available
-        && (!github_configured || github_authenticated || remote_access == "unauthenticated")
-    {
-        "running"
-    } else if git_available {
-        "degraded"
-    } else {
-        "unavailable"
-    };
-    let git_status_label = if !git_available {
-        "Git no disponible"
-    } else if github_configured && !github_authenticated {
-        "Local activo · GitHub pausado"
-    } else if git_initialized {
-        "Historial local activo"
-    } else {
-        "Git disponible"
-    };
-    let git_description = if !git_available {
-        "Git no está disponible para el runtime local."
-    } else if github_configured && !github_authenticated {
-        "El historial local puede usarse sin terminales visibles; GitHub queda pausado hasta conectar la cuenta."
-    } else if git_initialized {
-        "El runtime ejecuta Git de forma local, no interactiva y silenciosa."
-    } else {
-        "Git está instalado; el proyecto activo aún no tiene historial local inicializado."
-    };
-    let git_last_error = git["lastError"].as_str().map(ToString::to_string).or_else(|| {
-        if github_configured && !github_authenticated {
-            Some("GitHub remoto pausado: sin cuenta GitHub conectada. El trabajo local sigue disponible.".to_string())
-        } else {
-            None
-        }
-    });
-    Ok(RuntimeServicesStatus {
-        services: vec![
-            RuntimeServiceStatus {
-                id: "local-runtime".to_string(),
-                name: "Runtime local Rust".to_string(),
-                status: "running".to_string(),
-                status_label: "Operativo".to_string(),
-                description: "La aplicación usa comandos Tauri y persistencia local Rust."
-                    .to_string(),
-                endpoint: "tauri://local-api/health".to_string(),
-                expected_version: env!("CARGO_PKG_VERSION").to_string(),
-                version: health["version"].as_str().map(ToString::to_string),
-                expected_profile: runtime_profile().to_string(),
-                profile: health["profile"].as_str().map(ToString::to_string),
-                expected_app_data_dir: app_data_dir.clone(),
-                app_data_dir: Some(app_data_dir.clone()),
-                managed_by: Some("tauri".to_string()),
-                instance_id: health["instanceId"].as_str().map(ToString::to_string),
-                started_at: health["startedAt"].as_str().map(ToString::to_string),
-                last_error: None,
-            },
-            RuntimeServiceStatus {
-                id: "git-runtime".to_string(),
-                name: "Git local y GitHub".to_string(),
-                status: git_status.to_string(),
-                status_label: git_status_label.to_string(),
-                description: git_description.to_string(),
-                endpoint: "tauri://local-api/api/runtime/git".to_string(),
-                expected_version: "git".to_string(),
-                version: git["gitVersion"].as_str().map(ToString::to_string),
-                expected_profile: runtime_profile().to_string(),
-                profile: git["remoteAccess"].as_str().map(ToString::to_string),
-                expected_app_data_dir: git["folderPath"].as_str().unwrap_or("").to_string(),
-                app_data_dir: git["origin"].as_str().map(ToString::to_string),
-                managed_by: Some(
-                    if github_configured {
-                        "local-git+github"
-                    } else {
-                        "local-git"
-                    }
-                    .to_string(),
-                ),
-                instance_id: git["projectName"].as_str().map(ToString::to_string),
-                started_at: git["checkedAt"].as_str().map(ToString::to_string),
-                last_error: git_last_error,
-            },
-        ],
-        checked_at: trace_timestamp(),
-    })
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -405,9 +273,10 @@ pub fn run() {
     #[cfg(any(target_os = "android", target_os = "ios"))]
     install_mobile_crypto_provider();
 
-    let builder = tauri::Builder::default();
+    let builder = tauri::Builder::default()
+        .plugin(tauri::plugin::Builder::<tauri::Wry>::new("navigation-policy").on_navigation(|_,url|navigation_policy::allowed(url,cfg!(debug_assertions))).build());
     #[cfg(target_os = "android")]
-    let builder = builder.plugin(android_recording::plugin());
+    let builder = builder.plugin(android_recording::plugin()).plugin(android_exports::plugin());
     #[cfg(all(desktop, not(debug_assertions)))]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
         if let Some(window) = app.get_webview_window("main") {
@@ -423,13 +292,10 @@ pub fn run() {
     );
 
     builder
-        .register_uri_scheme_protocol("knownext-asset", |ctx, request| {
-            let api = ctx.app_handle().state::<LocalApiState>();
-            let response = match api.0.lock() {
-                Ok(api) => knownext_asset_response(&api, request.uri()),
-                Err(error) => text_response(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
-            };
-            response
+        .register_asynchronous_uri_scheme_protocol("knownext-asset", |ctx, request, responder| {
+            if !knownext_core::window_policy::allows_workspace_command(ctx.webview_label()) {responder.respond(text_response(StatusCode::FORBIDDEN,"Recurso documental no disponible desde esta ventana"));return;}
+            let api=ctx.app_handle().state::<LocalApiState>().1.clone();
+            tauri::async_runtime::spawn_blocking(move||responder.respond(knownext_asset_response(&api,request.uri())));
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
@@ -443,6 +309,11 @@ pub fn run() {
 
             let app_data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&app_data_dir)?;
+            #[cfg(not(target_os="android"))]
+            let state_owner=knownext_storage::acquire_runtime_owner(&app_data_dir).map_err(std::io::Error::other)?;
+            #[cfg(target_os="android")]
+            let state_owner=android_recording::state_owner(&app_data_dir).map_err(std::io::Error::other)?;
+            app.manage(state_owner);
             let currency_root = app_data_dir.clone();
             std::thread::spawn(move || loop {
                 let _ = knownext_storage::currency::refresh(&currency_root);
@@ -460,12 +331,19 @@ pub fn run() {
             let recordings = android_recording::init_runtime(app_data_dir.clone())
                 .map_err(std::io::Error::other)?;
             app.manage(recordings);
+            #[cfg(not(target_os = "android"))]
             let api = LocalApi::new(
                 app_data_dir,
                 env!("CARGO_PKG_VERSION").to_string(),
                 runtime_profile().to_string(),
             );
-            app.manage(LocalApiState(Mutex::new(api)));
+            #[cfg(target_os = "android")]
+            let api=android_recording::local_api().map_err(std::io::Error::other)?;
+            app.manage(api.runtime_operations());
+            app.manage(restart::RestartFence::default());
+            app.manage(workspace_exit::ExitRequest::default());
+            app.manage(LocalApiState(Mutex::new(api.clone()), api, Mutex::new(()),Mutex::new(()),Mutex::new(())));
+            scheduled_backup_runtime::start(app.handle());
             #[cfg(desktop)]
             {
                 recording::setup_tray(app.handle())?;
@@ -481,36 +359,27 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             local_api_request,
+            managed_native::managed_native_request,
+            restart::prepare_runtime_restart,
+            restart::release_runtime_restart,
+            workspace_exit::confirm_workspace_exit,
+            workspace_exit::abort_workspace_exit,
+            operations::local_operation_status,
+            operations::local_operation_continuity,
+            operations::cancel_local_operation,
             local_api_content,
             get_trace_log_status,
             record_trace_log,
             open_folder,
-            get_runtime_service_status,
+            runtime_services::get_runtime_service_status,
             recording::recording_request,
             recording::recording_audio,
-            recording::openai_model_access
         ])
         .on_window_event(|window, event| {
             #[cfg(desktop)]
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                let snapshot = window
-                    .state::<knownext_recording::RecordingService>()
-                    .request("snapshot", serde_json::json!({}))
-                    .ok();
-                let keep = snapshot.as_ref().is_some_and(|s| {
-                    s["settings"]["keepInTray"] == true
-                        || !s["captureOwner"].is_null()
-                        || s["sessions"].as_array().is_some_and(|a| {
-                            a.iter()
-                                .any(|s| s["status"] == "transcribing" || s["status"] == "queued")
-                        })
-                });
-                if window.label() == "recordings" || keep {
-                    api.prevent_close();
-                    let _ = window.hide();
-                    let _ = window
-                        .state::<knownext_recording::RecordingService>()
-                        .request("preview-stop", serde_json::json!({}));
+                if matches!(window.label(),"main"|"recordings") {
+                    api.prevent_close();workspace_exit::close_window(window);
                 }
             }
         })
@@ -521,6 +390,49 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saved_search_does_not_wait_for_the_mutation_queue() {
+        let dir=std::env::temp_dir().join(knownext_core::compact_id("knownext-runtime-concurrency"));
+        let api=LocalApi::new(dir.join("state"),"2.6.0".into(),"desktop".into());
+        let root=dir.join("project");
+        let project=api.handle("POST","/api/projects",serde_json::json!({"name":"Concurrency","folderPath":root.to_string_lossy()}),vec![]).unwrap();
+        std::fs::write(root.join("a.md"),"local result").unwrap();
+        let project_id=project.body["id"].as_str().unwrap().to_owned();
+        let state=std::sync::Arc::new(LocalApiState(Mutex::new(api.clone()),api,Mutex::new(()),Mutex::new(()),Mutex::new(())));
+        let guard=state.0.lock().unwrap();
+        let worker_state=state.clone();
+        let (sender,receiver)=std::sync::mpsc::channel();
+        let worker=std::thread::spawn(move||{
+            let result=worker_state.request(LocalApiRequest{method:"POST".into(),path:format!("/api/projects/{project_id}/search/content"),body:Some(serde_json::json!({"query":"local"})),files:None});
+            for path in ["/api/recovery/drafts", "/api/recovery/archives", "/api/drafts/orphans"] {
+                let snapshot=worker_state.request(LocalApiRequest{method:"GET".into(),path:path.into(),body:None,files:None}).unwrap();
+                assert_eq!(snapshot.status,200,"read snapshot {path} waited for mutation authority");
+            }
+            sender.send(result).unwrap();
+        });
+        let result=receiver.recv_timeout(std::time::Duration::from_secs(3)).expect("search waited for the mutation queue").unwrap();
+        assert_eq!(result.body["results"][0]["name"],"a.md");
+        drop(guard);worker.join().unwrap();std::fs::remove_dir_all(dir).unwrap();
+        assert!(LocalApi::is_independent_snapshot("GET","/api/projects/p/nodes/batch/batch-1"));
+        assert!(!LocalApi::is_independent_snapshot("POST","/api/projects/p/nodes/batch/batch-1/execute"));
+        assert!(!LocalApi::is_independent_snapshot("PUT","/api/documents/p%3A%3Aa.md"));
+        assert!(!LocalApi::is_independent_snapshot("GET","/api/config"));
+        assert!(!LocalApi::is_independent_snapshot("POST","/api/recovery/drafts/copy/archive"));
+        assert!(!LocalApi::is_independent_snapshot("POST","/api/recovery/drafts/copy/copy"));
+    }
+
+    #[test]
+    fn independent_audio_validation_does_not_wait_for_mutations_or_contact_a_provider(){
+        let root=std::env::temp_dir().join(knownext_core::compact_id("knownext-provider-queue"));
+        let api=LocalApi::new(root.clone(),"2.6.0".into(),"test".into());
+        let state=std::sync::Arc::new(LocalApiState(Mutex::new(api.clone()),api,Mutex::new(()),Mutex::new(()),Mutex::new(())));
+        let gate=state.0.lock().unwrap();let worker=state.clone();let (send,receive)=std::sync::mpsc::channel();
+        let thread=std::thread::spawn(move||{send.send(worker.request(LocalApiRequest{method:"POST".into(),path:"/api/transcription".into(),body:None,files:Some(vec![])})).unwrap();});
+        let response=receive.recv_timeout(std::time::Duration::from_secs(2)).expect("audio validation must not wait for the document gate").unwrap();assert_eq!(response.body["error"],"missing_audio");
+        drop(gate);thread.join().unwrap();std::fs::remove_dir_all(root).unwrap();
+        assert!(knownext_storage::is_provider_work("POST","/api/documents/p%3A%3Aa.md/ai/prompt"));assert!(!knownext_storage::is_provider_work("PUT","/api/documents/p%3A%3Aa.md"));
+    }
 
     #[test]
     fn parses_knownext_asset_uri_with_project_host() {
@@ -548,4 +460,10 @@ mod tests {
             Some(("knownext-lks".to_string(), "assets%2Fimage.png".to_string()))
         );
     }
+}
+
+#[cfg(test)]mod runtime_block_contract_tests{
+ use super::*;
+ #[test]fn runtime_block_wire_envelope_is_correlated_and_future_arguments_are_rejected(){let value=runtime_reply("operation-owned-contract",Ok(LocalApiResponse{status:200,body:serde_json::json!({"owned":true})})).unwrap();assert_eq!(value["protocolVersion"],1);assert_eq!(value["operationId"],"operation-owned-contract");assert_eq!(value["body"]["owned"],true);assert!(OffsetDateTime::parse(value["completedAt"].as_str().unwrap(),&Rfc3339).is_ok());assert!(serde_json::from_value::<LocalApiRequest>(serde_json::json!({"method":"GET","path":"/health","futureExecution":true})).is_err());}
+ #[test]fn runtime_block_authentication_dispatch_does_not_wait_for_document_mutations(){let root=std::env::temp_dir().join(knownext_core::compact_id("knownext-runtime-contract"));let api=LocalApi::new(root.join("state"),"qa".into(),"test".into());let state=std::sync::Arc::new(LocalApiState(Mutex::new(api.clone()),api,Mutex::new(()),Mutex::new(()),Mutex::new(())));let _busy=state.0.lock().unwrap();let worker=state.clone();let(tx,rx)=std::sync::mpsc::channel();let thread=std::thread::spawn(move||{let result=worker.request(LocalApiRequest{method:"POST".into(),path:"/api/auth/github/device/start".into(),body:None,files:None});tx.send(result.is_ok()).unwrap();});assert!(rx.recv_timeout(std::time::Duration::from_secs(3)).unwrap());thread.join().unwrap();}
 }

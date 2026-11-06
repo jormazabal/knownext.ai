@@ -32,15 +32,15 @@ describe("documents API contracts", () => {
     await saveDocument("docs/Plan.md", { markdown: "# Plan", baseFingerprint: { size: 1, mtimeNs: 123, sha256: "abc" } });
     expect(requestJson).toHaveBeenLastCalledWith("/api/documents/docs%2FPlan.md", {
       method: "PUT",
-      body: JSON.stringify({ markdown: "# Plan", baseFingerprint: { size: 1, mtimeNs: 123, sha256: "abc" } }),
+      body: JSON.stringify({ markdown: "# Plan", baseFingerprint: { size: 1, mtimeNs: 123, sha256: "abc" },expectedDraftWriteRevision:null }),
     });
     await saveDocumentDraft("docs/Plan.md", { markdown: "# Draft", baseFingerprint: null });
     expect(requestJson).toHaveBeenLastCalledWith("/api/documents/docs%2FPlan.md/draft", {
       method: "PUT",
-      body: JSON.stringify({ markdown: "# Draft", baseFingerprint: null }),
+      body: JSON.stringify({ markdown: "# Draft", baseFingerprint: null,expectedDraftWriteRevision:null }),
     });
     await discardDocumentDraft("docs/Plan.md");
-    expect(requestJson).toHaveBeenLastCalledWith("/api/documents/docs%2FPlan.md/draft", { method: "DELETE" });
+    expect(requestJson).toHaveBeenLastCalledWith("/api/documents/docs%2FPlan.md/draft", { method: "DELETE",body:JSON.stringify({expectedDraftWriteRevision:null}) });
     await exportDocument("docs/Plan.md", { format: "pdf", markdown: "# Plan", outputPath: "C:/Temp/Plan.pdf" });
     expect(requestJson).toHaveBeenLastCalledWith("/api/documents/docs%2FPlan.md/export", {
       method: "POST",
@@ -61,9 +61,11 @@ describe("documents API contracts", () => {
   it("routes recoverable draft actions", async () => {
     await listOrphanDrafts();
     expect(requestJson).toHaveBeenLastCalledWith("/api/drafts/orphans");
-    await restoreOrphanDraft("docs/Plan.md");
-    expect(requestJson).toHaveBeenLastCalledWith("/api/drafts/docs%2FPlan.md/restore", { method: "POST" });
-    await discardOrphanDraft("docs/Plan.md");
-    expect(requestJson).toHaveBeenLastCalledWith("/api/drafts/docs%2FPlan.md", { method: "DELETE" });
+    const review={documentId:"project::Plan.md",fingerprint:"a".repeat(64),locationRevision:"b".repeat(64)};
+    const body=JSON.stringify({documentId:review.documentId,expectedFingerprint:review.fingerprint,locationRevision:review.locationRevision});
+    await restoreOrphanDraft("docs/Plan.md",review);
+    expect(requestJson).toHaveBeenLastCalledWith("/api/drafts/docs%2FPlan.md/restore", { method: "POST",body });
+    await discardOrphanDraft("docs/Plan.md",review);
+    expect(requestJson).toHaveBeenLastCalledWith("/api/drafts/docs%2FPlan.md", { method: "DELETE",body });
   });
 });

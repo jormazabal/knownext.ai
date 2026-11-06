@@ -1,0 +1,5 @@
+export type ConflictAttemptObservation<T> = { status: "confirmed"; attemptId: string; result: T; checkedAt: string } | { status: "absent" | "pending" | "changed"; attemptId: string; phase?: string; checkedAt: string };
+export type ConflictAttemptConfirmation<T> = { id: string; verify: () => Promise<T | null> };
+export type ConflictAttemptRow={id:string;documentId:string|null;name:string;kind:"markdown"|"handwritten"|null;phase:"preparing"|"ready"|"applying"|"completed"|null;createdAt:string|null;archivedAt?:string|null;bytes:number;revision:string|null;canReview:boolean;warning:string|null};
+export type ConflictAttemptInventory={items:ConflictAttemptRow[];scanned:number;limited:boolean;warnings:string[];checkedAt:string};
+export type ConflictAttemptRecovery={receipt:ConflictAttemptRow;operationId:string;copies:import("./recovery").RecoveryCopy[];copiesVerified:boolean;draftMatchesRecordedPublication:boolean|null;fileStateReviewed:false;remoteStateReviewed:false;canReplay:false;payloadRetirement?:import("./conflictPayloads").ConflictPayloads;warnings:string[];checkedAt:string};

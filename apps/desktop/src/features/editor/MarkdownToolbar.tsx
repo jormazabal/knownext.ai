@@ -1,5 +1,6 @@
 import {
   Bold,
+  BookOpen,
   CheckSquare,
   Code2,
   ChevronDown,
@@ -29,9 +30,10 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { ModalFrame } from "../../components/ui/ModalFrame";
 import type { MarkdownEditorAction, MarkdownEditorActionOptions, MarkdownEditorFormatState, MarkdownEditorHistoryState } from "./editorTypes";
-import { markdownHighlightColors, type MarkdownHighlightColorId } from "./highlightExtension";
+import { markdownHighlightColors, type MarkdownHighlightColorId } from "./highlightPalette";
 import type { ExportFormat } from "../../types/domain";
 
 type ToolbarAction = {
@@ -97,6 +99,7 @@ type MarkdownToolbarProps = {
   documentActionsEnabled?: boolean;
   onRunEditorAction: (action: MarkdownEditorAction, options?: MarkdownEditorActionOptions) => void;
   onExportDocument: (format: ExportFormat) => void;
+  onSaveTemplate?: () => void;
   onMarkdownZoomChange: (zoomPercent: number) => void;
   onToggleMarkdownSource?: () => void;
   onToggleHistory: () => void;
@@ -117,6 +120,7 @@ export function MarkdownToolbar({
   documentActionsEnabled = true,
   onRunEditorAction,
   onExportDocument,
+  onSaveTemplate,
   onMarkdownZoomChange,
   onToggleMarkdownSource,
   onToggleHistory,
@@ -126,6 +130,23 @@ export function MarkdownToolbar({
   const [hoveredTableSize, setHoveredTableSize] = useState({ rows: 3, columns: 4 });
   const compactToolbar = useCompactToolbarMode();
   const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const menuEntry=useRef<"pointer"|"first"|"last">("pointer"),menuTrigger=useRef<HTMLButtonElement|null>(null),roving=useRef<HTMLButtonElement|null>(null);
+  function toolbarButtons(){return [...(toolbarRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")??[])].filter(b=>!b.closest('[role="menu"]')&&!toolbarRef.current?.querySelector('[role="dialog"]')?.contains(b)&&visibleControl(b));}
+  function moveTabStop(button:HTMLButtonElement){roving.current=button;for(const item of toolbarButtons())item.tabIndex=item===button?0:-1;}
+  function syncToolbarTabStop(){const items=toolbarButtons();if(items.length)moveTabStop(roving.current&&items.includes(roving.current)?roving.current:items[0]);toolbarRef.current?.querySelectorAll<HTMLElement>('span[tabindex]').forEach(node=>node.tabIndex=-1);}
+  useEffect(syncToolbarTabStop);
+  useEffect(()=>{window.addEventListener("resize",syncToolbarTabStop);return()=>window.removeEventListener("resize",syncToolbarTabStop);},[]);
+  function leaveToolbar(backward:boolean){const root=toolbarRef.current;if(!root)return;const modal=root.closest('[role="dialog"],[role="alertdialog"]'),container=modal??document;const controls=[...container.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex],[contenteditable="true"]')].filter(node=>!root.contains(node)&&visibleControl(node)&&(node.tabIndex>=0||node.getAttribute('contenteditable')==="true"));const candidates=controls.filter(node=>root.compareDocumentPosition(node)&(backward?Node.DOCUMENT_POSITION_PRECEDING:Node.DOCUMENT_POSITION_FOLLOWING));const next=backward?candidates[candidates.length-1]:candidates[0];(next??(modal?(backward?controls[controls.length-1]:controls[0]):null)??menuTrigger.current)?.focus();}
+  function toolbarKey(event:ReactKeyboardEvent<HTMLDivElement>){
+    if(event.nativeEvent.isComposing)return;const target=event.target as HTMLElement,dialog=target.closest('[role="dialog"]');if(dialog&&toolbarRef.current?.contains(dialog))return;
+    if(openMenu&&(event.key==="Escape"||event.key==="Tab")){setOpenMenu(null);event.preventDefault();event.stopPropagation();if(event.key==="Tab")leaveToolbar(event.shiftKey);else if(target.closest('[role="menu"]'))menuTrigger.current?.focus();return;}
+    if(target.closest('[role="menu"]'))return;const button=target.closest<HTMLButtonElement>('button');if(!button)return;const items=toolbarButtons(),index=items.indexOf(button);if(index<0)return;
+    if(["ArrowLeft","ArrowRight","Home","End"].includes(event.key)){event.preventDefault();const next=event.key==="Home"?items[0]:event.key==="End"?items[items.length-1]:items[(index+(event.key==="ArrowRight"?1:-1)+items.length)%items.length];moveTabStop(next);next.focus();}
+    else if((event.key==="ArrowDown"||event.key==="ArrowUp")&&button.hasAttribute('aria-haspopup')){event.preventDefault();menuEntry.current=event.key==="ArrowUp"?"last":"first";menuTrigger.current=button;if(openMenu)setOpenMenu(null);button.click();}
+    else if(event.key==="Enter"||event.key===" "){menuEntry.current="first";menuTrigger.current=button;}
+  }
+  function menuActionFocus(event:MouseEvent<HTMLDivElement>){if(menuEntry.current!=="pointer"&&(event.target as HTMLElement).closest('[role="menu"] button'))menuTrigger.current?.focus();}
+  function toolbarFocus(event:ReactFocusEvent<HTMLDivElement>){const target:EventTarget=event.target;if(target instanceof HTMLButtonElement&&toolbarButtons().includes(target))moveTabStop(target);}
 
   useEffect(() => {
     if (!openMenu) return;
@@ -136,7 +157,7 @@ export function MarkdownToolbar({
     }
 
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !event.isComposing) {
         setOpenMenu(null);
         setCompactOptionsOpen(false);
       }
@@ -153,7 +174,7 @@ export function MarkdownToolbar({
   useEffect(() => {
     if (!compactOptionsOpen) return;
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setCompactOptionsOpen(false);
+      if (event.key === "Escape" && !event.isComposing) setCompactOptionsOpen(false);
     }
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
@@ -182,6 +203,7 @@ export function MarkdownToolbar({
 
   function toggleMenu(menu: typeof openMenu, event: MouseEvent<HTMLButtonElement>) {
     keepEditorSelection(event);
+    menuTrigger.current=event.currentTarget;if(event.detail!==0)menuEntry.current="pointer";else if(menuEntry.current==="pointer")menuEntry.current="first";
     setOpenMenu((currentMenu) => (currentMenu === menu ? null : menu));
   }
 
@@ -193,7 +215,7 @@ export function MarkdownToolbar({
 
   if (compactToolbar) {
     return (
-      <div ref={toolbarRef} className="knownext-editor-toolbar knownext-editor-toolbar-compact flex h-9 shrink-0 items-center gap-1 border-b border-line bg-white px-2">
+      <div ref={toolbarRef} role="toolbar" aria-label="Herramientas del documento" data-menu-entry={menuEntry.current} onKeyDown={toolbarKey} onFocus={toolbarFocus} onClickCapture={menuActionFocus} className="knownext-editor-toolbar knownext-editor-toolbar-compact flex h-9 shrink-0 items-center gap-1 border-b border-line bg-white px-2">
         <BlockFormatSelect
           currentBlockFormat={currentBlockFormat}
           activeActions={activeActions}
@@ -261,6 +283,7 @@ export function MarkdownToolbar({
               setCompactOptionsOpen(false);
               onExportDocument(format);
             }}
+            onSaveTemplate={onSaveTemplate ? () => { setCompactOptionsOpen(false); onSaveTemplate(); } : undefined}
             onMarkdownZoomChange={(zoomPercent) => {
               setCompactOptionsOpen(false);
               onMarkdownZoomChange(zoomPercent);
@@ -280,7 +303,7 @@ export function MarkdownToolbar({
   }
 
   return (
-    <div ref={toolbarRef} className="knownext-editor-toolbar flex h-9 shrink-0 items-center gap-1 border-b border-line bg-white px-3">
+    <div ref={toolbarRef} role="toolbar" aria-label="Herramientas del documento" data-menu-entry={menuEntry.current} onKeyDown={toolbarKey} onFocus={toolbarFocus} onClickCapture={menuActionFocus} className="knownext-editor-toolbar flex h-9 shrink-0 items-center gap-1 border-b border-line bg-white px-3">
       <BlockFormatSelect
         currentBlockFormat={currentBlockFormat}
         activeActions={activeActions}
@@ -512,6 +535,7 @@ export function MarkdownToolbar({
                     setOpenMenu(null);
                     onExportDocument(format);
                   }} />
+                  {onSaveTemplate && <button role="menuitem" className="flex min-h-9 w-full items-center gap-2 rounded px-2 text-left text-[11px] text-ink-primary hover:bg-brand-hover" onMouseDown={keepEditorSelection} onClick={() => { setOpenMenu(null); onSaveTemplate(); }}><BookOpen size={14}/>Guardar como plantilla…</button>}
                 </ToolbarMenu>
               ) : null}
             </div>
@@ -677,6 +701,7 @@ function CompactToolbarOptionsDialog({
   onRunAction,
   onRunHighlight,
   onExportDocument,
+  onSaveTemplate,
   onMarkdownZoomChange,
   onToggleMarkdownSource,
   onToggleHistory,
@@ -698,22 +723,20 @@ function CompactToolbarOptionsDialog({
   onRunAction: (action: MarkdownEditorAction, options?: MarkdownEditorActionOptions) => void;
   onRunHighlight: (color: MarkdownHighlightColorId) => void;
   onExportDocument: (format: ExportFormat) => void;
+  onSaveTemplate?: () => void;
   onMarkdownZoomChange: (zoomPercent: number) => void;
   onToggleMarkdownSource: () => void;
   onToggleHistory: () => void;
 }) {
   return (
-    <div className="knownext-modal-overlay fixed inset-0 z-[90] flex items-center justify-center bg-black/20 px-4 py-6" role="presentation" onMouseDown={onClose}>
+    <ModalFrame label="Opciones del editor" onClose={onClose} className="z-[90]">
       <section
-        className="flex max-h-[min(640px,calc(100dvh-48px))] w-[min(460px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="compact-toolbar-options-title"
+        className="flex max-h-[min(640px,calc(100dvh-48px))] w-[min(460px,calc(100vw-32px))] flex-col [&_button]:min-h-11 overflow-hidden rounded-lg border border-line bg-white shadow-menu"
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-line px-4">
           <h2 id="compact-toolbar-options-title" className="text-[13px] font-semibold text-ink-primary">Opciones del editor</h2>
-          <button className="grid h-8 w-8 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange" aria-label="Cerrar opciones del editor" onClick={onClose}>
+          <button className="grid h-11 w-11 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange" aria-label="Cerrar opciones del editor" onClick={onClose}>
             <X size={16} />
           </button>
         </header>
@@ -792,6 +815,7 @@ function CompactToolbarOptionsDialog({
               <CompactExportAction label="Exportar Markdown (.md)" format="md" onRun={onExportDocument} />
               <CompactExportAction label="Exportar PDF (.pdf)" format="pdf" onRun={onExportDocument} />
               <CompactExportAction label="Exportar Word (.docx)" format="docx" onRun={onExportDocument} />
+              {onSaveTemplate && <button className="flex min-h-11 items-center gap-2 rounded px-3 text-left text-[12px] hover:bg-brand-hover" disabled={!editorReady} onClick={onSaveTemplate}><BookOpen size={16}/>Guardar como plantilla…</button>}
             </CompactToolbarSection>
           ) : null}
 
@@ -823,7 +847,7 @@ function CompactToolbarOptionsDialog({
           </CompactToolbarSection>
         </div>
       </section>
-    </div>
+    </ModalFrame>
   );
 }
 
@@ -952,7 +976,7 @@ function CompactHighlightPalette({
         <Highlighter size={15} />
         <span>Resaltado</span>
       </div>
-      <div className="grid grid-cols-6 gap-2">
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
         {markdownHighlightColors.map((color) => (
           <button
             key={color.id}
@@ -1133,7 +1157,19 @@ function ToolbarMenuButton({
   );
 }
 
+function visibleControl(node:HTMLElement){for(let current:HTMLElement|null=node;current;current=current.parentElement){const style=getComputedStyle(current);if(current.hidden||current.inert||style.display==="none"||style.visibility==="hidden")return false;}return true;}
+/** Mouse activation keeps Milkdown's selection; keyboard activation owns menu focus. */
+function useToolbarMenuNavigation(){
+  const ref=useRef<HTMLDivElement>(null);
+  const buttons=()=>[...(ref.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')??[])].filter(visibleControl);
+  function tabStop(target:HTMLButtonElement){for(const b of buttons())b.tabIndex=b===target?0:-1;}
+  useEffect(()=>{const items=buttons(),entry=ref.current?.closest<HTMLElement>('[role="toolbar"]')?.dataset.menuEntry;if(!items.length)return;const target=entry==="last"?items[items.length-1]:items[0];tabStop(target);if(entry&&entry!=="pointer")target.focus();},[]);
+  function onKeyDown(event:ReactKeyboardEvent<HTMLDivElement>){if(event.nativeEvent.isComposing||!["ArrowDown","ArrowUp","ArrowLeft","ArrowRight","Home","End"].includes(event.key))return;const items=buttons();if(!items.length)return;event.preventDefault();event.stopPropagation();const current=items.indexOf(document.activeElement as HTMLButtonElement),next=event.key==="Home"?0:event.key==="End"?items.length-1:(Math.max(current,0)+(["ArrowDown","ArrowRight"].includes(event.key)?1:-1)+items.length)%items.length;tabStop(items[next]);items[next].focus();}
+  function onFocus(event:ReactFocusEvent<HTMLDivElement>){const target:EventTarget=event.target;if(target instanceof HTMLButtonElement&&buttons().includes(target))tabStop(target);}
+  return{ref,onKeyDown,onFocus};
+}
 function ToolbarMenu({ children, align }: { children: ReactNode; align: "left" | "right" }) {
+  const navigation=useToolbarMenuNavigation();
   return (
     <div
       className={[
@@ -1141,6 +1177,9 @@ function ToolbarMenu({ children, align }: { children: ReactNode; align: "left" |
         align === "right" ? "right-0" : "left-0",
       ].join(" ")}
       role="menu"
+      ref={navigation.ref}
+      onKeyDown={navigation.onKeyDown}
+      onFocus={navigation.onFocus}
     >
       {children}
     </div>
@@ -1241,12 +1280,13 @@ function TablePicker({
   onHover: (size: { rows: number; columns: number }) => void;
   onInsert: (rows: number, columns: number) => void;
 }) {
+  const navigation=useToolbarMenuNavigation();
   const grid = Array.from({ length: 5 }, (_, rowIndex) =>
     Array.from({ length: 5 }, (_, columnIndex) => ({ row: rowIndex + 1, column: columnIndex + 1 })),
   );
 
   return (
-    <div className="absolute left-0 top-8 z-[90] w-[172px] rounded-md border border-line bg-white p-3 shadow-menu">
+    <div ref={navigation.ref} role="menu" aria-label="Insertar tabla" onKeyDown={navigation.onKeyDown} onFocus={navigation.onFocus} className="absolute left-0 top-8 z-[90] w-[172px] rounded-md border border-line bg-white p-3 shadow-menu">
       <div className="grid grid-cols-5 gap-1">
         {grid.flat().map((cell) => {
           const selected = cell.row <= rows && cell.column <= columns;

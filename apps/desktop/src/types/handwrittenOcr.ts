@@ -1,0 +1,4 @@
+import type {HandwrittenNoteContent,HandwrittenNoteDraftResponse} from "./domain";
+export type HandwrittenOcrResult={schemaVersion:1;attemptId:string;projectId:string;noteId:string;pageId:string;revision:string;pageSha256:string;phase:"ready"|"unavailable"|"failed"|"uncertain"|"applied";message:string;model:string;createdAt:string;startsAi:false;preservesStrokes:true;canReplay:false;sourceDataUrl?:string;text?:string|null;baseText?:string;correctedText?:string|null;appliedDraftWriteRevision?:string|null};
+export type HandwrittenOcrApplyRequest={noteId:string;attemptId:string;revision:string;text:string};
+export type HandwrittenOcrApply=HandwrittenNoteDraftResponse&{schemaVersion:1;attemptId:string;pageId:string;content:HandwrittenNoteContent;previousDraftWriteRevision:string|null;receipt:HandwrittenOcrResult};

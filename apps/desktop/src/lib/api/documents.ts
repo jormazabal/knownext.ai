@@ -16,23 +16,28 @@ export async function getDocument(documentId: string): Promise<DocumentRecord> {
   return requestJson<DocumentRecord>(`/api/documents/${encodeURIComponent(documentId)}`);
 }
 
+export function loadDocumentDiskVersion(documentId: string, expectedDraftWriteRevision:string|null=null): Promise<DocumentRecord> {
+  return requestJson(`/api/documents/${encodeURIComponent(documentId)}/draft/discard-and-read`, {method:"POST",body:JSON.stringify({expectedDraftWriteRevision})});
+}
+
 export async function saveDocument(documentId: string, payload: SaveDocumentPayload): Promise<DocumentRecord> {
   return requestJson<DocumentRecord>(`/api/documents/${encodeURIComponent(documentId)}`, {
     method: "PUT",
-    body: JSON.stringify(payload),
+    body: JSON.stringify({...payload,expectedDraftWriteRevision:payload.expectedDraftWriteRevision??null}),
   });
 }
 
 export async function saveDocumentDraft(documentId: string, payload: SaveDraftPayload): Promise<DraftResponse> {
   return requestJson<DraftResponse>(`/api/documents/${encodeURIComponent(documentId)}/draft`, {
     method: "PUT",
-    body: JSON.stringify(payload),
+    body: JSON.stringify({...payload,expectedDraftWriteRevision:payload.expectedDraftWriteRevision??null}),
   });
 }
 
-export async function discardDocumentDraft(documentId: string): Promise<void> {
+export async function discardDocumentDraft(documentId: string, expectedDraftWriteRevision:string|null=null): Promise<void> {
   await requestJson<void>(`/api/documents/${encodeURIComponent(documentId)}/draft`, {
     method: "DELETE",
+    body:JSON.stringify({expectedDraftWriteRevision}),
   });
 }
 
@@ -60,15 +65,19 @@ export async function getDocumentsSyncStatus(documents: SyncStatusDocument[]): P
 export async function listOrphanDrafts(): Promise<OrphanDraft[]> {
   return requestJson<OrphanDraft[]>("/api/drafts/orphans");
 }
+export type OrphanDraftInventory={schemaVersion:1;items:OrphanDraft[];limited:boolean;warnings:string[];queriedAt:string};
+export function getOrphanDraftInventory(){return requestJson<OrphanDraftInventory>("/api/recovery/orphans");}
+type OrphanReview=Pick<OrphanDraft,"documentId"|"fingerprint"|"locationRevision">;
+function orphanReviewBody(review:OrphanReview){return JSON.stringify({documentId:review.documentId,expectedFingerprint:review.fingerprint??null,locationRevision:review.locationRevision??null});}
 
-export async function restoreOrphanDraft(draftKey: string): Promise<RestoreDraftResponse> {
+export async function restoreOrphanDraft(draftKey: string,review:OrphanReview): Promise<RestoreDraftResponse> {
   return requestJson<RestoreDraftResponse>(`/api/drafts/${encodeURIComponent(draftKey)}/restore`, {
-    method: "POST",
+    method: "POST",body:orphanReviewBody(review),
   });
 }
 
-export async function discardOrphanDraft(draftKey: string): Promise<void> {
+export async function discardOrphanDraft(draftKey: string,review:OrphanReview): Promise<void> {
   await requestJson<void>(`/api/drafts/${encodeURIComponent(draftKey)}`, {
-    method: "DELETE",
+    method: "DELETE",body:orphanReviewBody(review),
   });
 }

@@ -1,0 +1,43 @@
+import { act, cleanup, renderHook } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+const api = vi.hoisted(() => ({ listDocumentTemplates: vi.fn(), previewDocumentTemplate: vi.fn() }));
+vi.mock("../../lib/api/documentTemplates", () => api);
+import { useDocumentTemplatePreview, useDocumentTemplates } from "./useDocumentTemplates";
+import type { DocumentTemplatePreview } from "../../types/documentTemplates";
+beforeEach(() => { vi.resetAllMocks(); vi.useFakeTimers(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); });
+const request = { projectId: "project", name: "Acta.md", revision: "reviewed", values: { asistentes: "Ana" } };
+const preview = (markdown: string): DocumentTemplatePreview => ({ templateId: "custom", revision: "reviewed", name: "Acta.md", values: {}, markdown, projectRootHash: "root" });
+it("ignores late preview responses and invalidates the previous preview as soon as fields change", async () => {
+  let old!: (value: DocumentTemplatePreview) => void;
+  api.previewDocumentTemplate.mockImplementationOnce(() => new Promise(resolve => { old = resolve; })).mockResolvedValueOnce(preview("Current"));
+  const { result, rerender } = renderHook(({ values }) => useDocumentTemplatePreview(true, "custom", { ...request, values }), { initialProps: { values: { asistentes: "Ana" } } });
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+  rerender({ values: { asistentes: "Miren" } });
+  expect(result.current.preview).toBeNull();
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+  expect(result.current.preview?.markdown).toBe("Current");
+  await act(async () => old(preview("Old")));
+  expect(result.current.preview?.markdown).toBe("Current");
+});
+it("retries a failed preview with the same fields and does not accept a response after closing", async () => {
+  let finish!: (value: DocumentTemplatePreview) => void;
+  api.previewDocumentTemplate.mockRejectedValueOnce(new Error("No disponible")).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const { result, rerender } = renderHook(({ open }) => useDocumentTemplatePreview(open, "custom", request), { initialProps: { open: true } });
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+  expect(result.current.error).toContain("No disponible");
+  act(() => result.current.retry());
+  expect(result.current.error).toBeNull(); expect(result.current.loading).toBe(true);
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+  rerender({ open: false });
+  await act(async () => finish(preview("Closed")));
+  expect(result.current.preview).toBeNull();
+});
+it("keeps the most recent catalog refresh when an older request finishes later", async () => {
+  let finish!: (value: unknown) => void;
+  api.listDocumentTemplates.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })).mockResolvedValueOnce({ templates: [], warnings: [{ message: "Current" }], complete: false });
+  const { result } = renderHook(() => useDocumentTemplates(true));
+  await act(async () => { await result.current.reload(); });
+  await act(async () => finish({ templates: [], warnings: [], complete: true }));
+  expect(result.current.inventory?.warnings[0].message).toBe("Current");
+});

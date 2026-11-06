@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronLeft, ChevronRight, FileText, FileSpreadsheet, Image, List, NotebookPen, PanelLeftOpen, ScrollText, Sparkles, X } from "lucide-react";
-import type { DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, RefObject } from "react";
+import type { DragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
+import { ModalFrame } from "../../components/ui/ModalFrame";
 import { xsViewportQuery } from "../../lib/runtime/responsive";
 import type { WorkspaceTab } from "../../types/domain";
 
@@ -22,6 +23,7 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
   const fixedTabs = tabs.filter((tab) => isFixedUtilityTab(tab));
   const scrollableTabs = tabs.filter((tab) => !isFixedUtilityTab(tab));
   const compactTabs = useCompactTabsMode();
+  const contextTriggerRef = useRef<HTMLElement | null>(null);
   const tabsViewportRef = useRef<HTMLDivElement | null>(null);
   const tabListMenuRef = useRef<HTMLDivElement | null>(null);
   const [tabsOverflowing, setTabsOverflowing] = useState(false);
@@ -112,11 +114,13 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
     onSelectTab(tabId);
   }
 
-  function openTabContextMenu(tab: WorkspaceTab, event: ReactMouseEvent<HTMLElement>) {
+  function openTabContextMenu(tab: WorkspaceTab, event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>) {
     if (!isCloseableTab(tab)) return;
     event.preventDefault();
     setTabListOpen(false);
-    setTabContextMenu({ tabId: tab.id, x: event.clientX, y: event.clientY });
+    contextTriggerRef.current = event.currentTarget;
+    const rect = event.currentTarget.getBoundingClientRect();
+    setTabContextMenu({ tabId: tab.id, x: "clientX" in event ? event.clientX : rect.left, y: "clientY" in event ? event.clientY : rect.bottom });
   }
 
   function closeTabs(tabIds: string[]) {
@@ -219,6 +223,19 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
     return null;
   }
 
+  const closeableTabs = tabs.filter(isCloseableTab);
+  const contextMenuTab = tabContextMenu ? tabs.find((tab) => tab.id === tabContextMenu.tabId && isCloseableTab(tab)) ?? null : null;
+  const otherCloseableTabIds = contextMenuTab ? closeableTabs.filter((tab) => tab.id !== contextMenuTab.id).map((tab) => tab.id) : [];
+  const contextMenu = contextMenuTab && tabContextMenu ? (
+    <TabContextMenu x={tabContextMenu.x} y={tabContextMenu.y}
+      origin={contextTriggerRef.current}
+      onDismiss={() => setTabContextMenu(null)}
+      closeOtherTabsDisabled={otherCloseableTabIds.length === 0}
+      onClose={() => closeTabs([contextMenuTab.id])}
+      onCloseOthers={() => closeTabs(otherCloseableTabIds)}
+      onCloseAll={() => closeTabs(closeableTabs.map((tab) => tab.id))} />
+  ) : null;
+
   if (compactTabs) {
     return (
       <CompactDocumentTabs
@@ -233,19 +250,16 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
         onCloseTab={onCloseTab}
         onOpenTabContextMenu={openTabContextMenu}
         rightSlot={rightSlot}
+        contextMenu={contextMenu}
       />
     );
   }
 
-  const closeableTabs = tabs.filter(isCloseableTab);
-  const contextMenuTab = tabContextMenu ? tabs.find((tab) => tab.id === tabContextMenu.tabId && isCloseableTab(tab)) ?? null : null;
-  const otherCloseableTabIds = contextMenuTab ? closeableTabs.filter((tab) => tab.id !== contextMenuTab.id).map((tab) => tab.id) : [];
-
   return (
-    <div className="knownext-document-tabs flex h-9 shrink-0 items-end border-b border-line bg-white">
+    <div className="knownext-document-tabs flex h-9 [@media(pointer:coarse)]:h-11 shrink-0 items-end border-b border-line bg-white">
       {onOpenNavigation ? (
         <button
-          className="grid h-full w-10 shrink-0 place-items-center border-r border-line text-ink-secondary hover:bg-brand-hover hover:text-brand-orange lg:hidden"
+          className="grid h-full w-11 shrink-0 place-items-center border-r border-line text-ink-secondary hover:bg-brand-hover hover:text-brand-orange lg:hidden"
           data-tooltip="Abrir documentos"
           data-tooltip-placement="bottom"
           aria-label="Abrir panel de documentos"
@@ -300,8 +314,9 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
             type="button"
             data-tooltip="Pestañas abiertas"
             data-tooltip-placement="bottom"
-            aria-label="Mostrar pestañas abiertas"
+            aria-haspopup="menu"
             aria-expanded={tabListOpen}
+            aria-label="Mostrar pestañas abiertas"
             onClick={() => setTabListOpen((open) => !open)}
           >
             <List size={14} />
@@ -329,7 +344,7 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
             <ChevronRight size={14} />
           </button>
           {tabListOpen ? (
-            <div className="absolute right-1 top-9 z-50 max-h-80 w-72 overflow-y-auto rounded-md border border-line bg-white p-1 shadow-lg">
+            <TabKeyboardMenu label="Pestañas abiertas" className="absolute right-1 top-9 z-50 max-h-80 w-72 overflow-y-auto rounded-md border border-line bg-white p-1 shadow-lg" onDismiss={() => setTabListOpen(false)}>
               {tabs.map((tab) => {
                 const active = tab.id === activeTabId;
                 const dirty = isDirtyTab(tab, dirtyIds);
@@ -337,8 +352,10 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
                 return (
                   <button
                     key={tab.id}
+                    role="menuitem"
+                    aria-current={active ? "page" : undefined}
                     className={[
-                      "flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] outline-none",
+                      "flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-orange",
                       active ? "bg-brand-hover text-brand-orange" : "text-ink-primary hover:bg-panel",
                     ].join(" ")}
                     type="button"
@@ -353,21 +370,12 @@ export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirty
                   </button>
                 );
               })}
-            </div>
+            </TabKeyboardMenu>
           ) : null}
         </div>
       ) : null}
       {rightSlot}
-      {contextMenuTab && tabContextMenu ? (
-        <TabContextMenu
-          x={tabContextMenu.x}
-          y={tabContextMenu.y}
-          closeOtherTabsDisabled={otherCloseableTabIds.length === 0}
-          onClose={() => closeTabs([contextMenuTab.id])}
-          onCloseOthers={() => closeTabs(otherCloseableTabIds)}
-          onCloseAll={() => closeTabs(closeableTabs.map((tab) => tab.id))}
-        />
-      ) : null}
+      {contextMenu}
       {dragPreview && dragPreview.x > 0 && dragPreview.y > 0 ? (
         <div
           className="pointer-events-none fixed z-[130] max-w-[240px] -translate-y-1/2 rounded-md border border-orange-200 bg-white/85 px-3 py-1.5 text-[11px] font-semibold text-ink-primary shadow-menu backdrop-blur"
@@ -393,6 +401,7 @@ function CompactDocumentTabs({
   onCloseTab,
   onOpenTabContextMenu,
   rightSlot,
+  contextMenu,
 }: {
   tabs: WorkspaceTab[];
   fixedTabs: WorkspaceTab[];
@@ -403,12 +412,13 @@ function CompactDocumentTabs({
   onOpenNavigation?: () => void;
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
-  onOpenTabContextMenu: (tab: WorkspaceTab, event: ReactMouseEvent<HTMLElement>) => void;
+  onOpenTabContextMenu: (tab: WorkspaceTab, event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>) => void;
   rightSlot?: ReactNode;
+  contextMenu?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
-  const activeWorkspaceTab = scrollableTabs.find((tab) => tab.id === activeTabId)
+  const activeWorkspaceTab = activeTab
     ?? scrollableTabs.find((tab) => tab.kind === "document" && tab.id === activeDocumentId)
     ?? scrollableTabs[0]
     ?? null;
@@ -419,10 +429,10 @@ function CompactDocumentTabs({
   }
 
   return (
-    <div className="knownext-document-tabs knownext-document-tabs-compact flex h-9 shrink-0 items-end border-b border-line bg-white">
+    <div className="knownext-document-tabs knownext-document-tabs-compact flex h-11 shrink-0 items-end border-b border-line bg-white">
       {onOpenNavigation ? (
         <button
-          className="grid h-full w-10 shrink-0 place-items-center border-r border-line text-ink-secondary hover:bg-brand-hover hover:text-brand-orange lg:hidden"
+          className="grid h-full w-11 shrink-0 place-items-center border-r border-line text-ink-secondary hover:bg-brand-hover hover:text-brand-orange lg:hidden"
           data-tooltip="Abrir documentos"
           data-tooltip-placement="bottom"
           aria-label="Abrir panel de documentos"
@@ -455,6 +465,9 @@ function CompactDocumentTabs({
             aria-expanded={open}
             onClick={() => setOpen(true)}
             onContextMenu={(event) => onOpenTabContextMenu(activeWorkspaceTab, event)}
+            onKeyDown={(event) => {
+              if (event.key === "ContextMenu" || event.shiftKey && event.key === "F10") onOpenTabContextMenu(activeWorkspaceTab, event);
+            }}
           >
             {renderTabIcon(activeWorkspaceTab, activeWorkspaceTab.id === activeTabId)}
             <span className="min-w-0 flex-1 truncate">{activeWorkspaceTab.name}</span>
@@ -462,7 +475,7 @@ function CompactDocumentTabs({
           </button>
           {!isFixedUtilityTab(activeWorkspaceTab) ? (
             <button
-              className="grid h-full w-8 shrink-0 cursor-default place-items-center text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
+              className="grid h-full w-11 shrink-0 cursor-default place-items-center text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
               type="button"
               aria-label={isDirtyTab(activeWorkspaceTab, dirtyIds) ? `Cerrar ${activeWorkspaceTab.name}, con cambios sin guardar` : `Cerrar ${activeWorkspaceTab.name}`}
               onClick={() => {
@@ -474,7 +487,7 @@ function CompactDocumentTabs({
             </button>
           ) : null}
           <button
-            className="grid h-full w-8 shrink-0 cursor-default place-items-center text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
+            className="grid h-full w-11 shrink-0 cursor-default place-items-center text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
             type="button"
             aria-label={`Mostrar archivos abiertos, activo ${activeWorkspaceTab.name}`}
             aria-haspopup="dialog"
@@ -490,6 +503,7 @@ function CompactDocumentTabs({
       ) : null}
 
       {rightSlot}
+      {contextMenu}
 
       {open ? (
         <OpenTabsDialog
@@ -520,26 +534,16 @@ function OpenTabsDialog({
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
 }) {
-  useEffect(() => {
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
-
   return (
-    <div className="knownext-modal-overlay fixed inset-0 z-[90] flex items-center justify-center bg-black/20 px-4 py-6" role="presentation" onMouseDown={onClose}>
+    <ModalFrame label="Archivos abiertos" onClose={onClose} className="!z-[180]">
+      <div className="absolute inset-0" aria-hidden="true" onMouseDown={onClose} />
       <section
-        className="flex max-h-[min(520px,calc(100dvh-48px))] w-[min(420px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="open-tabs-title"
+        className="relative flex max-h-[min(520px,calc(100dvh-48px))] w-[min(420px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-line px-4">
           <h2 id="open-tabs-title" className="text-[13px] font-semibold text-ink-primary">Archivos abiertos</h2>
-          <button className="grid h-8 w-8 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange" aria-label="Cerrar lista de archivos abiertos" onClick={onClose}>
+          <button className="grid h-11 w-11 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange" aria-label="Cerrar lista de archivos abiertos" onClick={onClose}>
             <X size={16} />
           </button>
         </header>
@@ -552,14 +556,14 @@ function OpenTabsDialog({
               const dirty = isDirtyTab(tab, dirtyIds);
               return (
                 <div key={tab.id} className={["flex h-11 items-center gap-2 rounded-md px-2", active ? "bg-brand-hover text-brand-orange" : "text-ink-primary hover:bg-panel"].join(" ")}>
-                  <button className="flex min-w-0 flex-1 items-center gap-2 text-left" type="button" onClick={() => onSelectTab(tab.id)}>
+                  <button className="flex min-h-11 min-w-0 flex-1 items-center gap-2 text-left" type="button" onClick={() => onSelectTab(tab.id)}>
                     {renderTabIcon(tab, active)}
                     <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{tab.name}</span>
                     {dirty ? <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-brand-orange" /> : null}
                   </button>
                   {!isFixedUtilityTab(tab) ? (
                     <button
-                      className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-ink-secondary hover:bg-white hover:text-brand-orange"
+                      className="grid h-11 w-11 shrink-0 place-items-center rounded-md text-ink-secondary hover:bg-white hover:text-brand-orange"
                       aria-label={dirty ? `Cerrar ${tab.name}, con cambios sin guardar` : `Cerrar ${tab.name}`}
                       onClick={() => onCloseTab(tab.id)}
                     >
@@ -572,7 +576,7 @@ function OpenTabsDialog({
           )}
         </div>
       </section>
-    </div>
+    </ModalFrame>
   );
 }
 
@@ -604,7 +608,7 @@ function WorkspaceTabButton({
   fixed?: boolean;
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
-  onOpenTabContextMenu: (tab: WorkspaceTab, event: ReactMouseEvent<HTMLElement>) => void;
+  onOpenTabContextMenu: (tab: WorkspaceTab, event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>) => void;
   onReorderDocumentTabs?: (draggedTabId: string, targetTabId: string, placement: "before" | "after") => void;
   onDocumentDragStart?: (tabId: string) => void;
   onDocumentDragEnd?: () => void;
@@ -626,12 +630,16 @@ function WorkspaceTabButton({
       data-tooltip-placement={fixed ? "bottom" : undefined}
       className={[
         "knownext-document-tab group relative flex h-full cursor-default items-center gap-1.5 border-r border-line text-[11px]",
-        fixed ? "w-12 min-w-12 max-w-12 justify-center px-0" : "min-w-[150px] max-w-[210px] px-2.5",
+        fixed ? "knownext-document-tab-fixed w-12 min-w-12 max-w-12 justify-center px-0" : "min-w-[150px] max-w-[210px] px-2.5",
         dragging ? "opacity-50" : "",
         active ? "knownext-document-tab-active bg-white font-semibold" : "text-ink-primary hover:bg-panel",
       ].join(" ")}
       onClick={() => onSelectTab(tab.id)}
       onContextMenu={(event) => onOpenTabContextMenu(tab, event)}
+      onKeyDown={(event) => {
+        if (event.key === "ContextMenu" || event.shiftKey && event.key === "F10") onOpenTabContextMenu(tab, event);
+        if (event.key === "Delete" && closeable) { event.preventDefault(); onCloseTab(tab.id); }
+      }}
       onPointerDown={(event) => {
         if (!draggable) return;
         if (!event.pointerType || event.pointerType === "mouse") return;
@@ -712,7 +720,7 @@ function WorkspaceTabButton({
         null
       ) : (
         <span
-          className="knownext-document-tab-close ml-auto grid h-5 w-5 cursor-default place-items-center rounded hover:bg-brand-hover"
+          className="knownext-document-tab-close ml-auto grid h-5 w-5 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 cursor-default place-items-center rounded hover:bg-brand-hover"
           aria-label={dirty ? `Cerrar ${tab.name}, con cambios sin guardar` : `Cerrar ${tab.name}`}
           draggable={false}
           onClick={(event) => {
@@ -736,6 +744,8 @@ function TabContextMenu({
   onClose,
   onCloseOthers,
   onCloseAll,
+  onDismiss,
+  origin,
 }: {
   x: number;
   y: number;
@@ -743,27 +753,29 @@ function TabContextMenu({
   onClose: () => void;
   onCloseOthers: () => void;
   onCloseAll: () => void;
+  onDismiss: () => void;
+  origin: HTMLElement | null;
 }) {
   return (
-    <div
+    <TabKeyboardMenu
       className="fixed z-[120] w-48 rounded-md border border-line bg-white p-1 text-[11px] text-ink-primary shadow-menu"
-      role="menu"
-      aria-label="Opciones de pestaña"
-      style={{ left: x, top: y }}
-      onPointerDown={(event) => event.stopPropagation()}
+      label="Opciones de pestaña"
+      position={{ x, y }}
+      onDismiss={onDismiss}
+      origin={origin}
     >
       <TabContextMenuItem label="Cerrar" onClick={onClose} />
       <TabContextMenuItem label="Cerrar otras pestañas" onClick={onCloseOthers} disabled={closeOtherTabsDisabled} />
       <div className="my-1 border-t border-line" />
       <TabContextMenuItem label="Cerrar todas las pestañas" onClick={onCloseAll} />
-    </div>
+    </TabKeyboardMenu>
   );
 }
 
 function TabContextMenuItem({ label, disabled = false, onClick }: { label: string; disabled?: boolean; onClick: () => void }) {
   return (
     <button
-      className="flex h-8 w-full items-center rounded px-2 text-left hover:bg-brand-hover hover:text-brand-orange disabled:cursor-default disabled:text-ink-secondary/50 disabled:hover:bg-transparent disabled:hover:text-ink-secondary/50"
+      className="flex min-h-11 w-full items-center rounded px-2 text-left hover:bg-brand-hover hover:text-brand-orange focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-orange disabled:cursor-default disabled:text-ink-secondary/50 disabled:hover:bg-transparent disabled:hover:text-ink-secondary/50"
       type="button"
       role="menuitem"
       disabled={disabled}
@@ -827,4 +839,58 @@ function getTabIcon(tab: WorkspaceTab) {
   if (tab.kind === "image") return Image;
   if (tab.kind === "reference-document" && tab.format === "xlsx") return FileSpreadsheet;
   return FileText;
+}
+
+function TabKeyboardMenu({ label, className, children, onDismiss, origin, position }: {
+  label: string; className: string; children: ReactNode; onDismiss: () => void;
+  origin?: HTMLElement | null; position?: { x: number; y: number };
+}) {
+  const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLElement | null>(null);
+  const [point, setPoint] = useState(position);
+  useEffect(() => {
+    const menu = root.current;
+    if (!menu) return;
+    trigger.current = origin ?? document.activeElement as HTMLElement | null;
+    const items = menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)');
+    (menu.querySelector<HTMLElement>('[aria-current="page"]') ?? items[0] ?? menu).focus();
+    function clamp() {
+      if (!position) return;
+      const rect = menu!.getBoundingClientRect();
+      setPoint({ x: Math.max(8, Math.min(position.x, window.innerWidth - rect.width - 8)), y: Math.max(8, Math.min(position.y, window.innerHeight - rect.height - 8)) });
+    }
+    clamp();
+    window.addEventListener("resize", clamp);
+    return () => {
+      window.removeEventListener("resize", clamp);
+      if (menu.contains(document.activeElement) || document.activeElement === document.body) {
+        queueMicrotask(() => {
+          if (document.activeElement?.closest('[role="dialog"],[role="alertdialog"]')) return;
+          const target = trigger.current?.isConnected ? trigger.current : document.querySelector<HTMLElement>('.knownext-document-tabs button');
+          target?.focus({ preventScroll: true });
+        });
+      }
+    };
+  }, []);
+  return <div ref={root} role="menu" aria-label={label} tabIndex={-1} className={className}
+    style={point ? { left: point.x, top: point.y, maxHeight: 'calc(100dvh - 16px)', overflowY: 'auto' } : undefined}
+    onPointerDown={event => event.stopPropagation()}
+    onKeyDown={event => {
+      const items = Array.from(root.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? []);
+      const index = items.indexOf(document.activeElement as HTMLButtonElement);
+      if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+        event.preventDefault(); event.stopPropagation();
+        const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+        items[next]?.focus();
+      } else if (event.key === "Escape" || event.key === "Tab") {
+        event.preventDefault(); event.stopPropagation();
+        if (event.key === "Tab") {
+          const candidates = Array.from(document.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]'))
+            .filter(el => !root.current?.contains(el) && !el.closest('[hidden],[inert]') && el.tabIndex >= 0 && getComputedStyle(el).display !== "none" && getComputedStyle(el).visibility !== "hidden");
+          const index = candidates.indexOf(trigger.current!);
+          (candidates[index + (event.shiftKey ? -1 : 1)] ?? trigger.current)?.focus();
+        } else trigger.current?.focus();
+        onDismiss();
+      }
+    }}>{children}</div>;
 }

@@ -15,6 +15,7 @@ export type RecordingDestination = {
   name: string;
 };
 export type RecordingSession = {
+  portableOrigin?: {schemaVersion:1;identity:string;projectId:string;sourceSha256:string;microphoneSha256:string|null;systemSha256:string|null};
   id: string;
   revision: number;
   createdAt: string;
@@ -51,6 +52,9 @@ export type RecordingDevice = {
   kind: "microphone" | "system";
 };
 export type RecordingSnapshot = {
+  settingsError?: string | null;
+  settingsRecoveryRevision?: string | null;
+  unavailableSessions?: number;
   revision: number;
   sessions: RecordingSession[];
   settings: RecordingSettings;
@@ -60,3 +64,7 @@ export type RecordingSnapshot = {
   warning: string | null;
   devices: RecordingDevice[];
 };
+
+/** A capture fragment, not word-level alignment or an inferred identity. */
+export type RecordingTranscriptSegment = {id:string;start:number;samples:number;text:string;speaker:string|null;timing:"fragment"};
+export type RecordingTranscript = {schemaVersion:1;sessionId:string;revision:number;sourceRevision:string;createdAt:string;title:string;projectId:string|null;status:RecordingSession["status"];samples:number;sampleRate:24000;audioAvailable:boolean;segments:RecordingTranscriptSegment[];unconfirmedCount:number;wordTimingAvailable:false;diarizationAvailable:false;readOnly:true;startsProvider:false;checkedAt:string};

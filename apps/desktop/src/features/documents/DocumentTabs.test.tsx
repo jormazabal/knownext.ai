@@ -1,22 +1,18 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DocumentTabs } from "./DocumentTabs";
-
 const tabs = [
   { kind: "document" as const, id: "doc-a", name: "Acta.md" },
   { kind: "document" as const, id: "doc-b", name: "Esquemas.md" },
 ];
-
 describe("DocumentTabs", () => {
   afterEach(() => {
     cleanup();
     Object.defineProperty(window, "matchMedia", { value: undefined, configurable: true });
   });
-
   it("shows a compact navigation opener when provided", async () => {
     const onOpenNavigation = vi.fn();
-
     const { unmount } = render(
       <DocumentTabs
         tabs={tabs}
@@ -27,16 +23,12 @@ describe("DocumentTabs", () => {
         onCloseTab={vi.fn()}
       />,
     );
-
     await userEvent.click(screen.getByLabelText("Abrir panel de documentos"));
-
     expect(onOpenNavigation).toHaveBeenCalledTimes(1);
     unmount();
   });
-
   it("shows an orange dirty marker instead of the close icon on any dirty tab", async () => {
     const onCloseTab = vi.fn();
-
     render(
       <DocumentTabs
         tabs={tabs}
@@ -46,20 +38,15 @@ describe("DocumentTabs", () => {
         onCloseTab={onCloseTab}
       />,
     );
-
     const dirtyCloseTarget = screen.getByLabelText("Cerrar Esquemas.md, con cambios sin guardar");
     expect(dirtyCloseTarget.querySelector(".bg-brand-orange")).toBeInTheDocument();
     expect(dirtyCloseTarget.querySelector(".lucide-x")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Cerrar Acta.md").querySelector(".lucide-x")).toBeInTheDocument();
-
     await userEvent.click(dirtyCloseTarget);
-
     expect(onCloseTab).toHaveBeenCalledWith("doc-b");
   });
-
   it("shows and closes release notes without a dirty marker", async () => {
     const onCloseTab = vi.fn();
-
     render(
       <DocumentTabs
         tabs={[...tabs, { kind: "release-notes", id: "app-release-notes", name: "Notas de release", utilityTabId: "release-notes", readonly: true }]}
@@ -69,18 +56,13 @@ describe("DocumentTabs", () => {
         onCloseTab={onCloseTab}
       />,
     );
-
     expect(screen.getByText("Notas de release")).toBeInTheDocument();
     expect(screen.getByLabelText("Cerrar Notas de release").querySelector(".bg-brand-orange")).not.toBeInTheDocument();
-
     await userEvent.click(screen.getByLabelText("Cerrar Notas de release"));
-
     expect(onCloseTab).toHaveBeenCalledWith("app-release-notes");
   });
-
   it("shows fixed utility tabs as icon-only tabs without close controls", () => {
     const onCloseTab = vi.fn();
-
     const { container } = render(
       <DocumentTabs
         tabs={[
@@ -94,7 +76,6 @@ describe("DocumentTabs", () => {
         onCloseTab={onCloseTab}
       />,
     );
-
     expect(screen.getByLabelText("IA")).toHaveTextContent("");
     expect(screen.getByLabelText("IA")).toHaveAttribute("data-tooltip", "IA");
     expect(screen.getByLabelText("Notas")).toHaveTextContent("");
@@ -105,11 +86,9 @@ describe("DocumentTabs", () => {
     expect(container.querySelector(".overflow-x-hidden [aria-label='Notas']")).not.toBeInTheDocument();
     expect(onCloseTab).not.toHaveBeenCalled();
   });
-
   it("shows reference documents as closable read-only tabs", async () => {
     const onSelectTab = vi.fn();
     const onCloseTab = vi.fn();
-
     render(
       <DocumentTabs
         tabs={[...tabs, { kind: "reference-document", id: "ref-budget", name: "Presupuesto.xlsx", path: "Presupuesto.xlsx", format: "xlsx", readonly: true }]}
@@ -119,20 +98,14 @@ describe("DocumentTabs", () => {
         onCloseTab={onCloseTab}
       />,
     );
-
     await userEvent.click(screen.getByText("Presupuesto.xlsx"));
-
     expect(onSelectTab).toHaveBeenCalledWith("ref-budget");
     expect(screen.getByLabelText("Cerrar Presupuesto.xlsx").querySelector(".bg-brand-orange")).not.toBeInTheDocument();
-
     await userEvent.click(screen.getByLabelText("Cerrar Presupuesto.xlsx"));
-
     expect(onCloseTab).toHaveBeenCalledWith("ref-budget");
   });
-
   it("shows close options from the secondary-button tab menu for closeable tabs", async () => {
     const onCloseTab = vi.fn();
-
     render(
       <DocumentTabs
         tabs={[
@@ -145,25 +118,19 @@ describe("DocumentTabs", () => {
         onCloseTab={onCloseTab}
       />,
     );
-
     fireEvent.contextMenu(screen.getByLabelText("Esquemas.md"), { clientX: 80, clientY: 24 });
-
     expect(screen.getByRole("menu", { name: "Opciones de pestaña" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Cerrar" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Cerrar otras pestañas" })).toBeEnabled();
     expect(screen.getByRole("menuitem", { name: "Cerrar todas las pestañas" })).toBeInTheDocument();
-
     await userEvent.click(screen.getByRole("menuitem", { name: "Cerrar otras pestañas" }));
-
     expect(onCloseTab).toHaveBeenCalledTimes(2);
     expect(onCloseTab).toHaveBeenNthCalledWith(1, "doc-a");
     expect(onCloseTab).toHaveBeenNthCalledWith(2, "ref-budget");
   });
-
   it("uses the batch close handler for closing all tabs when available", async () => {
     const onCloseTab = vi.fn();
     const onCloseTabs = vi.fn();
-
     render(
       <DocumentTabs
         tabs={[
@@ -179,14 +146,11 @@ describe("DocumentTabs", () => {
         onCloseTabs={onCloseTabs}
       />,
     );
-
     fireEvent.contextMenu(screen.getByLabelText("Esquemas.md"), { clientX: 80, clientY: 24 });
     await userEvent.click(screen.getByRole("menuitem", { name: "Cerrar todas las pestañas" }));
-
     expect(onCloseTabs).toHaveBeenCalledWith(["doc-a", "doc-b", "ref-budget"]);
     expect(onCloseTab).not.toHaveBeenCalled();
   });
-
   it("does not show the secondary-button tab menu for fixed utility tabs", () => {
     render(
       <DocumentTabs
@@ -201,13 +165,10 @@ describe("DocumentTabs", () => {
         onCloseTab={vi.fn()}
       />,
     );
-
     fireEvent.contextMenu(screen.getByLabelText("IA"), { clientX: 80, clientY: 24 });
     fireEvent.contextMenu(screen.getByLabelText("Notas"), { clientX: 80, clientY: 24 });
-
     expect(screen.queryByRole("menu", { name: "Opciones de pestaña" })).not.toBeInTheDocument();
   });
-
   it("reorders document tabs with drag and drop without making fixed tabs draggable", () => {
     const onReorderDocumentTabs = vi.fn();
     const dataTransfer = createDataTransfer();
@@ -223,7 +184,6 @@ describe("DocumentTabs", () => {
       height: 36,
       toJSON: () => ({}),
     });
-
     try {
       render(
         <DocumentTabs
@@ -240,7 +200,6 @@ describe("DocumentTabs", () => {
           onReorderDocumentTabs={onReorderDocumentTabs}
         />,
       );
-
       expect(screen.getByLabelText("IA")).toHaveAttribute("draggable", "false");
       expect(screen.getByLabelText("Notas")).toHaveAttribute("draggable", "false");
       expect(screen.getByLabelText("Acta.md")).toHaveAttribute("draggable", "true");
@@ -248,24 +207,19 @@ describe("DocumentTabs", () => {
       expect(screen.getByLabelText("Acta.md")).toHaveClass("cursor-default");
       expect(screen.getByLabelText("Notas de release")).toHaveAttribute("draggable", "true");
       expect(screen.getByLabelText("Notas de release")).toHaveAttribute("data-reorderable", "true");
-
       fireEvent.dragStart(screen.getByLabelText("Esquemas.md"), { dataTransfer });
       fireEvent.dragOver(screen.getByLabelText("Acta.md"), { dataTransfer, clientX: 120 });
       fireEvent.drop(screen.getByLabelText("Acta.md"), { dataTransfer, clientX: 120 });
-
       expect(onReorderDocumentTabs).toHaveBeenCalledWith("doc-b", "doc-a", "after");
-
       onReorderDocumentTabs.mockClear();
       fireEvent.dragStart(screen.getByLabelText("Notas de release"), { dataTransfer: releaseNotesDataTransfer });
       fireEvent.dragOver(screen.getByLabelText("Acta.md"), { dataTransfer: releaseNotesDataTransfer, clientX: 120 });
       fireEvent.drop(screen.getByLabelText("Acta.md"), { dataTransfer: releaseNotesDataTransfer, clientX: 120 });
-
       expect(onReorderDocumentTabs).toHaveBeenCalledWith("app-release-notes", "doc-a", "after");
     } finally {
       rectSpy.mockRestore();
     }
   });
-
   it("reorders tabs when the drop event only exposes text/plain drag data", () => {
     const onReorderDocumentTabs = vi.fn();
     const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
@@ -279,7 +233,6 @@ describe("DocumentTabs", () => {
       height: 36,
       toJSON: () => ({}),
     });
-
     try {
       render(
         <DocumentTabs
@@ -291,19 +244,15 @@ describe("DocumentTabs", () => {
           onReorderDocumentTabs={onReorderDocumentTabs}
         />,
       );
-
       const textOnlyDataTransfer = createDataTransfer();
       textOnlyDataTransfer.setData("text/plain", "doc-b");
-
       fireEvent.dragOver(screen.getByLabelText("Acta.md"), { dataTransfer: textOnlyDataTransfer });
       fireEvent.drop(screen.getByLabelText("Acta.md"), { dataTransfer: textOnlyDataTransfer });
-
       expect(onReorderDocumentTabs).toHaveBeenCalledWith("doc-b", "doc-a", "after");
     } finally {
       rectSpy.mockRestore();
     }
   });
-
   it("reorders document tabs with pointer dragging in the native WebView path", () => {
     const onReorderDocumentTabs = vi.fn();
     const onSelectTab = vi.fn();
@@ -322,7 +271,6 @@ describe("DocumentTabs", () => {
         toJSON: () => ({}),
       };
     });
-
     try {
       render(
         <DocumentTabs
@@ -334,20 +282,17 @@ describe("DocumentTabs", () => {
           onReorderDocumentTabs={onReorderDocumentTabs}
         />,
       );
-
       const pointerDown = new MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: 220, clientY: 18 });
       Object.defineProperty(pointerDown, "pointerType", { value: "touch" });
       fireEvent(screen.getByLabelText("Esquemas.md"), pointerDown);
       fireEvent(window, new MouseEvent("pointermove", { bubbles: true, clientX: 120, clientY: 18 }));
       fireEvent(window, new MouseEvent("pointerup", { bubbles: true, clientX: 120, clientY: 18 }));
-
       expect(onReorderDocumentTabs).toHaveBeenCalledWith("doc-b", "doc-a", "after");
       expect(onSelectTab).not.toHaveBeenCalled();
     } finally {
       rectSpy.mockRestore();
     }
   });
-
   it("reorders document tabs with mouse dragging when WebView mouse events are used", () => {
     const onReorderDocumentTabs = vi.fn();
     const onSelectTab = vi.fn();
@@ -366,7 +311,6 @@ describe("DocumentTabs", () => {
         toJSON: () => ({}),
       };
     });
-
     try {
       render(
         <DocumentTabs
@@ -378,18 +322,15 @@ describe("DocumentTabs", () => {
           onReorderDocumentTabs={onReorderDocumentTabs}
         />,
       );
-
       fireEvent.mouseDown(screen.getByLabelText("Esquemas.md"), { button: 0, clientX: 220, clientY: 18 });
       fireEvent.mouseMove(window, { clientX: 120, clientY: 18 });
       fireEvent.mouseUp(window, { clientX: 120, clientY: 18 });
-
       expect(onReorderDocumentTabs).toHaveBeenCalledWith("doc-b", "doc-a", "after");
       expect(onSelectTab).not.toHaveBeenCalled();
     } finally {
       rectSpy.mockRestore();
     }
   });
-
   it("shows overflow controls and a vertical tab list when open tabs do not fit", async () => {
     const scrollWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollWidth");
     const clientWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
@@ -405,7 +346,6 @@ describe("DocumentTabs", () => {
         return String(this.className).includes("overflow-x-hidden") ? 320 : 0;
       },
     });
-
     try {
       const onSelectTab = vi.fn();
       render(
@@ -422,19 +362,14 @@ describe("DocumentTabs", () => {
           onCloseTab={vi.fn()}
         />,
       );
-
       expect(screen.getByLabelText("Mostrar pestañas abiertas")).toBeInTheDocument();
       expect(screen.getByLabelText("Pestaña anterior")).toBeInTheDocument();
       expect(screen.getByLabelText("Pestaña siguiente")).toBeInTheDocument();
-
       await userEvent.click(screen.getByLabelText("Pestaña siguiente"));
       await userEvent.click(screen.getByLabelText("Pestaña anterior"));
-
       expect(onSelectTab).toHaveBeenNthCalledWith(1, "ref-xlsx");
       expect(onSelectTab).toHaveBeenNthCalledWith(2, "doc-b");
-
       await userEvent.click(screen.getByLabelText("Mostrar pestañas abiertas"));
-
       expect(screen.getAllByText("Datos.xlsx").length).toBeGreaterThan(1);
       expect(screen.getAllByText("Informe.docx").length).toBeGreaterThan(1);
     } finally {
@@ -446,12 +381,10 @@ describe("DocumentTabs", () => {
       }
     }
   });
-
   it("uses a compact tab switcher in narrow responsive mode", async () => {
     mockCompactTabsMode(true);
     const onSelectTab = vi.fn();
     const onCloseTab = vi.fn();
-
     render(
       <DocumentTabs
         tabs={[
@@ -467,7 +400,6 @@ describe("DocumentTabs", () => {
         onCloseTab={onCloseTab}
       />,
     );
-
     expect(screen.getByLabelText("Abrir panel de documentos")).toBeInTheDocument();
     expect(screen.getByLabelText("IA")).toBeInTheDocument();
     expect(screen.getByLabelText("Notas")).toBeInTheDocument();
@@ -478,28 +410,20 @@ describe("DocumentTabs", () => {
     expect(closeActiveTab.compareDocumentPosition(openDocuments) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByText("Acta.md")).not.toBeInTheDocument();
     expect(screen.queryByText("Presupuesto.xlsx")).not.toBeInTheDocument();
-
     await userEvent.click(closeActiveTab);
-
     expect(onCloseTab).toHaveBeenCalledWith("doc-b");
     expect(screen.queryByRole("dialog", { name: "Archivos abiertos" })).not.toBeInTheDocument();
-
     await userEvent.click(openDocuments);
-
     expect(screen.getByRole("dialog", { name: "Archivos abiertos" })).toBeInTheDocument();
     expect(screen.getByText("Acta.md")).toBeInTheDocument();
     expect(screen.getAllByText("Esquemas.md").length).toBeGreaterThan(1);
     expect(screen.getByText("Presupuesto.xlsx")).toBeInTheDocument();
-
     await userEvent.click(screen.getByText("Acta.md"));
-
     expect(onSelectTab).toHaveBeenCalledWith("doc-a");
     expect(screen.queryByRole("dialog", { name: "Archivos abiertos" })).not.toBeInTheDocument();
   });
-
-  it("keeps the current document visible when a fixed tab is active in narrow responsive mode", () => {
+  it("names the active utility correctly while keeping the document switcher available", () => {
     mockCompactTabsMode(true);
-
     render(
       <DocumentTabs
         tabs={[
@@ -515,13 +439,62 @@ describe("DocumentTabs", () => {
         onCloseTab={vi.fn()}
       />,
     );
-
     expect(screen.getByLabelText("Notas")).toBeInTheDocument();
-    expect(screen.getByLabelText("Mostrar archivos abiertos, activo Esquemas.md")).toBeInTheDocument();
+    expect(screen.getByLabelText("Mostrar archivos abiertos, activo Notas")).toBeInTheDocument();
+    expect(screen.getByLabelText("Documento activo Notas")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Cerrar Notas")).not.toBeInTheDocument();
     expect(screen.queryByText("Acta.md")).not.toBeInTheDocument();
   });
 });
-
+describe("DocumentTabs keyboard boundaries", () => {
+  afterEach(() => { cleanup(); Reflect.deleteProperty(window, "matchMedia"); vi.restoreAllMocks(); });
+  it("opens tab context with Shift+F10, navigates disabled actions and returns focus", async () => {
+    const onClose = vi.fn();
+    render(<><DocumentTabs tabs={[tabs[0]]} activeTabId="doc-a" dirtyDocumentIds={[]} onSelectTab={vi.fn()} onCloseTab={onClose}/><button>Después</button></>);
+    const tab = screen.getByRole("button", {name:"Acta.md"});
+    tab.focus();
+    await userEvent.keyboard("{Shift>}{F10}{/Shift}");
+    const menu = screen.getByRole("menu", {name:"Opciones de pestaña"});
+    const first = within(menu).getByRole("menuitem", {name:/^Cerrar$/});
+    const last = within(menu).getByRole("menuitem", {name:"Cerrar todas las pestañas"});
+    expect(first).toHaveFocus();
+    expect(within(menu).getByRole("menuitem", {name:"Cerrar otras pestañas"})).toBeDisabled();
+    await userEvent.keyboard("{ArrowDown}"); expect(last).toHaveFocus();
+    await userEvent.keyboard("{Home}"); expect(first).toHaveFocus();
+    await userEvent.keyboard("{End}"); expect(last).toHaveFocus();
+    await userEvent.keyboard("{Escape}"); expect(tab).toHaveFocus();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    await userEvent.keyboard("{Shift>}{F10}{/Shift}{Enter}");
+    expect(onClose).toHaveBeenCalledWith("doc-a");
+  });
+  it("clamps context to the viewport and lets Tab leave the menu", async () => {
+    const rect = vi.spyOn(HTMLElement.prototype,"getBoundingClientRect").mockReturnValue({x:0,y:0,left:0,top:0,right:192,bottom:150,width:192,height:150,toJSON:()=>({})});
+    render(<><DocumentTabs tabs={tabs} activeTabId="doc-a" dirtyDocumentIds={[]} onSelectTab={vi.fn()} onCloseTab={vi.fn()}/><button>Después</button></>);
+    fireEvent.contextMenu(screen.getByRole("button",{name:"Acta.md"}),{clientX:10000,clientY:10000});
+    const menu=screen.getByRole("menu");
+    expect(Number.parseFloat(menu.style.left)).toBeLessThanOrEqual(window.innerWidth-192-8);
+    expect(Number.parseFloat(menu.style.top)).toBeLessThanOrEqual(window.innerHeight-150-8);
+    await userEvent.tab();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.getByRole("button",{name:"Esquemas.md"})).toHaveFocus();
+    rect.mockRestore();
+  });
+  it("isolates the compact file dialog, traps Tab and restores its opener", async () => {
+    mockCompactTabsMode(true);
+    const {container}=render(<><DocumentTabs tabs={tabs} activeTabId="doc-a" dirtyDocumentIds={["doc-b"]} onSelectTab={vi.fn()} onCloseTab={vi.fn()}/><button>Fondo</button></>);
+    const opener=screen.getByLabelText("Mostrar archivos abiertos, activo Acta.md");
+    await userEvent.click(opener);
+    const dialog=screen.getByRole("dialog",{name:"Archivos abiertos"});
+    expect(container.querySelector<HTMLElement>('.knownext-document-tab-compact-active')?.inert).toBe(true);
+    const close=within(dialog).getByRole("button",{name:"Cerrar lista de archivos abiertos"});
+    expect(close).toHaveFocus();
+    const last=within(dialog).getByRole("button",{name:"Cerrar Esquemas.md, con cambios sin guardar"});
+    expect(last).toHaveClass("h-11","w-11");
+    last.focus(); await userEvent.tab(); expect(close).toHaveFocus();
+    await userEvent.keyboard("{Escape}"); expect(opener).toHaveFocus();
+    expect(container.querySelector<HTMLElement>('.knownext-document-tab-compact-active')?.inert).toBe(false);
+  });
+});
 function createDataTransfer() {
   const data = new Map<string, string>();
   return {
@@ -534,7 +507,6 @@ function createDataTransfer() {
     setDragImage: vi.fn(),
   } as unknown as DataTransfer;
 }
-
 function mockCompactTabsMode(matches: boolean) {
   Object.defineProperty(window, "matchMedia", {
     configurable: true,

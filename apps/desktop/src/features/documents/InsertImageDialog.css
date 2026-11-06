@@ -1,0 +1,7 @@
+.insert-image-dialog section { min-height:0; }
+.insert-image-dialog :is(button,input,summary):focus-visible { outline:2px solid rgb(var(--accent-ring)); outline-offset:2px; }
+.insert-image-dialog details summary { list-style-position:inside; }
+@media(max-width:820px),(pointer:coarse) {
+  .insert-image-dialog button { min-height:44px; min-width:44px; }
+  .insert-image-dialog input:not([type=file]) { min-height:44px; }
+}

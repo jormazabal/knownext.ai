@@ -1,0 +1,26 @@
+import {cleanup,fireEvent,render,screen,waitFor} from "@testing-library/react";
+import {afterEach,expect,it,vi} from "vitest";
+const{getHistoryGroups,changeHistoryGroup,getDocumentHistorySnapshot,getVersionContent}=vi.hoisted(()=>({getHistoryGroups:vi.fn(),changeHistoryGroup:vi.fn(),getDocumentHistorySnapshot:vi.fn(),getVersionContent:vi.fn()}));
+vi.mock("../../lib/api/historyGroups",()=>({getHistoryGroups,changeHistoryGroup}));
+vi.mock("../../lib/api/versions",()=>({getDocumentHistorySnapshot,getVersionContent,removeVersionMilestone:vi.fn(),saveVersionMilestone:vi.fn()}));
+import {HistoryCollections} from "./HistoryCollections";
+import {VersionHistoryPanel} from "./VersionHistoryPanel";
+afterEach(()=>{cleanup();vi.resetAllMocks();});
+const doc="owned::Review.md",first="a".repeat(40),second="b".repeat(40),base={schemaVersion:1,documentId:doc,projectId:"owned",revision:null,groups:[],groupLimit:128,referenceLimit:5000,checkedAt:"2026-11-01T21:00:00Z"};
+it("binds creation to the chosen version and observes an unknown acknowledgement without replay",async()=>{
+  let savedId="";getHistoryGroups.mockResolvedValueOnce(base).mockImplementationOnce(async()=>({...base,revision:"owned-confirmed",groups:[{id:savedId,title:"Entrega del cliente",description:"Revisión acordada",retired:false,referenceCount:1,documentVersionIds:[first],createdAt:base.checkedAt,updatedAt:base.checkedAt}]}));
+  changeHistoryGroup.mockImplementation(async(_doc,_revision,intent)=>{savedId=intent.groupId;throw Error("ACK desconocido");});const onFilter=vi.fn();
+  const view=render(<HistoryCollections documentId={doc} versionId={first} versionLabel="Primera versión" selectedGroupId="" onFilter={onFilter}/>);
+  fireEvent.click(screen.getByText("Colecciones de versiones"));fireEvent.click(await screen.findByRole("button",{name:"Nueva colección"}));fireEvent.change(screen.getByLabelText("Nombre de la colección"),{target:{value:"Entrega del cliente"}});fireEvent.change(screen.getByLabelText("Descripción (opcional)"),{target:{value:"Revisión acordada"}});
+  view.rerender(<HistoryCollections documentId={doc} versionId={second} versionLabel="Segunda versión" selectedGroupId="" onFilter={onFilter}/>);expect(screen.getByText("Se incluirá: Primera versión")).toBeInTheDocument();fireEvent.click(screen.getByRole("button",{name:"Guardar colección"}));expect(await screen.findByRole("alert")).toHaveTextContent("ACK desconocido");expect(changeHistoryGroup.mock.calls[0][2].versionId).toBe(first);expect(screen.getByLabelText("Nombre de la colección")).toHaveValue("Entrega del cliente");expect(screen.getByRole("button",{name:"Guardar colección"})).toBeDisabled();
+  fireEvent.click(screen.getByRole("button",{name:"Comprobar estado"}));await screen.findByText("Colección confirmada al comprobar el estado. No se repitió el guardado.");expect(changeHistoryGroup).toHaveBeenCalledTimes(1);expect(screen.queryByLabelText("Nombre de la colección")).not.toBeInTheDocument();expect(onFilter).toHaveBeenCalledWith({id:savedId,title:"Entrega del cliente",versionIds:[first]});
+});
+it("filters the list without clearing the existing comparison or closing its preview",async()=>{
+  const versions=[{id:second,hash:second.slice(0,8),title:"Segunda versión",author:"Owned",createdAt:"2026-11-01T20:00:00Z",current:true},{id:first,hash:first.slice(0,8),title:"Primera versión",author:"Owned",createdAt:"2026-11-01T19:00:00Z",current:false}];
+  getDocumentHistorySnapshot.mockResolvedValue({versions,milestones:{status:"missing",revision:null,error:null},history:{status:"ready",recordingEnabled:true,reason:null,canConfigure:true},checkedAt:base.checkedAt});getHistoryGroups.mockResolvedValue({...base,revision:"owned",groups:[{id:"history-group-owned",title:"Entrega del cliente",description:"",retired:false,referenceCount:3,documentVersionIds:[first],createdAt:base.checkedAt,updatedAt:base.checkedAt}]});
+  const onPreviewChange=vi.fn();render(<VersionHistoryPanel documentId={doc} documentName="Review.md" activePreviewVersionId={second} onPreviewChange={onPreviewChange} onClose={vi.fn()}/>);
+  await screen.findByLabelText("Seleccionar para comparar Primera versión");onPreviewChange.mockClear();fireEvent.click(screen.getByLabelText("Seleccionar para comparar Primera versión"));fireEvent.click(screen.getByLabelText("Seleccionar para comparar Segunda versión"));
+  fireEvent.click(screen.getByText("Colecciones de versiones"));await screen.findByRole("option",{name:"Entrega del cliente · 1 aquí"});fireEvent.change(screen.getByLabelText("Colección"),{target:{value:"history-group-owned"}});
+  await waitFor(()=>expect(screen.queryByLabelText("Seleccionar para comparar Segunda versión")).not.toBeInTheDocument());expect(screen.getByRole("button",{name:"Comparar versiones"})).toBeEnabled();expect(screen.getByText("1 versión elegida fuera de esta colección.")).toBeInTheDocument();expect(onPreviewChange).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button",{name:"Ver todo el historial"}));expect(await screen.findByLabelText("Seleccionar para comparar Segunda versión")).toBeChecked();expect(screen.getByLabelText("Seleccionar para comparar Primera versión")).toBeChecked();expect(changeHistoryGroup).not.toHaveBeenCalled();
+});

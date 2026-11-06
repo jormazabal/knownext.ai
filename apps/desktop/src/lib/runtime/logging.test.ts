@@ -34,8 +34,6 @@ describe("runtime logging helpers", () => {
     expect(invokeMock).toHaveBeenLastCalledWith("record_trace_log", {
       level: "error",
       source: "settings",
-      message: "Diagnostic copied",
-      detail: null,
     });
 
     await openTraceLogFolder("C:/Logs");
@@ -48,5 +46,12 @@ describe("runtime logging helpers", () => {
     invokeMock.mockRejectedValue(new Error("No log file"));
 
     await expect(recordTraceLog({ level: "info", source: "ai", message: "ignored" })).resolves.toBeUndefined();
+  });
+  it("does not send free-form errors, prompts or paths to the diagnostic bridge",async()=>{
+    Object.defineProperty(window,"__TAURI_INTERNALS__",{value:{},configurable:true});
+    invokeMock.mockResolvedValue({recorded:true,eventId:"diagnostic-1-a"});
+    expect(await recordTraceLog({source:"app.document.private-file.md",message:"private prompt",detail:"C:/private/token.txt"})).toBe("diagnostic-1-a");
+    expect(invokeMock).toHaveBeenCalledWith("record_trace_log",{level:"error",source:"document"});
+    expect(JSON.stringify(invokeMock.mock.calls)).not.toMatch(/private|token/);
   });
 });

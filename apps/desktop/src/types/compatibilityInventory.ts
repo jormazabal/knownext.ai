@@ -1,0 +1,2 @@
+export type CompatibilityInventory={schemaVersion:1;limited:boolean;checkedAt:string;message:string;entries:{id:string;label:string;status:"compatible"|"compatible-legacy"|"protected"|"not-reviewed"|"absent";message:string;sourceVersion?:number|null;currentVersion?:number;byteLength?:number}[]};
+export type ProjectProtection={schemaVersion:1;projectId:string;checkedAt:string;contactsRemote:false;allDocumentsVerified:false;items:{id:string;label:string;state:"available"|"attention"|"disabled"|"not-checked";message:string}[]};

@@ -1,10 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import {registerPendingInputCheckpoint} from "../editor/pendingInputCheckpoints";
 import {
   ArrowLeftRight,
   ArrowUpDown,
   Check,
   Eraser,
   FilePlus2,
+  FileText,
+  ScanText,
   Grid3X3,
   Highlighter,
   Lasso,
@@ -67,6 +70,12 @@ import {
   updateHandwrittenPageLayout,
   updateToolPresetList,
 } from "./handwrittenModel";
+import {PageOcrDialog} from "./PageOcrDialog";
+import type {HandwrittenOcrApplyRequest,HandwrittenOcrApply,HandwrittenOcrResult} from "../../types/handwrittenOcr";
+import {PageTranscriptionDialog} from "./PageTranscriptionDialog";
+import {pageTranscription,updatePageTranscription} from "./pageTranscription";
+import type {HandwrittenPageFocus} from "../../types/localSearch";
+import "./HandwrittenEditor.css";
 
 type HandwrittenEditorProps = {
   noteId: string;
@@ -79,6 +88,11 @@ type HandwrittenEditorProps = {
   onChange: (content: HandwrittenNoteContent) => void;
   onToolPresetsChange: (toolPresets: HandwrittenToolPreset[]) => void;
   onEraserConfigChange: (eraserConfig: HandwrittenEraserConfig) => void;
+  pageFocus?:HandwrittenPageFocus|null;
+  onPageFocusHandled?:(requestId:number)=>void;
+  onBeforeOcr?:()=>Promise<void>;
+  onOcrObserved?:(receipt:HandwrittenOcrResult)=>Promise<void>;
+  onApplyOcr?:(request:HandwrittenOcrApplyRequest)=>Promise<HandwrittenOcrApply>;
 };
 
 type PageViewport = {
@@ -176,6 +190,11 @@ export function HandwrittenEditor({
   onChange,
   onToolPresetsChange,
   onEraserConfigChange,
+  pageFocus,
+  onPageFocusHandled,
+  onBeforeOcr,
+  onOcrObserved,
+  onApplyOcr,
 }: HandwrittenEditorProps) {
   const [activePencilId, setActivePencilId] = useState("pencil-1");
   const [activeUtilityTool, setActiveUtilityTool] = useState<UtilityTool>("draw");
@@ -187,6 +206,10 @@ export function HandwrittenEditor({
   const [zoomSettingsOpen, setZoomSettingsOpen] = useState(false);
   const [toolbarPlacement, setToolbarPlacement] = useState<ToolbarPlacement>("top");
   const [activePageId, setActivePageId] = useState("");
+  const [pageOcr,setPageOcr]=useState<{noteId:string;pageId:string;pageNumber:number}|null>(null);
+  const [pageTextReview,setPageTextReview]=useState<{noteId:string;pageId:string;pageNumber:number;baseText:string}|null>(null);
+  const [navigationNotice,setNavigationNotice]=useState("");
+  const appliedPageFocus=useRef<number|null>(null);
   const [zoomPercent, setZoomPercent] = useState(72);
   const [selectedStrokeIds, setSelectedStrokeIds] = useState<Set<string>>(() => new Set());
   const [selectionFrameBounds, setSelectionFrameBounds] = useState<SelectionBounds | null>(null);
@@ -205,6 +228,8 @@ export function HandwrittenEditor({
   const pendingMiniMapNavigationRef = useRef<PendingMiniMapNavigation | null>(null);
   const livePointsRef = useRef<HandwrittenPoint[]>([]);
   const activePointerRef = useRef<ActivePointer | null>(null);
+  const pendingInputCheckpoint=useRef<()=>void>(()=>{});
+  useEffect(()=>registerPendingInputCheckpoint(()=>pendingInputCheckpoint.current()),[]);
   const overlayFrameRef = useRef<number | null>(null);
   const liveRenderIndexRef = useRef(0);
   const undoStackRef = useRef<string[]>([]);
@@ -215,6 +240,7 @@ export function HandwrittenEditor({
   useEffect(() => {
     if (noteIdRef.current !== noteId) {
       noteIdRef.current = noteId;
+      setNavigationNotice("");
       undoStackRef.current = [];
       redoStackRef.current = [];
       contentRef.current = content;
@@ -283,6 +309,15 @@ export function HandwrittenEditor({
 
   const activePage = useMemo(() => content?.pages.find((page) => page.id === activePageId) ?? content?.pages[0] ?? null, [activePageId, content]);
   const activePageIndex = useMemo(() => activePage && content ? content.pages.findIndex((page) => page.id === activePage.id) : -1, [activePage, content]);
+  useEffect(()=>{
+    if(!pageFocus||pageFocus.noteId!==noteId||!content||appliedPageFocus.current===pageFocus.requestId)return;
+    appliedPageFocus.current=pageFocus.requestId;
+    if(content.pages.some(page=>page.id===pageFocus.pageId)){
+      setActivePageId(pageFocus.pageId);setNavigationNotice("");
+      pendingMiniMapNavigationRef.current={pageId:pageFocus.pageId,ratioX:0.5,ratioY:0};
+    }else setNavigationNotice("La página del resultado ya no está disponible. La nota y sus demás páginas se conservan.");
+    onPageFocusHandled?.(pageFocus.requestId);
+  },[pageFocus,noteId,content,onPageFocusHandled]);
   const pencilPresets = useMemo(() => normalizeToolPresets(toolPresets), [toolPresets]);
   const activeTool = pencilPresets.find((pencil) => pencil.id === activePencilId) ?? pencilPresets[0];
   const activeEraserConfig = useMemo(() => normalizeEraserConfig(eraserConfig), [eraserConfig]);
@@ -688,6 +723,10 @@ export function HandwrittenEditor({
     } catch {
       // Best effort only.
     }
+    completePointerInput(page,activePointer);
+  }
+
+  function completePointerInput(page:HandwrittenNotePage,activePointer:ActivePointer){
     activePointerRef.current = null;
     cancelOverlayRender();
     clearOverlay(page);
@@ -777,6 +816,15 @@ export function HandwrittenEditor({
     }
     handlePointerUp(page, event);
   }
+
+  pendingInputCheckpoint.current=()=>{
+    const pointer=activePointerRef.current;if(!pointer)return;
+    const page=contentRef.current?.pages.find(page=>page.id===pointer.pageId);
+    if(!page)return;
+    try{canvasRefs.current[page.id]?.releasePointerCapture(pointer.pointerId);}catch{/* A hidden canvas may already have released capture. */}
+    if(isSelectionPointerKind(pointer.kind)){cancelSelectionInteraction(page);return;}
+    completePointerInput(page,pointer);
+  };
 
   function commitSelectionInteraction(interaction: SelectionInteractionState, page: HandwrittenNotePage, currentContent: HandwrittenNoteContent) {
     const transform = getSelectionInteractionTransform(interaction);
@@ -1065,6 +1113,13 @@ export function HandwrittenEditor({
           >
             <Settings2 size={16} />
           </button>
+          <button className="grid h-8 w-8 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange disabled:opacity-40" aria-label="Texto de la página" data-tooltip="Texto de la página" disabled={!activePage} onClick={()=>{
+            const latest=contentRef.current;
+            if(!activePage||!latest||activePointerRef.current)return;
+            setPageTextReview({noteId,pageId:activePage.id,pageNumber:activePageIndex+1,baseText:pageTranscription(latest,activePage.id)});
+            setPageSettingsOpen(false);setPagesLayerOpen(false);setZoomSettingsOpen(false);setEraserSettingsOpen(false);
+          }}><FileText size={16}/></button>
+          <button className="grid min-h-11 min-w-11 place-items-center rounded text-ink-secondary hover:bg-brand-hover disabled:opacity-40" aria-label="Reconocer texto de la página con IA" data-tooltip="Reconocer texto con IA" disabled={!activePage||!onBeforeOcr||!onApplyOcr} onClick={()=>{if(activePage&&!activePointerRef.current){setPageOcr({noteId,pageId:activePage.id,pageNumber:activePageIndex+1});setPageTextReview(null);setPageSettingsOpen(false);setPagesLayerOpen(false);}}}><ScanText size={17}/></button>
         </div>
         <div className={groupClass}>
           <button
@@ -1098,9 +1153,9 @@ export function HandwrittenEditor({
   const popoverPlacement: PopoverPreferredPlacement = toolbarIsVertical ? "right" : "bottom";
 
   return (
-    <div ref={editorBoundaryRef} className="flex h-full min-h-0 flex-col bg-white">
+    <div ref={editorBoundaryRef} className="knownext-handwritten-editor flex h-full min-h-0 flex-col bg-white">
       {!toolbarIsVertical ? (
-        <div className="flex h-10 shrink-0 items-center border-b border-line bg-white px-2">
+        <div className="knownext-handwritten-toolbar-row flex h-10 shrink-0 items-center border-b border-line bg-white px-2">
           <div className="min-w-0 flex flex-1 items-center gap-1 overflow-x-auto overscroll-x-contain py-1">
             {renderToolbarContent(false)}
           </div>
@@ -1109,13 +1164,14 @@ export function HandwrittenEditor({
 
       <div className="flex min-h-0 flex-1">
         {toolbarIsVertical ? (
-          <aside className="flex w-10 shrink-0 flex-col items-center border-r border-line bg-white py-1">
+          <aside className="knownext-handwritten-toolbar-column flex w-10 shrink-0 flex-col items-center border-r border-line bg-white py-1">
             <div className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto overscroll-y-contain">
               {renderToolbarContent(true)}
             </div>
           </aside>
         ) : null}
         <section className="flex min-w-0 flex-1 flex-col">
+          {navigationNotice&&<p role="status" className="shrink-0 px-3 py-2 text-xs text-ink-secondary">{navigationNotice}</p>}
           <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-auto overscroll-contain bg-panel px-6 py-6">
             <div className="mx-auto flex w-max min-w-full flex-col items-center gap-6">
               {activePage ? (
@@ -1183,6 +1239,13 @@ export function HandwrittenEditor({
           onChange={handleUpdateEraser}
         />
       ) : null}
+      {pageOcr&&pageOcr.noteId===noteId&&<PageOcrDialog key={`${pageOcr.noteId}:${pageOcr.pageId}`} {...pageOcr} onBeforeOcr={onBeforeOcr} onApplyOcr={onApplyOcr} onOcrObserved={onOcrObserved} onClose={()=>setPageOcr(null)}/>}
+      {pageTextReview&&<PageTranscriptionDialog key={`${pageTextReview.noteId}:${pageTextReview.pageId}`} pageNumber={pageTextReview.pageNumber} initialText={pageTextReview.baseText} currentText={pageTextReview.noteId===noteId?pageTranscription(content,pageTextReview.pageId):undefined} onClose={()=>setPageTextReview(null)} onApply={(text,baseText)=>{
+        const latest=contentRef.current;
+        if(pageTextReview.noteId!==noteId||!latest)return "La nota activa cambió. El texto pendiente se conserva.";
+        try{commitChange(updatePageTranscription(latest,pageTextReview.pageId,baseText,text));return null;}
+        catch(error){return error instanceof Error?error.message:"No se pudo aplicar el texto. Se conserva el campo para revisar.";}
+      }}/>}
       {pageSettingsOpen && activePage ? (
         <SheetSettingsLayer
           anchorElement={pageSettingsAnchorRef.current}

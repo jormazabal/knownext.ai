@@ -1,0 +1,2 @@
+export type ConflictPackageReview={schemaVersion:1;attemptId:string;reviewRevision:string;packageSha256:string;byteLength:number;fileName:string;files:{path:string;role:string;byteLength:number;sha256:string}[];warnings:string[];originalsPreserved:true;canExport:true;checkedAt:string};
+export type ConflictPackageDelivery={status:"saved"|"cancelled";attemptId:string;reviewRevision:string;fileName?:string;byteLength?:number;requestId:string;completedAt:string};

@@ -1,0 +1,54 @@
+import {CompatibilityInventoryPanel} from "./CompatibilityInventoryPanel";
+import {useEffect,useRef,useState} from "react";
+import {MigrationRetentionPanel} from "./MigrationRetentionPanel";
+import {ChevronDown,RefreshCw} from "lucide-react";
+import {applyStateUpgrade,completeUpgradeRecovery,listUpgradeRecoveries,restoreUpgradeRecovery,reviewStateUpgrade,reviewUpgradeRecovery} from "../../lib/api/stateMigrations";
+import {getApiErrorMessage} from "../../lib/api/client";
+import type {UpgradeCatalog,UpgradeRecovery,UpgradeResult,UpgradeReview,StateTransitionAuthority,StateTransitionOutcome} from "../../types/stateMigrations";
+
+export function StateMigrationPanel({english=false,onBeforeChange,onSettled,initialRecoveryId}:{english?:boolean;initialRecoveryId?:string}&StateTransitionAuthority){
+  const canChange=Boolean(onBeforeChange&&onSettled);
+  const[open,setOpen]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState("");
+  const[review,setReview]=useState<UpgradeReview|null>(null),[catalog,setCatalog]=useState<UpgradeCatalog|null>(null),[recovery,setRecovery]=useState<UpgradeRecovery|null>(null),[result,setResult]=useState<UpgradeResult|null>(null);
+  const inFlight=useRef(false),mounted=useRef(true),feedback=useRef<HTMLParagraphElement>(null);
+  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
+  useEffect(()=>{if(initialRecoveryId){setOpen(true);void inspect(initialRecoveryId);}},[initialRecoveryId]);
+  useEffect(()=>{if(!busy&&(result||error)){feedback.current?.focus({preventScroll:true});feedback.current?.scrollIntoView({block:"nearest"});}},[result,error,busy]);
+  const button="min-h-11 rounded px-3 text-xs font-medium text-brand-dark hover:bg-brand-hover disabled:opacity-50";
+  async function refresh(){
+    if(inFlight.current)return;inFlight.current=true;setBusy(true);setError("");setResult(null);
+    try{const[next,history]=await Promise.all([reviewStateUpgrade(),listUpgradeRecoveries()]);if(mounted.current){setReview(next);setCatalog(history);setRecovery(null);}}
+    catch(cause){if(mounted.current)setError(getApiErrorMessage(cause,english?"The review could not be loaded.":"No se pudo consultar la revisión."));}
+    finally{inFlight.current=false;if(mounted.current)setBusy(false);}
+  }
+  async function inspect(id:string){
+    if(inFlight.current)return;inFlight.current=true;setBusy(true);setError("");setResult(null);setRecovery(null);
+    try{const next=await reviewUpgradeRecovery(id);if(mounted.current)setRecovery(next);}
+    catch(cause){if(mounted.current)setError(getApiErrorMessage(cause,english?"Recovery could not be reviewed.":"No se pudo revisar la recuperación."));}
+    finally{inFlight.current=false;if(mounted.current)setBusy(false);}
+  }
+  async function apply(action:"upgrade"|"restore"|"complete"="upgrade"){
+    if(!canChange||inFlight.current||(action==="upgrade"&&!review?.canApply)||(action==="restore"&&!recovery?.canRestore)||(action==="complete"&&!recovery?.canComplete))return;
+    inFlight.current=true;setBusy(true);setError("");const chosen=recovery;
+    let prepared=false,outcome:StateTransitionOutcome|undefined;
+    try{await onBeforeChange!();prepared=true;const next=action==="restore"&&chosen?await restoreUpgradeRecovery(chosen.id,chosen.revision):action==="complete"&&chosen?await completeUpgradeRecovery(chosen.id,chosen.revision):await applyStateUpgrade(review!.revision);outcome={confirmed:true,message:next.message,result:next};if(mounted.current){setResult(next);setReview(null);setRecovery(null);setCatalog(null);}}
+    catch(cause){const message=getApiErrorMessage(cause,english?"No confirmation was received. Current state will be read again; no action is replayed.":"No se recibió confirmación. Se volverá a consultar el estado actual, sin repetir la operación.");if(prepared)outcome={confirmed:false,message};if(mounted.current){setError(message);if(prepared){setReview(null);setRecovery(null);}}}
+    finally{inFlight.current=false;if(mounted.current)setBusy(false);if(prepared&&outcome)onSettled!(outcome);}
+  }
+  const labels=english?{missing:"Absent · preserved",compatible:"Compatible",legacy:"Update available",blocked:"Requires review",original:"Original",applied:"Updated",changed:"Changed afterwards",unavailable:"Unavailable"}:{missing:"Ausente · se conserva",compatible:"Compatible",legacy:"Actualización disponible",blocked:"Requiere revisión",original:"Original",applied:"Actualizado",changed:"Cambio posterior",unavailable:"No disponible"};
+  return <details open={open} onToggle={event=>setOpen(event.currentTarget.open)} className="rounded-md bg-panel px-4">
+    <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-2 py-3 text-sm font-medium"><span>{english?"Data compatibility and recovery":"Compatibilidad y recuperación de datos"}</span><ChevronDown size={16} aria-hidden="true" className={open?"shrink-0 rotate-180":"shrink-0"}/></summary>
+    <div aria-busy={busy} className="space-y-3 pb-4 text-xs leading-5">
+      <p className="text-ink-secondary">{english?"Review preferences, project registration and export style. An update preserves verified private originals first. Documents, history, audio, credentials and drafts are not changed.":"Revisa preferencias, registro de proyectos y estilo de exportación. La actualización conserva antes copias privadas verificadas. No cambia documentos, historial, audio, credenciales ni borradores."}</p>
+      <p className="text-ink-secondary">{canChange?(english?"Before a change, documents and notes are protected and pending settings must be confirmed. The workspace then reads the observed state again, including after an uncertain acknowledgement.":"Antes de cambiar el estado se protegen documentos y notas, y los ajustes pendientes deben estar confirmados. Después se vuelve a cargar el estado observado, también si falta una confirmación."):(english?"Read-only review. Apply changes from the protected workspace.":"Revisión de consulta. Aplica los cambios desde el espacio de trabajo protegido.")}</p>
+      <button type="button" disabled={busy} className={button} onClick={()=>void refresh()}><RefreshCw size={13} className="mr-2 inline"/>{busy?(english?"Working…":"Procesando…"):(english?"Review current state":"Revisar estado actual")}</button>
+      {error&&<p ref={feedback} tabIndex={-1} role="alert" className="break-words text-red-700">{error}</p>}
+      {result&&!error&&<p ref={feedback} tabIndex={-1} role="status" className="break-words">{result.message} {result.status!=="unchanged"&&<span className="text-ink-secondary">{english?"Reference":"Referencia"}: {result.id}</span>}</p>}
+      {review&&<><ul className="space-y-2">{review.entries.map(entry=><li key={entry.id} className="flex flex-wrap justify-between gap-x-3"><span className="font-medium">{entry.filename}</span><span className="text-ink-secondary">{labels[entry.status]}</span>{entry.message&&<p className="w-full text-red-700">{entry.message}</p>}</li>)}</ul>{review.canApply&&<div><p className="text-ink-secondary">{english?"The three states are reviewed together. If a step fails, stop and review confirmed changes; no operation is repeated automatically.":"Los tres estados se revisan en conjunto. Si falla un paso, se detiene el proceso y se revisan los cambios confirmados; no se repite automáticamente."}</p><button type="button" disabled={busy||!canChange} className="mt-2 min-h-11 rounded bg-brand-dark px-3 font-semibold text-white disabled:opacity-50" onClick={()=>void apply()}>{english?"Preserve originals and update":"Conservar originales y actualizar"}</button></div>}</>}
+      {catalog&&<section><h5 className="font-semibold">{english?"Recovery points":"Puntos de recuperación"}</h5>{catalog.limited&&<p>{english?"Partial listing.":"Listado parcial."}</p>}<ul className="max-h-48 overflow-y-auto">{catalog.entries.map(entry=><li key={entry.id} className="flex flex-wrap items-center justify-between gap-2 py-1"><span className="min-w-0 break-words text-ink-secondary">{entry.createdAt?new Date(entry.createdAt).toLocaleString(english?"en-GB":"es-ES"):entry.id}{!entry.canReview&&<span className="block">{english?"Incomplete or unsupported point · preserved":"Punto incompleto o no compatible · se conserva"}</span>}</span><button disabled={busy||!entry.canReview} className={button} onClick={()=>void inspect(entry.id)}>{english?"Review recovery":"Revisar recuperación"}</button></li>)}</ul>{!catalog.entries.length&&<p className="text-ink-secondary">{english?"No recovery points yet.":"Todavía no hay puntos de recuperación."}</p>}</section>}
+      {recovery&&<section><h5 className="font-semibold">{english?"Observed recovery state":"Estado de recuperación observado"}</h5><ul className="mt-2 space-y-1">{recovery.entries.map(entry=><li key={entry.id}>{entry.filename} · {labels[entry.status]}{!entry.backupVerified?(english?" · original copy not verified":" · copia original sin verificar"):entry.backupCompatible===false&&(english?" · original format not compatible":" · formato del original no compatible")}</li>)}</ul><p className="mt-2 text-ink-secondary">{english?"Restore only if these states have not been edited afterwards. The copies remain and the workspace reloads the observed state after confirmation. This does not guarantee compatibility with an older application version.":"Solo se recupera si estos estados no han cambiado después. Las copias se conservan y el espacio vuelve a leer el estado tras la confirmación. No garantiza compatibilidad con una versión antigua de la aplicación."}</p>{recovery.canComplete?<div className="mt-3"><p className="text-ink-secondary">{english?"This interrupted update has exact verified destinations. Complete its remaining steps while keeping every original copy.":"Esta actualización interrumpida tiene destinos exactos verificados. Puedes completar los pasos pendientes conservando todas las copias originales."}</p><button type="button" disabled={busy||!canChange} className={`${button} mt-1`} onClick={()=>void apply("complete")}>{english?"Complete reviewed update":"Completar actualización revisada"}</button></div>:recovery.completionReason&&<p className="mt-2 text-ink-secondary">{english?"Completion is unavailable for this point. Keep the copies and review its compatibility or later changes.":recovery.completionReason}</p>}<button disabled={busy||!canChange||!recovery.canRestore} className="mt-2 min-h-11 rounded px-3 font-medium text-red-700 hover:bg-red-50 disabled:opacity-50" onClick={()=>void apply("restore")}>{english?"Restore reviewed originals":"Recuperar originales revisados"}</button></section>}
+      <CompatibilityInventoryPanel english={english}/>
+      <MigrationRetentionPanel enabled={canChange&&!busy} english={english} initialId={recovery?.id??initialRecoveryId} onChanged={()=>void refresh()}/>
+    </div>
+  </details>;
+}

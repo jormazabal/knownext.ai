@@ -1,0 +1,23 @@
+# Bloque 1 · Integridad, recuperación y almacenamiento
+
+Registro de entrega: 129. Continúa los paquetes P01/P05; no es una redefinición ni un cierre de todo el programa. Autoridad: completar el primer bloque de las agrupaciones pendientes, sin gasto IA ni suites completas durante el desarrollo.
+
+## Cierre funcional
+
+1. Inventario común consultable de las 20 familias conocidas del perfil, incluidos archivos sueltos y preparaciones anteriores al catálogo. Páginas de 50; lectura de contenido acotada, enlaces y archivos de coordinación excluidos. Los formatos activos, desconocidos o parciales se conservan y pueden respaldarse cuando sus bytes son legibles dentro del presupuesto.
+2. Cierre explícito de identidades terminales en seis familias: recibos de conflicto, selecciones y aplicaciones mixtas, reuniones de historial, transferencias y plantillas retiradas. Se valida el formato propietario, las dependencias y la ubicación; el identificador se registra permanentemente antes del traslado atómico. El cupo activo se libera; los bytes conservados siguen medidos. Lecturas y escrituras del identificador anterior no lo recrean ni repiten efectos.
+3. Cierre interrumpido observable y continuación explícita únicamente con las mismas huellas. No se reanuda al consultar. Los originales o el archivo permanecen; no hay sustitución de destinos.
+4. Retirada de bytes archivados solo después de volver a elegir y comprobar un ZIP externo completo. Diario inmutable previo a la primera retirada, máximo 16 archivos por petición, consulta sin efectos y nueva revisión/confirmación para continuar. Identidad, huellas y respaldo externo permanecen. Una copia cambiada, incompleta, ajena o de formato futuro no autoriza retirada.
+5. Preparaciones mixtas incompletas: respaldo de bytes, otra selección con identidad nueva a partir de elecciones y bases comprobadas, y cierre sin aplicar/deshacer cuando el recibo y la admisión son conocidos. Un recibo futuro o no atribuible se protege; no se interpreta para liberar una admisión ajena.
+6. Archivos regulares/ejecutables: contenido y modo declarados en el formato 2 de aplicación, lectura compatible del formato 1. Unix aplica el permiso; Windows admite el contenido cuando mantiene el modo ejecutable y rechaza cambios de modo que exigirían alterar el índice. No hay checkout ni cambio implícito del historial/índice.
+7. Productores internos: creaciones, carpetas, eliminación, duplicación, documentos/imágenes/notas de IA y versiones respetan la reserva del proyecto. El versionado por API usa una reserva exclusiva reentrante. Captura nueva: margen de admisión de 32 MiB; transferencia nueva: margen de 384 MiB. Guardar, detener y continuar trabajo conservado no dependen de ampliar ese presupuesto.
+8. Compatibilidad: revisión de JSON de perfil/proyectos registrados por los codecs propietarios, legado compatible sin conversión forzada, futuro/corrupción conservados. Si una escritura conocida cambia el esquema auxiliar, conserva antes una copia exacta y un manifiesto. Credenciales siguen bajo protección nativa; no se crean copias auxiliares de acceso en texto plano.
+9. UX: acceso separado a «Registros y conservación» y «Espacio y límites», confirmaciones distintas para conservar y retirar, listado de contenido por tramos y errores sin reenvío automático. Resumen por proyecto diferencia guardado, historial, remoto, continuidad y respaldo externo; una configuración remota no se presenta como copia verificada.
+
+## Frontera de cierre
+
+Cierre de implementación local y comprobaciones dirigidas. La regresión completa del programa, piloto instalado 2.6→3.0, cortes físicos/espacio real, selectores nativos y aceptación Windows/Android pertenecen a P10 y permanecen pendientes. Las ampliaciones de combinación visual por bloques, copias programadas y portabilidad integral conservan sus pendientes en el backlog; no se han eliminado ni se declaran completadas con este bloque.
+
+El presupuesto es de admisión sobre almacenes conocidos, no una cuota rígida del disco. Captura/continuaciones existentes pueden crecer; cobertura parcial impide nuevas preparaciones con el presupuesto activo. El archivo de identidades necesita conservar metadatos permanentes. No hay purga automática por edad, ni descubrimiento indiscriminado de carpetas externas. Los límites de revisión no son una garantía de interrupción de E/S del sistema.
+
+Evidencia consolidada y comprobaciones: [avance-129.md](avance-129.md). Comprobaciones dirigidas, build de producción y composición Tauri Windows completadas; cierre local registrado en output/v3-integrity-verification.json.

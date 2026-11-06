@@ -1,0 +1,6 @@
+@media (pointer:coarse),(max-width:820px) {
+  .knownext-handwritten-editor .knownext-handwritten-toolbar-row { height:52px; }
+  .knownext-handwritten-editor .knownext-handwritten-toolbar-column { width:52px; }
+  .knownext-handwritten-editor .knownext-handwritten-toolbar-row button,
+  .knownext-handwritten-editor .knownext-handwritten-toolbar-column button { min-width:44px; min-height:44px; }
+}

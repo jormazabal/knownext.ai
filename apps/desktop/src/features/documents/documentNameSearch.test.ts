@@ -26,6 +26,11 @@ const nodes: DocumentTreeNode[] = [
 ];
 
 describe("searchDocumentTreeByName", () => {
+  it("includes handwritten notes and distinguishes identical names by parent path", () => {
+    const tree: DocumentTreeNode[] = [{id:"folder-a",name:"Equipo A",type:"folder",children:[{id:"note-a",name:"Acta.knote",type:"handwritten-note"}]},{id:"folder-b",name:"Equipo B",type:"folder",children:[{id:"note-b",name:"Acta.knote",type:"handwritten-note"}]}];
+    expect(searchDocumentTreeByName(tree,"acta")).toHaveLength(2);
+    expect(searchDocumentTreeByName(tree,"Equipo B Acta",10,true).map(item=>item.id)).toEqual(["note-b"]);
+  });
   it("matches text in the middle and end of folder or document names", () => {
     expect(searchDocumentTreeByName(nodes, "tect").map((result) => result.id)).toEqual(["folder-architecture", "doc-runtime"]);
     expect(searchDocumentTreeByName(nodes, "final").map((result) => result.id)).toEqual(["doc-final", "attachment-final"]);

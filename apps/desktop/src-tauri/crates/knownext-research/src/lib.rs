@@ -361,6 +361,51 @@ pub fn coverage_report(plan: &Value, evidence: &[Value], strategy: &Value) -> Va
     })
 }
 
+fn graph_id(value: &Value) -> Option<&str> {
+    value.as_str().filter(|id| {
+        !id.is_empty()
+            && id.len() <= 200
+            && id.as_bytes()[0].is_ascii_alphanumeric()
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+    })
+}
+/// Graph membership, not factual verification. Duplicate/missing provider IDs never grant support.
+pub fn usable_evidence(sources: &[Value], evidence: &[Value]) -> Vec<Value> {
+    let mut sources_count: BTreeMap<&str, usize> = BTreeMap::new();
+    for source in sources {
+        if let Some(id) = graph_id(&source["id"]) {
+            *sources_count.entry(id).or_default() += 1;
+        }
+    }
+    let known = sources
+        .iter()
+        .filter(|source| {
+            graph_id(&source["id"]).is_some_and(|id| sources_count.get(id) == Some(&1))
+                && !matches!(
+                    source["status"].as_str(),
+                    Some("unavailable" | "rejected" | "failed")
+                )
+        })
+        .filter_map(|source| graph_id(&source["id"]))
+        .collect::<BTreeSet<_>>();
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for row in evidence {
+        if let Some(id) = graph_id(&row["id"]) {
+            *counts.entry(id).or_default() += 1;
+        }
+    }
+    evidence
+        .iter()
+        .filter(|row| {
+            graph_id(&row["id"]).is_some_and(|id| counts.get(id) == Some(&1))
+                && graph_id(&row["sourceId"]).is_some_and(|id| known.contains(id))
+        })
+        .cloned()
+        .collect()
+}
+
 pub fn quality_report(
     sources: &[Value],
     evidence: &[Value],
@@ -368,32 +413,46 @@ pub fn quality_report(
     findings: &[Value],
     diagnostics: &[Value],
 ) -> Value {
-    let source_ids: BTreeSet<String> = evidence
+    let usable = usable_evidence(sources, evidence);
+    let source_ids = usable
         .iter()
-        .filter_map(|item| {
-            item.get("sourceId")
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned)
-        })
-        .collect();
+        .filter_map(|row| row["sourceId"].as_str().map(str::to_owned))
+        .collect::<BTreeSet<_>>();
+    let known_evidence = usable
+        .iter()
+        .filter_map(|row| graph_id(&row["id"]))
+        .collect::<BTreeSet<_>>();
     let cited_count = sources
         .iter()
         .filter(|source| {
-            source
-                .get("status")
-                .and_then(Value::as_str)
-                .map(|status| matches!(status, "cited" | "used_as_evidence"))
-                .unwrap_or(false)
+            source_ids.contains(source["id"].as_str().unwrap_or(""))
+                && matches!(
+                    source["status"].as_str(),
+                    Some("cited" | "used_as_evidence")
+                )
         })
         .count()
         .max(source_ids.len());
+    let mut finding_counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for finding in findings {
+        if let Some(id) = graph_id(&finding["id"]) {
+            *finding_counts.entry(id).or_default() += 1;
+        }
+    }
     let unsupported_findings = findings
         .iter()
         .filter(|finding| {
-            finding
-                .get("evidenceIds")
-                .and_then(Value::as_array)
-                .map(Vec::is_empty)
+            if graph_id(&finding["id"]).is_none_or(|id| finding_counts.get(id) != Some(&1)) {
+                return true;
+            }
+            finding["evidenceIds"]
+                .as_array()
+                .map(|refs| {
+                    refs.is_empty()
+                        || refs
+                            .iter()
+                            .any(|id| graph_id(id).is_none_or(|id| !known_evidence.contains(id)))
+                })
                 .unwrap_or(true)
         })
         .count();
@@ -410,6 +469,9 @@ pub fn quality_report(
     }
     if unsupported_findings > 0 {
         limitations.push("Hay hallazgos sin evidencias asociadas.".to_string());
+    }
+    if usable.len() != evidence.len() {
+        limitations.push("Hay evidencias con identidades ambiguas o fuentes desconocidas; no se cuentan como apoyo.".to_string());
     }
     if coverage_status != "pass" {
         limitations.push("La cobertura de objetivos no es completa.".to_string());
@@ -431,6 +493,7 @@ pub fn quality_report(
         "sourceCount": sources.len(),
         "citedSourceCount": cited_count,
         "evidenceCount": evidence.len(),
+        "usableEvidenceCount":usable.len(),
         "supportedFindings": findings.len().saturating_sub(unsupported_findings),
         "unsupportedFindings": unsupported_findings,
         "limitations": limitations,
@@ -547,5 +610,38 @@ mod tests {
         });
         let coverage = coverage_report(&plan, &[], &strategy_for_mode("quick", 50));
         assert_eq!(coverage["status"], json!("fail"));
+    }
+}
+
+#[cfg(test)]
+mod evidence_quality_tests {
+    use super::*;
+    #[test]
+    fn block8_quality_unknown_source_or_evidence_ids_never_count_as_backed_findings() {
+        let sources = vec![json!({"id":"source-known","status":"read"})];
+        let evidence = vec![
+            json!({"id":"evidence-known","sourceId":"source-known"}),
+            json!({"id":"evidence-orphan","sourceId":"source-missing"}),
+        ];
+        let findings = vec![
+            json!({"id":"finding-one","evidenceIds":["evidence-known"]}),
+            json!({"id":"finding-orphan","evidenceIds":["evidence-orphan"]}),
+            json!({"id":"finding-unknown","evidenceIds":["does-not-exist"]}),
+            json!({"id":"finding-empty","evidenceIds":[]}),
+        ];
+        let report = quality_report(
+            &sources,
+            &evidence,
+            &json!({"status":"pass"}),
+            &findings,
+            &[],
+        );
+        assert_eq!(report["supportedFindings"], 1);
+        assert_eq!(report["unsupportedFindings"], 3);
+        assert_eq!(report["usableEvidenceCount"], 1);
+        assert_eq!(report["citedSourceCount"], 1);
+        assert_eq!(report["status"], "fail");
+        let duplicated = vec![sources[0].clone(), sources[0].clone()];
+        assert!(usable_evidence(&duplicated, &evidence).is_empty());
     }
 }

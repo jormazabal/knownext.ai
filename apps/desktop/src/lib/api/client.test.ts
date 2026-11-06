@@ -5,7 +5,7 @@ import { ApiError, requestBinary, requestFormData, requestJson, validateRuntimeH
 const invokeMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: invokeMock,
+  invoke: async(command:string,args?:Record<string,unknown>)=>{const value=await invokeMock(command,args);return value&&typeof value==="object"?{protocolVersion:1,operationId:args?.operationId,completedAt:new Date().toISOString(),...value}:value;},
 }));
 
 describe("requestJson", () => {
@@ -23,6 +23,7 @@ describe("requestJson", () => {
     await expect(requestJson("/api/config", { method: "PUT", body: JSON.stringify({ layout: { sidebarWidth: 320 } }) })).resolves.toEqual({ ok: true });
 
     expect(invokeMock).toHaveBeenCalledWith("local_api_request", {
+      operationId: expect.stringMatching(/^operation-/),
       request: {
         method: "PUT",
         path: "/api/config",
@@ -41,6 +42,21 @@ describe("requestJson", () => {
       detail: "No encontrado",
     });
   });
+  it("preserves only an explicit not-started outcome instead of inferring it from an error status",async()=>{
+    Object.defineProperty(window,"__TAURI_INTERNALS__",{value:{},configurable:true});
+    invokeMock.mockResolvedValueOnce({status:409,body:{detail:"Proyecto ocupado",operationOutcome:"not-started"}}).mockResolvedValueOnce({status:409,body:{detail:"Resultado incierto"}});
+    await expect(requestJson("/api/documents/p::a.md/conflict",{method:"POST"})).rejects.toMatchObject({status:409,detail:"Proyecto ocupado",operationOutcome:"not-started"});
+    await expect(requestJson("/api/documents/p::a.md/conflict",{method:"POST"})).rejects.toMatchObject({status:409,operationOutcome:undefined});
+    expect(invokeMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves a structured private-draft conflict code without deriving it from translated text",async()=>{
+    Object.defineProperty(window,"__TAURI_INTERNALS__",{value:{},configurable:true});
+    invokeMock.mockResolvedValueOnce({status:409,body:{detail:"Otra operación cambió la edición",code:"draft_write_conflict",operationOutcome:"not-started"}})
+      .mockResolvedValueOnce({status:409,body:{detail:"draft_write_conflict"}});
+    await expect(requestJson("/api/documents/p::A.md/draft",{method:"PUT"})).rejects.toMatchObject({status:409,code:"draft_write_conflict",operationOutcome:"not-started"});
+    await expect(requestJson("/api/documents/p::A.md/draft",{method:"PUT"})).rejects.toMatchObject({code:undefined,operationOutcome:undefined});
+  });
 
   it("routes form-data files through the local Tauri command as base64 file payloads", async () => {
     Object.defineProperty(window, "__TAURI_INTERNALS__", { value: {}, configurable: true });
@@ -56,6 +72,7 @@ describe("requestJson", () => {
     await expect(requestFormData("/api/projects/project-1/attachments", formData)).resolves.toEqual({ uploaded: true });
 
     expect(invokeMock).toHaveBeenCalledWith("local_api_request", {
+      operationId: expect.stringMatching(/^operation-/),
       request: {
         method: "POST",
         path: "/api/projects/project-1/attachments",
@@ -86,6 +103,7 @@ describe("requestJson", () => {
     });
 
     expect(invokeMock).toHaveBeenCalledWith("local_api_content", {
+      operationId: expect.stringMatching(/^operation-/),
       request: {
         method: "POST",
         path: "/api/documents/docs%2Fnotes.md/export/content",
@@ -156,3 +174,11 @@ describe("API client runtime compatibility", () => {
     })).toThrow(ApiError);
   });
 });
+
+it("rejects malformed payloads before native work and incompatible responses with a traceable unknown outcome",async()=>{
+ Object.defineProperty(window,"__TAURI_INTERNALS__",{value:{},configurable:true});invokeMock.mockClear();
+ await expect(requestJson("/api/config",{method:"PUT",body:"invalid JSON"})).rejects.toMatchObject({status:400,operationOutcome:"not-started",code:"invalid-request-body",operationId:expect.stringMatching(/^operation-/)});expect(invokeMock).not.toHaveBeenCalled();
+ invokeMock.mockResolvedValueOnce({status:"200",body:{ok:true}});await expect(requestJson("/api/config")).rejects.toMatchObject({status:502,operationOutcome:"unknown",code:"invalid-runtime-response",operationId:expect.stringMatching(/^operation-/)});expect(invokeMock).toHaveBeenCalledTimes(1);
+});
+
+it("rejects future or unrelated native replies instead of adopting their result",async()=>{Object.defineProperty(window,"__TAURI_INTERNALS__",{value:{},configurable:true});invokeMock.mockClear();invokeMock.mockResolvedValueOnce({status:200,body:{ok:true},protocolVersion:99}).mockResolvedValueOnce({status:200,body:{ok:true},operationId:"operation-other-request-12345"});await expect(requestJson("/health")).rejects.toMatchObject({code:"invalid-runtime-response",operationOutcome:"unknown"});await expect(requestJson("/health")).rejects.toMatchObject({code:"invalid-runtime-response",operationOutcome:"unknown"});expect(invokeMock).toHaveBeenCalledTimes(2);});

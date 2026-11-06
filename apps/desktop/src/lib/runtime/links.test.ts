@@ -30,3 +30,5 @@ describe("external link helper", () => {
     expect(open).not.toHaveBeenCalled();
   });
 });
+
+it("rejects executable, local, credential-bearing and malformed URLs before native or browser dispatch",async()=>{const browser=vi.spyOn(window,"open").mockImplementation(()=>null);for(const url of ["javascript:alert(1)","file:///C:/private.md","data:text/html,hi","https://user:pass@example.com/","https://example.com/\n","not a URL"]){await expect(openExternalUrl(url)).rejects.toThrow();}expect(browser).not.toHaveBeenCalled();expect(open).not.toHaveBeenCalled();});

@@ -11,6 +11,7 @@ import {
   readLocalAppPreferences,
   updateAiConfig,
   writeLocalAppPreferences,
+  cacheLocalAppPreferences,
 } from "./config";
 import type { AiConfig, AppConfig, ExportTemplateConfig } from "../../types/domain";
 
@@ -19,6 +20,11 @@ vi.mock("./client", () => ({
 }));
 
 describe("app configuration contracts", () => {
+  it("reports a failed secondary cache without throwing into native persistence", () => {
+    const blocked=vi.spyOn(Storage.prototype,"setItem").mockImplementation(()=>{throw new Error("Quota exceeded");});
+    try {expect(cacheLocalAppPreferences({appearance:defaultAppearanceConfig})).toBe(false);}
+    finally {blocked.mockRestore();}
+  });
   beforeEach(() => {
     vi.mocked(requestJson).mockReset();
     window.localStorage.clear();

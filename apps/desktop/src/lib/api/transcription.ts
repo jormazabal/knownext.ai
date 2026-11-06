@@ -1,3 +1,4 @@
+import {checkAiBudgetBeforeSend} from "./aiBudget";
 import type { AiTranscriptionLanguage } from "../../types/domain";
 import { requestFormData } from "./client";
 
@@ -9,6 +10,7 @@ export type TranscriptionResponse = {
 };
 
 export async function transcribePcmAudio(chunks: ArrayBuffer[], language: AiTranscriptionLanguage): Promise<TranscriptionResponse> {
+  await checkAiBudgetBeforeSend();
   const formData = new FormData();
   formData.append("file", pcmChunksToWavFile(chunks));
   return requestFormData<TranscriptionResponse>("/api/transcription", formData, {

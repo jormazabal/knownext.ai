@@ -1,3 +1,5 @@
+import {ApiError} from "./errors";
+import {runLocalOperation} from "../runtime/localOperations";
 import { invoke } from "@tauri-apps/api/core";
 import { APP_VERSION } from "../appVersion";
 import { isTauriMobileRuntime, isTauriRuntime } from "../runtime/platform";
@@ -27,18 +29,7 @@ export function isRuntimeApiEnabled() {
   return true;
 }
 
-export class ApiError extends Error {
-  status: number;
-  detail?: unknown;
-
-  constructor(status: number, statusText: string, detail?: unknown) {
-    const detailMessage = typeof detail === "string" ? detail : detail ? JSON.stringify(detail) : "";
-    super(detailMessage ? `${status} ${statusText}: ${detailMessage}` : `${status} ${statusText}`);
-    this.name = "ApiError";
-    this.status = status;
-    this.detail = detail;
-  }
-}
+export {ApiError} from "./errors";
 
 export type ApiRequestInit = RequestInit & {
   timeoutMs?: number;
@@ -65,22 +56,15 @@ type LocalApiFile = {
 
 export async function requestJson<T>(path: string, init?: ApiRequestInit): Promise<T> {
   await initializeApiBaseUrl();
-  if (!isTauriRuntime()) {
-    const response = await handleWebDevLocalApiRequest<T>(init?.method ?? "GET", path, parseBody(init?.body));
-    if (response.status >= 400) throw apiErrorFromResponse(response.status, response.body);
+  const native=isTauriRuntime();
+  return runLocalOperation(async operationId=>{
+    const response=native
+      ?await invoke<LocalApiResponse<T>>("local_api_request", {request:{method:init?.method??"GET",path,body:parseBody(init?.body)},operationId})
+      :await handleWebDevLocalApiRequest<T>(init?.method??"GET",path,parseBody(init?.body));
+    validateResponse(response, native?operationId:undefined);
+    if(response.status>=400)throw apiErrorFromResponse(response.status,response.body);
     return response.body;
-  }
-
-  const response = await invoke<LocalApiResponse<T>>("local_api_request", {
-    request: {
-      method: init?.method ?? "GET",
-      path,
-      body: parseBody(init?.body),
-    },
-  });
-
-  if (response.status >= 400) throw apiErrorFromResponse(response.status, response.body);
-  return response.body;
+  },{native,label:operationLabel(init?.method??"GET"),timeoutMs:init?.timeoutMs,signal:init?.signal});
 }
 
 export async function requestFormData<T>(path: string, formData: FormData, init?: ApiRequestInit): Promise<T> {
@@ -101,37 +85,32 @@ export async function requestFormData<T>(path: string, formData: FormData, init?
     }
   }
 
-  const response = await invoke<LocalApiResponse<T>>("local_api_request", {
-    request: {
-      method: init?.method ?? "POST",
-      path,
-      body: parseBody(init?.body),
-      files,
-    },
-  });
-
-  if (response.status >= 400) throw apiErrorFromResponse(response.status, response.body);
-  return response.body;
+  return runLocalOperation(async operationId=>{
+    const response=await invoke<LocalApiResponse<T>>("local_api_request",{request:{method:init?.method??"POST",path,body:parseBody(init?.body),files},operationId});
+    validateResponse(response,operationId);
+    if(response.status>=400)throw apiErrorFromResponse(response.status,response.body);
+    return response.body;
+  },{native:true,label:"Importación",timeoutMs:init?.timeoutMs,signal:init?.signal});
 }
 
 export async function requestBinary(path: string, init?: ApiRequestInit): Promise<Blob> {
   await initializeApiBaseUrl();
-  if (!isTauriRuntime()) {
-    const response = await handleWebDevLocalApiRequest<LocalApiContentResponse>(init?.method ?? "GET", path, parseBody(init?.body));
-    if (response.status >= 400) throw apiErrorFromResponse(response.status, response.body);
-    return base64ToBlob(response.body.dataBase64, response.body.contentType);
-  }
+  const native=isTauriRuntime();
+  return runLocalOperation(async operationId=>{
+    const response=native
+      ?await invoke<LocalApiContentResponse>("local_api_content",{request:{method:init?.method??"GET",path,body:parseBody(init?.body)},operationId})
+      :await (async()=>{const response=await handleWebDevLocalApiRequest<LocalApiContentResponse>(init?.method??"GET",path,parseBody(init?.body));validateResponse(response);if(response.status>=400)throw apiErrorFromResponse(response.status,response.body);return response.body;})();
+    validateResponse(response,native?operationId:undefined);
+    if(response.status>=400)throw new ApiError(response.status,"Local API error");
+    if(typeof response.contentType!=="string"||typeof response.dataBase64!=="string")throw new ApiError(502,"Respuesta incompatible","El runtime no devolvió un contenido válido.","unknown","invalid-runtime-response");
+    return base64ToBlob(response.dataBase64,response.contentType);
+  },{native,label:"Preparación de archivo",timeoutMs:init?.timeoutMs,signal:init?.signal});
+}
 
-  const response = await invoke<LocalApiContentResponse>("local_api_content", {
-    request: {
-      method: init?.method ?? "GET",
-      path,
-      body: parseBody(init?.body),
-    },
-  });
-
-  if (response.status >= 400) throw new ApiError(response.status, "Local API error");
-  return base64ToBlob(response.dataBase64, response.contentType);
+function operationLabel(method:string){return method==="GET"?"Consulta":method==="PUT"?"Guardado":method==="DELETE"?"Eliminación":"Operación";}
+function validateResponse(value:unknown,operationId?:string):asserts value is {status:number}{
+  if(operationId&&(!value||typeof value!=="object"||!("protocolVersion" in value)||value.protocolVersion!==1||!("operationId" in value)||value.operationId!==operationId||!("completedAt" in value)||typeof value.completedAt!=="string"||!Number.isFinite(Date.parse(value.completedAt))))throw new ApiError(502,"Respuesta incompatible","La respuesta no confirma la petición ni su versión. Consulta antes de repetir.","unknown","invalid-runtime-response",operationId);
+  if(!value||typeof value!=="object"||!("status" in value)||!Number.isInteger(value.status)||Number(value.status)<100||Number(value.status)>599)throw new ApiError(502,"Respuesta incompatible","No se pudo confirmar la respuesta del runtime. Comprueba el resultado antes de repetir la operación.","unknown","invalid-runtime-response");
 }
 
 export async function requestDataUrl(path: string, init?: ApiRequestInit): Promise<string> {
@@ -150,6 +129,7 @@ export async function waitForApiReady(_options: { attempts?: number; intervalMs?
 }
 
 export function getApiErrorMessage(error: unknown, fallback: string) {
+  if (typeof error === "string" && error.trim()) return error.slice(0, 2000);
   if (error instanceof ApiError) return typeof error.detail === "string" ? error.detail : error.message;
   if (error instanceof Error) return error.message;
   return fallback;
@@ -182,13 +162,15 @@ export function validateRuntimeHealth(health: RuntimeHealth) {
 
 function parseBody(body: BodyInit | null | undefined) {
   if (!body) return null;
-  if (typeof body === "string") return JSON.parse(body);
-  return null;
+  if (typeof body === "string") {try{return JSON.parse(body);}catch{throw new ApiError(400,"Petición inválida","El contenido de la petición no es JSON válido.","not-started","invalid-request-body");}}
+  throw new ApiError(400,"Petición inválida","Este tipo de contenido necesita el contrato de importación.","not-started","invalid-request-body");
 }
 
 function apiErrorFromResponse(status: number, body: unknown) {
   const detail = typeof body === "object" && body && "detail" in body ? (body as { detail?: unknown }).detail : body;
-  return new ApiError(status, "Local API error", detail);
+  const outcome = typeof body === "object" && body && "operationOutcome" in body && body.operationOutcome === "not-started" ? "not-started" : undefined;
+  const code = typeof body === "object" && body && "code" in body && typeof body.code === "string" ? body.code.slice(0,128) : undefined;
+  return new ApiError(status, "Local API error", detail, outcome,code);
 }
 
 async function fileToBase64(file: File) {

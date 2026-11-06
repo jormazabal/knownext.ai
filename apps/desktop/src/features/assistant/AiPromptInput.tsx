@@ -1,10 +1,16 @@
 import { AlertCircle, AlertTriangle, Brain, Check, CheckCircle2, ChevronDown, ChevronRight, Clock3, File, FileText, Image, Loader2, MessageSquare, Mic, MoreVertical, Pause, Play, Plus, Search, SendHorizontal, SlidersHorizontal, Sparkles, Square, X, Zap, type LucideIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
+import {createPortal} from "react-dom";
+import {ModalFrame} from "../../components/ui/ModalFrame";
+import { useSessionDraft, useSessionValue } from "../../app/useSessionDraft";
 import type { AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiExecutionMode, AiPromptIntent, AiReasoningDepth, AiResearchBrief, AiResearchJob, AiResearchReportLength, AiSelectionFocus, AiTranscriptionLanguage, AiTranscriptionTarget } from "../../types/domain";
-import { getDocumentTreeFileDragData, hasDocumentTreeFileDragData } from "../../lib/dragData";
+import { getDocumentTreeDragData, getDocumentTreeFileDragData, hasDocumentTreeFileDragData } from "../../lib/dragData";
 import { isPhoneAppShell } from "../../lib/runtime/platform";
 import { xsViewportQuery } from "../../lib/runtime/responsive";
 import { useRealtimeTranscription } from "../transcription/useRealtimeTranscription";
+import type {AiContextOriginReview} from "../../types/domain";
+import {getApiErrorMessage} from "../../lib/api/client";
+import {ActiveContextSourcesDialog} from "./ActiveContextSourcesDialog";
 
 export type AiPromptExecutionOptions = {
   executionMode: AiExecutionMode;
@@ -16,6 +22,8 @@ const promptControlClass =
   "border border-line bg-panel shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:border-orange-200 hover:bg-brand-hover hover:text-brand-orange disabled:cursor-not-allowed disabled:opacity-50";
 
 type AiPromptInputProps = {
+  embedded?: boolean;
+  onActivityChange?: (active: boolean) => void;
   documentId?: string;
   projectId?: string;
   markdown: string;
@@ -34,6 +42,7 @@ type AiPromptInputProps = {
   onCancelResearchBrief?: () => void;
   onCancelResearchJob?: (jobId: string) => void | Promise<void>;
   onRetryResearchJob?: (jobId: string) => void | Promise<void>;
+  onReviewResearchEvidence?: (jobId:string)=>void;
   onTranscriptionConfigChange?: (transcription: Partial<AiConfigStatus["transcription"]>) => void;
   onPreviewDocumentDictation?: (text: string) => void;
   onCommitDocumentDictation?: (text: string) => void;
@@ -42,15 +51,19 @@ type AiPromptInputProps = {
   onDismissAppliedChange?: () => void;
   onSearchProjectDocuments?: (query: string) => Promise<AiContextSearchResult[]>;
   onAddProjectDocumentContext?: (documentId: string) => void | Promise<void>;
+  onAddProjectSelectionContext?: (nodeIds:string[])=>void;
   onUploadContextFiles?: (files: File[]) => void | Promise<void>;
   onPickLocalContextFiles?: () => void | Promise<void>;
   onRemoveContextSource?: (sourceId: string) => void | Promise<void>;
   onExtendContextSource?: (sourceId: string) => void | Promise<void>;
   onPreviewContextSource?: (sourceId: string) => Promise<AiContextSourcePreviewResponse>;
+  onRefreshContextSource?:(sourceId:string,review:AiContextOriginReview)=>Promise<AiContextSourcePreviewResponse>;
   onAddContextSourceToProject?: (sourceId: string) => void | Promise<void>;
 };
 
 export function AiPromptInput({
+  embedded = false,
+  onActivityChange,
   documentId,
   projectId,
   providerReady,
@@ -67,6 +80,7 @@ export function AiPromptInput({
   onCancelResearchBrief,
   onCancelResearchJob,
   onRetryResearchJob,
+  onReviewResearchEvidence,
   onTranscriptionConfigChange,
   onPreviewDocumentDictation,
   onCommitDocumentDictation,
@@ -75,18 +89,21 @@ export function AiPromptInput({
   onDismissAppliedChange,
   onSearchProjectDocuments,
   onAddProjectDocumentContext,
+  onAddProjectSelectionContext,
   onUploadContextFiles,
   onPickLocalContextFiles,
   onRemoveContextSource,
   onExtendContextSource,
   onPreviewContextSource,
+  onRefreshContextSource,
   onAddContextSourceToProject,
 }: AiPromptInputProps) {
-  const [prompt, setPrompt] = useState("");
+  const scope = JSON.stringify([projectId ?? null, documentId ?? null]);
+  const [prompt, setPrompt] = useSessionDraft(scope);
   const [loading, setLoading] = useState(false);
-  const [executionMode, setExecutionMode] = useState<AiExecutionMode>("quick");
-  const [reasoningDepth, setReasoningDepth] = useState<AiReasoningDepth>("light");
-  const [intent, setIntent] = useState<AiPromptIntent | null>(null);
+  const [executionMode, setExecutionMode] = useSessionValue<AiExecutionMode>(scope, "quick");
+  const [reasoningDepth, setReasoningDepth] = useSessionValue<AiReasoningDepth>(scope, "light");
+  const [intent, setIntent] = useSessionValue<AiPromptIntent | null>(scope, null);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [depthMenuOpen, setDepthMenuOpen] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
@@ -100,6 +117,12 @@ export function AiPromptInput({
   const [referenceIndex, setReferenceIndex] = useState(0);
   const [preview, setPreview] = useState<AiContextSourcePreviewResponse | null>(null);
   const [previewLoadingId, setPreviewLoadingId] = useState<string | null>(null);
+  const [originError,setOriginError]=useState<string|null>(null);
+  const [originBusy,setOriginBusy]=useState(false);
+  const [originBlocked,setOriginBlocked]=useState<Set<string>>(new Set());
+  const previewEpoch=useRef(0);const originPending=useRef(false);
+  useEffect(()=>{++previewEpoch.current;originPending.current=false;setOriginBusy(false);setPreviewLoadingId(null);setPreview(null);setSourcesOpen(false);setOriginError(null);setOriginBlocked(new Set());return()=>{++previewEpoch.current;};},[projectId]);
+  useEffect(()=>{if(preview&&!activeContextSources.some(source=>source.id===preview.source.id)){setPreview(null);}},[activeContextSources,preview]);
   const [transcriptionMenuOpen, setTranscriptionMenuOpen] = useState(false);
   const [transcriptionTarget, setTranscriptionTarget] = useState<AiTranscriptionTarget>(transcriptionConfig?.defaultTarget ?? "prompt");
   const [transcriptionLanguage, setTranscriptionLanguage] = useState<AiTranscriptionLanguage>(transcriptionConfig?.defaultLanguage ?? "auto");
@@ -118,10 +141,12 @@ export function AiPromptInput({
   const canPrompt = hasContext && providerReady;
   const canManageContext = hasContext && Boolean(onAddProjectDocumentContext || onUploadContextFiles || onPickLocalContextFiles);
   const hasBlockingContext = activeContextSources.some((source) => source.status === "processing");
+  const hasContextReviewRequired=activeContextSources.some(source=>source.requiresReview===true);
   const transcription = transcriptionConfig ?? defaultTranscriptionConfig;
   const transcriptionState = useRealtimeTranscription();
   const compactPrompt = useCompactPromptMode();
   const transcribing = transcriptionState.status === "connecting" || transcriptionState.status === "listening" || transcriptionState.status === "stopping";
+  useEffect(() => { onActivityChange?.(loading || transcribing); }, [loading, transcribing, onActivityChange]);
   const transcriptionAvailable = canPrompt && transcription.enabled;
   const canStartTranscription = transcriptionAvailable && !loading && !hasBlockingContext;
   const selectedDepthLabel = reasoningDepthLabels[reasoningDepth];
@@ -219,17 +244,6 @@ export function AiPromptInput({
   }, []);
 
   useEffect(() => {
-    if (!compactOptionsOpen) return;
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setCompactOptionsOpen(false);
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [compactOptionsOpen]);
-
-  useEffect(() => {
     if (referenceQuery === null || !onSearchProjectDocuments) {
       setReferenceResults([]);
       return;
@@ -263,12 +277,13 @@ export function AiPromptInput({
   }, [prompt]);
 
   async function handleSubmit() {
-    if (!prompt.trim() || !canPrompt || hasBlockingContext) return;
+    if (loading || !prompt.trim() || !canPrompt || hasBlockingContext || hasContextReviewRequired) return;
+    const submittedPrompt = prompt;
     setLoading(true);
     try {
       await onSubmit(prompt.trim(), selectionFocus ?? null, intent ? { executionMode, reasoningDepth, intent } : { executionMode, reasoningDepth });
-      setPrompt("");
-      if (intent?.kind === "research") setIntent(null);
+      setPrompt(current => current === submittedPrompt ? "" : current);
+      if (intent?.kind === "research") setIntent(current => current === intent ? null : current);
     } finally {
       setLoading(false);
     }
@@ -446,10 +461,11 @@ export function AiPromptInput({
   }
 
   function isContextDrop(event: DragEvent<HTMLDivElement>) {
-    return hasDocumentTreeFileDragData(event.dataTransfer) || Array.from(event.dataTransfer.types ?? []).includes("Files");
+    return Boolean(getDocumentTreeDragData(event.dataTransfer)?.nodeIds?.length)||hasDocumentTreeFileDragData(event.dataTransfer) || Array.from(event.dataTransfer.types ?? []).includes("Files");
   }
 
   async function addDroppedProjectFile(dataTransfer: DataTransfer) {
+    const selection=getDocumentTreeDragData(dataTransfer)?.nodeIds;if(selection&&onAddProjectSelectionContext){onAddProjectSelectionContext(selection);setContextMenuOpen(false);return true;}
     const projectFile = getDocumentTreeFileDragData(dataTransfer);
     if (!projectFile || !onAddProjectDocumentContext) return false;
     await onAddProjectDocumentContext(projectFile.id);
@@ -461,7 +477,7 @@ export function AiPromptInput({
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setDragActive(false);
-    if (getDocumentTreeFileDragData(event.dataTransfer)) {
+    if (getDocumentTreeFileDragData(event.dataTransfer)||getDocumentTreeDragData(event.dataTransfer)?.nodeIds?.length) {
       void addDroppedProjectFile(event.dataTransfer);
       return;
     }
@@ -477,14 +493,29 @@ export function AiPromptInput({
   }
 
   async function openPreview(source: AiContextSource) {
-    if (!onPreviewContextSource) return;
+    if (!onPreviewContextSource||originPending.current) return;
+    const version=++previewEpoch.current;setOriginError(null);setSourcesOpen(true);
+    if(preview?.source.id!==source.id)setPreview(null);
     setPreviewLoadingId(source.id);
     try {
-      setPreview(await onPreviewContextSource(source.id));
-      setSourcesOpen(true);
+      const result=await onPreviewContextSource(source.id);
+      if(result.source.id!==source.id)throw new Error("La vista recibida no corresponde a la fuente seleccionada.");
+      if(version===previewEpoch.current){setPreview(result);if(result.originReview?.source.id===source.id&&/^[a-f0-9]{64}$/i.test(result.originReview.sourceRevision)){setOriginBlocked(old=>{const next=new Set(old);next.delete(source.id);return next;});}}
+    } catch(failure){if(version===previewEpoch.current)setOriginError(getApiErrorMessage(failure,"No se pudo revisar la copia. Se conserva el contexto."));
     } finally {
-      setPreviewLoadingId(null);
+      if(version===previewEpoch.current)setPreviewLoadingId(null);
     }
+  }
+  async function refreshPreviewCopy(){
+    if(originPending.current||!preview?.originReview||!onRefreshContextSource||originBlocked.has(preview.source.id))return;
+    const source=preview.source,review=preview.originReview,version=++previewEpoch.current;
+    originPending.current=true;setOriginBusy(true);setOriginError(null);
+    try{
+      const result=await onRefreshContextSource(source.id,review);
+      if(result.source.id!==source.id)throw new Error("La confirmación no corresponde a la copia revisada.");
+      if(version===previewEpoch.current)setPreview(result);
+    }catch(failure){if(version===previewEpoch.current){setOriginBlocked(old=>new Set(old).add(source.id));setOriginError(getApiErrorMessage(failure,"No se ha confirmado la actualización.")+" Revisa el origen antes de otra decisión; no se ha repetido la petición.");}}
+    finally{if(version===previewEpoch.current){originPending.current=false;setOriginBusy(false);}}
   }
 
   function focusProjectReferenceSearch() {
@@ -556,7 +587,7 @@ export function AiPromptInput({
   }
 
   return (
-    <div className="knownext-ai-prompt-anchor pointer-events-none absolute inset-x-8 bottom-11 z-20 flex justify-center">
+    <div className={embedded ? "knownext-ai-prompt-anchor workspace-prompt-embedded flex min-w-0 flex-col" : "knownext-ai-prompt-anchor pointer-events-none absolute inset-x-8 bottom-11 z-20 flex justify-center"}>
       {loading || appliedChangeSummary ? (
         <div className="absolute bottom-full right-0 mb-2 flex w-[min(320px,42vw)] min-w-[240px] flex-col items-end gap-2">
           {loading ? (
@@ -588,6 +619,8 @@ export function AiPromptInput({
           onCancelBrief={onCancelResearchBrief}
           onCancelJob={onCancelResearchJob}
           onRetryJob={onRetryResearchJob}
+          onReviewEvidence={onReviewResearchEvidence}
+          fallbackFocus={()=>textareaRef.current}
         />
       ) : null}
       <div
@@ -1008,7 +1041,7 @@ export function AiPromptInput({
                 data-tooltip="Enviar prompt"
                 aria-label="Enviar prompt"
                 onClick={() => void handleSubmit()}
-                disabled={loading || !canPrompt || hasBlockingContext}
+                disabled={loading || !canPrompt || hasBlockingContext || hasContextReviewRequired}
               >
                 {loading ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-brand-orange border-t-transparent" /> : <SendHorizontal size={18} />}
               </button>
@@ -1019,12 +1052,13 @@ export function AiPromptInput({
             data-tooltip="Enviar"
             aria-label="Enviar"
             onClick={() => void handleSubmit()}
-            disabled={loading || !canPrompt || hasBlockingContext}
+            disabled={loading || !canPrompt || hasBlockingContext || hasContextReviewRequired}
           >
             {loading ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-brand-orange border-t-transparent" /> : <SendHorizontal size={18} />}
           </button>
           )}
         </div>
+        {hasContextReviewRequired&&<p role="status" className="px-3 py-2 text-xs text-brand-dark">Hay copias de contexto que revisar. Abre las fuentes marcadas para actualizarlas o quitarlas antes de enviar.</p>}
         {hasBlockingContext ? (
           <p className="mx-10 mt-1 text-[10px] text-ink-secondary">Esperando a que las fuentes terminen de procesarse.</p>
         ) : null}
@@ -1039,12 +1073,17 @@ export function AiPromptInput({
           </div>
         ) : null}
         {sourcesOpen ? (
-          <ActiveSourcesPopover
+          <ActiveContextSourcesDialog
             refElement={sourcesRef}
             sources={activeContextSources}
             preview={preview}
             previewLoadingId={previewLoadingId}
             onPreview={openPreview}
+            busy={originBusy}
+            blocked={!!preview&&originBlocked.has(preview.source.id)}
+            error={originError}
+            onRefresh={onRefreshContextSource?refreshPreviewCopy:undefined}
+            onClose={()=>setSourcesOpen(false)}
             onRemove={onRemoveContextSource}
             onExtend={onExtendContextSource}
             onAddToProject={onAddContextSourceToProject}
@@ -1222,6 +1261,8 @@ function ResearchPreparationCard({
   onCancelBrief,
   onCancelJob,
   onRetryJob,
+  onReviewEvidence,
+  fallbackFocus,
 }: {
   brief: AiResearchBrief | null;
   job: AiResearchJob | null;
@@ -1230,6 +1271,8 @@ function ResearchPreparationCard({
   onCancelBrief?: () => void;
   onCancelJob?: (jobId: string) => void | Promise<void>;
   onRetryJob?: (jobId: string) => void | Promise<void>;
+  onReviewEvidence?:(jobId:string)=>void;
+  fallbackFocus?:()=>HTMLElement|null;
 }) {
   const activeBrief = brief ?? job?.brief ?? null;
   const running = Boolean(job && !isResearchTerminalStatus(job.status));
@@ -1243,6 +1286,11 @@ function ResearchPreparationCard({
   const [secondsLeft, setSecondsLeft] = useState(60);
   const [countdownPaused, setCountdownPaused] = useState(false);
   const [confirmCancelJob, setConfirmCancelJob] = useState(false);
+  const cancellationSent=useRef<string|null>(null);
+  const [cancelRequestError,setCancelRequestError]=useState("");
+  const [cancelRequestedId,setCancelRequestedId]=useState<string|null>(null);
+  const currentJobId=useRef(job?.id);currentJobId.current=job?.id;
+  useEffect(()=>{cancellationSent.current=null;setCancelRequestedId(null);setCancelRequestError("");setConfirmCancelJob(false);},[job?.id]);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const autoStartedRef = useRef<string | null>(null);
 
@@ -1300,14 +1348,14 @@ function ResearchPreparationCard({
   }
 
   function requestCancelJob() {
-    if (!job || !running) return;
+    if (!job || !running || cancellationSent.current===job.id) return;
     setConfirmCancelJob(true);
   }
 
   function confirmCancelRunningJob() {
-    if (!job) return;
-    setConfirmCancelJob(false);
-    void onCancelJob?.(job.id);
+    if (!job || !running || !onCancelJob || cancellationSent.current===job.id) return;
+    cancellationSent.current=job.id;setCancelRequestedId(job.id);setCancelRequestError("");setConfirmCancelJob(false);
+    const id=job.id;void Promise.resolve().then(()=>onCancelJob(id)).catch(error=>{if(currentJobId.current===id)setCancelRequestError(getApiErrorMessage(error,"No se confirmó la solicitud. Consulta el estado antes de repetirla."));});
   }
 
   return (
@@ -1324,6 +1372,8 @@ function ResearchPreparationCard({
                 {activeBrief ? <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-ink-secondary ring-1 ring-line">Documento nuevo</span> : null}
               </div>
               <p className="mt-1 text-[11px] leading-4 text-ink-secondary">{job?.progressMessage ?? job?.message ?? "Revisa el guion. Puedes editarlo o dejar que empiece automáticamente."}</p>
+              {job?.persistenceWarning&&<p role="status" className="mt-2 text-xs leading-5 text-ink-secondary">{job.persistenceWarning}</p>}
+              {job?.conversationWarning&&<p role="status" className="mt-2 text-xs leading-5 text-ink-secondary">El resultado está disponible, pero su historial no se ha podido conservar: {job.conversationWarning}</p>}
             </div>
           </div>
           {job ? (
@@ -1437,20 +1487,23 @@ function ResearchPreparationCard({
       <div className="flex items-center justify-between gap-3 border-t border-line bg-white px-4 py-3">
         <p className="min-w-0 truncate text-[11px] text-ink-secondary">{footerText}</p>
         <div className="flex shrink-0 gap-2">
-          {job && running ? <button className="h-9 rounded-xl border border-line px-4 text-[12px] font-semibold text-ink-secondary transition hover:bg-brand-hover" onClick={requestCancelJob}>Cancelar</button> : null}
+          {job && running ? <button className="min-h-11 rounded-xl border border-line px-4 text-[12px] font-semibold text-ink-secondary transition hover:bg-brand-hover disabled:opacity-50" disabled={!onCancelJob||cancelRequestedId===job.id} onClick={requestCancelJob}>{cancelRequestedId===job.id?"Cancelación solicitada":"Cancelar"}</button> : null}
           {!job && activeBrief ? <button className="h-9 rounded-xl border border-line px-4 text-[12px] font-semibold text-ink-secondary transition hover:bg-brand-hover" onClick={onCancelBrief}>Cancelar</button> : null}
           {!job && activeBrief && !editingPlan ? <button className="h-9 rounded-xl border border-line px-4 text-[12px] font-semibold text-ink-secondary transition hover:bg-brand-hover" onClick={() => setEditingPlan(true)}>Cambiar</button> : null}
           {!job && activeBrief && editingPlan ? <button className="h-9 rounded-xl border border-line px-4 text-[12px] font-semibold text-ink-secondary transition hover:bg-brand-hover" onClick={commitDraftPlan}>Guardar cambios</button> : null}
           {!job && activeBrief && !editingPlan ? <ResearchCountdownButton secondsLeft={secondsLeft} totalSeconds={60} paused={countdownPaused} onToggle={() => setCountdownPaused((paused) => !paused)} /> : null}
           {!job && activeBrief ? <button className="h-9 rounded-xl bg-brand-orange px-4 text-[12px] font-semibold text-white shadow-[0_8px_18px_rgba(243,112,33,0.22)] transition hover:bg-brand-dark" onClick={startNow}>Iniciar ahora</button> : null}
           {job && failed ? <button className="h-9 rounded-xl bg-brand-orange px-4 text-[12px] font-semibold text-white shadow-[0_8px_18px_rgba(243,112,33,0.22)] transition hover:bg-brand-dark" onClick={() => void onRetryJob?.(job.id)}>Reintentar</button> : null}
+          {job&&isResearchTerminalStatus(job.status)&&(job.markdown||job.draftMarkdown||job.documentId||job.createdDocumentId)&&onReviewEvidence?<button className="min-h-11 rounded-xl border border-line px-3 text-[12px] font-semibold text-ink-secondary transition hover:bg-brand-hover" onClick={()=>onReviewEvidence(job.id)}>Revisar fuentes</button>:null}
           {job && isResearchTerminalStatus(job.status) ? <button className="h-9 rounded-xl border border-line px-4 text-[12px] font-semibold text-ink-secondary transition hover:bg-brand-hover" onClick={onCancelBrief}>Cerrar</button> : null}
         </div>
       </div>
+      {cancelRequestError&&<p role="alert" className="px-4 pb-3 text-xs text-red-700">{cancelRequestError}</p>}
       {confirmCancelJob ? (
         <ResearchCancelConfirmationDialog
           onCancel={() => setConfirmCancelJob(false)}
           onConfirm={confirmCancelRunningJob}
+          fallbackFocus={fallbackFocus}
         />
       ) : null}
     </div>
@@ -1525,32 +1578,37 @@ function ResearchCountdownButton({
 function ResearchCancelConfirmationDialog({
   onCancel,
   onConfirm,
+  fallbackFocus,
 }: {
   onCancel: () => void;
   onConfirm: () => void;
+  fallbackFocus?:()=>HTMLElement|null;
 }) {
-  return (
-    <div className="absolute inset-0 z-50 grid place-items-center bg-white/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="research-cancel-title">
-      <div className="w-[min(360px,100%)] rounded-2xl border border-line bg-white p-4 shadow-[0_18px_45px_rgba(17,24,39,0.18)]">
+  const submitted=useRef(false);
+  return createPortal(
+    <ModalFrame label="Cancelar investigación" onClose={onCancel} fallbackFocus={fallbackFocus} className="!z-[130]">
+      <section className="flex max-h-[calc(100dvh-24px)] w-full max-w-sm flex-col overflow-hidden rounded-2xl border border-line bg-white p-4 shadow-menu">
+      <div className="min-h-0 overflow-y-auto">
         <div className="flex items-start gap-3">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-red-50 text-red-600">
             <AlertTriangle size={17} />
           </span>
           <div className="min-w-0">
             <p id="research-cancel-title" className="text-[14px] font-semibold text-ink-primary">Cancelar investigación</p>
-            <p className="mt-1 text-[12px] leading-5 text-ink-secondary">Se detendrá el proceso y no se creará ningún documento parcial.</p>
+            <p className="mt-1 text-[12px] leading-5 text-ink-secondary">Se solicitará detener el proceso. Los resultados y documentos ya guardados se conservan.</p>
           </div>
         </div>
-        <div className="mt-4 flex justify-end gap-2">
-          <button type="button" className="h-9 rounded-xl border border-line px-4 text-[12px] font-semibold text-ink-secondary transition hover:bg-brand-hover" onClick={onCancel}>
+        </div>
+        <footer className="mt-4 flex shrink-0 flex-wrap justify-end gap-2">
+          <button type="button" data-autofocus className="min-h-11 rounded-xl border border-line px-4 text-[12px] font-semibold text-ink-secondary transition hover:bg-brand-hover" onClick={onCancel}>
             Volver
           </button>
-          <button type="button" className="h-9 rounded-xl bg-red-600 px-4 text-[12px] font-semibold text-white transition hover:bg-red-700" onClick={onConfirm}>
+          <button type="button" className="min-h-11 rounded-xl bg-red-600 px-4 text-[12px] font-semibold text-white transition hover:bg-red-700" onClick={()=>{if(!submitted.current){submitted.current=true;onConfirm();}}}>
             Cancelar investigación
           </button>
-        </div>
-      </div>
-    </div>
+        </footer>
+      </section>
+    </ModalFrame>,document.body
   );
 }
 
@@ -1591,8 +1649,8 @@ function researchFooterText(job: AiResearchJob, stalled: boolean) {
   if (stalled) return "No hay actividad reciente. Puedes esperar o cancelar.";
   if (isResearchReadyStatus(job.status)) return job.documentPath ? `Borrador creado para revisar: ${job.documentPath}` : "Borrador creado para revisar.";
   if (isResearchFailedStatus(job.status)) return "No se creó ningún documento.";
-  if (job.status === "cancelled") return "Investigación cancelada. No se creó ningún documento parcial.";
-  return "La investigación está trabajando. Puedes cancelarla; no se creará documento parcial.";
+  if (job.status === "cancelled") return "Investigación cancelada. Los resultados y documentos ya guardados se conservan.";
+  return "La investigación está trabajando. Puedes solicitar detenerla; los resultados ya guardados se conservan.";
 }
 
 function isResearchStalled(job: AiResearchJob, nowMs: number) {
@@ -2024,18 +2082,15 @@ function PromptOptionsDialog({
     ? "Coloca el cursor en el documento antes de dictar sobre él."
     : null;
 
-  return (
-    <div className="knownext-modal-overlay fixed inset-0 z-[90] flex items-center justify-center bg-black/20 px-4 py-6" role="presentation" onMouseDown={onClose}>
+  return createPortal(
+    <ModalFrame label="Opciones del prompt" onClose={onClose} className="!z-[120]">
       <section
-        className="flex max-h-[min(680px,calc(100dvh-48px))] w-[min(460px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="prompt-options-title"
+        className="flex max-h-[min(680px,calc(100dvh-24px))] w-full max-w-[460px] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu [&_button]:min-h-11 [&_button]:min-w-11"
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-line px-4">
           <h2 id="prompt-options-title" className="text-[13px] font-semibold text-ink-primary">Opciones del prompt</h2>
-          <button className="grid h-8 w-8 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange" aria-label="Cerrar opciones del prompt" onClick={onClose}>
+          <button data-autofocus className="grid h-11 w-11 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange" aria-label="Cerrar opciones del prompt" onClick={onClose}>
             <X size={16} />
           </button>
         </header>
@@ -2148,7 +2203,7 @@ function PromptOptionsDialog({
           </PromptOptionsSection>
         </div>
       </section>
-    </div>
+    </ModalFrame>,document.body
   );
 }
 
@@ -2249,107 +2304,6 @@ function pathWithoutFileName(path: string, name: string) {
   if (normalized === name) return "";
   const index = normalized.lastIndexOf("/");
   return index >= 0 ? normalized.slice(0, index) : "";
-}
-
-function ActiveSourcesPopover({
-  refElement,
-  sources,
-  preview,
-  previewLoadingId,
-  onPreview,
-  onRemove,
-  onExtend,
-  onAddToProject,
-}: {
-  refElement: RefObject<HTMLDivElement>;
-  sources: AiContextSource[];
-  preview: AiContextSourcePreviewResponse | null;
-  previewLoadingId: string | null;
-  onPreview: (source: AiContextSource) => void | Promise<void>;
-  onRemove?: (sourceId: string) => void | Promise<void>;
-  onExtend?: (sourceId: string) => void | Promise<void>;
-  onAddToProject?: (sourceId: string) => void | Promise<void>;
-}) {
-  return (
-    <div ref={refElement} className="absolute bottom-full left-0 z-40 mb-2 grid max-h-[430px] w-[min(560px,calc(100vw-80px))] grid-cols-[minmax(0,1fr)_minmax(220px,260px)] overflow-hidden rounded-[18px] border border-line bg-white text-[11px] text-ink-primary shadow-menu">
-      <div className="min-w-0 border-r border-line p-2">
-        <div className="mb-1 flex items-center justify-between gap-2 px-1">
-          <p className="font-semibold">Fuentes activas</p>
-          <span className="rounded-full bg-panel px-2 py-0.5 text-[10px] text-ink-secondary">{sources.length}</span>
-        </div>
-        <div className="max-h-[360px] space-y-1 overflow-y-auto pr-1">
-          {sources.length === 0 ? (
-            <p className="px-1 py-2 text-ink-secondary">No hay fuentes añadidas.</p>
-          ) : (
-            sources.map((source) => (
-              <div key={source.id} className="flex items-start gap-2 rounded-xl px-2 py-2 hover:bg-brand-hover">
-                <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white text-brand-orange shadow-subtle">
-                  {source.kind === "image" ? <Image size={14} /> : source.kind === "project_document" ? <FileText size={14} /> : <File size={14} />}
-                </span>
-                <button type="button" className="min-w-0 flex-1 text-left" onClick={() => void onPreview(source)}>
-                  <span className="block truncate text-[11px] font-semibold">{source.name}</span>
-                  <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-ink-secondary">
-                    <SourceStatus source={source} />
-                    <span>{source.kind === "image" ? "Imagen" : source.kind === "project_document" || source.path ? "Proyecto" : "Externo"}</span>
-                    {source.expiresAt ? <span>{formatRelativeExpiry(source.expiresAt)}</span> : null}
-                  </span>
-                </button>
-                {previewLoadingId === source.id ? <span className="mt-1 h-4 w-4 animate-spin rounded-full border-2 border-brand-orange border-t-transparent" /> : null}
-                {onRemove ? (
-                  <button type="button" className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-ink-secondary hover:bg-white hover:text-brand-orange" aria-label={`Quitar ${source.name}`} onClick={() => void onRemove(source.id)}>
-                    <X size={13} />
-                  </button>
-                ) : null}
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-      <div className="min-w-0 bg-panel/50 p-3">
-        {preview ? (
-          <div className="flex h-full min-h-0 flex-col">
-            <div className="min-w-0">
-              <p className="truncate text-[12px] font-semibold text-ink-primary">{preview.source.name}</p>
-              <p className="mt-1 text-[10px] text-ink-secondary">
-                {preview.source.mimeType ?? preview.source.kind} · {formatSize(preview.source.sizeBytes)}
-              </p>
-              {preview.source.warning ? <p className="mt-2 rounded-xl border border-orange-200 bg-brand-hover px-2 py-1.5 text-[10px] text-brand-orange">{preview.source.warning}</p> : null}
-              {preview.source.error ? <p className="mt-2 rounded-xl border border-orange-200 bg-brand-hover px-2 py-1.5 text-[10px] text-brand-orange">{preview.source.error}</p> : null}
-            </div>
-            <div className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-xl border border-line bg-white p-2 text-[10px] leading-4 text-ink-secondary">
-              {preview.previewText ? <p className="whitespace-pre-wrap">{preview.previewText}</p> : <p>{preview.source.kind === "image" ? "Imagen lista para análisis visual." : "Sin texto de previsualización."}</p>}
-            </div>
-            <div className="mt-3 flex flex-wrap justify-end gap-1.5">
-              {onExtend ? (
-                <button type="button" className="inline-flex h-7 items-center gap-1 rounded-full border border-line bg-white px-2.5 text-[10px] font-medium text-ink-secondary hover:border-orange-200 hover:bg-brand-hover hover:text-brand-orange" onClick={() => void onExtend(preview.source.id)}>
-                  <Clock3 size={12} />
-                  Mantener 1 h
-                </button>
-              ) : null}
-              {onAddToProject && preview.source.kind === "external_file" && !preview.source.path ? (
-                <button type="button" className="inline-flex h-7 items-center gap-1 rounded-full bg-brand-orange px-2.5 text-[10px] font-semibold text-white hover:bg-brand-dark" onClick={() => void onAddToProject(preview.source.id)}>
-                  <FileText size={12} />
-                  Añadir al proyecto
-                </button>
-              ) : null}
-            </div>
-          </div>
-        ) : (
-          <div className="grid h-full min-h-[220px] place-items-center text-center text-[10px] leading-4 text-ink-secondary">
-            <p>Selecciona una fuente para ver estado, caducidad y previsualización.</p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function SourceStatus({ source }: { source: AiContextSource }) {
-  if (source.status === "processing") return <span className="text-brand-orange">Procesando</span>;
-  if (source.status === "error") return <span className="text-brand-orange">No se pudo leer</span>;
-  if (source.status === "warning") return <span className="text-brand-orange">Aviso</span>;
-  if (source.status === "expiring") return <span className="text-brand-orange">Caduca pronto</span>;
-  return <span>Listo</span>;
 }
 
 function getActiveMention(value: string) {

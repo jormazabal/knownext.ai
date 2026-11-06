@@ -1,0 +1,7 @@
+# Bloque121 · Traslados sucesivos sin perder el archivo privado
+
+F07/T08/F16. Corregir la reexportación de proyectos importados. El paquete documental completo excluye la carpeta Archivo KnowNext; no mezcla sus textos privados con la exclusión de audio/metadatos. La opción privada conserva todos los archivos anteriores, verifica las huellas de originales/partes y añade copias del estado actual sin reemplazar las anteriores.
+
+Mantener rutas de payloads existentes para conservar enlaces. Guardar los tres metadatos de cabecera originales bajo Anteriores/<huella>; generar cabecera/inventario/preferencias actuales, con índice de esas copias originales. Nuevos payloads bajo una generación distinta. Formato de paquete3 cuando conserva archivo anterior; lectura1/2/3, índice privado2 para metadatos anteriores. Conteos agregados y número de archivos conservados visibles. Sin adopción/ejecución automática. Mantener128MiB/32MiB/10000 entradas y rechazar conjunto si hay enlaces, rutas/campos/versión incompatibles, partes dañadas o cambios de fuentes.
+
+Aceptar: dos traslados completos sucesivos entre almacenes independientes conservan audio reconstruible, bundle, borradores y metadatos originales; nuevas copias actuales añadidas sin colisión; exportación simple excluye todo el archivo privado; fuentes intactas y rechazos de corrupción. Comprobaciones dirigidas y una campaña visual agrupada; sin suites completas, gasto IA o instalación.

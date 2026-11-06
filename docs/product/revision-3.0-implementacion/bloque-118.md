@@ -1,0 +1,7 @@
+# Bloque118 · Cobertura de inventario y admisión de copias
+
+F17/F04/T08. Extender «Copias y límites» a paquetes de traslado, plantillas de proyecto, almacenes de grabación y copias/papelera conocidas de proyectos registrados, incluidas ubicaciones externas. Metadatos únicamente, sin leer coordinación, sin seguir enlaces ni conceder autoridad de borrado/recuperación. Mantener presupuestos de tiempo/entradas/filas, cobertura parcial explícita y deduplicación de ubicaciones solapadas. No confundir bytes lógicos con espacio libre/recuperable.
+
+El presupuesto opcional cuenta esas familias observadas. Extender admisión antes de publicar nuevas plantillas de proyecto y anclas de recuperación histórica, conservando la revisión y los límites propios. No frenar guardado/borradores/audio en curso/continuaciones; no afirmar cuota absoluta del disco ni liberar identidades. Traslados, captura y productores aún no integrados deben declararse explícitamente.
+
+Aceptar: inventario de carpetas externas con propietario de proyecto indicado pero contenido no verificado, sin acceso fuera de raíces ni doble conteo de raíz compartida; fuentes/locks intactos; política conservada ante futuros; nuevas copias cubiertas rechazadas sin payload al agotar presupuesto y permitidas al ampliarlo. Comprobaciones dirigidas y revisión visual agrupada, sin suites completas/IA/instalación. Actualizar backlog/reporte y límites.

@@ -1,0 +1,3 @@
+export type ReplaceSelection={documentIds:string[];query:string;replacement:string};
+export type ReplaceReview={schemaVersion:1;projectId:string;revision:string;checkedAt:string;preservesSavedFiles:true;documents:Array<{documentId:string;path:string;before:string;after:string;matches:number}>};
+export type ReplaceReceipt={schemaVersion:1;id:string;projectId:string;revision:string;phase:"applying"|"interrupted"|"partial"|"completed";checkedAt:string;preservesSavedFiles:true;undoId:string|null;copies?:Array<{documentId:string;path:string;before:string;after:string}>;documents:Array<{documentId:string;path:string;matches:number;applied:boolean}>};

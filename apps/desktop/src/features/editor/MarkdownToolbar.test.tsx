@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MarkdownToolbar } from "./MarkdownToolbar";
@@ -8,6 +8,14 @@ describe("MarkdownToolbar", () => {
     cleanup();
     Object.defineProperty(window, "matchMedia", { value: undefined, configurable: true });
   });
+  const keyboardProps={historyOpen:false,historyEnabled:true,historyDisabledReason:"",editorReady:true,markdownZoomPercent:100,activeActions:{},editorHistoryState:{canUndo:true,canRedo:false,undoDepth:1,redoDepth:0},onRunEditorAction:vi.fn(),onExportDocument:vi.fn(),onMarkdownZoomChange:vi.fn(),onToggleHistory:vi.fn()};
+  it("keeps an available tab stop when responsive CSS hides the previous focused control",()=>{render(<MarkdownToolbar {...keyboardProps}/>);const bold=screen.getByRole("button",{name:"Negrita"}),block=screen.getByRole("button",{name:"Formato de bloque"});bold.focus();expect(bold.tabIndex).toBe(0);bold.style.display="none";fireEvent.resize(window);expect(block.tabIndex).toBe(0);expect(within(screen.getByRole("toolbar")).getAllByRole("button").filter(b=>b.tabIndex===0&&!b.hasAttribute("disabled"))).toEqual([block]);});
+  it("uses one toolbar tab stop and Arrow/Home/End navigation omitting disabled actions",async()=>{render(<MarkdownToolbar {...keyboardProps}/>);const toolbar=screen.getByRole("toolbar"),first=screen.getByRole("button",{name:"Formato de bloque"});expect(within(toolbar).getAllByRole("button").filter(b=>b.tabIndex===0&&!b.hasAttribute("disabled"))).toHaveLength(1);first.focus();await userEvent.keyboard("{ArrowRight}");expect(screen.getByRole("button",{name:"Negrita"})).toHaveFocus();await userEvent.keyboard("{End}");expect(screen.getByRole("button",{name:"Deshacer"})).toHaveFocus();await userEvent.keyboard("{ArrowRight}");expect(first).toHaveFocus();await userEvent.keyboard("{ArrowLeft}");expect(screen.getByRole("button",{name:"Deshacer"})).toHaveFocus();await userEvent.keyboard("{Home}");expect(first).toHaveFocus();});
+  it("opens menus from either keyboard direction and returns on Escape or activation",async()=>{const run=vi.fn(),outer=vi.fn();render(<main onKeyDown={outer}><MarkdownToolbar {...keyboardProps} onRunEditorAction={run}/></main>);const trigger=screen.getByRole("button",{name:"Formato de bloque"});trigger.focus();await userEvent.keyboard("{ArrowDown}");expect(screen.getByRole("menuitem",{name:"Normal"})).toHaveFocus();await userEvent.keyboard("{End}");expect(screen.getByRole("menuitem",{name:"Título 6"})).toHaveFocus();await userEvent.keyboard("{ArrowDown}");expect(screen.getByRole("menuitem",{name:"Normal"})).toHaveFocus();outer.mockClear();fireEvent.keyDown(document.activeElement!,{key:"Escape",isComposing:true});expect(screen.getByRole("menu")).toBeInTheDocument();outer.mockClear();await userEvent.keyboard("{Escape}");expect(trigger).toHaveFocus();expect(outer).not.toHaveBeenCalled();await userEvent.keyboard("{ArrowUp}");expect(screen.getByRole("menuitem",{name:"Título 6"})).toHaveFocus();await userEvent.keyboard("{Home}{ArrowDown}{Enter}");expect(run).toHaveBeenCalledWith("heading-1");expect(run).toHaveBeenCalledOnce();expect(trigger).toHaveFocus();expect(screen.queryByRole("menu")).not.toBeInTheDocument();});
+  it("closes a keyboard menu on Tab and leaves the toolbar in either direction",async()=>{render(<><input aria-label="Antes"/><MarkdownToolbar {...keyboardProps}/><input aria-label="Después"/></>);const trigger=screen.getByRole("button",{name:"Formato de bloque"});trigger.focus();await userEvent.keyboard("{ArrowDown}");await userEvent.tab();expect(screen.queryByRole("menu")).not.toBeInTheDocument();expect(screen.getByLabelText("Después")).toHaveFocus();trigger.focus();await userEvent.keyboard("{ArrowDown}");await userEvent.tab({shift:true});expect(screen.getByLabelText("Antes")).toHaveFocus();});
+  it("preserves the editor DOM selection when pointer users open and activate a format menu",async()=>{const run=vi.fn();render(<><div role="textbox" contentEditable suppressContentEditableWarning>Texto seleccionado</div><MarkdownToolbar {...keyboardProps} onRunEditorAction={run}/></>);const editor=screen.getByRole("textbox");editor.focus();const range=document.createRange();range.setStart(editor.firstChild!,0);range.setEnd(editor.firstChild!,5);const selection=window.getSelection()!;selection.removeAllRanges();selection.addRange(range);await userEvent.click(screen.getByRole("button",{name:"Formato de bloque"}));expect(editor).toHaveFocus();expect(selection.toString()).toBe("Texto");await userEvent.click(screen.getByRole("menuitem",{name:"Título 2"}));expect(editor).toHaveFocus();expect(selection.toString()).toBe("Texto");expect(run).toHaveBeenCalledWith("heading-2");});
+  it("makes the table picker reachable by keyboard and returns to its trigger",async()=>{render(<MarkdownToolbar {...keyboardProps}/>);const trigger=screen.getByRole("button",{name:"Tabla"});trigger.focus();await userEvent.keyboard("{ArrowDown}");expect(screen.getByRole("button",{name:"Insertar tabla 1 x 1"})).toHaveFocus();await userEvent.keyboard("{End}");expect(screen.getByRole("button",{name:"Personalizar..."})).toHaveFocus();await userEvent.keyboard("{Home}{ArrowRight}");expect(screen.getByRole("button",{name:"Insertar tabla 1 x 2"})).toHaveFocus();await userEvent.keyboard("{Escape}");expect(trigger).toHaveFocus();expect(screen.queryByRole("menu")).not.toBeInTheDocument();});
+  it("keeps compact modal focus and returns without reacting to composition Escape",async()=>{mockCompactToolbarMode(true);render(<MarkdownToolbar {...keyboardProps}/>);const trigger=screen.getByRole("button",{name:"Más opciones"});trigger.focus();await userEvent.keyboard("{Enter}");const dialog=screen.getByRole("dialog",{name:"Opciones del editor"});expect(dialog.contains(document.activeElement)).toBe(true);fireEvent.keyDown(document.activeElement!,{key:"Escape",isComposing:true});expect(dialog).toBeInTheDocument();await userEvent.keyboard("{Escape}");expect(screen.queryByRole("dialog")).not.toBeInTheDocument();expect(trigger).toHaveFocus();});
 
   it("marks active editor formats and keeps toolbar actions available", async () => {
     const onRunEditorAction = vi.fn();
@@ -367,6 +375,17 @@ describe("MarkdownToolbar", () => {
 
     expect(onRunEditorAction).toHaveBeenCalledWith("bullet-list");
     expect(screen.queryByRole("dialog", { name: "Opciones del editor" })).not.toBeInTheDocument();
+  });
+  it.each([false, true])("dispatches template capture and closes its menu in compact mode %s", async compact => {
+    mockCompactToolbarMode(compact);
+    const onSaveTemplate = vi.fn();
+    render(<MarkdownToolbar historyOpen={false} historyEnabled historyDisabledReason="" editorReady markdownZoomPercent={100} activeActions={{}} editorHistoryState={{ canUndo: false, canRedo: false, undoDepth: 0, redoDepth: 0 }} onRunEditorAction={vi.fn()} onExportDocument={vi.fn()} onSaveTemplate={onSaveTemplate} onMarkdownZoomChange={vi.fn()} onToggleHistory={vi.fn()}/>);
+    const trigger = screen.getByRole("button", { name: compact ? "Más opciones" : "Exportar documento" });
+    trigger.focus(); await userEvent.click(trigger);
+    await userEvent.click(screen.getByRole(compact ? "button" : "menuitem", { name: "Guardar como plantilla…" }));
+    expect(onSaveTemplate).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("dialog", { name: "Opciones del editor" })).not.toBeInTheDocument();
+    if (compact) expect(trigger).toHaveFocus();
   });
 });
 

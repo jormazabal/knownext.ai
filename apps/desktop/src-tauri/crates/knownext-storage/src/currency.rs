@@ -1,16 +1,30 @@
 use serde_json::{json, Value};
 use std::{
-    io::{Read, Write},
+    io::Read,
     path::Path,
     time::Duration,
 };
 const SOURCE: &str = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml";
 pub fn read(root: &Path) -> Value {
-    std::fs::read(root.join("eur-usd.json"))
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or(Value::Null)
+    read_checked(root).unwrap_or(Value::Null)
 }
+const CACHE_LIMIT:u64=64*1024;
+fn snapshot(root:&Path)->Result<Option<Vec<u8>>,String>{
+    let directory=std::fs::symlink_metadata(root).map_err(|_|"No se puede consultar la caché de cambio")?;
+    if !directory.is_dir()||super::batch::linked(&directory){return Err("La carpeta de cambio no es regular".into())}
+    let path=root.join("eur-usd.json");let metadata=match std::fs::symlink_metadata(&path){Ok(m)=>m,Err(e) if e.kind()==std::io::ErrorKind::NotFound=>return Ok(None),Err(_)=>return Err("No se puede consultar el cambio guardado".into())};
+    if !metadata.is_file()||super::batch::linked(&metadata)||metadata.len()>CACHE_LIMIT{return Err("Caché de cambio no regular o fuera de límites; se conserva".into())}
+    let mut bytes=Vec::new();std::fs::File::open(path).map_err(|_|"No se puede leer el cambio guardado")?.take(CACHE_LIMIT+1).read_to_end(&mut bytes).map_err(|_|"No se pudo completar la lectura del cambio")?;
+    if bytes.len() as u64>CACHE_LIMIT{return Err("La caché de cambio creció fuera de límites; se conserva".into())}Ok(Some(bytes))
+}
+fn decode(bytes:&[u8])->Result<Value,String>{
+    let value:Value=serde_json::from_slice(bytes).map_err(|_|"Caché de cambio dañada; se conserva")?;
+    let object=value.as_object().ok_or("Formato de cambio no compatible; se conserva")?;
+    if object.keys().any(|k| !["schemaVersion","date","usdPerEur","source","checkedAt"].contains(&k.as_str()))||object.get("schemaVersion").is_some_and(|v|v.as_u64()!=Some(1)){return Err("Versión de cambio no compatible; se conserva".into())}
+    for field in ["date","checkedAt"]{if let Some(date)=object.get(field){if !date.as_str().is_some_and(|s|time::format_description::parse("[year]-[month]-[day]").ok().and_then(|format|time::Date::parse(s,&format).ok()).is_some()){return Err("Fecha de cambio no válida; se conserva".into())}}}
+    if object.get("usdPerEur").is_some_and(|v|!v.as_f64().is_some_and(|n|n.is_finite()&&n>0.0))||object.get("source").is_some_and(|v|v.as_str()!=Some(SOURCE))||object.contains_key("date")!=object.contains_key("usdPerEur"){return Err("Referencia de cambio no válida; se conserva".into())}Ok(value)
+}
+pub fn read_checked(root:&Path)->Result<Value,String>{snapshot(root)?.map_or(Ok(Value::Null),|bytes|decode(&bytes))}
 pub fn valid(rate: &Value) -> bool {
     let Some(date) = rate["date"].as_str().and_then(|s| {
         time::Date::parse(
@@ -36,9 +50,21 @@ pub fn convert(usd: f64, rate: &Value) -> Option<f64> {
     }
 }
 pub fn refresh(root: &Path) -> Result<Value, String> {
-    let mut previous = read(root);
+    refresh_inner(root, false)
+}
+/// Explicit user retry after an offline startup; automatic daily refresh is unchanged.
+pub fn refresh_now(root:&Path)->Result<Value,String>{
+    static LAST_ATTEMPT:std::sync::Mutex<Option<std::time::Instant>>=std::sync::Mutex::new(None);
+    let mut last=LAST_ATTEMPT.try_lock().map_err(|_|"Ya se está consultando el cambio BCE")?;
+    if last.is_some_and(|at|at.elapsed()<Duration::from_secs(60)){return Err("Espera un minuto antes de volver a consultar el cambio BCE. Se conserva la referencia anterior.".into());}
+    *last=Some(std::time::Instant::now());
+    refresh_inner(root,true)
+}
+fn refresh_inner(root:&Path,manual:bool)->Result<Value,String>{
+    let original=snapshot(root)?;
+    let mut previous=original.as_deref().map_or(Ok(Value::Null),decode)?;
     let today = knownext_core::now_iso()[..10].to_string();
-    if previous["checkedAt"] == today {
+    if !manual && previous["checkedAt"] == today {
         return Ok(previous);
     }
     if !previous.is_object() {
@@ -46,7 +72,8 @@ pub fn refresh(root: &Path) -> Result<Value, String> {
     }
     previous["checkedAt"] = json!(today);
     // Persist the attempt too: retries must not query the ECB more than daily.
-    write(root, &previous)?;
+    write(root, &previous,original.as_deref())?;
+    let attempted=serde_json::to_vec(&previous).map_err(|_|"No se pudo preparar la revisión del cambio")?;
     let mut response = knownext_core::http_client_builder()
         .timeout(Duration::from_secs(15))
         .build()
@@ -63,21 +90,13 @@ pub fn refresh(root: &Path) -> Result<Value, String> {
         .map_err(|e| e.to_string())?;
     let (date, rate) = parse(&xml)?;
     let value = json!({"date":date,"usdPerEur":rate,"source":SOURCE,"checkedAt":today});
-    write(root, &value)?;
+    write(root, &value,Some(&attempted))?;
     Ok(value)
 }
-fn write(root: &Path, value: &Value) -> Result<(), String> {
-    let mut f = tempfile::NamedTempFile::new_in(root).map_err(|e| e.to_string())?;
-    f.write_all(
-        serde_json::to_string(value)
-            .map_err(|e| e.to_string())?
-            .as_bytes(),
-    )
-    .map_err(|e| e.to_string())?;
-    f.as_file().sync_all().map_err(|e| e.to_string())?;
-    f.persist(root.join("eur-usd.json"))
-        .map_err(|e| e.to_string())?;
-    Ok(())
+fn write(root: &Path, value: &Value,expected:Option<&[u8]>) -> Result<(), String> {
+    let bytes=serde_json::to_vec(value).map_err(|_|"No se pudo preparar el cambio")?;decode(&bytes)?;
+    if snapshot(root)?.as_deref()!=expected{return Err("El cambio guardado cambió durante la consulta; se conserva sin sustituir".into())}
+    super::atomic_io::write(&root.join("eur-usd.json"),&bytes).map_err(|_|"No se pudo confirmar el cambio guardado".into())
 }
 pub fn parse(xml: &str) -> Result<(String, f64), String> {
     let mut reader = quick_xml::Reader::from_str(xml);

@@ -10,6 +10,7 @@ export default defineConfig({
     __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: false,
   },
   build: {
+    manifest: true,
     rollupOptions: {
       output: {
         manualChunks: splitVendorChunks,
@@ -20,6 +21,8 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 1420,
     strictPort: true,
+    // Native builds and test edits must not reload an in-progress product session.
+    watch: { ignored: ["**/src-tauri/**", "**/*.test.*"] },
   },
   envPrefix: ["VITE_", "TAURI_"],
 });
@@ -27,7 +30,11 @@ export default defineConfig({
 function splitVendorChunks(id: string) {
   const moduleId = id.replace(/\\/g, "/");
 
+  if (moduleId.includes("vite/preload-helper") || moduleId.includes("commonjsHelpers.js")) return "runtime-helpers";
+
   if (!moduleId.includes("/node_modules/")) return;
+
+  if (matchesPackage(moduleId,"react") || matchesPackage(moduleId,"react-dom") || matchesPackage(moduleId,"scheduler")) return "react-runtime";
 
   if (matchesPackage(moduleId, "@milkdown/crepe")) return "milkdown-crepe";
   if (matchesPackage(moduleId, "@milkdown/components") || moduleId.includes("/@milkdown/plugin-")) return "milkdown-ui";

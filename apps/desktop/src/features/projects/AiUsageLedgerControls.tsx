@@ -1,0 +1,12 @@
+import {useAiUsageLedger} from "./useAiUsageLedger";
+export function AiUsageLedgerControls({onChanged,english=false}:{onChanged:()=>void|Promise<void>;english?:boolean}){
+  const state=useAiUsageLedger(onChanged);
+  return <section aria-label={english?"Usage preservation":"Conservación del consumo"} className="mt-3 text-xs leading-5">
+    <p>{english?"Period totals preserve future usage after recent detail rotates. Existing history can only start from records still available.":"Los totales por periodo conservan el consumo futuro aunque rote el detalle reciente. El histórico heredado solo puede partir de los registros que aún estén disponibles."}</p>
+    {state.info&&<p role="status" className="mt-2">{state.observeFirst?(english?"The previous review is preserved; current state is not confirmed.":"Se conserva la revisión anterior; el estado actual está sin confirmar."):state.info.needsUpgrade?(english?"The current ledger needs conversion. An exact original copy is preserved first.":"El registro actual necesita conversión. Primero se conservará una copia exacta del original."):(english?`${state.info.recordedEntries??0} records accounted for · ${state.info.recentEntries} recent details.`:`${state.info.recordedEntries??0} registros contabilizados · ${state.info.recentEntries} detalles recientes.`)}</p>}
+    {!state.observeFirst&&state.info?.originalCopyStatus==="verified"&&<p>{english?"Original copy verified.":"Copia original verificada."}</p>}
+    {!state.observeFirst&&state.info?.originalCopyStatus==="unavailable"&&<p role="alert" className="mt-2 text-red-700">{english?"The original copy could not be verified. Current totals are preserved.":"No se pudo verificar la copia original. Los totales actuales se conservan."}</p>}
+    {state.error&&<p role="alert" className="mt-2 text-red-700">{state.error}</p>}
+    <div className="mt-2 flex flex-wrap gap-2"><button type="button" disabled={state.busy} onClick={()=>void state.review()} className="min-h-11 rounded px-2 text-brand-dark hover:bg-brand-hover disabled:opacity-50">{state.busy?(english?"Working…":"Procesando…"):state.observeFirst?(english?"Check state":"Comprobar estado"):(english?"Review preservation":"Revisar conservación")}</button>{state.info?.needsUpgrade&&!state.observeFirst&&<button type="button" disabled={state.busy} onClick={()=>void state.apply()} className="min-h-11 rounded bg-brand-dark px-2 font-medium text-white disabled:opacity-50">{english?"Preserve and convert":"Conservar y convertir"}</button>}</div>
+  </section>;
+}

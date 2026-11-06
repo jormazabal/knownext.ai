@@ -1,0 +1,17 @@
+# Avance122 · Borradores portables que pueden continuarse con protección
+
+[Reporte visual](avance-122.html) · [Definición](bloque-122.md) · [Plan](plan.md).
+
+Borradores del archivo portable revisables por separado, con SHA/formato conocidos y copias del mismo documento diferenciadas. Copia nativa estable en Apartadas; continuación explícita de Markdown/nota solo con base guardada coincidente y sin borrador local/legado, autoridad existente de protección/recarga y publicación sin reemplazo. Fuente y documento guardado conservados, cuota antes de la copia, futuros/parciales rechazados y acuse incierto consultado sin repetir (122).
+
+El catálogo solo lee el índice; la revisión individual comprueba Original.json y construye una copia con campos permitidos, ligada al proyecto y ubicación receptores. No adopta autoridad, coste o historia del origen. El índice compartido1/2 conserva sus límites y se reutiliza sin reinterpretar versiones futuras. Lista de30 entradas ampliable, variantes del mismo documento diferenciadas, fecha original cuando es válida y extracto de texto sin medios activos. Los controles de acción permanecen fuera del área desplazable.
+
+Guardar copia crea copy.json/manifest.json en drafts-review con identidad determinista y verifica ambos. Una copia incompleta, futura o con extras no se sustituye ni duplica. Presupuesto global opcional y cuota propia128MiB antes del payload nuevo; continuar una copia ya conservada no reclama otra admisión. Hasta8MiB por original/copia y2MiB de Markdown; la nota conserva trazos y contenido, reasociando su identidad.
+
+Traer como borrador usa la protección y recarga existentes del espacio de trabajo. Revisa de nuevo índice, fuente, ubicación, archivo guardado y ausencia de borrador actual/legado antes de crear el borrador sin reemplazar. La base portable coincide por tamaño/SHA, sin exigir la marca física de tiempo del equipo anterior. El documento guardado no cambia: guardarlo sigue siendo explícito. Tras una confirmación incierta se consulta una vez, sin repetir, y se exige otra revisión para otra acción.
+
+Verificación dirigida: cuatro contratos Rust pasan (copia/continuación de texto, base/borrador/futuros, presupuesto/copia desconocida y nota con tinta reasociada). Un contrato afectado del traslado sucesivo pasa tras extraer el lector compartido del índice. Siete casos frontend/SDK y TypeScript pasan. App/centro/diálogo/autoridad de transición reales con adaptadores controlados: dos variantes, una copia con acuse interrumpido, consulta sin replay y continuación revisada. Escritorio y320x560 sin desbordamiento, controles visibles, cero errores/red externa; capturas523–526 inspeccionadas. El almacenamiento web de la campaña representa los efectos y conserva diskMarkdown; los contratos temporales acreditan los archivos nativos por separado. No acredita aceptación instalada ni Android. Se reutiliza la comprobación Tauri agrupada117–121; no hay comandos nuevos122.
+
+Evidencia: avance-122.md; output/v3-portable-draft-adoption-final-contract.log; output/v3-portable-drafts-shared-index-contract.log; output/v3-portable-draft-adoption-ui.log; output/v3-portable-draft-adoption-types.log; output/v3-portable-draft-adoption-browser-evidence.json.
+
+Continúan audio/historial activos portables, tamaños mayores, otras preferencias, cuotas/productores y retención restantes, ampliaciones del programa, regresión final y aceptación física. Android/SAF sin compilación vigente; T17 real aplazada sin gasto. Sin instalación/publicación; VERSION2.6.0.

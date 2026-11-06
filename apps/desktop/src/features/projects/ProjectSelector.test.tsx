@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ProjectSelector } from "./ProjectSelector";
@@ -77,4 +77,11 @@ describe("ProjectSelector", () => {
     await userEvent.click(screen.getAllByRole("button", { name: /proyecto alpha/i })[0]);
     expect(screen.queryByText("Proyecto Beta")).not.toBeInTheDocument();
   });
+  it("opens historical resource restoration without requiring an active Markdown editor", async () => {
+    cleanup();const restore=vi.fn();render(<ProjectSelector projects={projects} activeProject={projects[0]} onSelectProject={vi.fn()} onCreateProject={vi.fn()} onOpenHistoryRestore={restore}/>);
+    await userEvent.click(screen.getByRole("button",{name:/proyecto alpha/i}));
+    await userEvent.click(screen.getByRole("button",{name:/restaurar archivo histórico/i}));
+    expect(restore).toHaveBeenCalledTimes(1);expect(screen.queryByText("Proyecto Beta")).not.toBeInTheDocument();
+  });
+
 });

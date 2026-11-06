@@ -23,7 +23,36 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self' 'wasm-unsafe-eval'",
+        "style-src": "'self' 'unsafe-inline'",
+        "style-src-attr": "'unsafe-inline'",
+        "font-src": "'self' data:",
+        "img-src": "'self' data: blob: https: http: knownext-asset: asset:",
+        "media-src": "'self' data: blob:",
+        "connect-src": "'self' ipc: http://ipc.localhost knownext-asset: http://knownext-asset.localhost asset: http://asset.localhost blob: data:",
+        "worker-src": "'self' blob:",
+        "object-src": "'none'",
+        "frame-src": "'none'",
+        "base-uri": "'self'",
+        "form-action": "'none'"
+      },
+      "devCsp": {
+        "default-src": "'self'",
+        "script-src": "'self' 'unsafe-inline' 'wasm-unsafe-eval'",
+        "style-src": "'self' 'unsafe-inline'",
+        "style-src-attr": "'unsafe-inline'",
+        "font-src": "'self' data:",
+        "img-src": "'self' data: blob: https: http: knownext-asset: asset:",
+        "media-src": "'self' data: blob:",
+        "connect-src": "'self' ipc: http://ipc.localhost knownext-asset: http://knownext-asset.localhost asset: http://asset.localhost blob: data: http://127.0.0.1:1420 ws://127.0.0.1:1420 http://10.0.2.2:1420 ws://10.0.2.2:1420",
+        "worker-src": "'self' blob:",
+        "object-src": "'none'",
+        "frame-src": "'none'",
+        "base-uri": "'self'",
+        "form-action": "'none'"
+      }
     }
   },
   "bundle": {
@@ -31,6 +60,7 @@
     "targets": "all",
     "createUpdaterArtifacts": true,
     "externalBin": [],
+    "resources": ["crates/knownext-docs/assets/fonts/OFL.txt"],
     "icon": [
       "icons/icon.ico"
     ],

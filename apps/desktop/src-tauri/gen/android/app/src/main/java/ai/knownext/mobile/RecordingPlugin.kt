@@ -54,6 +54,7 @@ object RecordingBridge {
     fun command(action:String,payload:JSONObject=JSONObject()):JSONObject=unwrap(nativeCommand(action,payload.toString()))
     fun init(context:android.content.Context) {
         System.loadLibrary("knownext_ai_desktop_lib")
+        CredentialVault.install()
         val root=context.getSharedPreferences("recording-runtime",0).getString("root",null)?:throw IllegalStateException("Abre KnowNext.ai para inicializar la grabación")
         unwrap(nativeInit(root))
     }

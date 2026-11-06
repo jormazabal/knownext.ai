@@ -10,6 +10,6 @@ if (!recordingWindow) void initializeWindowStatePersistence();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    {recordingWindow ? <RecordingPanel /> : <App />}
+    {recordingWindow ? <RecordingPanel compact /> : <App />}
   </React.StrictMode>,
 );

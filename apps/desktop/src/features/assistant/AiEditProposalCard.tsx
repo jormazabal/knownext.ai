@@ -5,6 +5,7 @@ import type { AiEditOperation, AiEditProposal } from "../../types/domain";
 type AiEditProposalCardProps = {
   proposal: AiEditProposal | null;
   compact?: boolean;
+  applying?: boolean;
   staleOperationIds?: string[];
   blockedOperationReasons?: Record<string, string>;
   appliedOperationIds?: string[];
@@ -19,6 +20,7 @@ const EMPTY_OPERATION_REASONS: Record<string, string> = {};
 export function AiEditProposalCard({
   proposal,
   compact = false,
+  applying = false,
   staleOperationIds = EMPTY_OPERATION_IDS,
   blockedOperationReasons = EMPTY_OPERATION_REASONS,
   appliedOperationIds = EMPTY_OPERATION_IDS,
@@ -51,32 +53,33 @@ export function AiEditProposalCard({
   const reviewCount = staleCount + blockedCount;
 
   return (
-    <div className={["mt-3 rounded-2xl border border-orange-200 bg-brand-hover/70 p-3 text-ink-primary", compact ? "" : "shadow-subtle"].join(" ")}>
+    <div className="mt-3 py-2 text-ink-primary" aria-busy={applying}>
       <div className="flex items-start gap-2.5">
-        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white text-brand-orange shadow-subtle">
+        <span className="grid h-8 w-8 shrink-0 place-items-center text-brand-orange">
           <Icon size={15} />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <span className="text-[10px] font-semibold uppercase text-brand-orange">Propuesta IA</span>
-            <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-brand-orange shadow-subtle">{scopeLabel(proposal)}</span>
+            <span className="text-[11px] font-medium text-ink-secondary">{scopeLabel(proposal)}</span>
           </div>
           <p className="mt-1 text-[12px] font-semibold leading-5 text-ink-primary">{proposal.title}</p>
           <p className="mt-0.5 text-[11px] leading-4 text-ink-secondary">{proposal.summary}</p>
+          {proposal.recovery && <p role={proposal.recovery.stored ? "status" : "alert"} className={`mt-2 text-xs leading-5 ${proposal.recovery.stored ? "text-ink-secondary" : "text-red-800"}`}>{proposal.recovery.removed ? "Has retirado la copia conservada. Esta propuesta permanece solo en la sesión." : proposal.recovery.stored ? "Copia conservada en Resultados IA. Puedes recuperarla tras cerrar la aplicación; se mantiene hasta que la quites." : `Solo disponible en esta sesión. No cierres la aplicación antes de conservarla en Resultados IA. ${proposal.recovery.error ?? ""}`}</p>}
           <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-ink-secondary">
-            <span className="rounded-full bg-white px-2 py-1 shadow-subtle">
+            <span className="py-1">
               {operationsCount === 1 ? "1 cambio" : `${operationsCount} cambios`}
             </span>
-            <span className="rounded-full bg-white px-2 py-1 shadow-subtle">
+            <span className="py-1">
               {documentsCount === 1 ? "1 documento" : `${documentsCount} documentos`}
             </span>
             {appliedCount > 0 ? (
-              <span className="rounded-full border border-green-200 bg-white px-2 py-1 font-medium text-green-700 shadow-subtle">
+              <span className="py-1 font-medium text-green-700">
                 {appliedCount === 1 ? "1 aplicado" : `${appliedCount} aplicados`}
               </span>
             ) : null}
             {reviewCount > 0 ? (
-              <span className="rounded-full border border-orange-200 bg-white px-2 py-1 font-medium text-brand-orange shadow-subtle">
+              <span className="py-1 font-medium text-brand-orange">
                 {reviewCount === 1 ? "1 requiere revisión" : `${reviewCount} requieren revisión`}
               </span>
             ) : null}
@@ -85,10 +88,11 @@ export function AiEditProposalCard({
       </div>
 
       {proposal.operations.length > 0 ? (
-        <div className="mt-3 rounded-xl border border-orange-100 bg-white/80">
+        <div className="mt-2">
           <button
             type="button"
-            className="flex h-9 w-full items-center gap-2 px-3 text-left text-[11px] font-semibold text-ink-primary hover:bg-white"
+            className="flex min-h-11 w-full items-center gap-2 text-left text-[12px] font-semibold text-ink-primary hover:bg-panel/50"
+            aria-expanded={reviewOpen}
             onClick={() => setReviewOpen((open) => !open)}
           >
             {reviewOpen ? <ChevronDown size={13} className="text-brand-orange" /> : <ChevronRight size={13} className="text-brand-orange" />}
@@ -98,7 +102,7 @@ export function AiEditProposalCard({
             </span>
           </button>
           {reviewOpen ? (
-            <div className="max-h-[360px] space-y-2 overflow-y-auto border-t border-orange-100 p-2">
+            <div className="max-h-[360px] space-y-3 overflow-y-auto py-2">
               {proposal.operations.map((operation, index) => {
                 const stale = staleIds.has(operation.id);
                 const blocked = blockedIds.has(operation.id);
@@ -114,6 +118,8 @@ export function AiEditProposalCard({
                     stale={stale}
                     blocked={blocked}
                     applied={applied}
+                    applying={applying}
+                    sideBySide={!compact}
                     reviewReason={reviewReason}
                     onToggle={() => {
                       if (stale || blocked || applied) return;
@@ -135,7 +141,7 @@ export function AiEditProposalCard({
         {onOpenConversation ? (
           <button
             type="button"
-            className="inline-flex h-8 items-center gap-1.5 rounded-full border border-line bg-white px-3 text-[11px] font-medium text-ink-secondary hover:border-orange-200 hover:text-brand-orange"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-full px-3 text-[12px] font-medium text-ink-secondary hover:bg-panel hover:text-brand-orange"
             onClick={onOpenConversation}
           >
             <GitCompareArrows size={13} />
@@ -144,7 +150,8 @@ export function AiEditProposalCard({
         ) : null}
         <button
           type="button"
-          className="inline-flex h-8 items-center gap-1.5 rounded-full border border-line bg-white px-3 text-[11px] font-medium text-ink-secondary hover:border-orange-200 hover:text-brand-orange"
+          className="inline-flex min-h-11 items-center gap-1.5 rounded-full px-3 text-[12px] font-medium text-ink-secondary hover:bg-panel hover:text-brand-orange disabled:opacity-50"
+          disabled={applying}
           onClick={() => onDiscard(proposal.id)}
         >
           <X size={13} />
@@ -152,12 +159,12 @@ export function AiEditProposalCard({
         </button>
         <button
           type="button"
-          className={["inline-flex h-8 items-center gap-1.5 rounded-full bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark", effectiveSelectedIds.length === 0 ? "cursor-not-allowed opacity-50" : ""].join(" ")}
-          disabled={effectiveSelectedIds.length === 0}
+          className={["inline-flex min-h-11 items-center gap-1.5 rounded-full bg-brand-orange px-4 text-[12px] font-semibold text-white hover:bg-brand-dark", effectiveSelectedIds.length === 0 || applying ? "cursor-not-allowed opacity-50" : ""].join(" ")}
+          disabled={effectiveSelectedIds.length === 0 || applying}
           onClick={() => void onApply(proposal.id, effectiveSelectedIds)}
         >
           <Check size={13} />
-          Aplicar{effectiveSelectedIds.length > 0 && effectiveSelectedIds.length < operationsCount ? ` ${effectiveSelectedIds.length}` : ""}
+          {applying ? "Aplicando…" : `Aplicar${effectiveSelectedIds.length > 0 && effectiveSelectedIds.length < operationsCount ? ` ${effectiveSelectedIds.length}` : ""}`}
         </button>
       </div>
     </div>
@@ -171,6 +178,8 @@ function ProposalOperationRow({
   stale,
   blocked,
   applied,
+  applying,
+  sideBySide,
   reviewReason,
   onToggle,
 }: {
@@ -180,18 +189,20 @@ function ProposalOperationRow({
   stale: boolean;
   blocked: boolean;
   applied: boolean;
+  applying: boolean;
+  sideBySide: boolean;
   reviewReason: string | null;
   onToggle: () => void;
 }) {
   const after = operation.replacementMarkdown ?? operation.markdown ?? operation.imageAltText ?? operation.imageAssetId ?? "";
-  const before = operation.originalExcerpt ?? operation.anchorExcerpt ?? "";
-  const disabled = stale || blocked || applied;
+  const before = operation.action === "replace_document" ? operation.expectedMarkdown ?? operation.originalExcerpt ?? "" : operation.originalExcerpt ?? operation.anchorExcerpt ?? "";
+  const disabled = stale || blocked || applied || applying;
   return (
-    <div className={["rounded-lg border p-2", stale || blocked ? "border-orange-200 bg-brand-hover/70" : applied ? "border-green-200 bg-green-50/60" : "border-line bg-white"].join(" ")}>
-      <label className="flex items-start gap-2">
+    <div className={["py-2", stale || blocked ? "bg-brand-hover/40" : ""].join(" ")}>
+      <label className="flex min-h-11 items-start gap-2">
         <input
           type="checkbox"
-          className="mt-1 h-3.5 w-3.5 accent-brand-orange"
+          className="mt-1 h-5 w-5 shrink-0 accent-brand-orange"
           checked={selected}
           disabled={disabled}
           onChange={onToggle}
@@ -206,13 +217,13 @@ function ProposalOperationRow({
           </span>
           <span className="mt-1 block text-[11px] font-medium leading-4 text-ink-primary">{operation.summary}</span>
           <span className="mt-1 block text-[10px] leading-4 text-ink-secondary">{operationPlacementLabel(operation)}</span>
-          <span className="mt-1 block truncate font-mono text-[9px] text-ink-secondary">{operation.documentId}</span>
+          <span className="mt-1 block truncate text-[11px] text-ink-secondary">{operation.documentLabel ?? "Documento de destino"}</span>
           {reviewReason ? <span className="mt-1 block text-[10px] leading-4 text-brand-orange">{reviewReasonLabel(reviewReason)}</span> : null}
         </span>
       </label>
       {before || after ? (
-        <div className="mt-2 grid gap-1.5 text-[10px] leading-4 md:grid-cols-2">
-          <DiffPane title="Actual" text={before || "Sin texto reemplazado"} tone="before" />
+        <div className={["mt-2 grid gap-3 text-[11px] leading-5", sideBySide ? "md:grid-cols-2" : ""].join(" ")}>
+          <DiffPane title="Base enviada" text={before || "Sin texto reemplazado"} tone="before" collapsed={!sideBySide && operation.action === "replace_document"}/>
           <DiffPane title="Propuesta" text={after || "Sin vista previa"} tone="after" />
         </div>
       ) : null}
@@ -220,16 +231,19 @@ function ProposalOperationRow({
   );
 }
 
-function DiffPane({ title, text, tone }: { title: string; text: string; tone: "before" | "after" }) {
+function DiffPane({ title, text, tone, collapsed = false }: { title: string; text: string; tone: "before" | "after"; collapsed?: boolean }) {
+  if (collapsed) return <details className="min-w-0"><summary className="min-h-11 cursor-pointer py-3 text-[11px] font-semibold text-ink-secondary">{title}</summary><p className="whitespace-pre-wrap break-words p-2 text-[11px] leading-5 text-ink-primary">{text}</p></details>;
   return (
-    <div className={["min-w-0 rounded-md border p-2", tone === "after" ? "border-orange-100 bg-brand-hover/40" : "border-line bg-panel/70"].join(" ")}>
+    <div className={["min-w-0 p-2", tone === "after" ? "bg-brand-hover/30" : "bg-panel/50"].join(" ")}>
       <p className="mb-1 text-[9px] font-semibold uppercase text-ink-secondary">{title}</p>
-      <p className="max-h-24 overflow-y-auto whitespace-pre-wrap break-words text-[10px] text-ink-primary">{text}</p>
+      <p className="whitespace-pre-wrap break-words text-[11px] leading-5 text-ink-primary">{text}</p>
     </div>
   );
 }
 
 function reviewReasonLabel(reason: string) {
+  if (reason === "permission_revoked") return "La edición con IA está desactivada. Se conserva esta propuesta para revisión.";
+  if (reason === "source_changed") return "Hay cambios nuevos desde el envío a IA. Conserva la propuesta como copia para revisarla.";
   if (reason === "stale") return "El documento cambió desde que se generó la propuesta.";
   if (reason === "anchor_ambiguous") return "El texto de referencia aparece varias veces; elige o ajusta el fragmento antes de aplicar.";
   if (reason === "anchor_not_found") return "El texto de referencia ya no aparece en el documento.";

@@ -1,0 +1,8 @@
+export type ProjectTemplate={schemaVersion:1;id:string;name:string;description:string;createdAt:string;archiveSha256:string;sourceArchiveSha256:string;archiveBytes:number;fileCount:number;directoryCount:number;retired:boolean;revision:string};
+export type ProjectTemplateInventory={templates:ProjectTemplate[];complete:boolean;warnings:string[];maximumEntries:number;maximumBytes:number;storedBytes:number};
+
+export type ProjectTemplateCatalogue={format:"knownext.project-template-catalogue";schemaVersion:1;entries:{name:string;description:string;path:string;archiveSha256:string;archiveBytes:number;fileCount:number;directoryCount:number}[]};
+export type ProjectTemplateCatalogueChoice={index:number;name:string};
+export type ProjectTemplateCatalogueAttempt={schemaVersion:1;id:string;transferId:string;archiveSha256:string;revision:string;phase:"applying"|"completed"|"partial"|"uncertain";entries:{index:number;name:string;status:"pending"|"created"|"existing"|"unconfirmed";templateId:string|null}[];checkedAt:string;canReplay?:false;preservesSource?:true;createsProjects?:false};
+export type ProjectTemplateCatalogueReview={schemaVersion:1;transferId:string;archiveSha256:string;revision:string;entries:{index:number;name:string;sourceName:string;description:string;fileCount:number;directoryCount:number;archiveBytes:number;status:"new"|"existing"|"conflict";templateId:string|null}[];canApply:boolean;capacityAvailable:boolean;createsProjects:false;startsAi:false;preservesSource:true;checkedAt:string};
+export type ProjectTemplateCatalogueJob=import("./projectTransfer").ProjectTransferJob&{templateCatalogue:true;catalogue:ProjectTemplateCatalogue|null;catalogueOutcome:ProjectTemplateCatalogueAttempt|null};

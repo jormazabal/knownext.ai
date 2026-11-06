@@ -8,15 +8,23 @@ use knownext_storage::LocalApi;
 use serde_json::{json, Value};
 use std::{
     path::PathBuf,
-    sync::{Mutex, OnceLock},
+    sync::{Arc,Mutex, OnceLock},
 };
 use tauri::{plugin::PluginHandle, Manager, Emitter};
 static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
 static INIT_LOCK: Mutex<()> = Mutex::new(());
+static STATE_OWNER:Mutex<Option<(PathBuf,Arc<knownext_storage::RuntimeOwner>)>>=Mutex::new(None);
+pub fn state_owner(root:&std::path::Path)->Result<Arc<knownext_storage::RuntimeOwner>,String>{
+    let canonical=root.canonicalize().map_err(|_|"No se puede verificar el estado local de Android")?;
+    let mut owner=STATE_OWNER.lock().map_err(|_|"No se puede coordinar el estado local de Android")?;
+    if let Some((path,lease))=&*owner{return if path==&canonical{Ok(lease.clone())}else{Err("El proceso ya utiliza otro estado local".into())};}
+    let lease=Arc::new(knownext_storage::acquire_runtime_owner(root)?);*owner=Some((canonical,lease.clone()));Ok(lease)
+}
 static RUNTIME: OnceLock<(RecordingService, Mutex<LocalApi>)> = OnceLock::new();
 pub struct AndroidRecording(pub PluginHandle<tauri::Wry>);
 pub fn init_runtime(root: PathBuf) -> Result<RecordingService, String> {
     let _guard = INIT_LOCK.lock().map_err(|e| e.to_string())?;
+    state_owner(&root)?;
     let _ = rustls::crypto::ring::default_provider().install_default();
     if let Some((s, _)) = RUNTIME.get() {
         return Ok(s.clone());
@@ -28,7 +36,17 @@ pub fn init_runtime(root: PathBuf) -> Result<RecordingService, String> {
     }))?;
     let api = LocalApi::new(root, env!("CARGO_PKG_VERSION").into(), "mobile".into());
     let _ = RUNTIME.set((service.clone(), Mutex::new(api)));
+    let receipts_service=service.clone();
+    std::thread::spawn(move||{
+        let _=knownext_recording::transcription::reconcile_usage(&receipts_service,|receipt|{
+            RUNTIME.get().ok_or("Runtime no inicializado")?.1.lock().map_err(|_|"No se puede revisar el consumo de audio")?.record_recording_usage(receipt)
+        });
+    });
     Ok(service)
+}
+/// The foreground and background worker share all domain gates, including usage.
+pub fn local_api()->Result<LocalApi,String>{
+    Ok(RUNTIME.get().ok_or("Runtime no inicializado")?.1.lock().map_err(|_|"No se puede consultar el runtime Android")?.clone())
 }
 pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri::plugin::Builder::new("recording")
@@ -106,10 +124,15 @@ pub extern "system" fn Java_ai_knownext_mobile_RecordingBridge_nativeWork(
         let (s, api) = RUNTIME.get().ok_or("Runtime no inicializado")?;
         let more = knownext_recording::transcription::one_fragment(
             s,
-            || {
+            |project| {
+                let status=api.lock().map_err(|e|e.to_string())?.ai_spend_assessment(Some(project))?;
+                if status["checks"].as_array().is_some_and(|checks|checks.iter().any(|check|check["state"]!="ok")) { if let Some(app)=APP.get(){let _=app.emit("ai-budget-warning", &status);} }
                 api.lock()
                     .map_err(|e| e.to_string())?
-                    .recording_credential()
+                    .recording_transcription_credential(project)
+            },
+            |receipt| {
+                api.lock().map_err(|e|e.to_string())?.record_recording_usage(receipt)
             },
             |id, d, t| {
                 let document=api.lock().map_err(|e|e.to_string())?.create_recording_document(id,&d.project_id,d.folder_id.as_deref(),&d.name,t)?;

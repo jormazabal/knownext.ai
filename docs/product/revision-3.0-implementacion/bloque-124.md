@@ -1,0 +1,7 @@
+# Bloque124 · Audio portable como grabación local retenida
+
+F07/F11/F17/T02/T08. Catálogo y revisión explícitos del audio detenido del archivo privado; verificar todas las partes WAV/PCM y sus huellas antes de copiar. Importar a una identidad nativa estable ligada al receptor/ubicación/original/pistas, como sesión detenida que requiere revisión, sin cola, costes, envíos o caducidad automática. No adoptar estado del proveedor, transcripción como envío confirmado ni autoridad del origen; los originales y sus textos permanecen.
+
+Publicación exclusiva, PCM exacto y session.json al final; identidad ocupada/parcial/futura no se sustituye ni duplica. Presupuesto opcional antes del payload, protección ante captura/vista de niveles/dictado/envío activos y coordinación de ubicación. Ante acuse incierto consultar sin reenviar. Importación nativa por ventana principal y servicio Rust, sin rutas/PCM en React. Máximo128MiB y partes16MiB; metadatos y catálogos acotados. Android conserva la revisión de archivo pero la adopción nativa queda explícitamente pendiente mientras no exista integración móvil comprobada.
+
+Validar contratos de fuente alterada, base/ubicación/identidad, formato futuro, pistas múltiples, publicación detenida/retención/coste cero, presupuesto y preservación; SDK/interacciones, comprobación Tauri agrupada y campaña visual escritorio/320px. Sin suites completas, proveedores, instalación ni activación nativa.

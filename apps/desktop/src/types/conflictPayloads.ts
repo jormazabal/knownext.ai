@@ -1,0 +1,1 @@
+export type ConflictPayloads={schemaVersion:1;attemptId:string;revision:string;phase:"available"|"retiring"|"retired";remainingFiles:number;remainingBytes:number;archiveSha256:string;archiveBytes:number;fileName:string;canExport:boolean;canRetire:boolean;receiptPreserved:true;identityPreserved:true;containsLocalMetadata:true;canReplay:false;checkedAt:string};

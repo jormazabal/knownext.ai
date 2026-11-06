@@ -53,15 +53,11 @@ const handwrittenBrowserFileTypes: Record<HandwrittenExportFormat, { description
 export async function selectExportFilePath(defaultFileName: string, format: ExportFormat): Promise<string | null> {
   if (!isTauriRuntime()) return null;
 
-  try {
-    return await saveDialog({
+  return saveDialog({
       title: "Exportar documento",
       defaultPath: withExportExtension(defaultFileName, format),
       filters: [exportDialogFilters[format]],
     });
-  } catch {
-    return null;
-  }
 }
 
 export async function selectBrowserExportTarget(defaultFileName: string, format: ExportFormat): Promise<BrowserExportTarget | null> {
@@ -99,15 +95,11 @@ export async function selectBrowserExportTarget(defaultFileName: string, format:
 export async function selectHandwrittenExportFilePath(defaultFileName: string, format: HandwrittenExportFormat): Promise<string | null> {
   if (!isTauriRuntime()) return null;
 
-  try {
-    return await saveDialog({
+  return saveDialog({
       title: "Exportar nota a mano",
       defaultPath: withHandwrittenExportExtension(defaultFileName, format),
       filters: [handwrittenExportDialogFilters[format]],
     });
-  } catch {
-    return null;
-  }
 }
 
 export async function selectBrowserHandwrittenExportTarget(defaultFileName: string, format: HandwrittenExportFormat): Promise<BrowserExportTarget | null> {

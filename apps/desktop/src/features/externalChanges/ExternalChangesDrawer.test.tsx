@@ -3,10 +3,53 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ExternalChangesDrawer } from "./ExternalChangesDrawer";
 import type { ExternalChangeSet, Project, ProjectFileSyncOverview, ProjectSyncStatus } from "../../types/domain";
+import { reviewRemoteProject } from "../../lib/api/projectRemoteReview";
+vi.mock("../../lib/api/projectRemoteReview",()=>({reviewRemoteProject:vi.fn()}));
 
 describe("ExternalChangesDrawer", () => {
   afterEach(() => {
     cleanup();
+  });
+
+  it("opens read-only graph review and suppresses push, pull and replacement promises while diverged",async()=>{
+    vi.mocked(reviewRemoteProject).mockRejectedValueOnce(new Error("Referencia todavía no conocida"));
+    renderDrawer({syncStatus:{...syncStatus,state:"conflict",hasConflicts:true,diverged:true,pendingPush:true,pendingPull:true},openDrafts:[]});
+    expect(screen.queryByRole("button",{name:/Subir versiones a GitHub|Actualizar desde GitHub|Usar GitHub|Usar este equipo/})).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button",{name:"Revisar divergencia"}));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Referencia todavía no conocida");
+    expect(screen.getByRole("button",{name:"Cerrar revisión"})).toBeEnabled();
+  });
+
+  it("shows loading without claiming an empty result and retains the last checked files while refreshing", () => {
+    const first=renderDrawer({overview:null,openDrafts:[],busy:true});
+    expect(screen.getByRole("status")).toHaveTextContent("Comprobando el estado de los archivos");
+    expect(screen.queryByText("No hay archivos con estos filtros")).not.toBeInTheDocument();
+    first.unmount();renderDrawer({busy:true});
+    expect(screen.getByRole("status")).toHaveTextContent("última consulta de este proyecto");
+    expect(screen.getByText("SAAS.md")).toBeInTheDocument();
+  });
+
+  it("keeps selected filters when the compact filter section is folded", () => {
+    renderDrawer();const toggle=screen.getByRole("button",{name:"Filtrar archivos"});
+    expect(toggle).toHaveAttribute("aria-expanded","false");fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded","true");
+    fireEvent.click(screen.getByRole("button",{name:"Local: Todos"}));fireEvent.click(screen.getByRole("checkbox",{name:/Borrador/}));
+    expect(toggle).toHaveTextContent("1 activo");fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded","false");expect(screen.getByText("Notas.md")).toBeInTheDocument();
+  });
+
+  it("keeps keyboard focus inside and closes once with Escape",async()=>{
+    const user=userEvent.setup(),onClose=vi.fn();renderDrawer({onClose});
+    const first=screen.getByRole("button",{name:"Comprobar guardado y sincronización de nuevo"});
+    expect(first).toHaveFocus();await user.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(screen.getByRole("button",{name:"Comprobar de nuevo"})).toHaveFocus();
+    await user.tab();expect(first).toHaveFocus();await user.keyboard("{Escape}");expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("isolates the workspace and returns focus to the connected launcher",()=>{
+    const launcher=document.createElement("button");launcher.textContent="Owned launcher";document.body.append(launcher);launcher.focus();
+    const view=renderDrawer();expect(launcher.inert).toBe(true);view.unmount();
+    expect(launcher.inert).toBe(false);expect(launcher).toHaveFocus();launcher.remove();
   });
 
   it("renders the main file view ordered by modification date", () => {
@@ -107,6 +150,12 @@ describe("ExternalChangesDrawer", () => {
     expect(onOmitAll).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps draft files out of the publish count and removes stale actions without a review",()=>{
+    const owned={documentId:"doc-saas",path:"SAAS.md",name:"SAAS.md",isDirty:true,hasRecoveredDraft:false};
+    const first=renderDrawer({openDrafts:[owned]});expect(screen.queryByRole("button",{name:/Guardar seleccionados en historial/})).not.toBeInTheDocument();first.unmount();
+    renderDrawer({changeSet:{...changeSet,revision:null},openDrafts:[]});expect(screen.queryByRole("button",{name:/Guardar seleccionados en historial/})).not.toBeInTheDocument();expect(screen.getByText(/Comprueba de nuevo para revisar los archivos/)).toBeInTheDocument();
+  });
+
   it("shows GitHub pending work as versions instead of per-file upload copy", () => {
     renderDrawer({
       openDrafts: [],
@@ -177,7 +226,6 @@ function renderDrawer(overrides: Partial<Parameters<typeof ExternalChangesDrawer
       onOmitAll={vi.fn()}
       onPushGithub={vi.fn()}
       onPullGithub={vi.fn()}
-      onResolveGithubConflict={vi.fn()}
       onOpenGithubRepository={vi.fn()}
       onOpenDocument={vi.fn()}
       onSaveDocument={vi.fn()}
@@ -291,6 +339,7 @@ const overview: ProjectFileSyncOverview = {
 
 const changeSet: ExternalChangeSet = {
   id: "changes-1",
+  revision: "review-current",
   projectId: "project-1",
   title: "Cambios externos detectados",
   source: "git",
@@ -312,7 +361,7 @@ const changeSet: ExternalChangeSet = {
     omitted: 1,
     totalBytes: 140,
   },
-  items: [],
+  items: overview.files.filter(file=>file.change).map(file=>({id:file.change!.itemId,path:file.path,name:file.name,kind:file.kind,changeType:file.change!.changeType,risk:file.change!.risk,decision:file.change!.decision})),
 };
 
 const syncStatus: ProjectSyncStatus = {

@@ -14,6 +14,7 @@ type AiConversationViewProps = {
   events: AiConversationEvent[];
   pendingIntent: AiPendingIntent | null;
   editProposal?: AiEditProposal | null;
+  applyingEditProposalId?: string | null;
   staleEditOperationIds?: string[];
   blockedEditOperationReasons?: Record<string, string>;
   appliedEditOperationIds?: string[];
@@ -30,6 +31,7 @@ export function AiConversationView({
   events,
   pendingIntent,
   editProposal = null,
+  applyingEditProposalId = null,
   staleEditOperationIds = [],
   blockedEditOperationReasons = {},
   appliedEditOperationIds = [],
@@ -147,6 +149,7 @@ export function AiConversationView({
                         event={event}
                         pendingIntent={event.id === pendingActionEventId ? pendingIntent : null}
                         editProposal={event.id === pendingActionEventId ? editProposal : null}
+                        applyingEditProposalId={applyingEditProposalId}
                         staleEditOperationIds={staleEditOperationIds}
                         blockedEditOperationReasons={blockedEditOperationReasons}
                         appliedEditOperationIds={appliedEditOperationIds}
@@ -183,6 +186,7 @@ function AiEventBubble({
   event,
   pendingIntent,
   editProposal,
+  applyingEditProposalId,
   staleEditOperationIds,
   blockedEditOperationReasons,
   appliedEditOperationIds,
@@ -196,6 +200,7 @@ function AiEventBubble({
   event: AiConversationEvent;
   pendingIntent: AiPendingIntent | null;
   editProposal: AiEditProposal | null;
+  applyingEditProposalId?: string | null;
   staleEditOperationIds: string[];
   blockedEditOperationReasons: Record<string, string>;
   appliedEditOperationIds: string[];
@@ -258,6 +263,7 @@ function AiEventBubble({
             {onApplyEditProposal && onDiscardEditProposal ? (
               <AiEditProposalCard
                 proposal={editProposal}
+                applying={Boolean(editProposal && editProposal.id === applyingEditProposalId)}
                 staleOperationIds={staleEditOperationIds}
                 blockedOperationReasons={blockedEditOperationReasons}
                 appliedOperationIds={appliedEditOperationIds}

@@ -13,6 +13,13 @@ val tauriProperties = Properties().apply {
     }
 }
 
+val fontLicenseAssets = layout.buildDirectory.dir("generated/knownext-font-licenses")
+val prepareBundledFontLicense = tasks.register<Copy>("prepareBundledFontLicense") {
+    from("../../../crates/knownext-docs/assets/fonts/OFL.txt")
+    into(fontLicenseAssets.map { it.dir("licenses") })
+    rename("OFL.txt", "Noto-OFL.txt")
+}
+
 fun releaseVersionName(): String {
     return tauriProperties.getProperty("tauri.android.versionName")
         ?: file("../../../../../../VERSION").readText().trim()
@@ -51,6 +58,11 @@ android {
     }
     buildTypes {
         getByName("debug") {
+            if (providers.gradleProperty("knownextQa").orNull == "true") {
+                applicationIdSuffix = ".v3qa"
+                resValue("string", "app_name", "KnowNext.ai QA")
+                resValue("string", "main_activity_title", "KnowNext.ai QA")
+            }
             manifestPlaceholders["usesCleartextTraffic"] = "true"
             isDebuggable = true
             isJniDebuggable = true
@@ -77,7 +89,10 @@ android {
     buildFeatures {
         buildConfig = true
     }
+    sourceSets.getByName("main").assets.srcDir(fontLicenseAssets)
 }
+
+tasks.named("preBuild").configure { dependsOn(prepareBundledFontLicense) }
 
 rust {
     rootDirRel = "../../../"

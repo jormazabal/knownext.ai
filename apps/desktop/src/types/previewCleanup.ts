@@ -1,0 +1,3 @@
+export type PreviewCleanupEntry={id:string;revision:string;projectId:string;projectName?:string;path:string;name:string;bytes:number;generatedAt:string};
+export type PreviewCleanupInventory={schemaVersion:1;id:"preview-receipt-cleanup";checkedAt:string;scope:"preview-receipts-only";entries:PreviewCleanupEntry[];skipped:number;limited:boolean;limits:{entries:number;bytes:number;milliseconds:number;selection:number}};
+export type PreviewCleanupResult={id:string;checkedAt:string;scope:"preview-receipts-only";outcomes:Array<{id:string;status:"deleted"|"changed"|"unavailable"|"preserved"|"budget-exceeded"}>;deletedBytes:number};

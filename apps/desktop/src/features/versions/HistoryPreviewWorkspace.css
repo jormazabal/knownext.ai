@@ -1,0 +1,6 @@
+.knownext-history-workspace { overflow-wrap:anywhere; }
+.knownext-history-workspace select { min-width:0; }
+.knownext-history-workspace button[aria-pressed="true"] { color:#D85A12; background:#FFF1E8; }
+.knownext-history-columns { overflow-x:auto; }
+.knownext-history-columns > div { min-width:580px; }
+.knownext-history-line > span:last-child { overflow-wrap:anywhere; }

@@ -17,9 +17,10 @@
     "android:run": "pnpm --filter @knownext/desktop tauri:android:run",
     "build": "pnpm --filter @knownext/desktop build",
     "bundle:check-clean": "node scripts/check-client-bundle-clean.mjs",
+    "bundle:measure-load": "node scripts/measure-frontend-load.mjs",
     "test": "pnpm --filter @knownext/desktop test",
     "rust:check": "cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
-    "rust:test": "cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --workspace && cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
+    "rust:test": "node --test scripts/test-native.test.mjs && node scripts/test-native.mjs",
     "version:check": "node scripts/check-version.mjs",
     "release:secrets:check": "node scripts/check-release-secrets.mjs",
     "release:check": "pnpm version:check && pnpm build && pnpm bundle:check-clean && pnpm test && pnpm rust:test"

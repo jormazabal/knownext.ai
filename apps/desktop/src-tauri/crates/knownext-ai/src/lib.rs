@@ -1,3 +1,4 @@
+pub mod handwritten_ocr;
 use base64::Engine;
 use reqwest::blocking::{multipart, Client};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT};
@@ -957,7 +958,9 @@ pub fn generate_image(openai_key: Option<&str>, config: &Value, prompt: &str) ->
     let mut request = json!({
         "model": model,
         "prompt": prompt,
-        "n": config.get("maxImagesPerPrompt").and_then(Value::as_u64).unwrap_or(1).clamp(1, 4),
+        // This function returns one image. The runtime bounds distinct operations;
+        // never request and bill extra images that this response would discard.
+        "n": 1,
         "size": normalize_image_size_for_model(model, config.get("size").and_then(Value::as_str).unwrap_or("auto")),
         "quality": normalize_image_quality(config.get("quality").and_then(Value::as_str).unwrap_or("auto")),
         "output_format": normalize_image_format(config.get("outputFormat").and_then(Value::as_str).unwrap_or("png"))

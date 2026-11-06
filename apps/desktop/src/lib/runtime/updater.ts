@@ -101,6 +101,7 @@ declare global {
 }
 
 let pendingDesktopUpdate: Update | null = null;
+let downloadedDesktopUpdate: Update | null = null;
 let pendingAndroidUpdate: PendingAndroidUpdate | null = null;
 
 export function getUpdaterStatus(): UpdaterStatus {
@@ -126,9 +127,11 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
   if (!status.supported) return { supported: false, update: null };
 
   if (isMobileDeviceRuntime()) {
+    pendingDesktopUpdate=null;downloadedDesktopUpdate=null;
     return checkForAndroidUpdate();
   }
 
+  pendingAndroidUpdate=null;
   const { check } = await import("@tauri-apps/plugin-updater");
   pendingDesktopUpdate = await check({ timeout: 10000 });
 
@@ -138,9 +141,9 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
   };
 }
 
-export async function installUpdate(onProgress?: (progress: UpdateDownloadProgress) => void) {
+export async function installUpdate(onProgress?: (progress: UpdateDownloadProgress) => void,beforeInstall?:()=>Promise<void>) {
   if (pendingAndroidUpdate) {
-    await installAndroidUpdate(pendingAndroidUpdate, onProgress);
+    await installAndroidUpdate(pendingAndroidUpdate, onProgress,beforeInstall);
     pendingAndroidUpdate = null;
     return;
   }
@@ -151,12 +154,18 @@ export async function installUpdate(onProgress?: (progress: UpdateDownloadProgre
 
   let downloadedBytes = 0;
   let contentLength: number | undefined;
-  await pendingDesktopUpdate.downloadAndInstall((event) => {
+  if(downloadedDesktopUpdate!==pendingDesktopUpdate){
+  await pendingDesktopUpdate.download((event) => {
     if (event.event === "Started") contentLength = event.data.contentLength;
     const progress = mapDownloadProgress(event, downloadedBytes, contentLength);
     downloadedBytes = progress.downloadedBytes;
     onProgress?.(progress);
   });
+  downloadedDesktopUpdate=pendingDesktopUpdate;
+  }
+  // Protect the revisions created DURING download immediately before installation.
+  await beforeInstall?.();
+  await pendingDesktopUpdate.install();
 
   const { relaunch } = await import("@tauri-apps/plugin-process");
   await relaunch();
@@ -300,12 +309,16 @@ function readAndroidPackageInfo(bridge: AndroidUpdaterBridge): AndroidPackageInf
   };
 }
 
-async function installAndroidUpdate(update: PendingAndroidUpdate, onProgress?: (progress: UpdateDownloadProgress) => void) {
+async function installAndroidUpdate(update: PendingAndroidUpdate, onProgress?: (progress: UpdateDownloadProgress) => void,beforeInstall?:()=>Promise<void>) {
   const bridge = requireAndroidUpdaterBridge();
   if (!bridge.canRequestPackageInstalls()) {
     bridge.openInstallPermissionSettings();
     throw new Error("Android necesita permiso para instalar actualizaciones desde KnowNext.ai. Actívalo y vuelve a pulsar Actualizar.");
   }
+
+  // This Android bridge has one combined operation: retain protection for download
+  // and installer launch instead of pretending there is a later interception point.
+  await beforeInstall?.();
 
   const requestId = `android-update-${Date.now()}`;
   const payload = {
@@ -318,6 +331,7 @@ async function installAndroidUpdate(update: PendingAndroidUpdate, onProgress?: (
   };
 
   await new Promise<void>((resolve, reject) => {
+    const deadline=setTimeout(()=>{cleanup();reject(new Error("No se confirmó la apertura del instalador Android. Comprueba el estado antes de repetir la actualización."));},30*60_000);
     const onEvent = (event: Event) => {
       const detail = (event as AndroidUpdaterEvent).detail;
       if (!detail || detail.requestId !== requestId) return;
@@ -353,9 +367,9 @@ async function installAndroidUpdate(update: PendingAndroidUpdate, onProgress?: (
         reject(new Error(detail.data?.message ?? "No se pudo instalar la actualización Android."));
       }
     };
-    const cleanup = () => window.removeEventListener("knownext-android-updater", onEvent);
+    const cleanup = () => {clearTimeout(deadline);window.removeEventListener("knownext-android-updater", onEvent);};
     window.addEventListener("knownext-android-updater", onEvent);
-    bridge.downloadAndInstall(JSON.stringify(payload));
+    try{bridge.downloadAndInstall(JSON.stringify(payload));}catch(error){cleanup();reject(error);}
   });
 }
 

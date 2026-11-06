@@ -25,7 +25,20 @@ private const val MAX_UPDATE_MANIFEST_BYTES = 256 * 1024
 private const val MAX_UPDATE_REDIRECTS = 5
 
 class MainActivity : TauriActivity() {
+    private var imeViewportCleanup: (() -> Unit)? = null
     private var recordingWebView: WebView? = null
+    // Informational lifecycle signal. It neither grants native authority nor promises a JS checkpoint before process death.
+    private fun emitWorkspaceVisibility(visible: Boolean) {
+        runCatching { recordingWebView?.evaluateJavascript("window.dispatchEvent(new CustomEvent('knownext:activity-visibility',{detail:{visible:$visible}}))", null) }
+    }
+    override fun onPause() {
+        emitWorkspaceVisibility(false)
+        super.onPause()
+    }
+    override fun onResume() {
+        super.onResume()
+        emitWorkspaceVisibility(true)
+    }
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -40,10 +53,20 @@ class MainActivity : TauriActivity() {
 
     override fun onWebViewCreate(webView: WebView) {
         super.onWebViewCreate(webView)
+        CredentialVault.install()
         recordingWebView = webView
+        webView.post { imeViewportCleanup?.invoke(); imeViewportCleanup = installImeViewport(webView) }
         webView.addJavascriptInterface(this,"KnownextRecordingIntent")
+        webView.addJavascriptInterface(KnowNextAppearance(this, webView), "KnownextAppearance")
         updaterBridge = KnowNextAndroidUpdater(this, webView)
         webView.addJavascriptInterface(updaterBridge!!, "KnownextAndroidUpdater")
+    }
+
+    override fun onDestroy() {
+        imeViewportCleanup?.invoke()
+        imeViewportCleanup = null
+        recordingWebView = null
+        super.onDestroy()
     }
 }
 

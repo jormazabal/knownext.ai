@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, mkdirSync, rmSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,7 @@ const sdkRoot = process.env.ANDROID_HOME ?? join(process.env.LOCALAPPDATA ?? "",
 const ndkHome = process.env.NDK_HOME ?? join(sdkRoot, "ndk", "28.2.13676358");
 const javaHome = process.env.JAVA_HOME ?? "C:\\Program Files\\Android\\Android Studio\\jbr";
 const abi = process.env.KNOWNEXT_ANDROID_ABI ?? "arm64";
+const qaBuild = process.env.KNOWNEXT_ANDROID_QA === "1";
 const androidApiLevel = process.env.KNOWNEXT_ANDROID_API_LEVEL ?? "35";
 const llvmBin = join(ndkHome, "toolchains", "llvm", "prebuilt", process.platform === "win32" ? "windows-x86_64" : "linux-x86_64", "bin");
 const commandExtension = process.platform === "win32" ? ".cmd" : "";
@@ -76,13 +77,16 @@ try {
   if (process.platform !== "win32") chmodSync(gradleWrapper, 0o755);
   run(
     process.platform === "win32" ? "gradlew.bat" : "./gradlew",
-    [target.gradleTask, "-x", target.gradleTask.replace("assemble", "rustBuild")],
+    [target.gradleTask, "-x", target.gradleTask.replace("assemble", "rustBuild"), ...(qaBuild ? ["-PknownextQa=true"] : [])],
     join(repoRoot, "apps", "desktop", "src-tauri", "gen", "android"),
     env,
   );
 
   const apk = join(repoRoot, "apps", "desktop", "src-tauri", "gen", "android", "app", "build", "outputs", "apk", ...target.apkPath);
-  const output = join(repoRoot, "output", target.outputName);
+  const metadata = JSON.parse(readFileSync(join(dirname(apk), "output-metadata.json"), "utf8"));
+  const expectedPackage = qaBuild ? "ai.knownext.mobile.v3qa" : "ai.knownext.mobile";
+  if (metadata.applicationId !== expectedPackage) throw new Error(`Refusing to copy APK with unexpected package: ${metadata.applicationId}`);
+  const output = join(repoRoot, "output", qaBuild ? target.outputName.replace(".apk", "-qa.apk") : target.outputName);
   mkdirSync(dirname(output), { recursive: true });
   copyFileSync(apk, output);
   console.log(`APK: ${output}`);

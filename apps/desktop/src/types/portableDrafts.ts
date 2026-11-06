@@ -1,0 +1,5 @@
+import type {RecoveryCopy} from "./recovery";
+export type PortableDraftEntry={id:string;path:string;name:string};
+export type PortableDraftCatalog={schemaVersion:1;projectId:string;revision:string;checkedAt:string;limited:boolean;unavailable:number;scope:"portable-drafts-only";items:PortableDraftEntry[]};
+export type PortableDraftReview={schemaVersion:1;projectId:string;entryId:string;catalogRevision:string;revision:string;checkedAt:string;documentId:string;path:string;kind:"document"|"handwritten-note";preview:string;sourceUpdatedAt:string|null;bytes:number;sourceSha256:string;copyKey:string;copyState:"absent"|"present"|"incomplete"|"blocked";copy:RecoveryCopy|null;canCopy:boolean;canResume:boolean;baseMatches:boolean;resumeReason:string;preservesSource:true;startsAi:false};
+export type PortableDraftResult={schemaVersion:1;projectId:string;entryId:string;requestRevision:string;status:"copied"|"draft_ready";checkedAt:string;copy:RecoveryCopy;review:PortableDraftReview;preservesSource:true;startsAi:false};

@@ -1,0 +1,46 @@
+name: Quality
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    name: Frontend and native contracts
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.0.8
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Validate version and production bundle
+        run: pnpm version:check && pnpm build && pnpm bundle:check-clean
+      - name: Frontend regression
+        run: pnpm --filter @knownext/desktop test --maxWorkers=4 --minWorkers=1
+      - name: Native regression with isolated fixtures
+        shell: pwsh
+        run: |
+          foreach ($name in @('KNOWNEXT_SHARED_PROJECT_FIXTURE','KNOWNEXT_SHARED_STATE_FIXTURE','KNOWNEXT_SHARED_MODE','KNOWNEXT_OWNED_LOCK_FIXTURE','KNOWNEXT_OWNED_LOCK_MODE')) {
+            Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+          }
+          pnpm rust:test
+          exit $LASTEXITCODE
