@@ -2,6 +2,15 @@
 
 All KnowNext.ai releases use one monolithic application version for the frontend, Tauri shell, Rust runtime, Windows updater, and Android updater.
 
+## 3.0.0 - local candidate C1 (not published)
+
+- Consolidated the v3 local-first workspace, contextual panels, batch actions and simpler/advanced settings.
+- Added reviewed editing/history/reversion, resource/template workflows, portable state, integrity/conflict recovery and bounded retention/quotas/backups.
+- Completed compact recording, minutes and handwritten-note workflows, research evidence review and honest capability/coverage states.
+- Deferred secondary views, reduced initial JavaScript by14.32%, and added private session-only timing counters and bounded Unicode search.
+- Source regression:1,158frontend and740Rust cases passed plus two explicit synthetic benchmarks; installed candidate acceptance is recorded separately.
+- Real-provider AI evaluation, physical/human acceptance and signed production-update validation remain separate. No release has been published.
+
 ## 2.6.0 - 2026-10-30
 
 - Added meeting recording from the Windows system tray, the application and project folders, with microphone/system audio selection, signal meters, pause/resume and Markdown transcription using the existing OpenAI credential.

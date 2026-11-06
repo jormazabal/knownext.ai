@@ -156,3 +156,12 @@ If Android infrastructure fails after Windows assets were built and verified, fi
 The SDK setup explicitly requests `platform-tools`; the deprecated `tools` package is no longer distributed by Google and fails the old action default. The 2.6.0 initial run passed Windows but hit that SDK setup failure before compiling Android.
 
 Android release builds pin Temurin Java 21 instead of inheriting the runner default. The recovery build compiled Rust successfully but Gradle 8.14.3 rejected the newer runner Java with `Unsupported class file major version 69`; Java 21 matches the validated local Kotlin build.
+
+
+## Local candidate before publication
+
+A local candidate may use VERSION3.0.0 with a C1 label in its notes before any tag or public release exists. Keep all checked manifests aligned and rebuild packaging inputs. Do not run release.yml or publish assets during local acceptance. When the user requires reuse of a completed regression, preserve its evidence/inputs and run only checks invalidated by version, packaging or reproduced defects; do not call release:check blindly because it repeats both full suites. This does not assert that the remote release gate has run.
+
+Windows isolation uses the explicit tauri.candidate.conf.json overlay: separate productName/identifier and MSI UpgradeCode, updater artifacts disabled only for the QA bundle. The normal updater key and production UpgradeCode stay unchanged. This package validates local installation/runtime, not signed production upgrade. Android QA debug uses its separate applicationId and existing debug certificate; emulator x86_64 does not certify ARM64 hardware. No production keys are regenerated.
+
+The3.0 download links in the candidate source refer to the future release; they are not verified public downloads before publication. Signing preflight failures remain blocking for distributable signed assets, even if a local QA installer can be built and installed.
