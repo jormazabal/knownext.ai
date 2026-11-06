@@ -177,7 +177,50 @@
                 <File Id="UpdateTaskUninstaller" Source="uninstall-task.ps1" KeyPath="yes" Checksum="yes"/>
             </Component>
             {{/if}}
-            {{resources}}
+            <!-- Tauri's generated resource XML uses file KeyPaths and omits
+                 per-user directory removal. This template accepts only the
+                 reviewed Noto license; check-installer-resources.mjs rejects
+                 additions or replacements before bundling. Do not emit the
+                 generated resource XML or reuse its random component IDs. -->
+            <?ifndef env.TAURI_KNOWNEXT_FONT_LICENSE?>
+                <?error TAURI_KNOWNEXT_FONT_LICENSE must identify the reviewed bundled Noto license?>
+            <?endif?>
+            {{#each resource_file_ids ~}}
+                {{#unless @first}}
+                    <?error The per-user installer requires an explicit component for every additional resource?>
+                {{/unless}}
+            {{else}}
+                <?error The per-user installer requires the bundled Noto license resource?>
+            {{/each~}}
+            <Directory Id="KnownextResourceCrates" Name="crates">
+                <Directory Id="KnownextResourceDocs" Name="knownext-docs">
+                    <Directory Id="KnownextResourceAssets" Name="assets">
+                        <Directory Id="KnownextResourceFonts" Name="fonts">
+                            <!-- One license component per upgrade family. The
+                                 family UUID is stable across versions and is
+                                 distinct for the public and C1 installers;
+                                 it is not used by another component. WiX cannot
+                                 auto-generate a GUID for this mixed file/HKCU
+                                 component, so do not restore Guid="*" here. -->
+                            <Component Id="KnownextNotoLicense" Guid="{{upgrade_code}}" Win64="$(var.Win64)">
+                                <File Id="KnownextNotoLicenseFile"
+                                      Name="OFL.txt"
+                                      Source="$(env.TAURI_KNOWNEXT_FONT_LICENSE)" />
+                                <RegistryValue Root="HKCU"
+                                               Key="Software\\{{manufacturer}}\\{{product_name}}\Components"
+                                               Name="Noto font license"
+                                               Type="integer"
+                                               Value="1"
+                                               KeyPath="yes" />
+                                <RemoveFolder Id="RemoveKnownextResourceFonts" Directory="KnownextResourceFonts" On="uninstall" />
+                                <RemoveFolder Id="RemoveKnownextResourceAssets" Directory="KnownextResourceAssets" On="uninstall" />
+                                <RemoveFolder Id="RemoveKnownextResourceDocs" Directory="KnownextResourceDocs" On="uninstall" />
+                                <RemoveFolder Id="RemoveKnownextResourceCrates" Directory="KnownextResourceCrates" On="uninstall" />
+                            </Component>
+                        </Directory>
+                    </Directory>
+                </Directory>
+            </Directory>
             <Component Id="CMP_UninstallShortcut" Guid="*">
 
                 <Shortcut Id="UninstallShortcut"
@@ -235,9 +278,7 @@
 
             <ComponentRef Id="RegistryEntries"/>
 
-            {{#each resource_file_ids as |resource_file_id| ~}}
-                <ComponentRef Id="{{ resource_file_id }}"/>
-            {{/each~}}
+            <ComponentRef Id="KnownextNotoLicense"/>
 
             {{#if enable_elevated_update_task}}
                 <ComponentRef Id="UpdateTask" />

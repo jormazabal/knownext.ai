@@ -165,3 +165,12 @@ A local candidate may use VERSION3.0.0 with a C1 label in its notes before any t
 Windows isolation uses the explicit tauri.candidate.conf.json overlay: separate productName/identifier and MSI UpgradeCode, updater artifacts disabled only for the QA bundle. The normal updater key and production UpgradeCode stay unchanged. This package validates local installation/runtime, not signed production upgrade. Android QA debug uses its separate applicationId and existing debug certificate; emulator x86_64 does not certify ARM64 hardware. No production keys are regenerated.
 
 The3.0 download links in the candidate source refer to the future release; they are not verified public downloads before publication. Signing preflight failures remain blocking for distributable signed assets, even if a local QA installer can be built and installed.
+
+
+## Per-user Windows license resource contract (C1)
+
+The custom WiX template explicitly installs the single reviewed Noto OFL resource under a component with an HKCU registry key path and four empty-directory removal rules. Its stable component GUID uses the upgrade-family UUID, distinct between production and the C1 overlay. Handlebars variables in registry paths retain the template double-backslash escaping; inspect the generated MSI Registry table before accepting a packaging change.
+
+`pnpm --filter @knownext/desktop tauri:build` supplies the repository license path through `scripts/build-windows.mjs`. The beforeBundleCommand guard accepts exactly the configured OFL resource and rejects absent/replaced/additional mappings or an unrelated source path. Future resources require an explicit template/guard review. The Windows release workflow supplies the same public source-path variable; this preparation has not executed that workflow.
+
+To repackage a previously compiled local C1 binary without repeating Rust/frontend builds, set TAURI_KNOWNEXT_FONT_LICENSE to the absolute repository OFL path and use the Tauri bundle command with the candidate overlay and --no-sign. This option applies only to local QA. Distribution still requires the existing signing identities. Keep the application-build commit and installer-definition commit separate in the evidence when a template-only fix is repackaged.

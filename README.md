@@ -14,7 +14,7 @@ Version 3.0.0 (local candidate C1) runs as a self-contained native app on Window
 - Frontend API boundary under `apps/desktop/src/lib/api`, backed by Tauri commands instead of HTTP.
 - Local JSON/file persistence with replaceable Rust services.
 
-There is no external product service, packaged auxiliary runtime, API port, or mobile workstation dependency in 2.6.0.
+There is no external product service, packaged auxiliary runtime, API port, or mobile workstation dependency in 3.0.0.
 
 ## Download
 

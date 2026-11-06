@@ -1,0 +1,10 @@
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {spawnSync} from 'node:child_process';
+import {assertInstallerResources,fontLicenseResource} from './check-installer-resources.mjs';
+import fs from 'node:fs';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),desktop=path.join(root,'apps/desktop');
+const source=path.join(desktop,'src-tauri',fontLicenseResource);
+assertInstallerResources(JSON.parse(fs.readFileSync(path.join(desktop,'src-tauri/tauri.conf.json'),'utf8')),source);
+const result=spawnSync(process.execPath,[path.join(desktop,'node_modules/@tauri-apps/cli/tauri.js'),'build',...process.argv.slice(2)],{cwd:desktop,env:{...process.env,TAURI_KNOWNEXT_FONT_LICENSE:source},stdio:'inherit',windowsHide:true});
+if(result.error)throw result.error;process.exitCode=result.status??1;

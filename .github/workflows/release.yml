@@ -131,6 +131,7 @@ jobs:
       - name: Build Tauri Windows release
         uses: tauri-apps/tauri-action@v0.6.2
         env:
+          TAURI_KNOWNEXT_FONT_LICENSE: ${{ github.workspace }}/apps/desktop/src-tauri/crates/knownext-docs/assets/fonts/OFL.txt
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}

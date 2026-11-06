@@ -4,6 +4,8 @@ All KnowNext.ai releases use one monolithic application version for the frontend
 
 ## 3.0.0 - local candidate C1 (not published)
 
+- Fixed per-user MSI installation of the bundled font license with an HKCU key path, explicit empty-directory cleanup and a strict resource mapping guard.
+
 - Consolidated the v3 local-first workspace, contextual panels, batch actions and simpler/advanced settings.
 - Added reviewed editing/history/reversion, resource/template workflows, portable state, integrity/conflict recovery and bounded retention/quotas/backups.
 - Completed compact recording, minutes and handwritten-note workflows, research evidence review and honest capability/coverage states.
