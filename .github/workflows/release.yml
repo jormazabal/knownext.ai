@@ -22,6 +22,9 @@ permissions:
 jobs:
   release-preflight:
     name: Check release signing inputs
+    # A repaired unpublished tag is dispatched explicitly for the affected
+    # platform so already verified packages are not built or replaced again.
+    if: ${{ github.event_name != 'push' || github.event.created == true }}
     runs-on: ubuntu-latest
 
     steps:
