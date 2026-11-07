@@ -18,10 +18,40 @@ $candidatePath = Join-Path $work 'KnowNext.ai_3.0.0_x64_en-US.msi'
 $baselineHash = '9fed807911e341aa6e4ba6f99e2553750cd2b56711a265723116ae7e1008d591'
 $family = '{389ECB95-C3D2-5327-872C-5E9508C14B2A}'
 $installKey = 'HKCU:\Software\knownext\KnowNext.ai'
-$uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall'
 $appData = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'ai.knownext.desktop'
 $localData = [Environment]::GetFolderPath('LocalApplicationData')
 $repo = Split-Path -Parent $PSScriptRoot
+$currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+
+Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class KnownextUpgradeMsi {
+    [DllImport("msi.dll", EntryPoint = "MsiGetProductInfoExW", ExactSpelling = true, CharSet = CharSet.Unicode)]
+    public static extern uint Read(string product, string sid, uint context, string property,
+        StringBuilder value, ref uint characters);
+}
+'@
+
+function Read-RegistrationProperty([string]$ProductCode, [uint32]$Context, [string]$Property) {
+    $buffer = [Text.StringBuilder]::new(1024)
+    [uint32]$characters = $buffer.Capacity
+    $sid = if ($Context -eq 4) { $null } else { $currentSid }
+    # NullString preserves a native NULL for per-machine context.
+    if ($Context -eq 4) { $sid = [NullString]::Value }
+    $status = [KnownextUpgradeMsi]::Read($ProductCode, $sid, $Context, $Property, $buffer, [ref]$characters)
+    if ($status -eq 1605) { return $null }
+    if ($status -ne 0) { throw "Windows Installer registration query failed for context $Context and property $Property (error $status)." }
+    return $buffer.ToString()
+}
+
+function Find-ProductRegistration([string]$ProductCode) {
+    foreach ($context in @(1, 2, 4)) {
+        $state = Read-RegistrationProperty $ProductCode $context 'State'
+        if ($null -ne $state) { [pscustomobject]@{ context = $context; state = $state } }
+    }
+}
 
 function Read-VerifiedMsi([string]$Path, [string]$ExpectedHash, [string]$Version) {
     $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -58,9 +88,16 @@ function Install-PerUserMsi([string]$Path, [string]$LogName) {
 }
 
 function Read-InstalledRegistration($Package) {
-    $entry = Get-ItemProperty -LiteralPath (Join-Path $uninstallKey $Package.productCode)
-    if ($entry.DisplayName -cne 'KnowNext.ai' -or $entry.DisplayVersion -ne $Package.version -or $entry.WindowsInstaller -ne 1) {
-        throw "Incorrect HKCU uninstall registration for $($Package.version)."
+    $registrations = @(Find-ProductRegistration $Package.productCode)
+    if ($registrations.Count -ne 1 -or $registrations[0].context -notin @(1, 2) -or $registrations[0].state -ne '5') {
+        throw "Expected one installed per-user Windows Installer registration for $($Package.version)."
+    }
+    $context = $registrations[0].context
+    $name = Read-RegistrationProperty $Package.productCode $context 'InstalledProductName'
+    $version = Read-RegistrationProperty $Package.productCode $context 'VersionString'
+    $assignment = Read-RegistrationProperty $Package.productCode $context 'AssignmentType'
+    if ($name -cne 'KnowNext.ai' -or $version -ne $Package.version -or $assignment -ne '0') {
+        throw "Incorrect Windows Installer product or per-user assignment for $($Package.version)."
     }
     $path = (Get-ItemProperty -LiteralPath $installKey -Name InstallDir).InstallDir
     $full = [IO.Path]::GetFullPath($path).TrimEnd('\', '/')
@@ -69,7 +106,7 @@ function Read-InstalledRegistration($Package) {
     }
     $exe = Join-Path $full 'knownext-ai-desktop.exe'
     if (!(Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'The registered installation does not contain the executable.' }
-    return [ordered]@{ installDir = $full; displayVersion = $entry.DisplayVersion; executableSha256 = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant() }
+    return [ordered]@{ installDir = $full; displayVersion = $version; context = $context; assignmentType = $assignment; machineRegistrationAbsent = $true; executableSha256 = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant() }
 }
 
 $proof = [ordered]@{ pass = $false; runner = 'github-hosted-windows'; scope = 'Per-user MSI installation and upgrade with synthetic AppData'; phase = 'verify-inputs' }
@@ -79,8 +116,8 @@ try {
     if ($proof.baseline.productCode -ieq $proof.candidate.productCode) { throw 'The MSI versions must have distinct ProductCodes.' }
     Assert-AppStopped
     if ((Test-Path -LiteralPath $appData) -or (Test-Path -LiteralPath $installKey) -or
-        (Test-Path -LiteralPath (Join-Path $uninstallKey $proof.baseline.productCode)) -or
-        (Test-Path -LiteralPath (Join-Path $uninstallKey $proof.candidate.productCode))) {
+        @(Find-ProductRegistration $proof.baseline.productCode).Count -or
+        @(Find-ProductRegistration $proof.candidate.productCode).Count) {
         throw 'The verification runner already has KnowNext state.'
     }
 
@@ -97,7 +134,7 @@ try {
     Install-PerUserMsi $candidatePath 'upgrade-3.0.0.log'
     $proof.candidateInstalled = Read-InstalledRegistration $proof.candidate
     if ($proof.candidateInstalled.installDir -ine $proof.baselineInstalled.installDir) { throw 'The upgrade changed the registered installation path.' }
-    if (Test-Path -LiteralPath (Join-Path $uninstallKey $proof.baseline.productCode)) { throw 'The old ProductCode remains registered after the upgrade.' }
+    if (@(Find-ProductRegistration $proof.baseline.productCode).Count) { throw 'The old ProductCode remains registered after the upgrade.' }
     if ((Get-FileHash -LiteralPath $witness -Algorithm SHA256).Hash -ine $witnessHash) { throw 'The synthetic AppData witness changed.' }
     $proof.witness = [ordered]@{ sha256 = $witnessHash; preserved = $true }
     $proof.oldProductRegistrationRemoved = $true
