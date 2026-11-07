@@ -1779,7 +1779,7 @@ Verificación focal cerrada:43casos backend únicos,39frontend/API,TypeScript/Vi
 
 SC01 avance05 cerrado en desarrollo y QA focal:47casos backend únicos y39frontend/API aprobados, sin suites completas repetidas. Revisión independiente cerró además consultas POST que fabricaban pendientes y nombres Git interpretados como patrones. Candidatas definitivas Windows/Androidx64/ARM64 verificadas con1.089fuentes/187recursos; Windows y Androidx64 conservan sesión y tres SHA, consultas/vistas sin marcadores. Carpeta vacía creada/retirada entre ambos, limpieza local104bytes protegida, reapertura/cancelación y Proton→local→mismo origen Proton verificados; Android conserva asociación y aviso de revisión, con recuperación natural tras fallo de red. [Recibo final](../../../output/sc01-proton-p2/final/acceptance-05.json) y [reporte visual](sincronizacion-alternativa/avance-05.html). QA detenida sin transferencias activas, producción intacta y sin publicación. P6 mantiene aceptación física ARM, caducidad/renovación Android,24h literales e interrupciones nativas forzadas; GitHub real y distribución/firma pública se evalúan aparte. Microsoft/Google y SOLO CLOUD siguen fuera.
 
-### Entrega3.0.0 · publicación autorizada ·7noviembre2026
+### Entrega 3.0.0 · publicada · 7 noviembre 2026
 
 El usuario ordena cerrar pendientes y publicar para actualización con tres agentes. Autoriza consolidación, commit/push, PR/merge, tag, CI y publicación, sustituyendo la restricción previa para esta entrega. Continúan sin gasto IA ni suites completas repetidas innecesariamente. Equipo real: coordinador release/CI/notas, WindowsSDK/MSI y AndroidSDK/APK/update, con ámbitos exclusivos.
 
@@ -1787,9 +1787,11 @@ El usuario ordena cerrar pendientes y publicar para actualización con tres agen
 - [x] Firmas existentes disponibles enGitHub; sin regenerar claves ni exportar secretos.
 - [x] Preparación SDK/crypto desde fuentes/locks; CRT estático Windows, OpenSSL Android desde fuente, recursos/notices/provenance y guardas.
 - [x] Baseline Android2.6firmada con testigo sintético enAVDown; UpgradeCode MSI coincide; aplicación habitual intacta.
-- [x] Notas3.0 y disclosure Proton experimental personal no comercial; reutilización de CI autenticada por árbol/herramientas/imagen.
-- [ ] Consolidar fuente, PR y única regresión completa CI del árbol revisado.
-- [ ] Construir MSI/NSIS+firmas/APKproducción y manifiestos; verificar paquetes/firmas/updateAndroid sintético.
-- [ ] Publicar release completa; verificar latest.json/android-latest.json, MSI/APK públicos y cerrar reporte con enlaces/hashes.
+- [x] Notas 3.0 y aviso de Proton experimental para uso personal no comercial. Una regresión completa en GitHub, reutilizada con los mismos insumos de producto, herramientas e imagen. Los arreglos de empaquetado tienen pruebas focales.
+- [x] Consolidación e integración: PR 92 y correcciones de empaquetado PR 93/94. Regresión aprobada en la ejecución 42331739232. Fuente del tag final `be4e59b4`.
+- [x] MSI/NSIS, firmas de actualización, APK de producción, manifiestos y fuentes de Proton comprobados. Actualización desde 2.6 en Windows hospedado y Android emulado: datos sintéticos conservados. Android guardó y reabrió sin red e inició y canceló Proton sin autorizar una cuenta.
+- [x] [Release pública 3.0.0](https://github.com/jormazabal/knownext.ai/releases/tag/v3.0.0): nueve archivos disponibles. Ambos manifiestos y las descargas MSI/APK devolvieron HTTP 200 y coincidieron por SHA-256 con los archivos verificados.
+
+[Reporte visual de entrega](avance-141.html) · [Recibo de publicación](../../development/release-3.0.0-verification.json). La verificación de actualización Windows usa un equipo aislado hospedado; el emulador Android ejecuta la APK ARM64 mediante traducción. No se modificó la instalación personal ni se repitieron las suites completas después de los ajustes de empaquetado.
 
 Microsoft/Google ySOLO CLOUD siguen aplazados. Las aceptaciones que requieren hardware/24h o datos personales no se convierten enPASS al publicar.
