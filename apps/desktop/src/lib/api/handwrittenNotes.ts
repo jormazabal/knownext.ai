@@ -22,23 +22,28 @@ export async function getHandwrittenNote(noteId: string): Promise<HandwrittenNot
   return requestJson<HandwrittenNoteRecord>(`/api/handwritten-notes/${encodeURIComponent(noteId)}`);
 }
 
+export function loadHandwrittenDiskVersion(noteId: string, expectedDraftWriteRevision:string|null=null): Promise<HandwrittenNoteRecord> {
+  return requestJson(`/api/handwritten-notes/${encodeURIComponent(noteId)}/draft/discard-and-read`, {method:"POST",body:JSON.stringify({expectedDraftWriteRevision})});
+}
+
 export async function saveHandwrittenNote(noteId: string, payload: SaveHandwrittenNotePayload): Promise<HandwrittenNoteRecord> {
   return requestJson<HandwrittenNoteRecord>(`/api/handwritten-notes/${encodeURIComponent(noteId)}`, {
     method: "PUT",
-    body: JSON.stringify(payload),
+    body: JSON.stringify({...payload,expectedDraftWriteRevision:payload.expectedDraftWriteRevision??null}),
   });
 }
 
 export async function saveHandwrittenNoteDraft(noteId: string, payload: SaveHandwrittenNoteDraftPayload): Promise<HandwrittenNoteDraftResponse> {
   return requestJson<HandwrittenNoteDraftResponse>(`/api/handwritten-notes/${encodeURIComponent(noteId)}/draft`, {
     method: "PUT",
-    body: JSON.stringify(payload),
+    body: JSON.stringify({...payload,expectedDraftWriteRevision:payload.expectedDraftWriteRevision??null}),
   });
 }
 
-export async function discardHandwrittenNoteDraft(noteId: string): Promise<void> {
+export async function discardHandwrittenNoteDraft(noteId: string, expectedDraftWriteRevision:string|null=null): Promise<void> {
   await requestJson<void>(`/api/handwritten-notes/${encodeURIComponent(noteId)}/draft`, {
     method: "DELETE",
+    body:JSON.stringify({expectedDraftWriteRevision}),
   });
 }
 

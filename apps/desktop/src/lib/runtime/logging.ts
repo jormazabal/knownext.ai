@@ -5,6 +5,9 @@ export type TraceLogStatus = {
   enabled: boolean;
   folderPath: string;
   filePath: string;
+  directoryExists?: boolean;
+  eventId?: string;
+  recorded?: boolean;
 };
 
 type TraceLogPayload = {
@@ -28,28 +31,30 @@ export async function getTraceLogStatus() {
 
 export async function recordTraceLog(payload: TraceLogPayload) {
   try {
+    // Free-form error text stays in the UI. The diagnostic bridge receives metadata only.
+    const metadata={level:payload.level??"error",source:diagnosticOperation(payload.source)};
     if (isTauriRuntime()) {
-      await invoke<TraceLogStatus>("record_trace_log", {
-        level: payload.level ?? "error",
-        source: payload.source,
-        message: payload.message,
-        detail: payload.detail ?? null,
-      });
-      return;
+      const receipt=await invoke<TraceLogStatus>("record_trace_log",metadata);
+      return receipt?.recorded ? receipt.eventId : undefined;
     }
 
-    await requestRuntimeJson<TraceLogStatus>("/api/runtime/logging", {
+    const receipt=await requestRuntimeJson<TraceLogStatus>("/api/runtime/logging", {
       method: "POST",
-      body: JSON.stringify({
-        level: payload.level ?? "error",
-        source: payload.source,
-        message: payload.message,
-        detail: payload.detail ?? null,
-      }),
+      body: JSON.stringify(metadata),
     });
+    return receipt?.recorded ? receipt.eventId : undefined;
   } catch {
     // Logging must never create a second user-visible error.
   }
+}
+
+function diagnosticOperation(source:string) {
+  const category=source.split('.')[1]??source;
+  if(["startup","project","ai","settings","runtime"].includes(category))return category;
+  if(["document","save","autosave","editor"].includes(category))return "document";
+  if(category==="config")return "settings";
+  if(category==="projects")return "project";
+  return "application";
 }
 
 export async function openTraceLogFolder(folderPath: string) {

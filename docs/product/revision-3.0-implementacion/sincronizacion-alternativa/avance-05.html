@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KnowNext.ai · Proton · avance05</title>
+<style>
+:root{color-scheme:light;--ink:#111827;--muted:#6b7280;--accent:#d85a12;--soft:#fff1e8}
+*{box-sizing:border-box}body{margin:0;background:#fff;color:var(--ink);font:16px/1.6 system-ui,"Segoe UI",sans-serif}
+main{max-width:1120px;margin:auto;padding:48px 28px}a{color:var(--accent);text-underline-offset:3px;overflow-wrap:anywhere}a:focus-visible,summary:focus-visible{outline:3px solid #f37021;outline-offset:4px}
+.eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}h1{font-size:clamp(30px,5vw,50px);line-height:1.12;letter-spacing:-.035em;font-weight:650;margin:14px 0 20px}
+h2{font-size:24px;line-height:1.25;letter-spacing:-.025em;margin:0 0 18px}h3{font-size:17px;line-height:1.4;margin:0 0 8px}p{margin:0 0 14px}.lead{font-size:20px;max-width:830px}.muted,figcaption{color:var(--muted)}
+.pill{display:inline-block;background:var(--soft);color:#8e350e;padding:5px 12px;border-radius:6px;font-size:13px;font-weight:600}.section{margin-top:42px}
+.summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;margin-top:28px}.summary article{padding:18px 20px;background:#fafafa;border-radius:12px;min-width:0}.summary strong{display:block;font-size:32px;line-height:1.2;margin-bottom:8px;font-weight:650}.summary span{font-size:14px;color:var(--muted)}.summary b{color:#374151;font-weight:600}
+.features{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px 36px}.features p{font-size:14px;color:#4b5563}
+.notice{background:var(--soft);border-radius:10px;padding:20px 24px;font-size:14px;color:#7c2d12}.notice p:last-child{margin:0}
+.checks{width:100%;border-collapse:collapse;table-layout:fixed;font-size:14px}.checks th,.checks td{padding:12px 12px 12px 0;text-align:left;vertical-align:top;border-bottom:1px solid #e5e7eb;overflow-wrap:anywhere}.checks th:first-child,.checks td:first-child{width:28%}
+.gallery{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px;align-items:start}.gallery.pair{grid-template-columns:repeat(2,minmax(0,1fr));max-width:760px;margin:auto}
+.native-gallery{grid-template-columns:1fr}.native-gallery figure a{max-width:none}
+figure{margin:0;min-width:0}figure img{display:block;width:100%;height:auto;border-radius:10px}figure a{display:block;max-width:390px;margin:auto}figcaption{padding-top:9px;font-size:12px;line-height:1.5}
+details{background:#fafafa;border-radius:10px;padding:16px 20px;margin:16px 0}summary{cursor:pointer;font-weight:600;min-height:32px}.group-note{font-size:14px;color:#4b5563;margin:10px 0 20px}.sources{font-size:13px;margin-top:18px}.sources a{display:inline-block;margin-right:14px;min-height:30px}
+li{margin:8px 0}.evidence{font-size:14px}footer{margin-top:40px;font-size:13px;color:var(--muted)}
+@media(max-width:700px){main{padding:28px 18px}.features,.gallery,.gallery.pair{grid-template-columns:1fr}.summary{gap:8px}.summary article{padding:13px 10px}.summary strong{font-size:26px}.summary span{font-size:12px}.lead{font-size:18px}.section{margin-top:32px}.checks{font-size:12px}.gallery figure{width:100%;max-width:390px;margin:auto}details{padding:14px 12px}.notice{padding:18px}}
+@media print{main{padding:0}.notice,figure,article{break-inside:avoid}details{break-inside:auto}}
+</style>
+</head>
+<body><main>
+<header>
+<div class="eyebrow">KnowNext.ai · SC01 · avance05</div>
+<h1>Continuidad sin perder el control.</h1>
+<p class="lead">Recuperar una operación, revisar el almacén y cambiar de sincronización conservando el trabajo y su origen.</p>
+<span class="pill">Desarrollo y QA focal cerrados</span>
+<p class="muted evidence">Candidatas QA listas, sin publicar. 47 contratos nativos y 39 de interfaz/API aprobados. Windows final y Android final x86_64 comprobados; ARM64 final verificado como paquete, sin aceptación física. Las evidencias P2 conservan su alcance.</p>
+<p class="sources"><a href="#windows-native">Windows real</a><a href="#visual">Vistas controladas</a><a href="#evidencia">Consultar la evidencia</a><a href="plan.md">Backlog vigente</a><a href="../../../../output/sc01-proton-p2/final/acceptance-05.json">Cierre verificado</a></p>
+</header>
+<div class="summary">
+<article><strong>4</strong><span><b>Agentes reales</b><br>Ámbitos asignados y revisión cruzada.</span></article>
+<article><strong>39</strong><span><b>Casos UI/API</b><br>Nombres únicos; las repeticiones no suman.</span></article>
+<article><strong>17</strong><span><b>Vistas controladas</b><br>Componente real, sin cuenta ni proveedor.</span></article>
+</div>
+<section class="section">
+<h2>Qué cambia para quien trabaja</h2>
+<div class="features">
+<article><h3>Confirmación fiable</h3><p>La espera agotada abre una consulta del intento. No repite el envío ni utiliza un «Al día» anterior como confirmación de una operación nueva.</p></article>
+<article><h3>Recepciones recuperables</h3><p>Los archivos completados se conservan. Si cambia uno pendiente o aparece un borrador, la aplicación ofrece una comparación vigente.</p></article>
+<article><h3>Carpetas vacías con contexto</h3><p>Sólo se retira una carpeta vacía cuando su base e identidad siguen siendo demostrables. Una recreación local se conserva; no hay borrado recursivo.</p></article>
+<article><h3>Limpieza revisada</h3><p>Separar lo protegido de lo recuperable, comprobar otra copia y poder recuperar, continuar o cancelar la misma operación, sin perder lo ya confirmado.</p></article>
+<article><h3>Cambiar sin perder el origen</h3><p>Preparar y verificar antes de activar. Volver es otra migración que incluye los cambios nuevos; el historial local permanece.</p></article>
+<article><h3>Réplicas informadas</h3><p>Un aviso detiene publicaciones al destino anterior en el nuevo motor y conserva recepción y trabajo local. No se promete detener clientes antiguos.</p></article>
+</div>
+</section>
+<section class="section" id="verificacion">
+<h2>Qué está comprobado</h2>
+<table class="checks"><thead><tr><th>Área</th><th>Estado de esta entrega</th></tr></thead><tbody>
+<tr><td>Interfaz y API</td><td>39 casos únicos correctos. Los cinco casos afectados de recuperación del destino y de su revisión pasaron; los resultados no afectados se reutilizan. Las últimas fuentes están incorporadas a Windows P2 y Android P2 instalado en QA.</td></tr>
+<tr><td>Pantallas</td><td>17 vistas controladas, comprobadas a 1280 y 390 px sin errores ni desbordamientos. Se añaden por separado tres capturas nativas Windows: no se suman como ensayos controlados ni como aceptación Android.</td></tr>
+<tr id="native-status"><td>Motor y ciclo de vida</td><td>47 casos Rust únicos aprobados: 36 reutilizados, seis de Git y cinco de consultas sin cambios. Las huellas acreditan ocho entradas no modificadas; sólo se repiten los afectados.</td></tr>
+<tr><td>SDK y sesión</td><td>Se reutiliza sólo la evidencia no afectada del <a href="avance-04.html">avance04</a>. No se vuelve a pedir acceso por cada cambio ni se atribuye ese resultado a los recorridos nuevos.</td></tr>
+<tr id="candidate-status"><td>Candidatas QA</td><td>Traslado Proton→local y retorno al mismo origen completados. Android recibió baja y aviso sin cambiar su asociación. Windows y Android finales pasaron las rutas afectadas; paquete ARM64 final verificado. Sin publicación ni aceptación ARM física.</td></tr>
+</tbody></table>
+</section>
+<section class="section notice" id="android">
+<h3>Regresión del sondeo cerrada en ambas candidatas</h3>
+<p>El sondeo del proyecto se marcaba como una edición aunque los archivos no hubieran cambiado. En la APK anterior una consulta aumentó los marcadores de dos a tres con los mismos hashes. El hook está corregido y sus dos contratos dirigidos pasan.</p>
+<p><a href="../../../../output/sc01-proton-p2/android-qa/scan-dirty-reproduction.json">Reproducción nativa anterior</a> · <a href="../../../../output/sc01-proton-p2/polling-contracts.log">Contratos del sondeo</a> · <a href="../../../../output/sc01-proton-p2/polling-affected-contract.log">Comprobación afectada</a>. Windows y Android P2 mantienen cero pendientes tras consultar; Android también conserva cero marcadores más de un minuto después. Se cierra este defecto concreto, no toda la aceptación de sincronización o migración.</p>
+<p>Las dos consultas adicionales y la selección literal Git también están corregidas, con contratos dirigidos aprobados y Windows/Android finales comprobados. No se repite la campaña completa.</p>
+</section>
+<section class="section" id="windows-native">
+<h2>Windows P2 · comprobación nativa parcial</h2>
+<p><span class="pill">Aplicación nativa · documentos sintéticos</span></p>
+<p>Candidata identificada por SHA256 <code>187c49c0…d7eec</code>, abierta con el perfil QA. Estos recorridos y sus tres capturas son independientes de las 17 vistas controladas de la galería siguiente. Las rutas corregidas tienen una comprobación final separada más abajo.</p>
+<table class="checks"><thead><tr><th>Recorrido Windows</th><th>Resultado observado</th></tr></thead><tbody>
+<tr><td>Sesión</td><td>Cuenta conectada sin nuevo login. Estado listo, cero pendientes y confirmación remota verdadera.</td></tr>
+<tr><td>Sondeo</td><td>Consulta correcta. El estado posterior sigue con cero pendientes y confirmación remota verdadera; no reaparece el pendiente anterior.</td></tr>
+<tr><td>Limpieza real</td><td>Una copia candidata de 104 bytes; operación completa con 104 bytes liberados. Material protegido conservado, sin purga remota y tres hashes originales intactos.</td></tr>
+<tr><td>Preparación del cambio</td><td>Proton a local: revisión sin bloqueos, tres archivos y 538 bytes. El destino está preparado para confirmar, conservando la asociación de origen.</td></tr>
+<tr><td>Recuperar al reabrir</td><td>La consulta recupera el mismo intento y revisión, muestra el destino local guardado y permite confirmarlo. La confirmación aún no se ha ejecutado.</td></tr>
+<tr><td>Cancelación posterior</td><td>La preparación se canceló de forma ordinaria, con el origen conservado y sin activación. Android publicó un antecedente causal nuevo; se concilia antes de revisar otra preparación.</td></tr>
+<tr><td>Baja de carpeta vacía</td><td>Un único envío correcto deja cero pendientes y confirmación remota verdadera, con tres hashes originales intactos. Android recibió después la baja sin alterar los archivos.</td></tr>
+<tr><td>Nuevo traslado a local</td><td>Otro intento, después de conciliar, completó el cambio: confirmación correcta, traslado integral y origen conservado. No es la preparación cancelada anterior.</td></tr>
+<tr><td>Retorno completado</td><td>Confirmación correcta e integral al mismo proyecto, cuenta y raíz original. Origen conservado; sin recuperación local ni cambios nuevos pendientes. Generación3, pausa conservada, cero pendientes, confirmación remota verdadera y tres hashes idénticos.</td></tr>
+</tbody></table>
+<p class="sources"><a href="../../../../output/sc01-proton-p2/windows-qa/runtime-receipts.json">Recibos nativos parciales Windows</a></p>
+<details>
+<summary>Ver las tres capturas nativas inspeccionadas</summary>
+<p class="group-note">La etiqueta de cuenta se ocultó en el DOM sólo para la evidencia visual. La sesión y los resultados del runtime se conservaron. Cada imagen corresponde a su momento: pausa, primera preparación recuperada y retorno posterior completado. No acreditan aceptación Android.</p>
+<div class="gallery native-gallery">
+<figure><a href="../../../../output/sc01-proton-p2/windows-qa/proton-native-paused.png"><img src="../../../../output/sc01-proton-p2/windows-qa/proton-native-paused.png" alt="Candidata nativa Windows en pausa, con cuenta recordada y su identidad ocultada para la evidencia."></a><figcaption>Estado pausado observado en la aplicación real. No se presenta esta imagen como una captura de «Al día».</figcaption></figure>
+<figure><a href="../../../../output/sc01-proton-p2/windows-qa/proton-native-migration-recovered.png"><img src="../../../../output/sc01-proton-p2/windows-qa/proton-native-migration-recovered.png" alt="Preparación nativa Proton a local recuperada tras reabrir, antes de su cancelación posterior."></a><figcaption>Preparación recuperada con el mismo intento y revisión. Esta imagen es anterior a su cancelación posterior; no muestra un cambio activado.</figcaption></figure>
+<figure><a href="../../../../output/sc01-proton-p2/windows-qa/proton-native-return-complete.png"><img src="../../../../output/sc01-proton-p2/windows-qa/proton-native-return-complete.png" alt="Retorno nativo completado al mismo origen Proton, con la identidad de cuenta ocultada sólo para la evidencia."></a><figcaption>Retorno confirmado al origen anterior. Mismo proyecto y raíz, generación3; los tres hashes originales permanecen idénticos.</figcaption></figure>
+</div>
+</details>
+<p class="notice"><strong>El primer intento no se activó.</strong> Otro intento posterior completó Proton→local y el retorno también quedó confirmado. Es evidencia del recorrido P2; las comprobaciones del binario final se distinguen a continuación.</p>
+</section>
+<section class="section" id="windows-final">
+<h2>Windows final · rutas afectadas comprobadas</h2>
+<p><span class="pill">Candidata final QA · comprobación dirigida correcta</span></p>
+<p>Binario <code>fcd5790f…efdcf5</code>, con perfil verificado: cuenta recordada, generación3 y pausa conservadas, cero pendientes y confirmación remota verdadera. Consultar cambios externos mantiene ese estado.</p>
+<p>Un PDF sintético externo de 15 bytes crea un pendiente real. Crear y actualizar su vista previa no genera marcadores falsos: permanecen en cero. Tras retirar sólo la copia comprobada por hash, vuelve a cero pendientes y confirmación remota verdadera. Los tres hashes originales siguen idénticos; una observación 181,113 segundos después conserva cero pendientes y confirmación verdadera.</p>
+<p class="evidence"><a href="../../../../output/sc01-proton-p2/final/windows-qa/readonly-acceptance.json">Windows final ejecutado en QA</a> · <a href="../../../../output/sc01-proton-p2/final/reused-evidence-inputs.json">Reutilización de evidencia por huellas</a>. Sin repetir la campaña de sincronización ni alterar datos productivos.</p>
+</section>
+<section class="section" id="android-final">
+<h2>Android final · actualización y consultas comprobadas</h2>
+<p><span class="pill">APK final QA · comprobación dirigida correcta</span></p>
+<p>APK <code>da5b6496…6d28b8</code> actualizada en el emulador. Conserva UID10217, cuenta recordada, los tres hashes originales, asociación, generación1, aviso y pausa.</p>
+<p>Una consulta de cambios externos y la creación/actualización de una vista previa devolvieron resultado correcto sin marcadores falsos. El PDF temporal de 15 bytes se retiró sólo tras verificar su hash y tipo. Final: cero marcadores y pendientes, sin error de inventario y journals vacíos.</p>
+<p>El aviso conserva el bloqueo de publicación y la confirmación remota falsa: no se presenta como «Al día». Se detuvo sólo la QA con journals vacíos; emulador y cuenta conservados. No se repitieron los recorridos anteriores ni suites completas.</p>
+<p class="evidence"><a href="../../../../output/sc01-proton-p2/android-qa/final-apk-focused-acceptance.json">Recibo Android final</a> · <a href="../../../../output/sc01-proton-p2/android-qa/final-apk-focused-acceptance.md">Alcance de la comprobación</a>.</p>
+<p class="evidence"><a href="../../../../output/sc01-proton-p2/final/native/arm64-v8a-apk-integrity.json">ARM64 final verificado</a>: 173.193.000 bytes, SHA256 <code>ccf1ac85…5a9d6e</code>. Firma, identidad, cinco bibliotecas y corte final de 1.089 fuentes y 187 archivos de interfaz correctos. Paquete sin instalar físicamente ni publicar.</p>
+<p class="evidence"><a href="../../../../output/sc01-proton-p2/final/native/android-qa-artifacts.json">Catálogo Android final</a> · <a href="../../../../output/sc01-proton-p2/final/acceptance-05.json">Cierre consolidado y alcance</a>.</p>
+</section>
+<section class="section" id="android-native">
+<h2>Android P2 · actualización y sondeo comprobados</h2>
+<p><span class="pill">Emulador QA · resultado nativo acotado</span></p>
+<p>La actualización conserva identidad de aplicación, cuenta recordada sin nuevo login y los tres tamaños y hashes originales. Se recibió vacía la carpeta remota «Carpeta vacía P2». El scheduler normal drenó los tres marcadores heredados, sin borrarlos manualmente.</p>
+<p class="evidence">El <a href="../../../../output/sc01-proton-p2/native/android-qa-artifacts.json">catálogo P2</a> verifica los paquetes x86_64 y ARM64 contra el mismo corte de 1.089 fuentes y 187 archivos de interfaz. ARM64 no tiene aceptación física. Son paquetes anteriores a las correcciones finales de consultas y Git.</p>
+<p>Una única consulta mantuvo cero marcadores. Más de un minuto después seguían cero pendientes, sin error de inventario y con los tres hashes intactos. <a href="../../../../output/sc01-proton-p2/android-qa/installed-update-acceptance.json">Recibo Android</a> · <a href="../../../../output/sc01-proton-p2/android-qa/installed-update-acceptance.md">Detalle y límites observados</a>.</p>
+<p>No se observó confirmación remota verdadera antes de pausar, porque había otra consulta al proveedor en curso. La pausa la interrumpió con el mensaje esperado de progreso conservado, sin intentos en journal y con un contador de fallo por la interrupción explícita. Es una observación distinta de los marcadores, que se mantuvieron en cero.</p>
+<p>Después del traslado a local, Android recibió la baja de carpeta y el aviso con antecedente causal verificado. Conserva los tres hashes, cuenta, asociación y generación1; no sigue automáticamente el nuevo destino. El estado pide revisión, bloquea publicación y conserva cero pendientes, sin afirmar «Al día».</p>
+<p>Un fallo inicial de conexión se recuperó con el reintento natural: sin login, envío manual ni replay, y sin errores ni fallos al terminar. Journals vacíos. <a href="../../../../output/sc01-proton-p2/android-qa/directory-and-relocation-acceptance.json">Recibo de baja y aviso</a> · <a href="../../../../output/sc01-proton-p2/android-qa/directory-and-relocation-acceptance.md">Alcance de esta recepción</a>.</p>
+<p class="notice">El bloqueo se acredita por la autoridad y el estado devuelto; no hubo otro inventario remoto para afirmar ausencia de escrituras. Se mantienen separadas las 17 vistas controladas, las tres capturas nativas Windows y estos recibos Android. Windows completó el retorno; Android no fue migrado.</p>
+</section>
+<section class="section" id="visual">
+<h2>Cómo se ve y cómo se utiliza</h2>
+<p><span class="pill">Componente real · datos controlados</span></p>
+<p class="muted">Las imágenes muestran la interfaz implementada con respuestas de ensayo. No son capturas de una cuenta real ni aceptación Windows/Android instalada. Abre una imagen para verla a tamaño completo.</p>
+<details open>
+<summary>01 · Esperar una confirmación sin repetir el envío</summary>
+<p class="group-note">El resultado incierto se consulta sin iniciar otro envío. Una confirmación anterior no reaparece durante la espera; el mensaje principal explica qué está ocurriendo.</p>
+<div class="gallery pair">
+<figure><a href="../../../../output/sc01-proton-p2/ui/proton-ack-waiting-390.png"><img src="../../../../output/sc01-proton-p2/ui/proton-ack-waiting-390.png" alt="Espera de confirmación: documentos conservados, consulta y pausa disponibles, envío deshabilitado."></a><figcaption>Espera con documentos locales conservados. El estado anterior no se presenta como «Al día» actual.</figcaption></figure>
+<figure><a href="../../../../output/sc01-proton-p2/ui/proton-ack-recovered-390.png"><img src="../../../../output/sc01-proton-p2/ui/proton-ack-recovered-390.png" alt="Confirmación recuperada mediante consulta: Al día con Proton."></a><figcaption>La consulta recupera la confirmación. Un solo envío; la actualización de estado no lo repite.</figcaption></figure>
+</div>
+<p class="sources"><a href="../../../../output/sc01-proton-p2/ui/proton-ack-waiting-1280.png">Espera en escritorio</a></p>
+</details>
+<details>
+<summary>02 · Revisar el almacén y recuperar una limpieza interrumpida</summary>
+<p class="group-note">El límite corresponde al almacén privado local, no a la cuota de Proton. Continuar y cancelar usan la operación revisada: cancelar conserva lo ya liberado y las copias que faltan por tratar.</p>
+<div class="gallery">
+<figure><a href="../../../../output/sc01-proton-p2/ui/proton-retention-review-390.png"><img src="../../../../output/sc01-proton-p2/ui/proton-retention-review-390.png" alt="Inventario del almacén privado, bytes protegidos y revisión de la limpieza."></a><figcaption>Revisar primero: material protegido, copias reconstruibles y espacio que se propone liberar.</figcaption></figure>
+<figure><a href="../../../../output/sc01-proton-p2/ui/proton-retention-recovery-390.png"><img src="../../../../output/sc01-proton-p2/ui/proton-retention-recovery-390.png" alt="Limpieza interrumpida recuperada con su progreso y opciones de continuar o cancelar lo pendiente."></a><figcaption>Recuperar la misma revisión y su progreso después de una interrupción.</figcaption></figure>
+<figure><a href="../../../../output/sc01-proton-p2/ui/proton-retention-cancelled-390.png"><img src="../../../../output/sc01-proton-p2/ui/proton-retention-cancelled-390.png" alt="Limpieza cancelada: espacio ya liberado contabilizado y copias pendientes conservadas."></a><figcaption>Cancelar lo pendiente sin fingir que se deshicieron las bajas ya confirmadas.</figcaption></figure>
+</div>
+<p class="sources"><a href="../../../../output/sc01-proton-p2/ui/proton-retention-review-1280.png">Revisión en escritorio</a></p>
+</details>
+<details>
+<summary>03 · Preparar, verificar y confirmar un cambio de sincronización</summary>
+<p class="group-note">Destino local, otra cuenta o ubicación Proton y GitHub compatible configurado. La revisión no activa el cambio; primero se verifica el destino y después se confirma. Los destinos anteriores verificables de este proyecto se eligen por su nombre.</p>
+<div class="gallery">
+<figure><a href="../../../../output/sc01-proton-p2/ui/proton-migration-review-390.png"><img src="../../../../output/sc01-proton-p2/ui/proton-migration-review-390.png" alt="Revisión de la cuenta y ubicación de destino antes de preparar la migración."></a><figcaption>Elegir cuenta y ubicación, revisar contenido y advertencias, sin introducir identificadores técnicos.</figcaption></figure>
+<figure><a href="../../../../output/sc01-proton-p2/ui/proton-migration-ready-390.png"><img src="../../../../output/sc01-proton-p2/ui/proton-migration-ready-390.png" alt="Destino verificado, origen conservado y confirmación final explícita."></a><figcaption>El origen sigue asociado hasta confirmar el destino ya verificado.</figcaption></figure>
+<figure><a href="../../../../output/sc01-proton-p2/ui/proton-migration-complete-390.png"><img src="../../../../output/sc01-proton-p2/ui/proton-migration-complete-390.png" alt="Cambio de sincronización completado con comprobante y origen conservado."></a><figcaption>Comprobante del cambio. La recepción de otros equipos sigue siendo una comprobación distinta.</figcaption></figure>
+</div>
+<p class="sources"><a href="../../../../output/sc01-proton-p2/ui/proton-migration-review-1280.png">Revisión en escritorio</a></p>
+</details>
+<details>
+<summary>04 · Distinguir recuperación local, cambios nuevos y réplicas anteriores</summary>
+<p class="group-note">Estos estados no son equivalentes. La copia local requiere una elección explícita; una edición posterior sigue pendiente; un aviso no adopta otra cuenta ni confirma el traslado automáticamente.</p>
+<div class="gallery">
+<figure><a href="../../../../output/sc01-proton-p2/ui/proton-local-recovery-complete-390.png"><img src="../../../../output/sc01-proton-p2/ui/proton-local-recovery-complete-390.png" alt="Recuperación local completada, con el alcance de la copia disponible."></a><figcaption>Recuperación desde la copia local disponible. No se atribuye contenido desconocido de otros dispositivos.</figcaption></figure>
+<figure><a href="../../../../output/sc01-proton-p2/ui/proton-switch-new-edits-pending-390.png"><img src="../../../../output/sc01-proton-p2/ui/proton-switch-new-edits-pending-390.png" alt="Cambio activo con nuevas ediciones locales pendientes, sin afirmar Al día."></a><figcaption>Asociación activa y ediciones posteriores pendientes; no se presenta una confirmación falsa.</figcaption></figure>
+<figure><a href="../../../../output/sc01-proton-p2/ui/proton-relocation-notice-390.png"><img src="../../../../output/sc01-proton-p2/ui/proton-relocation-notice-390.png" alt="Aviso de cambio en otro dispositivo: revisar conexión o recibir cambios sin publicar al origen anterior."></a><figcaption>Revisar el aviso conservando la recepción. Otros clientes antiguos pueden seguir enviando.</figcaption></figure>
+</div>
+<p class="sources"><a href="../../../../output/sc01-proton-p2/ui/proton-relocation-notice-1280.png">Aviso en escritorio</a></p>
+</details>
+<details>
+<summary>05 · Recuperar el destino guardado al reabrir</summary>
+<p class="group-note">La consulta recupera el proveedor, la cuenta, la ubicación y el contenido del intento. Un resumen de sólo lectura sustituye al formulario de una operación nueva. Si falta la cuenta no se usa otra por defecto; preparar y confirmar requieren mostrar el destino correcto.</p>
+<div class="gallery pair">
+<figure><a href="../../../../output/sc01-proton-p2/ui/proton-migration-recovered-destination-390.png"><img src="../../../../output/sc01-proton-p2/ui/proton-migration-recovered-destination-390.png" alt="Destino Proton verificado recuperado, con cuenta y ubicación guardadas antes de confirmar."></a><figcaption>El intento preparado muestra su cuenta y ubicación reales. La confirmación corresponde a ese destino guardado.</figcaption></figure>
+<figure><a href="../../../../output/sc01-proton-p2/ui/proton-migration-recovered-review-390.png"><img src="../../../../output/sc01-proton-p2/ui/proton-migration-recovered-review-390.png" alt="Revisión guardada recuperada con el destino real y preparación del mismo intento."></a><figcaption>Una revisión guardada se puede preparar con la misma identidad y revisión, sin empezar de nuevo.</figcaption></figure>
+</div>
+<p class="sources"><a href="../../../../output/sc01-proton-p2/ui/migration-recovery-visual-result.json">Recibo de estas dos vistas</a></p>
+</details>
+<p class="evidence"><a href="../../../../output/sc01-proton-p2/ui/visual-result.json">Campaña inicial y huellas</a> · <a href="../../../../output/sc01-proton-p2/ui/visual-result-ack.json">Acuse actualizado</a> · <a href="../../../../output/sc01-proton-p2/ui/migration-recovery-visual-result.json">Destino recuperado</a> · <a href="../../../../output/sc01-proton-p2/ui/report.md">Detalle de la interfaz</a></p>
+<p class="muted evidence">La primera observación detectó una confirmación antigua durante la espera. Se corrigió y se comprobó sólo el flujo afectado; las imágenes de diagnóstico anteriores no forman parte de esta galería.</p>
+</section>
+<section class="section" id="candidatas">
+<h2>Cierre y alcance de las candidatas</h2>
+<ol>
+<li>Contratos finales aprobados: 47 Rust y 39 UI/API únicos, conservando resultados no afectados y sin repetir suites completas.</li>
+<li>QA funcional final Windows y Android cerrada en las rutas afectadas. Paquete ARM64 final verificado; el catálogo P2 conserva su alcance propio. ARM físico no está aceptado.</li>
+<li>Regresión del sondeo cerrada en ambas candidatas; Android mantiene cero marcadores durante la observación posterior.</li>
+<li>Traslado posterior Proton→local y retorno al mismo origen confirmados. Baja y aviso recibidos en Android sin cambiar su asociación. El primer intento se recuperó y canceló sin activarse.</li>
+</ol>
+<p>ARM físico, caducidad real del token Android, intervalo literal de 24 horas, interrupción nativa forzada durante escritura de archivos y distribución productiva conservan su aceptación propia. No se hizo un inventario remoto adicional para demostrar ausencia de escrituras tras el aviso. GitHub tiene contratos y comprobación literal local, sin transferencia real remota.</p>
+</section>
+<section class="section" id="evidencia">
+<h2>Evidencia y límites</h2>
+<p class="evidence"><a href="../../../../output/sc01-proton-p2/engine/implementation-status.md">Motor y contratos preparados</a> · <a href="../../../../output/sc01-proton-p2/lifecycle/implementation.md">Conservación y migración</a> · <a href="../../../../output/sc01-proton-p2/storage-final-contracts.log">Registro de contratos agrupados</a></p>
+<p class="evidence"><a href="../../../../output/sc01-proton-p2/lifecycle-affected-contracts.log">Ciclo de vida revalidado</a> · <a href="../../../../output/sc01-proton-p2/migration-reopen-contract.log">Reapertura de la revisión</a> · <a href="../../../../output/sc01-proton-p2/critical-unit-tests.log">Unitarios críticos</a> · <a href="../../../../output/sc01-proton-p2/runtime-lanes-final.log">Admisión Tauri</a></p>
+<p class="evidence"><a href="../../../../output/sc01-proton-p2/final/git-literal-contracts.log">Git literal</a> · <a href="../../../../output/sc01-proton-p2/final/git-literal-affected.log">Único caso Git afectado</a> · <a href="../../../../output/sc01-proton-p2/final/readonly-polling-contracts-final.log">Cinco consultas sin cambios</a></p>
+<p>La limpieza retira sólo caché local demostrablemente reconstruible y conserva el contenido de Proton. El presupuesto mostrado corresponde al almacén privado del dispositivo; la cuota de la cuenta no se consulta en este recorrido. Los cambios de GitHub requieren capacidades y repositorio compatibles; el historial local se conserva con su mecanismo propio.</p>
+<p>Se reutiliza la aceptación anterior sólo dentro de su alcance. Las capturas controladas, una compilación y una transferencia real son evidencias distintas.</p>
+</section>
+<footer>
+<p><a href="avance-05.md">Detalle de la entrega</a> · <a href="plan.md">Plan vigente</a> · <a href="avance-04.html">Aceptación anterior</a></p>
+<p>Desarrollo y QA focal cerrados; candidatas QA listas, sin publicar. Sin suites completas repetidas, gasto IA ni documentos personales. Microsoft/Google y SOLO CLOUD quedan fuera de este corte.</p>
+</footer>
+</main></body></html>
+
+

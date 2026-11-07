@@ -1,0 +1,13 @@
+import {requestJson} from "./client";
+import {deliverConflictPayloads} from "./conflictPayloadDelivery";
+import type {ConflictPayloads} from "../../types/conflictPayloads";
+const hash=(v:unknown)=>typeof v==="string"&&/^[a-f0-9]{64}$/i.test(v);
+const size=(v:unknown,max:number)=>typeof v==="number"&&Number.isSafeInteger(v)&&v>=0&&v<=max;
+function validate(value:ConflictPayloads,id:string){if(!value||value.schemaVersion!==1||value.attemptId!==id||!hash(value.revision)||!["available","retiring","retired"].includes(value.phase)||!size(value.remainingFiles,8)||!size(value.remainingBytes,256*1024**2)||!hash(value.archiveSha256)||!size(value.archiveBytes,40*1024**2)||!value.archiveBytes||typeof value.fileName!=="string"||!value.fileName.endsWith(".knownext-conflict-backup.zip")||value.fileName.includes("/")||value.fileName.includes("\\")||typeof value.canExport!=="boolean"||typeof value.canRetire!=="boolean"||value.canExport!==(value.phase==="available")||value.canRetire!==(value.remainingFiles>0)||value.phase==="retired"&&(value.remainingFiles!==0||value.remainingBytes!==0)||value.receiptPreserved!==true||value.identityPreserved!==true||value.containsLocalMetadata!==true||value.canReplay!==false||!Number.isFinite(Date.parse(value.checkedAt)))throw Error("La respuesta no confirma la retirada de este recibo. Consulta sin repetir.");return value;}
+export async function getConflictPayloads(id:string){return validate(await requestJson<ConflictPayloads>(`/api/recovery/conflict-attempts/${encodeURIComponent(id)}/payloads`),id);}
+export async function runConflictPayloads(review:ConflictPayloads,kind:"backup"|"retire"){
+ if(kind==="backup"&&!review.canExport||kind==="retire"&&!review.canRetire)throw Error("Consulta el estado actual antes de continuar.");
+ const result=await deliverConflictPayloads(kind,review.attemptId,review.revision) as {schemaVersion:number;attemptId:string;reviewRevision?:string;requestRevision?:string;status:string;review?:ConflictPayloads;archiveSha256?:string;byteLength?:number;requestId:string;completedAt:string;fileName?:string};
+ if(!result||result.schemaVersion!==1||result.attemptId!==review.attemptId||(kind==="backup"?result.reviewRevision:result.requestRevision)!==review.revision||typeof result.requestId!=="string"||!result.requestId||!Number.isFinite(Date.parse(result.completedAt))||!["cancelled",kind==="backup"?"saved":"completed"].includes(result.status)||result.status==="saved"&&(result.archiveSha256!==review.archiveSha256||result.byteLength!==review.archiveBytes||typeof result.fileName!=="string"))throw Error("No se confirmó esta operación. Comprueba el estado y el respaldo antes de repetir.");
+ if(result.status==="completed")result.review=validate(result.review!,review.attemptId);return result;
+}

@@ -1,0 +1,17 @@
+# Avance120 · Las copias de proyectos retirados siguen contando
+
+[Reporte visual](avance-120.html) · [Definición](bloque-120.md) · [Plan](plan.md).
+
+El inventario incluye ubicaciones del catálogo de proyectos retirados, además del registro actual. Cada almacén conocido indica «Proyecto retirado · asociación conservada» o «Ubicación conservada · proyecto registrado», según corresponda. Conserva límites de cobertura, rutas regulares, deduplicación por contención y consulta sin reclamar propietario/activar/restaurar. La identidad de fila incorpora proyecto, tipo y ruta canónica, evitando colisiones si un mismo proyecto conserva copias en dos ubicaciones. En ubicaciones coincidentes se prefiere la asociación registrada.
+
+Retirar un proyecto no hace desaparecer sus bytes del inventario ni libera cuota ficticia: con el presupuesto activo siguen impidiendo nuevas copias cubiertas si agotan la capacidad. Catálogo retirado futuro/ilegible o ubicación ausente implica cobertura parcial; no se sustituye ni supone vacío. Se leen fichas de metadatos para localizar las carpetas, no su contenido. Asociación registrada/conservada no demuestra propietario actual del payload ni concede autoridad de restauración/borrado. Las carpetas no catalogadas y repositorios Git siguen fuera.
+
+Las consultas GET de inventario, copias retirables de conflictos y preferencias portables se clasifican como snapshots independientes en el despachador nativo. No esperan el mutex global de mutaciones documentales; mantienen sus propias revisiones/puertas. PUT de presupuesto y POST de preferencias conservan su vía de escritura serializada. Evita que una lectura de inventario acotada bloquee el documento por ese mutex.
+
+Verificación dirigida: dos contratos Rust nuevos pasan y el de solapamiento externo afectado se reutiliza tras comprobarlo con el nuevo código. Retirada real mantiene16MiB medidos, proyecto fuera del selector y archivos/catálogo/política intactos; nueva combinación de otro proyecto rechazada por ese presupuesto. Catálogo99 conservado y cobertura parcial. Registro trasladado con ubicación anterior conserva ambas filas (8bytes), IDs diferentes y ninguna reclamación/escritura de propietario en la nueva raíz. El caso afectado por clasificación se repite de forma aislada y comprueba GET independiente/escrituras no independientes. Tres casos frontend/SDK dirigidos pasan (dos nuevos/uno afectado), siete intactos omitidos; TypeScript correcto. El primer filtro Rust seleccionó cero casos y no se usa como evidencia; los logs finales acreditan ejecución real.
+
+App/Centro de Recuperación/inventario reales con API controlada: ubicaciones retirada/conservada, cobertura parcial y pie visible a320x560. Dos consultas y ninguna acción de escritura, entrega, inspección o restauración; sin errores/red externa/desbordamiento. Capturas517–519 inspeccionadas. Contratos temporales prueban almacenamiento real; el fixture visual no sustituye aceptación instalada.
+
+Evidencia: output/v3-retired-inventory-final-contract.log; output/v3-retired-inventory-independent-contract.log; output/v3-retired-inventory-overlap-affected.log; output/v3-retired-inventory-ui.log; output/v3-retired-inventory-types.log; output/v3-retired-inventory-browser-evidence.json.
+
+Continúan productores/cuotas de identidades y retención restantes, portabilidad/adopción nativa y ampliaciones del programa. Regresión final y aceptación física pendientes; Android/SAF sin compilación vigente. T17 real aplazada sin gasto. Sin instalación/publicación; VERSION2.6.0.

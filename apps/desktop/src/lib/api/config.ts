@@ -284,6 +284,12 @@ export function writeLocalAppPreferences(preferences: LocalAppPreferencesUpdate)
   window.localStorage.setItem(localPreferencesKey, JSON.stringify(nextPreferences));
 }
 
+/** A secondary preference cache must not prevent a confirmed native write. */
+export function cacheLocalAppPreferences(preferences: LocalAppPreferencesUpdate): boolean {
+  try { writeLocalAppPreferences(preferences); return true; }
+  catch { return false; }
+}
+
 function normalizeAppearance(appearance: AppearanceConfig | undefined): AppearanceConfig | undefined {
   if (!appearance) return undefined;
   return {

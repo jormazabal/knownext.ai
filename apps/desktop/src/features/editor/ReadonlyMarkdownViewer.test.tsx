@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReadonlyMarkdownViewer } from "./ReadonlyMarkdownViewer";
 
 const milkdownMocks = vi.hoisted(() => {
@@ -47,6 +47,10 @@ vi.mock("@milkdown/crepe", () => ({
 }));
 
 describe("ReadonlyMarkdownViewer", () => {
+  // Compile the real deferred renderer outside the short DOM readiness assertion.
+  // Milkdown itself stays mocked; readonly configuration is still exercised below.
+  beforeAll(async()=>{await import("./ReadonlyMilkdown");});
+  afterEach(cleanup);
   beforeEach(() => {
     milkdownMocks.crepeInstances.length = 0;
   });
@@ -60,11 +64,11 @@ describe("ReadonlyMarkdownViewer", () => {
     expect(screen.getByText("Sin contenido.").parentElement).toHaveStyle({ "--knownext-markdown-zoom": "1.25" });
   });
 
-  it("mounts Milkdown as a readonly viewer for Markdown content", () => {
+  it("mounts Milkdown as a readonly viewer for Markdown content", async () => {
     render(<ReadonlyMarkdownViewer markdown={"# Release\n\nContenido"} ariaLabel="Notas de release" emptyMessage="Sin notas." zoomPercent={90} />);
 
     expect(screen.getByLabelText("Notas de release")).toBeInTheDocument();
-    expect(screen.getByTestId("milkdown-root")).toBeInTheDocument();
+    expect(await screen.findByTestId("milkdown-root")).toBeInTheDocument();
     expect(screen.queryByText("Sin notas.")).not.toBeInTheDocument();
     expect(milkdownMocks.crepeInstances).toHaveLength(1);
     expect(milkdownMocks.crepeInstances[0]?.config).toMatchObject({

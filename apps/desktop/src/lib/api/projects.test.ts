@@ -37,6 +37,15 @@ vi.mock("./client", () => ({
 }));
 
 describe("projects API contracts", () => {
+  it("imports with explicit keep-both and rejects large files before reading them",async()=>{
+    const file=new File(["small"],"note.md");
+    await importProjectAttachment("project/one","folder",file);
+    expect(requestFormData).toHaveBeenLastCalledWith("/api/projects/project%2Fone/attachments?collision=keep-both&parentId=folder",expect.any(FormData));
+    vi.mocked(requestFormData).mockClear();
+    Object.defineProperty(file,"size",{value:32*1024*1024+1});
+    await expect(importProjectImage("project",null,file)).rejects.toThrow("32 MiB");
+    expect(requestFormData).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.mocked(requestJson).mockReset();
     vi.mocked(requestFormData).mockReset();
@@ -118,11 +127,11 @@ describe("projects API contracts", () => {
 
     const image = new File(["png"], "image.png", { type: "image/png" });
     await importProjectImage("project-1", "assets", image);
-    expect(requestFormData).toHaveBeenLastCalledWith("/api/projects/project-1/assets/images?parentId=assets", expect.any(FormData));
+    expect(requestFormData).toHaveBeenLastCalledWith("/api/projects/project-1/assets/images?collision=keep-both&parentId=assets", expect.any(FormData));
     await importProjectAttachment("project-1", null, new File(["doc"], "contract.docx"));
-    expect(requestFormData).toHaveBeenLastCalledWith("/api/projects/project-1/attachments", expect.any(FormData));
+    expect(requestFormData).toHaveBeenLastCalledWith("/api/projects/project-1/attachments?collision=keep-both", expect.any(FormData));
     await importProjectAttachment("project-1", "docs/guides", new File(["# Imported"], "imported.md", { type: "text/markdown" }));
-    expect(requestFormData).toHaveBeenLastCalledWith("/api/projects/project-1/attachments?parentId=docs%2Fguides", expect.any(FormData));
+    expect(requestFormData).toHaveBeenLastCalledWith("/api/projects/project-1/attachments?collision=keep-both&parentId=docs%2Fguides", expect.any(FormData));
     await getProjectImage("project-1", "assets/image.png");
     expect(requestJson).toHaveBeenLastCalledWith("/api/projects/project-1/assets/assets%2Fimage.png");
     await getProjectImageUsage("project-1", "assets/image.png");

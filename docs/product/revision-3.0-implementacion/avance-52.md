@@ -1,0 +1,3 @@
+# Avance52 · originales recuperables y estados coherentes
+
+[Reporte visual](avance-52.html), [backlog](backlog.csv) y [plan único](plan.md). H61 instalado y restituido: migración/recuperación, combinación Markdown y fronteras de persistencia verificadas en Android con fixtures propios. C51–52 añaden conservación antes de normalización ordinaria, caché monetaria validada y estados de carga/conflicto/confirmación corregidos. Casos focales y TypeScript correctos; no suites completas. C51–52 pendientes del siguiente hito empaquetado agrupado. Continúa todo el programa, empezando por conflictos manuscritos y restauración parcial. Sin piloto real2.6, proveedores ni aceptación física.

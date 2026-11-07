@@ -1,0 +1,42 @@
+import {useMemo,useState} from "react";
+import {ModalFrame} from "../../components/ui/ModalFrame";
+import {ReadonlyMarkdownViewer} from "../editor/ReadonlyMarkdownViewer";
+import {buildConflictMerge,composeConflictMerge,type MergeChoice} from "./conflictMerge";
+import type {DocumentConflictReview} from "../../types/documentConflicts";
+
+export function DocumentConflictDialog({name,localMarkdown,review,loading,busy,error,onReload,onApply,onClose,onCheckAttempt,checkingAttempt=false}:{name:string;localMarkdown:string;review:DocumentConflictReview|null;loading:boolean;busy:boolean;error:string;onReload:()=>void;onApply:(markdown:string)=>void;onClose:()=>void;onCheckAttempt?:()=>void;checkingAttempt?:boolean}){
+  const historical=review?.historySource,remote=review?.remoteSource;const otherLabel=remote?"Remoto conocido":historical?"Versión elegida":"En disco";
+  const key=review?JSON.stringify([review.documentId,review.locationRevision,review.diskFingerprint.sha256,review.draftRevision,localMarkdown,historical?.versionId,historical?.markdownSha256,remote?.revision,remote?.markdownSha256]):"pending";
+  const[state,setState]=useState<{key:string;choices:Record<string,MergeChoice>;whole?:"local"|"disk"}>({key,choices:{}});
+  const current=state.key===key?state:{key,choices:{}};
+  const model=useMemo(()=>review?buildConflictMerge(localMarkdown,review.remoteSource?.markdown??review.historySource?.markdown??review.diskMarkdown):null,[localMarkdown,review]);
+  const combined=model?composeConflictMerge(model,current.choices,current.whole):null;
+  const disabled=busy||loading;
+  const editingDisabled=disabled||!!onCheckAttempt;
+  const button="min-h-11 rounded-md px-3 text-xs font-medium hover:bg-panel disabled:opacity-50";
+  function choose(id:string,choice:MergeChoice){setState({key,choices:{...current.choices,[id]:choice}});}
+  return <ModalFrame label={remote?"Combinar con remoto conocido":historical?"Restaurar partes de una versión":"Combinar versiones del documento"} onClose={()=>{if(!busy)onClose();}} className="z-[95]">
+    <section aria-busy={disabled} className="flex max-h-[calc(100dvh-24px)] w-[min(1000px,calc(100vw-24px))] flex-col overflow-hidden rounded-lg bg-white shadow-menu">
+      <header className="shrink-0 px-5 pt-4"><h2 className="text-base font-semibold">{remote?"Combinar con remoto conocido":historical?"Restaurar partes":"Combinar versiones"}</h2><p className="mt-1 break-words text-xs text-ink-secondary">{name}{historical?` · versión ${historical.versionId.slice(0,8)}`:''}</p><p className="mt-2 text-xs leading-5 text-ink-secondary">Prepara un borrador sin sustituir el archivo.{remote?' La sincronización del proyecto seguirá pendiente.':historical?' Guarda después de revisar para registrar el cambio en tu historial.':''}</p></header>
+      {error&&<p role="alert" tabIndex={0} className="max-h-24 shrink-0 overflow-y-auto px-5 pt-3 text-xs leading-5 text-red-700">{error}</p>}
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
+        {remote&&<p className="text-xs leading-5 text-ink-secondary">Remoto conocido · {remote.remoteCommit.slice(0,8)}. Instantánea local; no se han consultado cambios nuevos. Si cambia la referencia, tendrás que revisarla otra vez.</p>}
+        {remote&&review?.remotePathChanged&&<p className="break-words text-xs leading-5 text-ink-secondary">Cambio de nombre detectado en el historial conocido: <strong>{remote.sourcePath}</strong>. Revisa su contenido. Solo se combina el texto; la ruta local se conserva.</p>}
+        {loading&&<p role="status" className="text-sm">Revisando la versión actual del disco…</p>}
+        <div className="flex flex-wrap items-center justify-between gap-x-2"><p className="text-xs text-ink-secondary">{model?.status==="ready"?(model.changes===0?"Las dos versiones coinciden.":current.whole?"Versión completa elegida":`${Object.keys(current.choices).length}/${model.changes} bloques elegidos`):"Revisión de versiones"}</p><button className={button} disabled={disabled} onClick={onReload}>{onCheckAttempt?"Nueva revisión":"Revisar de nuevo"}</button></div>
+        {model&&<>
+          {model.status==="limited"?<p role="status" className="text-xs leading-5">{model.reason} Puedes elegir una versión completa; no se muestra una comparación parcial.</p>:<>
+            {model.segments.filter(segment=>segment.type==="change").map((segment,index)=>segment.type==="change"&&<section key={segment.id} className="border-t border-line pt-3">
+              <h3 className="text-sm font-semibold">Bloque {index+1}</h3><div className="mt-2 grid gap-4 md:grid-cols-2"><div className="min-w-0"><h4 className="text-xs font-medium">Mi edición</h4><pre className="mt-1 max-h-44 overflow-auto whitespace-pre-wrap break-words rounded bg-panel p-3 text-xs leading-5">{segment.local||"Sin contenido en este bloque"}</pre></div><div className="min-w-0"><h4 className="text-xs font-medium">{otherLabel}</h4><pre className="mt-1 max-h-44 overflow-auto whitespace-pre-wrap break-words rounded bg-panel p-3 text-xs leading-5">{segment.disk||"Sin contenido en este bloque"}</pre></div></div>
+              <div className="mt-2 flex flex-wrap gap-1" role="group" aria-label={`Conservar en bloque ${index+1}`}>{([['local','Mi edición'],['disk',otherLabel],['both','Ambos · primero mi edición']] as const).map(([choice,label])=><button key={choice} type="button" className={`${button} ${current.choices[segment.id]===choice?"bg-brand-hover text-brand-dark":""}`} aria-pressed={current.choices[segment.id]===choice} disabled={editingDisabled} onClick={()=>choose(segment.id,choice)}>{label}</button>)}</div>
+            </section>)}
+          </>}
+          <details open={model.status==="limited"||!!current.whole} className="border-t border-line pt-2"><summary className="min-h-11 cursor-pointer py-3 text-xs font-medium">Elegir una versión completa{current.whole?` · ${current.whole==="local"?"mi edición":remote?"remoto conocido":historical?"versión elegida":"disco"}`:""}</summary><div className="flex flex-wrap gap-2"><button className={button} aria-pressed={current.whole==="local"} disabled={editingDisabled} onClick={()=>setState({key,choices:{},whole:"local"})}>Usar toda mi edición</button><button className={button} aria-pressed={current.whole==="disk"} disabled={editingDisabled} onClick={()=>setState({key,choices:{},whole:"disk"})}>{remote?'Usar todo el remoto conocido':historical?'Usar toda la versión elegida':'Usar todo el disco'}</button></div></details>
+          {combined!==null&&<details className="border-t border-line pt-2"><summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">Vista del borrador combinado</summary><ReadonlyMarkdownViewer markdown={combined} ariaLabel="Borrador combinado propuesto" emptyMessage="El borrador combinado está vacío"/></details>}
+        </>}
+        <details className="border-t border-line pt-2"><summary className="min-h-11 cursor-pointer py-3 text-xs font-medium">Cómo se conservan las versiones</summary><p className="text-xs leading-5 text-ink-secondary">Elige qué conservar en cada bloque. Se guardarán copias de tu edición, del disco y de la propuesta antes de preparar el borrador combinado.{remote?' También se conservará una copia independiente del contenido remoto conocido y la referencia de su versión.':historical?' La propuesta incluye también el contenido histórico revisado y su referencia.':''} El archivo original se mantiene hasta que guardes. Una nueva revisión reinicia las elecciones si han cambiado las versiones.</p></details>
+      </div>
+      <footer className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-line px-5 py-3"><button type="button" disabled={busy} className={button} onClick={onClose}>{onCheckAttempt?"Cerrar revisión":"Cancelar"}</button>{onCheckAttempt?<button type="button" disabled={disabled} className="min-h-11 rounded-md bg-brand-dark px-3 text-xs font-semibold text-white disabled:opacity-50" onClick={onCheckAttempt}>{busy?checkingAttempt?"Consultando intento…":"Conservando y preparando…":"Consultar intento"}</button>:<button type="button" disabled={disabled||!!error||combined===null} className="min-h-11 rounded-md bg-brand-dark px-3 text-xs font-semibold text-white disabled:opacity-50" onClick={()=>{if(combined!==null)onApply(combined);}}>{busy?"Conservando y preparando…":"Aplicar al borrador"}</button>}</footer>
+    </section>
+  </ModalFrame>;
+}

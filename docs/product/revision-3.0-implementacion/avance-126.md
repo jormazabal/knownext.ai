@@ -1,0 +1,15 @@
+# Avance126 · Un control compacto en bandeja y espacio de trabajo
+
+[Reporte visual](avance-126.html) · [Definición](bloque-126.md) · [Historial portable](avance-125.md) · [Plan](plan.md).
+
+Gestor lateral de Grabaciones comparte el control compacto: fuentes en una fila, tiempo/niveles/acciones fijos y sesiones visibles al entrar, cierre/Ajustes útiles y áreas integradas de44px. La ventana principal no se redimensiona por usar composición compacta: geometría exclusiva de recordings. Contexto de bandeja conservado; documento intacto al configurar, sin captura/envíos automáticos (126).
+
+El gestor integrado usa la composición compacta existente en lugar de volver a mostrar tarjetas grandes por fuente. Cabecera/cierre visibles; sesiones abiertas al entrar y lista con desplazamiento propio. Tiempo, fuentes, niveles y controles quedan fuera de ese desplazamiento. Ajustes cierra el gestor, actualiza el árbol como el cierre normal y abre la configuración del espacio; no aparece la acción redundante Abrir gestor. La bandeja mantiene cabecera oculta, sesiones inicialmente recogidas y su acceso al espacio principal.
+
+El modo integrado ofrece44px en botones/selectores/interruptores y disclosure de detalles. Los interruptores conservan una pista visual pequeña dentro de un área mayor; no se sustituyen por iconos sin etiqueta. La geometría nativa comprueba la identidad recordings antes de consultar monitor, tamaño o posición: reutilizar el diseño compacto en main no modifica su ventana. Android sigue sin usar geometría de escritorio. Estado de captura, destino, nombre inicial, escucha y acciones de sesiones mantienen sus contratos existentes.
+
+Verificación dirigida: cuatro casos nuevos pasan; tres del hook de geometría y uno del gestor integrado (siete casos anteriores no repetidos). TypeScript y comprobación Tauri Windows conjunta125–126 correctos. Campaña con App, documento Milkdown abierto, RecordingPanel y configuración reales, snapshots de grabación controlados: gestor integrado de escritorio/320x560, siete controles medidos con área mínima44px, tiempo en la misma posición al desplazar sesiones, configuración abierta sin perder documento y bandeja de420x480 con contexto anterior. Sin desbordamiento, errores, red externa, captura, transcripción o adopción de archivos. Capturas539–543 inspeccionadas. El navegador no acredita geometría/hardware nativos; esa rama se contrasta con mocks dirigidos y queda pendiente aceptación física.
+
+Evidencia: avance-126.md; output/v3-embedded-recording-ui.log; output/v3-history-recording-types.log; output/v3-history-recording-native-check.log; output/v3-embedded-recording-browser-evidence.json.
+
+Bloques125–126 cerrados localmente. Continúan convivencia de historiales, familias portables, audio Android, cuotas/productores/retención restantes y ampliaciones técnicas/funcionales/UX. Regresión completa solo al terminar la implementación; aceptación física y móvil pendientes. Sin suites completas ni gasto IA; VERSION2.6.0, sin instalación/publicación.

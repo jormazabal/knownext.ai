@@ -38,7 +38,7 @@ describe("GithubLoginDialog", () => {
     expect(screen.queryByText("GitHub remoto no configurado")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Abrir GitHub" }));
-    await user.click(screen.getByRole("button", { name: "Ya autoricé" }));
+    await user.click(screen.getByRole("button", { name: "Comprobar" }));
 
     expect(onOpenGithub).toHaveBeenCalledTimes(1);
     expect(onPoll).toHaveBeenCalledTimes(1);
@@ -71,7 +71,8 @@ describe("GithubLoginDialog", () => {
     );
 
     expect(screen.getByText("GitHub remoto no configurado")).toBeInTheDocument();
-    expect(screen.getByText(/mantiene el historial local activo/i)).toBeInTheDocument();
+    expect(screen.getByText(/el historial depende de la capacidad de tu dispositivo y de los ajustes del proyecto/i)).toBeInTheDocument();
+    expect(screen.queryByText(/mantiene el historial local activo/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Abrir GitHub" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Ya autoricé" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reintentar login" })).toBeInTheDocument();

@@ -1,47 +1,26 @@
-import {
-  AlertTriangle,
-  Check,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  ExternalLink,
-  FileText,
-  Maximize2,
-  Minus,
-  RefreshCw,
-  Search,
-  Sheet,
-  ZoomIn,
-} from "lucide-react";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
-import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
-import type { DocumentPreview, DocumentPreviewTextResponse, Project, ReferenceDocumentWorkspaceTab, SpreadsheetSheetResponse } from "../../types/domain";
-import {
-  createDocumentPreview,
-  getDocumentPreviewPdfUrl,
-  getDocumentPreviewText,
-  getSpreadsheetSheet,
-  openDocumentPreviewExternal,
-  refreshDocumentPreview,
-} from "../../lib/api/documentPreviews";
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+import { AlertTriangle } from "lucide-react";
+import { Fragment,useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState } from "react";
+import type {DocumentPreview,DocumentPreviewTextResponse,Project,ReferenceDocumentWorkspaceTab,SpreadsheetSheetResponse} from "../../types/domain";
+import {createDocumentPreview,getDocumentPreviewPdfUrl,getDocumentPreviewText,getSpreadsheetSheet,openDocumentPreviewExternal,refreshDocumentPreview} from "../../lib/api/documentPreviews";
+import {DocumentPreviewToolbar} from "./DocumentPreviewToolbar";
+import {createDeferredView} from "../../components/ui/createDeferredView";
+import type {PdfPreviewSurfaceProps} from "./PdfPreviewSurface";
+import {PreviewStatusState} from "./PreviewStatusState";
+import {emptyPreviewReadingState,previewReadingMemory,previewReadingScope,previewSourceRevision} from "./previewReadingMemory";
+import type {PdfReadingPosition,SheetReadingPosition} from "./previewReadingMemory";
+import {previewErrorMessage} from "./previewErrorMessage";
+const PdfPreviewSurface=createDeferredView<PdfPreviewSurfaceProps>(()=>import("./PdfPreviewSurface").then(module=>({default:module.PdfPreviewSurface})),"Preparando visor PDF…","No se pudo cargar el visor PDF. El original se conserva.");
 
 type ReferenceDocumentViewerProps = {
   project: Project;
   tab: ReferenceDocumentWorkspaceTab;
 };
 
-type PdfSearchHighlight = {
-  id: string;
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-};
-
-export function ReferenceDocumentViewer({ project, tab }: ReferenceDocumentViewerProps) {
+export function ReferenceDocumentViewer(props: ReferenceDocumentViewerProps) {
+  const scope=previewReadingScope(props.project,props.tab);
+  return <ReferenceDocumentViewerSession key={scope} {...props} scope={scope}/>;
+}
+function ReferenceDocumentViewerSession({ project, tab, scope }: ReferenceDocumentViewerProps & {scope:string}) {
   const [preview, setPreview] = useState<DocumentPreview | null>(null);
   const [textPreview, setTextPreview] = useState<DocumentPreviewTextResponse | null>(null);
   const [pdfUrl, setPdfUrl] = useState("");
@@ -51,13 +30,53 @@ export function ReferenceDocumentViewer({ project, tab }: ReferenceDocumentViewe
   const [zoomPercent, setZoomPercent] = useState(100);
   const [fitMode, setFitMode] = useState<"width" | "page" | null>("width");
   const [pageNumber, setPageNumber] = useState(1);
+  const [pdfPosition,setPdfPosition]=useState<PdfReadingPosition|null>(null);
+  const [sheetPositions,setSheetPositions]=useState<Record<string,SheetReadingPosition>>({});
+  const [lastPageFocus,setLastPageFocus]=useState<string|null>(null);
+  const sourceRevision=preview?previewSourceRevision(preview.sourceFingerprint):null;
+  const latestSource=useRef(sourceRevision);latestSource.current=sourceRevision;
+  const [pdfPageCount, setPdfPageCount] = useState<number|null>(null);
+  const [pdfSearchCount,setPdfSearchCount] = useState<number|null>(null);
+  const [pageNavigationSequence,setPageNavigationSequence] = useState(0);
+  const handlePdfPageCount=useCallback((count:number|null)=>{
+    setPdfPageCount(count);
+    if(count!==null)setPageNumber(current=>Math.max(1,Math.min(current,count)));
+  },[]);
+  const [openingExternal, setOpeningExternal] = useState(false);
+  const externalInFlight = useRef(false);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [operationError, setOperationError] = useState<string | null>(null);
+  const epoch = useRef(0);
+  const refreshing = useRef(false);
 
+  useLayoutEffect(()=>{
+    const state={query,zoomPercent,fitMode,pageNumber,pdfPosition,activeSheetId,sheetPositions,lastPageFocus};
+    if(preview?.status==="ready")previewReadingMemory.write(scope,sourceRevision,state);
+  },[scope,sourceRevision,preview?.status,query,zoomPercent,fitMode,pageNumber,pdfPosition,activeSheetId,sheetPositions,lastPageFocus]);
+  function acceptPreview(next:DocumentPreview) {
+    const revision=previewSourceRevision(next.sourceFingerprint);
+    const saved=next.status==="ready"?previewReadingMemory.read(scope,revision):null;
+    if(next.status!=="ready")previewReadingMemory.forget(scope);
+    const state=saved??emptyPreviewReadingState();
+    setQuery(state.query);setZoomPercent(state.zoomPercent);setFitMode(state.fitMode);
+    setPageNumber(state.pageNumber);setPdfPosition(state.pdfPosition);setLastPageFocus(state.lastPageFocus);
+    setSheetPositions(state.sheetPositions);
+    setActiveSheetId(next.sheets?.some(s=>s.id===state.activeSheetId)?state.activeSheetId:next.sheets?.[0]?.id??"");
+    setPreview(next);
+  }
   useEffect(() => {
+    ++epoch.current;
+    refreshing.current = true;
     let cancelled = false;
     setBusy(true);
     setError(null);
+    setOperationError(null);
+    setPageNumber(1);
+    setPdfPageCount(null);
+    setPdfSearchCount(null);
+    setOpeningExternal(false);
+    externalInFlight.current = false;
     setPreview(null);
     setTextPreview(null);
     setPdfUrl("");
@@ -66,22 +85,34 @@ export function ReferenceDocumentViewer({ project, tab }: ReferenceDocumentViewe
     createDocumentPreview(project.id, { path: tab.path, preferredMode: tab.format === "xlsx" ? "spreadsheet" : "document" })
       .then((nextPreview) => {
         if (cancelled) return;
-        setPreview(nextPreview);
-        setActiveSheetId(nextPreview.sheets?.[0]?.id ?? "");
+        acceptPreview(nextPreview);
       })
       .catch((requestError) => {
-        if (!cancelled) setError(requestError instanceof Error ? requestError.message : "No se pudo preparar la vista.");
+        if (!cancelled) setError(previewErrorMessage(requestError,"No se pudo preparar la vista."));
       })
       .finally(() => {
-        if (!cancelled) setBusy(false);
+        if (!cancelled) {
+          refreshing.current = false;
+          setBusy(false);
+        }
       });
     return () => {
       cancelled = true;
+      ++epoch.current;
     };
-  }, [project.id, tab.format, tab.path]);
+  }, [project.id, project.folderPath, tab.id, tab.format, tab.path]);
+
+  useEffect(()=>{
+    if(!preview||busy||preview.status!=="ready"||tab.format!=="pdf"||!tab.pageFocus||!Number.isSafeInteger(tab.pageFocus.pageNumber)||tab.pageFocus.pageNumber<1)return;
+    const token=JSON.stringify([tab.pageFocus.requestId,tab.pageFocus.pageNumber]);
+    if(lastPageFocus===token)return;
+    const page=Math.max(1,Math.min(tab.pageFocus.pageNumber,pdfPageCount??tab.pageFocus.pageNumber));
+    setPageNumber(page);setPdfPosition({pageNumber:page,offsetRatio:0,horizontalRatio:0});
+    setLastPageFocus(token);setPageNavigationSequence(sequence=>sequence+1);
+  },[preview,busy,tab.format,tab.pageFocus?.requestId,tab.pageFocus?.pageNumber,pdfPageCount,lastPageFocus]);
 
   useEffect(() => {
-    if (!preview) return;
+    if (!preview || preview.projectId !== project.id || preview.path !== tab.path) return;
     let cancelled = false;
     if (preview.availableRenditions.includes("text")) {
       void getDocumentPreviewText(project.id, preview.id).then((text) => {
@@ -93,15 +124,17 @@ export function ReferenceDocumentViewer({ project, tab }: ReferenceDocumentViewe
     if (preview.availableRenditions.includes("pdf")) {
       void getDocumentPreviewPdfUrl(project.id, preview.id).then((url) => {
         if (!cancelled) setPdfUrl(url);
+      }).catch((requestError) => {
+        if (!cancelled) setError(previewErrorMessage(requestError,"No se pudo cargar el PDF."));
       });
     }
     return () => {
       cancelled = true;
     };
-  }, [preview, project.id]);
+  }, [preview, project.id, tab.path]);
 
   useEffect(() => {
-    if (!preview || preview.format !== "xlsx" || !activeSheetId || !preview.availableRenditions.includes("workbook")) return;
+    if (!preview || preview.projectId !== project.id || preview.path !== tab.path || preview.format !== "xlsx" || !activeSheetId || !preview.availableRenditions.includes("workbook")) return;
     let cancelled = false;
     setSheet(null);
     getSpreadsheetSheet(project.id, preview.id, activeSheetId)
@@ -109,12 +142,12 @@ export function ReferenceDocumentViewer({ project, tab }: ReferenceDocumentViewe
         if (!cancelled) setSheet(nextSheet);
       })
       .catch((requestError) => {
-        if (!cancelled) setError(requestError instanceof Error ? requestError.message : "No se pudo cargar la hoja.");
+        if (!cancelled) setError(previewErrorMessage(requestError,"No se pudo cargar la hoja."));
       });
     return () => {
       cancelled = true;
     };
-  }, [activeSheetId, preview, project.id]);
+  }, [activeSheetId, preview, project.id, tab.path]);
 
   const searchCount = useMemo(() => {
     if (!query.trim() || !textPreview?.text) return 0;
@@ -122,19 +155,47 @@ export function ReferenceDocumentViewer({ project, tab }: ReferenceDocumentViewe
   }, [query, textPreview?.text]);
 
   async function reloadPreview(forceRefresh = false) {
-    if (!preview) return;
+    if (refreshing.current || (preview && (preview.projectId !== project.id || preview.path !== tab.path))) return;
+    const requestEpoch = epoch.current;
+    refreshing.current = true;
     setBusy(true);
-    setError(null);
+    setOperationError(null);
     try {
-      const nextPreview = forceRefresh
+      const nextPreview = forceRefresh && preview
         ? await refreshDocumentPreview(project.id, preview.id)
         : await createDocumentPreview(project.id, { path: tab.path, preferredMode: tab.format === "xlsx" ? "spreadsheet" : "document" });
-      setPreview(nextPreview);
-      setActiveSheetId(nextPreview.sheets?.[0]?.id ?? "");
+      if (epoch.current !== requestEpoch) return;
+      setError(null);
+      setPdfUrl("");
+      setPdfSearchCount(null);
+      setTextPreview(null);
+      setSheet(null);
+      acceptPreview({...nextPreview});
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "No se pudo actualizar la vista.");
+      if (epoch.current === requestEpoch) setOperationError(previewErrorMessage(requestError,"No se pudo actualizar la vista."));
     } finally {
-      setBusy(false);
+      if (epoch.current === requestEpoch) {
+        refreshing.current = false;
+        setBusy(false);
+      }
+    }
+  }
+
+  async function openExternal() {
+    if (!preview || preview.projectId !== project.id || preview.path !== tab.path || externalInFlight.current) return;
+    const requestEpoch = epoch.current;
+    externalInFlight.current = true;
+    setOpeningExternal(true);
+    setOperationError(null);
+    try {
+      await openDocumentPreviewExternal(project.id, preview.id);
+    } catch (requestError) {
+      if (epoch.current === requestEpoch) setOperationError(previewErrorMessage(requestError,"No se pudo abrir el documento en la aplicación externa."));
+    } finally {
+      if (epoch.current === requestEpoch) {
+        externalInFlight.current = false;
+        setOpeningExternal(false);
+      }
     }
   }
 
@@ -144,35 +205,39 @@ export function ReferenceDocumentViewer({ project, tab }: ReferenceDocumentViewe
   const workbookHasNoSheets = Boolean(canShowSheet && preview?.sheets?.length === 0);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-white">
+    <div className="reference-viewer flex h-full min-h-0 flex-col bg-white">
       <DocumentPreviewToolbar
         preview={preview}
         query={query}
-        searchCount={searchCount}
+        searchCount={preview?.format === "xlsx" ? searchCount : pdfSearchCount}
         zoomPercent={zoomPercent}
         fitMode={fitMode}
         pageNumber={pageNumber}
-        pageCount={preview?.pageCount ?? null}
+        pageCount={pdfUrl ? pdfPageCount : null}
+        busy={busy}
+        openingExternal={openingExternal}
         activeSheetId={activeSheetId}
-        onQueryChange={setQuery}
+        onQueryChange={value=>setQuery(value.slice(0,512))}
         onZoomChange={(nextZoom) => {
           setFitMode(null);
           setZoomPercent(clamp(nextZoom, 50, 220));
         }}
         onFitModeChange={(nextFitMode) => setFitMode(nextFitMode)}
         onSelectSheet={setActiveSheetId}
-        onPageChange={setPageNumber}
+        onPageChange={page=>{setPageNumber(page);setPdfPosition({pageNumber:page,offsetRatio:0,horizontalRatio:0});setPageNavigationSequence(sequence=>sequence+1);}}
         onRefresh={() => void reloadPreview(true)}
-        onOpenExternal={() => preview && void openDocumentPreviewExternal(project.id, preview.id)}
+        onOpenExternal={() => void openExternal()}
       />
+      {operationError && <p role="alert" className="shrink-0 break-words bg-orange-50 px-3 py-2 text-xs leading-5 text-orange-900">{operationError}</p>}
       <div className="flex min-h-0 flex-1">
         <div className="min-w-0 flex-1 bg-panel/40">
           {error || status === "error" || status === "unsupported" || status === "protected" ? (
             <PreviewErrorState
+              canOpenExternal={Boolean(preview)}
               title={status === "unsupported" ? "Vista integrada no disponible" : "No se pudo generar la vista"}
               message={preview?.error ?? error ?? "El documento no se pudo preparar para lectura."}
               onRetry={() => void reloadPreview(true)}
-              onOpenExternal={() => preview && void openDocumentPreviewExternal(project.id, preview.id)}
+              onOpenExternal={() => void openExternal()}
             />
           ) : status === "stale" ? (
             <PreviewStatusState
@@ -192,9 +257,12 @@ export function ReferenceDocumentViewer({ project, tab }: ReferenceDocumentViewe
                 title="No se encontraron hojas"
                 message="El libro se pudo abrir, pero no se detectaron hojas visibles para la vista integrada."
                 onRetry={() => void reloadPreview(true)}
-                onOpenExternal={() => preview && void openDocumentPreviewExternal(project.id, preview.id)}
+                onOpenExternal={() => void openExternal()}
               />
-            ) : canShowSheet && sheet ? <SpreadsheetPreviewSurface sheet={sheet} query={query} /> : (
+            ) : canShowSheet && sheet ? <SpreadsheetPreviewSurface key={`${sourceRevision}|${sheet.sheetId}`} sheet={sheet} query={query} position={sheetPositions[sheet.sheetId]} onPositionChange={position=>{
+              if(latestSource.current!==sourceRevision)return;
+              setSheetPositions(current=>({...Object.fromEntries(Object.entries(current).filter(([id])=>id!==sheet.sheetId).slice(-15)),[sheet.sheetId]:position}));
+            }} /> : (
               <PreviewStatusState title="Preparando hoja" message="Cargando la grilla solo lectura." />
             )
           ) : canShowPdf ? (
@@ -205,13 +273,20 @@ export function ReferenceDocumentViewer({ project, tab }: ReferenceDocumentViewe
               fitMode={fitMode}
               pageNumber={pageNumber}
               onPageChange={setPageNumber}
+              onPageCountChange={handlePdfPageCount}
+              onSearchCountChange={setPdfSearchCount}
+              navigationSequence={pageNavigationSequence}
+              readingPosition={pdfPosition}
+              onReadingPositionChange={position=>{if(latestSource.current===sourceRevision)setPdfPosition(position);}}
             />
+          ) : preview.availableRenditions.includes("pdf") ? (
+            <PreviewStatusState title="Preparando vista" message="Obteniendo la representación del documento."/>
           ) : (
             <PreviewErrorState
               title="Vista de páginas no disponible"
               message="No se pudo generar una vista paginada para este documento."
               onRetry={() => void reloadPreview(true)}
-              onOpenExternal={() => preview && void openDocumentPreviewExternal(project.id, preview.id)}
+              onOpenExternal={() => void openExternal()}
             />
           )}
         </div>
@@ -220,401 +295,9 @@ export function ReferenceDocumentViewer({ project, tab }: ReferenceDocumentViewe
   );
 }
 
-function DocumentPreviewToolbar({
-  preview,
-  query,
-  searchCount,
-  zoomPercent,
-  fitMode,
-  pageNumber,
-  pageCount,
-  activeSheetId,
-  onQueryChange,
-  onZoomChange,
-  onFitModeChange,
-  onSelectSheet,
-  onPageChange,
-  onRefresh,
-  onOpenExternal,
-}: {
-  preview: DocumentPreview | null;
-  query: string;
-  searchCount: number;
-  zoomPercent: number;
-  fitMode: "width" | "page" | null;
-  pageNumber: number;
-  pageCount: number | null;
-  activeSheetId: string;
-  onQueryChange: (query: string) => void;
-  onZoomChange: (zoom: number) => void;
-  onFitModeChange: (mode: "width" | "page") => void;
-  onSelectSheet: (sheetId: string) => void;
-  onPageChange: (page: number) => void;
-  onRefresh: () => void;
-  onOpenExternal: () => void;
-}) {
-  const searchAvailable = preview?.availableRenditions.includes("text") ?? false;
-  const showPdfControls = Boolean(preview && preview.format !== "xlsx");
-  return (
-    <header className="flex h-11 shrink-0 items-center gap-2 border-b border-line bg-white px-2.5 text-[11px]">
-      {preview?.format === "xlsx" ? (
-        <SpreadsheetSheetSelect
-          sheets={preview.sheets ?? []}
-          activeSheetId={activeSheetId}
-          onSelectSheet={onSelectSheet}
-        />
-      ) : null}
-      <div className="relative flex h-7 w-[220px] items-center rounded-md border border-line bg-white px-2 focus-within:border-brand-orange">
-        <Search size={13} className="mr-1.5 shrink-0 text-ink-secondary" />
-        <input
-          className="min-w-0 flex-1 bg-transparent text-[11px] outline-none placeholder:text-ink-secondary"
-          value={query}
-          disabled={!searchAvailable}
-          placeholder={searchAvailable ? "Buscar en documento" : "Búsqueda no disponible"}
-          onChange={(event) => onQueryChange(event.target.value)}
-        />
-        {query ? <span className="ml-1 shrink-0 text-[10px] text-ink-secondary">{searchCount}</span> : null}
-      </div>
-      {showPdfControls ? (
-        <>
-          <div className="flex h-7 items-center rounded-md border border-line bg-white">
-            <button className="grid h-6 w-7 place-items-center text-ink-secondary hover:bg-brand-hover hover:text-brand-orange" onClick={() => onZoomChange(zoomPercent - 10)} aria-label="Reducir zoom">
-              <Minus size={12} />
-            </button>
-            <span className="w-12 text-center text-[10px] font-semibold text-ink-primary">{fitMode ? (fitMode === "width" ? "Ancho" : "Página") : `${zoomPercent}%`}</span>
-            <button className="grid h-6 w-7 place-items-center text-ink-secondary hover:bg-brand-hover hover:text-brand-orange" onClick={() => onZoomChange(zoomPercent + 10)} aria-label="Aumentar zoom">
-              <ZoomIn size={12} />
-            </button>
-          </div>
-          <button className={toolbarButtonClass(fitMode === "width")} onClick={() => onFitModeChange("width")}>Ancho</button>
-          <button className={toolbarButtonClass(fitMode === "page")} onClick={() => onFitModeChange("page")}>
-            <Maximize2 size={13} />
-          </button>
-          <div className="flex h-7 items-center rounded-md border border-line bg-white">
-            <button className="grid h-6 w-7 place-items-center text-ink-secondary hover:bg-brand-hover hover:text-brand-orange" onClick={() => onPageChange(Math.max(1, pageNumber - 1))} aria-label="Página anterior">
-              <ChevronLeft size={13} />
-            </button>
-            <span className="w-20 text-center text-[10px] text-ink-primary">{pageNumber} / {pageCount ?? "?"}</span>
-            <button className="grid h-6 w-7 place-items-center text-ink-secondary hover:bg-brand-hover hover:text-brand-orange" onClick={() => onPageChange(pageCount ? Math.min(pageCount, pageNumber + 1) : pageNumber + 1)} aria-label="Página siguiente">
-              <ChevronRight size={13} />
-            </button>
-          </div>
-        </>
-      ) : null}
-      <div className="ml-auto flex items-center gap-1">
-        <button className="grid h-7 w-7 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange" data-tooltip="Actualizar vista" aria-label="Actualizar vista" onClick={onRefresh}>
-          <RefreshCw size={14} />
-        </button>
-        <button className="grid h-7 w-7 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange" data-tooltip="Abrir externo" aria-label="Abrir externo" onClick={onOpenExternal}>
-          <ExternalLink size={14} />
-        </button>
-      </div>
-    </header>
-  );
-}
-
-function SpreadsheetSheetSelect({
-  sheets,
-  activeSheetId,
-  onSelectSheet,
-}: {
-  sheets: NonNullable<DocumentPreview["sheets"]>;
-  activeSheetId: string;
-  onSelectSheet: (sheetId: string) => void;
-}) {
-  const disabled = sheets.length === 0;
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const activeSheet = sheets.find((sheet) => sheet.id === activeSheetId) ?? null;
-
-  useEffect(() => {
-    if (!open) return;
-    function closeOnOutsideInteraction(event: PointerEvent) {
-      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
-    }
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("pointerdown", closeOnOutsideInteraction);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsideInteraction);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [open]);
-
-  return (
-    <div ref={containerRef} className="relative">
-      <button
-        type="button"
-        aria-label="Seleccionar hoja"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        disabled={disabled}
-        className="flex h-7 w-[240px] items-center rounded-md border border-line bg-white pl-2 pr-1 text-left text-[11px] text-ink-primary outline-none transition hover:border-orange-200 hover:bg-brand-hover focus:border-brand-orange disabled:text-ink-secondary"
-        onClick={() => setOpen((isOpen) => !isOpen)}
-      >
-        <Sheet size={13} className="mr-1.5 shrink-0 text-brand-orange" />
-        <span className="min-w-0 flex-1 truncate font-semibold">
-          {activeSheet?.name ?? (disabled ? "Sin hojas" : "Seleccionar hoja")}
-        </span>
-        {activeSheet ? (
-          <span className="ml-2 shrink-0 text-[9px] font-medium text-ink-secondary">
-            {activeSheet.rowCount}x{activeSheet.columnCount}
-          </span>
-        ) : null}
-        <ChevronDown size={13} className={["ml-1.5 shrink-0 text-ink-secondary transition", open ? "rotate-180" : ""].join(" ")} />
-      </button>
-      {open ? (
-        <div
-          role="listbox"
-          aria-label="Hojas del libro"
-          className="absolute left-0 top-8 z-40 max-h-72 w-[320px] overflow-auto rounded-md border border-line bg-white p-1 shadow-lg"
-        >
-          {sheets.map((sheet) => {
-            const selected = sheet.id === activeSheetId;
-            return (
-              <button
-                key={sheet.id}
-                type="button"
-                role="option"
-                aria-selected={selected}
-                className={[
-                  "flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] outline-none transition",
-                  selected ? "bg-brand-hover text-brand-orange" : "text-ink-primary hover:bg-panel",
-                ].join(" ")}
-                onClick={() => {
-                  onSelectSheet(sheet.id);
-                  setOpen(false);
-                }}
-              >
-                <Sheet size={13} className={selected ? "shrink-0 text-brand-orange" : "shrink-0 text-ink-secondary"} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-semibold">{sheet.name}</span>
-                  <span className="block text-[9px] text-ink-secondary">{sheet.rowCount} filas x {sheet.columnCount} columnas</span>
-                </span>
-                {selected ? <Check size={13} className="shrink-0 text-brand-orange" /> : null}
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function PdfPreviewSurface({ url, query, zoomPercent, fitMode, pageNumber, onPageChange }: { url: string; query: string; zoomPercent: number; fitMode: "width" | "page" | null; pageNumber: number; onPageChange: (pageNumber: number) => void }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [pdf, setPdf] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
-  const [containerWidth, setContainerWidth] = useState(900);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const element = containerRef.current;
-    if (!element) return;
-    const observer = new ResizeObserver((entries) => {
-      const width = entries[0]?.contentRect.width;
-      if (width) setContainerWidth(Math.max(320, width - 32));
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    setPdf(null);
-    setError(null);
-    const loadingTask = pdfjsLib.getDocument({ url });
-    loadingTask.promise
-      .then((document) => {
-        if (!cancelled) setPdf(document);
-      })
-      .catch(() => {
-        if (!cancelled) setError("No se pudo renderizar el PDF.");
-      });
-    return () => {
-      cancelled = true;
-      void loadingTask.destroy();
-    };
-  }, [url]);
-
-  useEffect(() => {
-    const page = containerRef.current?.querySelector(`[data-pdf-page="${pageNumber}"]`);
-    if (page instanceof HTMLElement) page.scrollIntoView({ block: "start", behavior: "smooth" });
-  }, [pageNumber]);
-
-  if (error) {
-    return <PreviewStatusState title="No se pudo renderizar el PDF" message={error} />;
-  }
-  if (!pdf) {
-    return <PreviewStatusState title="Preparando páginas" message="PDF.js está cargando el documento." />;
-  }
-
-  const pages = Array.from({ length: pdf.numPages }, (_, index) => index + 1);
-  return (
-    <div ref={containerRef} className="h-full overflow-auto bg-panel/60 px-4 py-4">
-      <div className="mx-auto flex w-fit flex-col gap-4">
-        {pages.map((page) => (
-          <PdfPageCanvas
-            key={page}
-            pdf={pdf}
-            pageNumber={page}
-            containerWidth={containerWidth}
-            query={query}
-            zoomPercent={zoomPercent}
-            fitMode={fitMode}
-            onVisible={onPageChange}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function PdfPageCanvas({
-  pdf,
-  pageNumber,
-  containerWidth,
-  query,
-  zoomPercent,
-  fitMode,
-  onVisible,
-}: {
-  pdf: pdfjsLib.PDFDocumentProxy;
-  pageNumber: number;
-  containerWidth: number;
-  query: string;
-  zoomPercent: number;
-  fitMode: "width" | "page" | null;
-  onVisible: (pageNumber: number) => void;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const [pageSize, setPageSize] = useState({ width: 0, height: 0, scale: 1 });
-  const [highlights, setHighlights] = useState<PdfSearchHighlight[]>([]);
-  const [renderError, setRenderError] = useState(false);
-
-  useEffect(() => {
-    const element = wrapperRef.current;
-    if (!element) return;
-    const observer = new IntersectionObserver((entries) => {
-      if (entries[0]?.isIntersecting) onVisible(pageNumber);
-    }, { threshold: 0.55 });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [onVisible, pageNumber]);
-
-  useEffect(() => {
-    let cancelled = false;
-    let renderTask: { cancel: () => void; promise: Promise<void> } | null = null;
-    setRenderError(false);
-    pdf.getPage(pageNumber)
-      .then((page) => {
-        if (cancelled || !canvasRef.current) return;
-        const baseViewport = page.getViewport({ scale: 1 });
-        const scale = fitMode === "width"
-          ? containerWidth / baseViewport.width
-          : fitMode === "page"
-            ? Math.min(containerWidth / baseViewport.width, 760 / baseViewport.height)
-            : zoomPercent / 100;
-        const effectiveScale = Math.max(0.25, scale);
-        const viewport = page.getViewport({ scale: effectiveScale });
-        const canvas = canvasRef.current;
-        const context = canvas.getContext("2d");
-        if (!context) return;
-        const pixelRatio = window.devicePixelRatio || 1;
-        canvas.width = Math.floor(viewport.width * pixelRatio);
-        canvas.height = Math.floor(viewport.height * pixelRatio);
-        canvas.style.width = `${Math.floor(viewport.width)}px`;
-        canvas.style.height = `${Math.floor(viewport.height)}px`;
-        setPageSize({ width: viewport.width, height: viewport.height, scale: effectiveScale });
-        context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-        renderTask = page.render({ canvas, canvasContext: context, viewport });
-        return renderTask.promise;
-      })
-      .catch((error) => {
-        if (!cancelled && error?.name !== "RenderingCancelledException") setRenderError(true);
-      });
-    return () => {
-      cancelled = true;
-      renderTask?.cancel();
-    };
-  }, [containerWidth, fitMode, pageNumber, pdf, zoomPercent]);
-
-  useEffect(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery || renderError) {
-      setHighlights([]);
-      return;
-    }
-    let cancelled = false;
-    pdf.getPage(pageNumber)
-      .then((page) => page.getTextContent())
-      .then((content) => {
-        if (cancelled) return;
-        const nextHighlights: PdfSearchHighlight[] = [];
-        content.items.forEach((item, itemIndex) => {
-          if (!("str" in item) || !item.str) return;
-          const text = item.str;
-          const normalizedText = text.toLowerCase();
-          if (!normalizedText.includes(normalizedQuery)) return;
-          const [, , , , x, y] = multiplyTransforms(
-            [pageSize.scale, 0, 0, -pageSize.scale, 0, pageSize.height],
-            item.transform,
-          );
-          const itemWidth = Math.max(8, item.width * pageSize.scale);
-          const itemHeight = Math.max(8, item.height * pageSize.scale);
-          const matches = findQueryMatches(normalizedText, normalizedQuery);
-          matches.forEach((match, matchIndex) => {
-            const leftRatio = match.start / Math.max(text.length, 1);
-            const widthRatio = (match.end - match.start) / Math.max(text.length, 1);
-            nextHighlights.push({
-              id: `${pageNumber}-${itemIndex}-${matchIndex}`,
-              left: x + itemWidth * leftRatio,
-              top: y - itemHeight * 0.95,
-              width: Math.max(6, itemWidth * widthRatio),
-              height: itemHeight * 1.15,
-            });
-          });
-        });
-        setHighlights(nextHighlights);
-      })
-      .catch(() => {
-        if (!cancelled) setHighlights([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [pageNumber, pageSize.height, pageSize.scale, pdf, query, renderError]);
-
-  return (
-    <div ref={wrapperRef} data-pdf-page={pageNumber} className="scroll-mt-3">
-      <div className="mb-1 px-1 text-[10px] font-semibold text-ink-secondary">Página {pageNumber}</div>
-      <div className="relative w-fit bg-white shadow-subtle ring-1 ring-line">
-        <canvas ref={canvasRef} className="block bg-white" />
-        {highlights.length ? (
-          <div className="pointer-events-none absolute inset-0 z-10">
-            {highlights.map((highlight) => (
-              <span
-                key={highlight.id}
-                className="absolute rounded-[2px] bg-brand-orange/30 ring-1 ring-brand-orange/45"
-                style={{
-                  left: `${highlight.left}px`,
-                  top: `${highlight.top}px`,
-                  width: `${highlight.width}px`,
-                  height: `${highlight.height}px`,
-                }}
-              />
-            ))}
-          </div>
-        ) : null}
-      </div>
-      {renderError ? <p className="py-2 text-center text-[10px] text-red-700">No se pudo renderizar esta página.</p> : null}
-    </div>
-  );
-}
-
-function SpreadsheetPreviewSurface({ sheet, query }: { sheet: SpreadsheetSheetResponse; query: string }) {
+function SpreadsheetPreviewSurface({ sheet, query, position, onPositionChange }: { sheet: SpreadsheetSheetResponse; query: string;position?:SheetReadingPosition;onPositionChange:(position:SheetReadingPosition)=>void }) {
+  const scrollRef=useRef<HTMLDivElement>(null);
+  useLayoutEffect(()=>{const el=scrollRef.current;if(el&&position){el.scrollTop=position.top;el.scrollLeft=position.left;}},[sheet.sheetId]);
   const cells = useMemo(() => {
     const map = new Map<string, SpreadsheetSheetResponse["cells"][number]>();
     sheet.cells.forEach((cell) => map.set(`${cell.row}:${cell.column}`, cell));
@@ -627,7 +310,7 @@ function SpreadsheetPreviewSurface({ sheet, query }: { sheet: SpreadsheetSheetRe
   const normalizedQuery = query.trim().toLowerCase();
 
   return (
-    <div className="h-full overflow-auto bg-white">
+    <div ref={scrollRef} data-testid="spreadsheet-scroll-surface" onScroll={event=>onPositionChange({top:event.currentTarget.scrollTop,left:event.currentTarget.scrollLeft})} className="h-full overflow-auto bg-white">
       <div className="inline-grid min-w-full border-b border-r border-line bg-white text-[11px]" style={{ gridTemplateColumns: `42px repeat(${columnCount}, minmax(96px, 136px))` }}>
         <div className="sticky left-0 top-0 z-20 border-b border-r border-line bg-panel" />
         {columns.map((column) => (
@@ -668,28 +351,9 @@ function SpreadsheetPreviewSurface({ sheet, query }: { sheet: SpreadsheetSheetRe
   );
 }
 
-function PreviewStatusState({ title, message, actionLabel, onAction }: { title: string; message: string; actionLabel?: string; onAction?: () => void }) {
+function PreviewErrorState({ title, message, onRetry, onOpenExternal, canOpenExternal = true }: { title: string; message: string; onRetry: () => void; onOpenExternal: () => void; canOpenExternal?: boolean }) {
   return (
-    <div className="grid h-full place-items-center px-6 text-center">
-      <div>
-        <div className="mx-auto grid h-10 w-10 place-items-center rounded-md border border-orange-100 bg-brand-hover text-brand-orange">
-          <FileText size={18} />
-        </div>
-        <p className="mt-3 text-[13px] font-semibold text-ink-primary">{title}</p>
-        <p className="mt-1 max-w-[360px] text-[11px] leading-5 text-ink-secondary">{message}</p>
-        {actionLabel && onAction ? (
-          <button className="mt-4 h-8 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark" onClick={onAction}>
-            {actionLabel}
-          </button>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function PreviewErrorState({ title, message, onRetry, onOpenExternal }: { title: string; message: string; onRetry: () => void; onOpenExternal: () => void }) {
-  return (
-    <div className="grid h-full place-items-center px-6 text-center">
+    <div className="reference-viewer-error grid h-full place-items-center px-6 text-center">
       <div>
         <div className="mx-auto grid h-10 w-10 place-items-center rounded-md border border-orange-100 bg-brand-hover text-brand-orange">
           <AlertTriangle size={18} />
@@ -697,7 +361,7 @@ function PreviewErrorState({ title, message, onRetry, onOpenExternal }: { title:
         <p className="mt-3 text-[13px] font-semibold text-ink-primary">{title}</p>
         <p className="mt-1 max-w-[420px] text-[11px] leading-5 text-ink-secondary">{message}</p>
         <div className="mt-4 flex justify-center gap-2">
-          <button className="h-8 rounded-md border border-line px-3 text-[11px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange" onClick={onOpenExternal}>Abrir externo</button>
+          {canOpenExternal && <button className="h-8 rounded-md border border-line px-3 text-[11px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange" onClick={onOpenExternal}>Abrir externo</button>}
           <button className="h-8 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark" onClick={onRetry}>Reintentar</button>
         </div>
       </div>
@@ -705,36 +369,8 @@ function PreviewErrorState({ title, message, onRetry, onOpenExternal }: { title:
   );
 }
 
-function toolbarButtonClass(active: boolean) {
-  return [
-    "inline-flex h-7 items-center justify-center gap-1 rounded-md border px-2 text-[10px] font-semibold transition",
-    active ? "border-orange-200 bg-brand-hover text-brand-orange" : "border-line bg-white text-ink-primary hover:bg-brand-hover hover:text-brand-orange",
-  ].join(" ");
-}
-
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
-}
-
-function findQueryMatches(text: string, query: string) {
-  const matches: Array<{ start: number; end: number }> = [];
-  let start = text.indexOf(query);
-  while (start >= 0) {
-    matches.push({ start, end: start + query.length });
-    start = text.indexOf(query, start + query.length);
-  }
-  return matches;
-}
-
-function multiplyTransforms(first: number[], second: number[]) {
-  return [
-    first[0] * second[0] + first[2] * second[1],
-    first[1] * second[0] + first[3] * second[1],
-    first[0] * second[2] + first[2] * second[3],
-    first[1] * second[2] + first[3] * second[3],
-    first[0] * second[4] + first[2] * second[5] + first[4],
-    first[1] * second[4] + first[3] * second[5] + first[5],
-  ];
 }
 
 function columnName(index: number) {

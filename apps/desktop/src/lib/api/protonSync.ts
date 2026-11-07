@@ -1,0 +1,12 @@
+import {requestJson} from "./client";
+import type {ProtonInbox,ProtonReceipt,ProtonReceiveReview,ProtonReview,ProtonStatus} from "../../types/protonSync";
+const path=(projectId:string)=>`/api/projects/${encodeURIComponent(projectId)}/proton-sync`;
+const post=<T>(projectId:string,action:string,body:unknown)=>requestJson<T>(`${path(projectId)}/${action}`,{method:"POST",body:JSON.stringify(body)});
+export const getProtonStatus=(projectId:string)=>requestJson<ProtonStatus>(path(projectId));
+export const reviewProton=(projectId:string,folderPath:string,logicalProjectId?:string)=>post<ProtonReview>(projectId,"review",{folderPath,...(logicalProjectId?{logicalProjectId}:{})});
+export const connectProton=(projectId:string,review:Pick<ProtonReview,"id"|"revision">)=>post<ProtonReceipt>(projectId,"connect",{id:review.id,revision:review.revision});
+export const publishProton=(projectId:string)=>post<ProtonReceipt>(projectId,"publish",{});
+export const getProtonInbox=(projectId:string)=>requestJson<ProtonInbox>(`${path(projectId)}/inbox`);
+export const reviewProtonReceive=(projectId:string,publicationId:string)=>post<ProtonReceiveReview>(projectId,"receive/review",{publicationId});
+export const applyProtonReceive=(projectId:string,review:Pick<ProtonReceiveReview,"id"|"revision">)=>post<ProtonReceipt>(projectId,"receive/apply",{id:review.id,revision:review.revision});
+export const disconnectProton=(projectId:string,generation:number)=>post<ProtonReceipt>(projectId,"disconnect",{generation});

@@ -1,0 +1,36 @@
+# Avance 09 · Configurar dentro del espacio de trabajo
+
+31/10/2026 · Rama `codex/v3-programa` · [Resumen visual](avance.html)
+
+## Implementado
+
+- **P03 / U07 y U13:** configuración integrada en el panel central. Las categorías sustituyen al árbol izquierdo y el contexto derecho muestra ayuda y ámbito del apartado. Se distingue «Este dispositivo» del proyecto al que pertenece el índice documental. No se simula una previsualización de exportación aún no implementada.
+- **P03 / U07:** la superficie documental permanece montada mientras se consulta configuración. Volver conserva texto, borrador, cursor y desplazamiento dentro de la sesión. La visibilidad de los laterales de configuración no cambia la preferencia del árbol documental. Corregido el regreso desde la paleta cuando el lateral temporal estaba abierto; el documento recupera el foco y queda descubierto.
+- **P06 / U05 y U12:** las categorías visitadas mantienen sus campos mientras la configuración permanece abierta. La vista avanzada se conserva por apartado y comparte los mismos valores. La clave no guardada permanece en memoria al cambiar de categoría; cerrar configuración o reiniciar retira ese campo privado, sin persistirlo.
+- **P01 / T03 y P06 / U12:** escrituras de preferencias e IA ordenadas sobre su archivo compartido; estilos ordenados sobre su archivo propio. Las solicitudes pendientes superadas se agrupan, las respuestas antiguas no aplican valores y un fallo conserva la elección del usuario. Los errores permanecen por grupo aunque otro grupo se guarde. El reintento es explícito y usa la última operación pendiente.
+- **P01 / T03:** las consultas de estado IA respetan revisiones de preferencias y credenciales, orden de respuestas y cambio de proyecto. Una lectura anterior no devuelve el formulario a valores previos después de guardar.
+- **P06 / U12:** corregido el callback real de guardado de la clave, que descartaba su promesa. Los fallos nativos llegan al formulario y no vacían el campo. Las escrituras de exportación salen del actualizador de estado de React. La caché secundaria no impide guardar en Rust; se informa de un fallo cuando tampoco puede conservar preferencias locales.
+- **P03 / U10:** categorías y controles móviles accesibles; los interruptores tienen un área de 44 × 44 px con una pista visual compacta de 44 × 24 px. Los errores usan una explicación de producto y mantienen el detalle técnico plegado.
+- **P01 / T04:** la lista compatible de borradores ausentes también utiliza el acceso auditado de lectura. Las tres consultas de recuperación y la búsqueda responden sin esperar la autoridad global de mutación en el test concurrente. Esto no completa el planificador de trabajos largos.
+
+## Verificación
+
+- **413 pruebas frontend / 90 archivos**, superadas: `v3-frontend-tests-23.log`. Incluye cola, respuestas obsoletas, error/reintento, caché fallida, navegación, conservación de campos y cancelación de foco pendiente. No se suman rondas focalizadas repetidas.
+- **207 pruebas Rust**, superadas: `v3-rust-tests-18.log`. La prueba concurrente incluye búsqueda y las tres lecturas de recuperación mientras la autoridad de mutación permanece ocupada.
+- TypeScript/Vite y **APK Android QA 18**, correctos: `v3-android-qa-build-18.log`. Persisten los avisos conocidos de chunks grandes, código Rust no usado y Gradle.
+- Web-dev a 1440 px: configuración con tres paneles y sin desbordamiento; cero errores de consola y de página tras la recarga de comprobación. El documento de 80 secciones mantuvo el mismo nodo editor, texto, cursor y desplazamiento de **2.310 px** al volver. Durante la edición estructural hubo errores transitorios de HMR al cambiar hooks; no se presentan como una ejecución correcta ni como un fallo reproducido en el paquete nativo.
+- Android API 36 x86_64, paquete separado `ai.knownext.mobile.v3qa`, sin conexión: documento largo con texto pendiente de guardar. Al volver de configuración conservó el mismo editor, contenido, cursor y desplazamiento de **3.442,67 px**. Las categorías del lateral sustituyeron al árbol y la ayuda identificó correctamente el proyecto del índice.
+- Fallo real controlado: archivos QA de configuración y credenciales en solo lectura. El ajuste IA siguió en pantalla y el disco mantuvo el valor anterior; la clave sintética no guardada conservó campo y error al cambiar de categoría. Las huellas de ambos archivos no cambiaron. Los permisos originales se restauraron mediante `finally`.
+- Guardar un estilo de exportación con otro grupo fallido no ocultó el error IA. Tras el reintento explícito, IA se guardó y desapareció el aviso. Ambos ajustes y el borrador sobrevivieron al reinicio; la clave sintética nunca se guardó. Los valores temporales de IA y exportación se restauraron después.
+- APK 17: reproducción corregida del regreso desde la paleta, mensaje en español, detalle técnico plegado y vista avanzada retenida por apartado. APK 18: área/pista de interruptor medidas a 44 × 44 / 44 × 24 px y nuevo fallo/reintento con composición compacta. Las ocho categorías se comprobaron a 412 px sin desbordamiento. No acredita todos los controles ni todos los estados.
+- Capturas inspeccionadas: [escritorio web](../../../output/playwright/revision-3.0/39-configuracion-paneles-escritorio.png), [categorías Android QA 17](../../../output/playwright/revision-3.0/36-android-navegacion-configuracion.png), [formulario Android QA 18](../../../output/playwright/revision-3.0/40-android-configuracion-compacta.png) y [error contextual Android QA 18](../../../output/playwright/revision-3.0/43-android-ajustes-error-compacto.png).
+- [Evidencia nativa por fase](../../../output/android-v3-settings-evidence.json) e [inventario de entradas del APK 18](../../../output/android-v3-settings-inputs-18.json). Interacción por DOM del WebView y fixtures sintéticos; sin proveedores facturables. No acredita tacto físico, TalkBack, teclado virtual, suspensión o DPI Windows.
+- El emulador volvió a mostrar el diálogo de System UI durante el arranque con QA detenido; se eligió Esperar desde el XML actual. Las capturas no contienen esa superposición. Al terminar se detuvo QA, se cerró la conexión y se comprobaron modo avión 0, Wi-Fi 1 y datos 0 antes de cerrar el emulador propio.
+
+## Pendiente y siguiente corte
+
+Diez paquetes iniciados; **ninguno cerrado completamente**. La navegación integrada y el guardado ordenado no completan la simplificación de cada categoría, búsqueda de ajustes, confirmaciones de restablecimiento, toda la accesibilidad, foco de todos los recorridos móviles, previsualización real ni preferencias pendientes entre reinicios. Mantener categorías visitadas también requiere revisar el trabajo de las superficies ocultas.
+
+Sigue abierto el [programa completo](plan.md): protección y recuperación de estado dañado, privacidad/credenciales, trabajos largos, edición y revisión IA, captura avanzada, índice/plantillas/investigación, exportación y plataformas, accesibilidad/DPI y candidata. El siguiente corte prioriza impedir que una lectura fallida de configuración o metadatos termine sustituyendo el original por valores predeterminados; debe conservar el archivo y ofrecer revisión explícita.
+
+VERSION continúa en 2.6.0. Sin commit, push, integración, publicación ni aceptación humana de 3.0.

@@ -31,6 +31,11 @@ describe("ExternalChangesBanner", () => {
     expect(onImportSafe).toHaveBeenCalledTimes(1);
   });
 
+  it("requires a new review before importing a cohort without a revision",()=>{
+    const submit=vi.fn();render(<ExternalChangesBanner changeSet={{...safeChanges,revision:null}} syncState="review-required" busy={false} onReview={vi.fn()} onImportSafe={submit}/>);
+    const button=screen.getByRole("button",{name:"Guardar recomendados"});expect(button).toBeDisabled();fireEvent.click(button);expect(submit).not.toHaveBeenCalled();
+  });
+
   it("requires review for risky changes and disables automatic import while busy", () => {
     const onReview = vi.fn();
     const onImportSafe = vi.fn();
@@ -80,6 +85,7 @@ const noChanges: ExternalChangeSet = {
 const safeChanges: ExternalChangeSet = {
   ...noChanges,
   id: "changes-safe",
+  revision: "current-review",
   title: "2 cambios externos",
   status: "safe",
   summary: {

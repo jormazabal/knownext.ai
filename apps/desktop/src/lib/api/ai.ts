@@ -1,3 +1,5 @@
+import {changeCredentials,getCredentialReview} from "./securityControls";
+import {checkAiBudgetBeforeSend} from "./aiBudget";
 import { requestFormData, requestJson } from "./client";
 import type {
   AiContextAddToProjectResponse,
@@ -36,6 +38,7 @@ const AI_CONTEXT_UPLOAD_TIMEOUT_MS = 120_000;
 const AI_RESEARCH_TIMEOUT_MS = 300_000;
 
 export async function promptAssistant(request: AiPromptRequest): Promise<AiPromptResponse> {
+  await checkAiBudgetBeforeSend(request.projectId??request.documentId?.split("::")[0]??"");
   if (request.documentId) {
     return requestJson<AiPromptResponse>(`/api/documents/${encodeURIComponent(request.documentId)}/ai/prompt`, {
       method: "POST",
@@ -56,6 +59,7 @@ export async function promptAssistant(request: AiPromptRequest): Promise<AiPromp
 }
 
 export async function sendAiInteraction(request: AiInteractionRequest): Promise<AiInteractionResponse> {
+  await checkAiBudgetBeforeSend(request.projectId);
   return requestJson<AiInteractionResponse>(`/api/projects/${request.projectId}/ai/interactions`, {
     method: "POST",
     body: JSON.stringify(request),
@@ -72,6 +76,7 @@ export async function prepareAiResearchBrief(projectId: string, request: AiResea
 }
 
 export async function startAiResearchJob(projectId: string, request: AiResearchJobRequest): Promise<AiResearchJob> {
+  await checkAiBudgetBeforeSend(projectId);
   return requestJson<AiResearchJob>(`/api/projects/${projectId}/ai/research/jobs`, {
     method: "POST",
     body: JSON.stringify(request),
@@ -94,6 +99,7 @@ export async function cancelAiResearchJob(projectId: string, jobId: string): Pro
 }
 
 export async function retryAiResearchJob(projectId: string, jobId: string): Promise<AiResearchJob> {
+  await checkAiBudgetBeforeSend(projectId);
   return requestJson<AiResearchJob>(`/api/projects/${projectId}/ai/research/jobs/${encodeURIComponent(jobId)}/retry`, {
     method: "POST",
     timeoutMs: AI_INTERACTION_TIMEOUT_MS,
@@ -248,10 +254,11 @@ export async function getAiPendingIntent(projectId: string): Promise<AiPendingIn
   return requestJson<AiPendingIntent | null>(`/api/projects/${projectId}/ai/pending-intent`);
 }
 
-export async function getAiUsageSummary(month?: string): Promise<AiUsageSummaryResponse> {
+export async function getAiUsageSummary(month?: string,projectId?:string): Promise<AiUsageSummaryResponse> {
   const params = new URLSearchParams();
   params.set("tzOffsetMinutes", String(-new Date().getTimezoneOffset()));
   if (month) params.set("month", month);
+  if(projectId)params.set("projectId",projectId);
   return requestJson<AiUsageSummaryResponse>(`/api/ai/usage/summary?${params.toString()}`);
 }
 
@@ -276,32 +283,23 @@ export async function getOpenAiKeyStatus(): Promise<OpenAiKeyStatus> {
   return requestJson<OpenAiKeyStatus>("/api/credentials/openai-key");
 }
 
-export async function saveOpenAiKey(apiKey: string): Promise<OpenAiKeyStatus> {
-  return requestJson<OpenAiKeyStatus>("/api/credentials/openai-key", {
-    method: "PUT",
-    body: JSON.stringify({ apiKey }),
-  });
-}
-
-export async function deleteOpenAiKey(): Promise<void> {
-  await requestJson<void>("/api/credentials/openai-key", {
-    method: "DELETE",
-  });
-}
+export async function saveOpenAiKey(apiKey:string):Promise<OpenAiKeyStatus>{const review=await getCredentialReview();await changeCredentials(review,"replace-openai",{secret:apiKey});return getOpenAiKeyStatus();}
+export async function deleteOpenAiKey():Promise<void>{const review=await getCredentialReview();await changeCredentials(review,"remove-openai");}
 
 export async function getAiIndexStatus(projectId: string): Promise<AiIndexStatusResponse> {
-  return requestJson<AiIndexStatusResponse>(`/api/projects/${projectId}/ai/index/status`);
+  return requestJson<AiIndexStatusResponse>(`/api/projects/${encodeURIComponent(projectId)}/ai/index/status`);
 }
 
 export async function rebuildAiIndex(projectId: string): Promise<AiIndexStatusResponse> {
-  return requestJson<AiIndexStatusResponse>(`/api/projects/${projectId}/ai/index/rebuild`, {
+  return requestJson<AiIndexStatusResponse>(`/api/projects/${encodeURIComponent(projectId)}/ai/index/rebuild`, {
     method: "POST",
     timeoutMs: AI_INDEX_TIMEOUT_MS,
   });
 }
 
-export async function deleteAiIndex(projectId: string): Promise<AiIndexStatusResponse> {
-  return requestJson<AiIndexStatusResponse>(`/api/projects/${projectId}/ai/index`, {
+export async function deleteAiIndex(projectId: string, revision: string): Promise<AiIndexStatusResponse> {
+  return requestJson<AiIndexStatusResponse>(`/api/projects/${encodeURIComponent(projectId)}/ai/index`, {
     method: "DELETE",
+    body: JSON.stringify({revision}),
   });
 }

@@ -1,7 +1,26 @@
+import {CredentialSecurityPanel} from "./CredentialSecurityPanel";
+import {AiPrivacyPanel} from "./AiPrivacyPanel";
+import type {StateTransitionAuthority} from "../../types/stateMigrations";
+import {AiDataPolicyPanel} from "./AiDataPolicyPanel";
+import {StateMigrationPanel} from "./StateMigrationPanel";
+import { settingsCopy } from "./settingsCopy";
+import { SettingsSearch } from "./SettingsSearch";
+import {RuntimePerformancePanel} from "./RuntimePerformancePanel";
+import { SafeDiagnosticsPanel } from "./SafeDiagnosticsPanel";
+import { buildServiceDiagnostic } from "../../lib/runtime/diagnostics";
+import { StorageUsagePanel } from "./StorageUsagePanel";
+import {ProjectBackupPanel} from "../backups/ProjectBackupPanel";
+import {discardProjectBackupDraft} from "../backups/useProjectBackups";
+import { getSettingsSections } from "./settingsSections";
+import type { AppSettingsSection } from "../../types/settings";
+import type { SettingsSaveDomain, SettingsSaveFailure } from "../../types/settings";
+import "./AppSettingsDialog.css";
+import { ModalFrame } from "../../components/ui/ModalFrame";
+import { getApiErrorMessage } from "../../lib/api/client";
 import { ModelAccessCheck } from "../../components/ai/ModelAccessCheck";
 import { AudioSettings } from "../recordings/AudioSettings";
 import { modelOptions as catalogOptions, openAiCatalog } from "../../lib/ai/modelCatalog";
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Activity, ArrowRight, Brain, Check, ChevronDown, Copy, Download, Eye, FileText, FolderOpen, Gauge, Grid2X2, Image as ImageIcon, Info, KeyRound, Languages, ListChecks, Mic, Monitor, Moon, Paintbrush, RefreshCw, RotateCcw, Server, Settings, ShieldCheck, Sparkles, Sun, Trash2, Type as TypeIcon, Underline, Workflow, Wrench, X } from "lucide-react";
 import { AiModelSelector, type AiModelSelectorOption, type AiModelSelectorTone } from "../../components/ai/AiModelSelector";
@@ -12,7 +31,8 @@ import type { AiConfigStatus, AiImageGenerationModelId, AiIndexStatusResponse, A
 import type { TraceLogStatus } from "../../lib/runtime/logging";
 import type { RuntimeServicesStatus } from "../../lib/runtime/services";
 
-type AppSettingsSection = "audio" | "summary" | "interface" | "export" | "ai" | "skills" | "capabilities" | "system";
+export type { AppSettingsSection } from "../../types/settings";
+const SettingsDepth = createContext({ advanced: false, setAdvanced: (_value: boolean) => {}, english: false });
 export type AppSettingsSaveState = "idle" | "saving" | "saved" | "error" | "local-only";
 
 const exportFontOptions: Array<[string, string]> = [
@@ -26,7 +46,22 @@ const exportFontOptions: Array<[string, string]> = [
   ["Consolas", "Consolas"],
 ];
 
-type AppSettingsDialogProps = {
+type AppSettingsDialogProps = StateTransitionAuthority & {
+  privacyProject?:{id:string;name:string}|null;
+  onBeforeProjectBackup?:(projectId:string)=>Promise<void>;
+  onProjectBackupRestorePrepared?:(projectId:string,transferId:string)=>void;
+  onSecurityChanged?:()=>void|Promise<void>;
+  onRefreshAiIndex?: () => void;
+  aiIndexBusy?: boolean;
+  aiIndexError?: string | null;
+  saveFailures?: SettingsSaveFailure[];
+  onRetrySave?: (domain: SettingsSaveDomain) => void;
+  exportResetting?: boolean;
+  presentation?: "dialog" | "workspace";
+  section?: AppSettingsSection;
+  onSectionChange?: (section: AppSettingsSection) => void;
+  initialSection?: AppSettingsSection;
+  navigationWidth?: number;
   onOpenRecordings?: () => void;
   open: boolean;
   appearance: AppearanceConfig;
@@ -47,7 +82,7 @@ type AppSettingsDialogProps = {
   onExportTemplateChange: (template: ExportTemplateUpdate) => void;
   onResetExportTemplate: () => void;
   onAiChange: (ai: AiConfigStatus) => void;
-  onSaveOpenAiKey: (apiKey: string) => void;
+  onSaveOpenAiKey: (apiKey: string) => void | Promise<void>;
   onDeleteOpenAiKey: () => void;
   onRebuildAiIndex: () => void;
   onReindexImages: () => void;
@@ -110,6 +145,21 @@ const permissionModePresets: Record<Exclude<PermissionModeId, "custom">, AiConfi
 };
 
 export function AppSettingsDialog({
+  privacyProject=null,
+  onBeforeProjectBackup,
+  onProjectBackupRestorePrepared,
+  onSecurityChanged,
+  onRefreshAiIndex,
+  aiIndexBusy = false,
+  aiIndexError = null,
+  saveFailures = [],
+  onRetrySave,
+  exportResetting = false,
+  presentation = "dialog",
+  section,
+  onSectionChange,
+  initialSection = "summary",
+  navigationWidth = 260,
   onOpenRecordings,
   open,
   appearance,
@@ -124,6 +174,8 @@ export function AppSettingsDialog({
   saveState,
   saveMessage,
   configPersistenceAvailable,
+  onBeforeChange,
+  onSettled,
   onClose,
   onAppearanceChange,
   onDiagnosticsChange,
@@ -138,53 +190,83 @@ export function AppSettingsDialog({
   onOpenTraceLogFolder,
   onRefreshRuntimeServices,
 }: AppSettingsDialogProps) {
-  const [activeSection, setActiveSection] = useStableSection(open);
+  const [backupDirty,setBackupDirty]=useState(false);
+  const [confirmBackupLeave,setConfirmBackupLeave]=useState(false);
+  function requestClose(){if(backupDirty){setConfirmBackupLeave(true);return;}onClose();}
+  const [localSection, setLocalSection] = useStableSection(open, initialSection);
+  const activeSection = section ?? localSection;
+  const setActiveSection = (next: AppSettingsSection) => {
+    if (section === undefined) setLocalSection(next);
+    onSectionChange?.(next);
+  };
+  const [advancedSections, setAdvancedSections] = useState<Partial<Record<AppSettingsSection, boolean>>>({});
+  const [visitedSections, setVisitedSections] = useState<AppSettingsSection[]>([]);
+  const [focusRequest, setFocusRequest] = useState<{ section: AppSettingsSection } | null>(null);
+  const activateSection = (next: AppSettingsSection) => { setFocusRequest({section:next}); setActiveSection(next); };
+  const surfaceRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!open) { setFocusRequest(null); return; }
+    if (focusRequest?.section === activeSection) {
+      const panel = surfaceRef.current?.querySelector<HTMLElement>(`#app-settings-panel-${activeSection}`);
+      if (panel) { panel.scrollTop = 0; panel.focus({ preventScroll: true }); setFocusRequest(null); }
+    }
+  }, [open, activeSection, focusRequest]);
+  useEffect(() => {
+    if (!open) setVisitedSections([]);
+    else setVisitedSections(current => current.includes(activeSection) ? current : [...current, activeSection]);
+  }, [open, activeSection]);
   const text = settingsCopy[appearance.language];
-  const sections: Array<{ id: AppSettingsSection; label: string; description: string; icon: typeof Eye }> = [
-    { id: "summary", label: text.summaryNav, description: text.summaryNavDescription, icon: Grid2X2 },
-    { id: "interface", label: text.interfaceNav, description: text.interfaceNavDescription, icon: Monitor },
-    { id: "ai", label: text.aiNav, description: text.aiNavDescription, icon: Brain },
-    { id: "audio", label: "Audio", description: "Grabación y transcripción de reuniones", icon: Mic },
-    { id: "skills", label: text.skillsNav, description: text.skillsNavDescription, icon: Sparkles },
-    { id: "capabilities", label: text.capabilitiesNav, description: text.capabilitiesNavDescription, icon: Wrench },
-    { id: "export", label: text.exportNav, description: text.exportNavDescription, icon: Download },
-    { id: "system", label: text.systemNav, description: text.systemNavDescription, icon: Settings },
-  ];
+  const sections = getSettingsSections(appearance.language);
 
   if (!open) return null;
 
-  return (
-    <div className="knownext-modal-overlay fixed inset-0 z-[95] grid place-items-center bg-black/20 px-4 py-6">
+  const surface = (
       <section
-        className="flex max-h-[min(760px,calc(100dvh-48px))] w-[min(1000px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="app-settings-title"
+        ref={surfaceRef}
+        aria-label={presentation === "workspace" ? text.title : undefined}
+        className={`settings-surface flex h-full w-full flex-col overflow-hidden bg-white ${presentation === "workspace" ? "settings-workspace" : ""}`}
       >
         <header className="flex items-start justify-between gap-4 px-5 py-4">
           <div className="min-w-0">
-            <h2 id="app-settings-title" className="text-[15px] font-semibold text-ink-primary">{text.title}</h2>
-            <p className="mt-1 text-[11px] text-ink-secondary">{text.subtitle}</p>
-            <SettingsSaveStatus state={saveState} message={saveMessage} persistenceAvailable={configPersistenceAvailable} text={text} />
+            {presentation === "dialog" && <><h2 id="app-settings-title" className="text-[15px] font-semibold text-ink-primary">{text.title}</h2>
+            <p className="mt-1 text-[11px] text-ink-secondary">{text.subtitle}</p></>}
+            <SettingsSaveStatus state={saveState} message={saveMessage} persistenceAvailable={configPersistenceAvailable} text={text} failures={saveFailures} onRetry={onRetrySave} indexReview={Boolean(aiIndexError || aiIndexStatus?.error)}/>
           </div>
-          <button
+          {presentation === "dialog" && <button
             className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
             data-tooltip={text.close}
             aria-label={text.closeSettings}
             type="button"
-            onClick={onClose}
+            onClick={requestClose}
           >
             <X size={16} />
-          </button>
+          </button>}
         </header>
 
-        <div className="flex min-h-0 flex-1 flex-col">
-          <nav
-            className="knownext-document-tabs flex h-9 shrink-0 items-end overflow-y-hidden border-b border-line bg-white"
+        <SettingsSearch language={appearance.language} onSelect={activateSection}/>
+
+        <div className="settings-layout flex min-h-0 flex-1">
+          <label className="settings-mobile-category">{text.sectionsLabel}
+            <select value={activeSection} onChange={event => setActiveSection(event.target.value as AppSettingsSection)}>
+              {sections.map(section => <option key={section.id} value={section.id}>{section.label}</option>)}
+            </select>
+          </label>
+          {presentation === "dialog" && <nav
+            className="settings-navigation"
+            style={{ width: navigationWidth }}
             aria-label={text.sectionsLabel}
             role="tablist"
+            aria-orientation="vertical"
+            onKeyDown={event => {
+              const index = sections.findIndex(section => section.id === activeSection);
+              const next = event.key === "ArrowDown" ? (index + 1) % sections.length : event.key === "ArrowUp" ? (index + sections.length - 1) % sections.length : event.key === "Home" ? 0 : event.key === "End" ? sections.length - 1 : -1;
+              if (next < 0) return;
+              event.preventDefault();
+              setActiveSection(sections[next].id);
+              document.getElementById(`app-settings-tab-${sections[next].id}`)?.focus();
+            }}
           >
-            <div className="flex h-full min-w-0 flex-1 items-end overflow-x-auto overflow-y-hidden">
+            <div className="settings-category-list">
               {sections.map((section, index) => (
                 <button
                   key={section.id}
@@ -197,6 +279,7 @@ export function AppSettingsDialog({
                       : "text-ink-primary hover:bg-panel",
                   ].join(" ")}
                   role="tab"
+                  tabIndex={activeSection === section.id ? 0 : -1}
                   aria-selected={activeSection === section.id}
                   aria-controls={`app-settings-panel-${section.id}`}
                   data-tooltip={section.description}
@@ -210,15 +293,26 @@ export function AppSettingsDialog({
                 </button>
               ))}
             </div>
-          </nav>
+          </nav>}
 
+          <div className="settings-panel-stack flex min-h-0 min-w-0 flex-1">
+          {sections.filter(panel => panel.id === activeSection || visitedSections.includes(panel.id)).map(panel => (
           <div
-            id={`app-settings-panel-${activeSection}`}
-            className="min-h-0 flex-1 overflow-y-auto px-6 py-5"
+            key={panel.id}
+            id={`app-settings-panel-${panel.id}`}
+            tabIndex={-1}
+            style={{ display: panel.id === activeSection ? undefined : "none" }}
+            className="settings-content min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-5"
             role="tabpanel"
-            aria-labelledby={`app-settings-tab-${activeSection}`}
+            aria-labelledby={presentation === "dialog" ? `app-settings-tab-${panel.id}` : undefined}
+            aria-label={presentation === "workspace" ? panel.label : undefined}
           >
-            {activeSection === "summary" ? (
+            <div className="settings-depth-control">
+              <span>{appearance.language === "en" ? "This device" : "Este dispositivo"}</span>
+              <label><input type="checkbox" role="switch" checked={Boolean(advancedSections[panel.id])} onChange={event => setAdvancedSections(current => ({...current, [panel.id]: event.target.checked}))}/>{appearance.language === "en" ? "Advanced view" : "Vista avanzada"}</label>
+            </div>
+            <SettingsDepth.Provider value={{ advanced: Boolean(advancedSections[panel.id]), setAdvanced: value => setAdvancedSections(current => ({...current, [panel.id]: value})), english: appearance.language === "en" }}>
+            {panel.id === "summary" ? (
               <SummarySettings
                 appearance={appearance}
                 diagnostics={diagnostics}
@@ -226,24 +320,29 @@ export function AppSettingsDialog({
                 aiIndexStatus={aiIndexStatus}
                 runtimeServicesStatus={runtimeServicesStatus}
                 text={text}
-                onSelectSection={setActiveSection}
+                onSelectSection={activateSection}
               />
-            ) : activeSection === "audio" ? (
-              <AudioSettings onOpenRecordings={() => { onClose(); onOpenRecordings?.(); }} onCredentials={() => setActiveSection("ai")} />
-            ) : activeSection === "interface" ? (
+            ) : panel.id === "audio" ? (
+              <AudioSettings active={panel.id === activeSection} onOpenRecordings={() => { if(backupDirty){setConfirmBackupLeave(true);return;}onClose(); onOpenRecordings?.(); }} onCredentials={() => activateSection("ai")} />
+            ) : panel.id === "interface" ? (
               <AppearanceSettings appearance={appearance} text={text} onAppearanceChange={onAppearanceChange} />
-            ) : activeSection === "export" ? (
-              <ExportSettings
+            ) : panel.id === "export" ? (
+              <fieldset className="min-w-0" disabled={exportResetting} aria-busy={exportResetting}><ExportSettings
                 template={exportTemplate}
                 templatePath={exportTemplatePath}
                 text={text}
                 onExportTemplateChange={onExportTemplateChange}
                 onResetExportTemplate={onResetExportTemplate}
-              />
-            ) : activeSection === "ai" ? (
+              /></fieldset>
+            ) : panel.id === "ai" ? (
               <AiDocumentalSettings
+                privacyProject={privacyProject}
+                onSecurityChanged={onSecurityChanged}
                 ai={ai}
                 aiIndexStatus={aiIndexStatus}
+                aiIndexBusy={aiIndexBusy}
+                aiIndexError={aiIndexError}
+                onRefreshAiIndex={onRefreshAiIndex}
                 text={text}
                 onAiChange={onAiChange}
                 onSaveOpenAiKey={onSaveOpenAiKey}
@@ -252,12 +351,18 @@ export function AppSettingsDialog({
                 onReindexImages={onReindexImages}
                 onDeleteAiIndex={onDeleteAiIndex}
               />
-            ) : activeSection === "skills" ? (
+            ) : panel.id === "skills" ? (
               <AiSkillsSettings />
-            ) : activeSection === "capabilities" ? (
+            ) : panel.id === "capabilities" ? (
               <CapabilitiesSettings ai={ai} text={text} onAiChange={onAiChange} onReindexImages={onReindexImages} />
             ) : (
               <SystemSettings
+                project={privacyProject}
+                onBeforeBackup={onBeforeProjectBackup}
+                onRestorePrepared={onProjectBackupRestorePrepared}
+                onBackupDirtyChange={setBackupDirty}
+                onBeforeChange={onBeforeChange}
+                onSettled={onSettled}
                 diagnostics={diagnostics}
                 traceLogStatus={traceLogStatus}
                 runtimeServicesStatus={runtimeServicesStatus}
@@ -268,26 +373,37 @@ export function AppSettingsDialog({
                 onRefresh={onRefreshRuntimeServices}
               />
             )}
+            </SettingsDepth.Provider>
+          </div>
+          ))}
           </div>
         </div>
       </section>
-    </div>
   );
+  const guardedSurface=<>{surface}{confirmBackupLeave&&<ModalFrame role="alertdialog" label={appearance.language==="en"?"Unsaved backup policy":"Cambios de copias pendientes"} onClose={()=>setConfirmBackupLeave(false)} className="fixed inset-0 !z-[140] flex items-center justify-center bg-black/25 p-3"><section className="w-full max-w-md rounded-lg bg-white p-4 text-xs shadow-lg"><h3 className="font-semibold">{appearance.language==="en"?"Unsaved backup policy":"Cambios de copias pendientes"}</h3><p className="my-3">{appearance.language==="en"?"The project backup policy has unsaved changes. Return to save them or discard them when leaving.":"La programación del proyecto tiene cambios sin guardar. Vuelve para guardarlos o descártalos al salir."}</p><div className="flex flex-wrap justify-end gap-2"><button className="min-h-11 rounded px-3 hover:bg-panel" onClick={()=>setConfirmBackupLeave(false)}>{appearance.language==="en"?"Keep configuring":"Seguir configurando"}</button><button className="min-h-11 rounded bg-brand-orange px-3 text-white" onClick={()=>{setConfirmBackupLeave(false);setBackupDirty(false);if(privacyProject)discardProjectBackupDraft(privacyProject.id);onClose();}}>{appearance.language==="en"?"Discard changes and leave":"Descartar cambios y salir"}</button></div></section></ModalFrame>}</>;
+  return presentation === "workspace" ? guardedSurface : <ModalFrame label={text.title} onClose={requestClose} className="settings-overlay">{guardedSurface}</ModalFrame>;
 }
 
 function SettingsSaveStatus({
+  indexReview,
+  failures,
+  onRetry,
   state,
   message,
   persistenceAvailable,
   text,
 }: {
+  indexReview: boolean;
+  failures: SettingsSaveFailure[];
+  onRetry?: (domain: SettingsSaveDomain) => void;
   state: AppSettingsSaveState;
   message?: string | null;
   persistenceAvailable: boolean;
   text: SettingsCopy;
 }) {
-  const effectiveState = persistenceAvailable ? state : "local-only";
-  const label = effectiveState === "saving"
+  const effectiveState = state === "error" ? "error" : persistenceAvailable ? state : "local-only";
+  const showIndexReview = indexReview && !failures.length && effectiveState !== "error" && effectiveState !== "saving";
+  const label = showIndexReview ? text.indexReviewResult : effectiveState === "saving"
     ? text.settingsSaving
     : effectiveState === "saved"
       ? text.settingsSaved
@@ -296,7 +412,7 @@ function SettingsSaveStatus({
         : effectiveState === "local-only"
           ? text.settingsLocalOnly
           : text.settingsIdle;
-  const toneClass = effectiveState === "saved"
+  const toneClass = showIndexReview ? "border-orange-100 bg-orange-50 text-orange-900" : effectiveState === "saved"
     ? "border-emerald-100 bg-emerald-50 text-emerald-700"
     : effectiveState === "error"
       ? "border-red-100 bg-red-50 text-red-700"
@@ -304,16 +420,17 @@ function SettingsSaveStatus({
         ? "border-orange-100 bg-brand-hover text-brand-orange"
         : "border-line bg-panel text-ink-secondary";
 
-  return (
+  return (<>
     <p
       className={["mt-2 inline-flex max-w-full items-center gap-1.5 rounded border px-2 py-1 text-[10px] font-semibold", toneClass].join(" ")}
-      title={message ?? undefined}
+      title={showIndexReview ? text.indexReviewResult : message ?? undefined}
       aria-live="polite"
     >
       <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />
-      <span className="truncate">{message ?? label}</span>
+      <span className="shrink-0 whitespace-nowrap">{showIndexReview ? text.indexStatusScope : text.settingsStatusScope} ·</span><span className="truncate">{showIndexReview ? label : message ?? label}</span>
     </p>
-  );
+    {!!failures.length && <ul className="mt-3 max-h-40 space-y-3 overflow-y-auto text-sm">{failures.map(failure => <li key={failure.id} className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0 flex-1"><p className="font-semibold">{failure.label}</p><p role="alert" className="mt-1 break-words text-xs leading-5 text-red-700">{text.settingsWriteFailed}</p><details className="mt-1 text-xs leading-5 text-ink-secondary"><summary className="min-h-11 cursor-pointer py-3">{text.settingsErrorDetails}</summary><p className="break-words">{failure.message}</p></details></div>{onRetry && <button aria-label={`${text.retrySettings} ${failure.label}`} onClick={() => onRetry(failure.id)} className="min-h-11 rounded-md px-3 text-sm font-semibold text-brand-orange hover:bg-panel">{text.retrySettings}</button>}</li>)}</ul>}
+  </>);
 }
 
 function SummarySettings({
@@ -341,10 +458,10 @@ function SummarySettings({
   const permissionMode = getPermissionMode(settingsAi.permissions);
   const accentPalette = accentPalettes.find((palette) => palette.id === appearance.primaryColor) ?? accentPalettes[0];
   const documentCount = aiIndexStatus?.documentCount ?? 0;
-  const ragStatus = aiIndexStatus?.localExactReady ? text.ragExactReady : describeIndexStatus(aiIndexStatus?.status ?? settingsAi.rag.status);
+  const ragStatus = aiIndexStatus?.localExactReady ? text.ragExactReady : describeIndexStatus(aiIndexStatus?.status ?? settingsAi.rag.status, appearance.language === "en");
 
   return (
-    <div className="space-y-5">
+    <div className="settings-summary space-y-5">
       <section className="flex flex-wrap items-start gap-4">
         <div className="flex min-w-0 items-start gap-4">
           <span className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-brand-hover text-brand-orange">
@@ -357,7 +474,7 @@ function SummarySettings({
         </div>
       </section>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-x-10 gap-y-8 lg:grid-cols-2">
         <SummaryCard
           icon={<Monitor size={20} />}
           title={text.interfaceNav}
@@ -366,7 +483,7 @@ function SummarySettings({
           actionIcon={<Monitor size={14} />}
           onAction={() => onSelectSection("interface")}
         >
-          <div className="overflow-hidden rounded-md border border-line">
+          <div className="settings-summary-values">
             <SummaryRow icon={<Sun size={13} />} label={text.themeHeading} value={describeThemeMode(appearance.themeMode, text)} />
             <SummaryRow icon={<Languages size={13} />} label={text.languageLabel} value={describeLanguage(appearance.language)} />
             <SummaryRow icon={<Gauge size={13} />} label={text.zoomLabel} value={`${appearance.zoomPercent}%`} />
@@ -387,7 +504,7 @@ function SummarySettings({
           actionIcon={<Brain size={14} />}
           onAction={() => onSelectSection("ai")}
         >
-          <div className="overflow-hidden rounded-md border border-line">
+          <div className="settings-summary-values">
             <SummaryRow
               icon={<Server size={13} />}
               label={text.summaryProviderLabel}
@@ -430,7 +547,7 @@ function SummarySettings({
           actionIcon={<Wrench size={14} />}
           onAction={() => onSelectSection("capabilities")}
         >
-          <div className="overflow-hidden rounded-md border border-line">
+          <div className="settings-summary-values">
             <SummaryRow icon={<ImageIcon size={13} />} label={text.summaryImageGenerationAi} value={settingsAi.imageGeneration.enabled ? settingsAi.imageGeneration.model : text.disabled} valueTone={settingsAi.imageGeneration.enabled ? "brand" : "neutral"} />
             <SummaryRow icon={<Eye size={13} />} label={text.summaryVisionAi} value={settingsAi.vision.enabled ? settingsAi.vision.model : text.disabled} valueTone={settingsAi.vision.enabled ? "brand" : "neutral"} />
             <SummaryRow icon={<Mic size={13} />} label={text.transcriptionHeading} value={settingsAi.transcription.model} valueTone="brand" />
@@ -447,7 +564,7 @@ function SummarySettings({
           actionIcon={<Settings size={14} />}
           onAction={() => onSelectSection("system")}
         >
-          <div className="overflow-hidden rounded-md border border-line">
+          <div className="settings-summary-values">
             <SummaryRow icon={<Server size={13} />} label={text.versionLabel} value={runtimeService?.version ?? text.unavailableValue} />
             <SummaryRow icon={<Settings size={13} />} label={text.profileLabel} value={describeRuntimeProfile(runtimeService?.profile, text)} />
             <SummaryRow icon={<Server size={13} />} label={text.servicesSummary} value={runtimeService?.statusLabel ?? text.servicesPending} success={runtimeService?.status === "running"} />
@@ -456,18 +573,18 @@ function SummarySettings({
         </SummaryCard>
       </div>
 
-      <section className="rounded-md border border-line px-4 py-3">
+      <AdvancedOptions><section className="settings-summary-models py-3">
         <div className="mb-3">
           <h3 className="text-[13px] font-semibold text-ink-primary">{text.summaryModelsHeading}</h3>
           <p className="mt-1 text-[11px] text-ink-secondary">{text.summaryModelsDescription}</p>
         </div>
-        <div className="overflow-hidden rounded-md border border-line">
+        <div className="settings-summary-values">
           <SummaryModelRow label={text.summaryMainAi} description={text.aiModelHeading} modelId={settingsAi.model} price="" tag={model.recommended ? text.recommendedModel : null} capabilityLabel={text.summaryCapabilityMetric} costLabel={text.summaryCostMetric} priceUnit={text.summaryTokenPriceUnit} />
           <SummaryModelRow label={text.summaryImageGenerationAi} description={text.imageGenerationModelHeading} modelId={settingsAi.imageGeneration.model} price={imageGenerationModel.price} tag={imageGenerationModel.recommended ? imageGenerationModel.tag : null} capabilityLabel={text.summaryCapabilityMetric} costLabel={text.summaryCostMetric} priceUnit={text.imageGenerationPricePer1kImage} />
           <SummaryModelRow label={text.summaryVisionAi} description={text.visionHeading} modelId={settingsAi.vision.model} price="" tag={visionModel.recommended ? text.recommendedModel : null} capabilityLabel={text.summaryCapabilityMetric} costLabel={text.summaryCostMetric} priceUnit={text.summaryTokenPriceUnit} />
           <SummaryModelRow label={text.summaryAudioAi} description={text.transcriptionHeading} modelId={settingsAi.transcription.model} capability={2} cost={1} price={text.summaryAudioPricing} tag={text.summaryEconomy} capabilityLabel={text.summaryCapabilityMetric} costLabel={text.summaryCostMetric} priceUnit={text.summaryTokenPriceUnit} />
         </div>
-      </section>
+      </section></AdvancedOptions>
 
     </div>
   );
@@ -745,6 +862,7 @@ function CapabilitiesSettings({
               />
             </CapabilityField>
 
+            <AdvancedOptions customized={settingsAi.vision.detail !== "auto" || settingsAi.vision.maxImageSizeMb !== defaultAiConfig.vision.maxImageSizeMb}>
             <div className="grid gap-3 md:grid-cols-1">
               <CapabilitySelect label={text.visionDetailLabel} value={settingsAi.vision.detail} onChange={(value) => updateVision({ detail: value as AiConfigStatus["vision"]["detail"] })}>
                 <option value="auto">{text.visionDetailAuto}</option>
@@ -760,6 +878,7 @@ function CapabilitiesSettings({
               <option value="50">50 MB</option>
             </CapabilitySelect>
 
+            </AdvancedOptions>
             <div className="divide-y divide-line border-t border-line pt-2">
               <CapabilityToggleRow icon={<FolderOpen size={14} />} label={text.visionIndexHeading} description={text.visionIndexDescription} enabled={settingsAi.vision.imageIndexingEnabled} onToggle={() => updateVision({ imageIndexingEnabled: !settingsAi.vision.imageIndexingEnabled })} />
               <CapabilityToggleRow icon={<Server size={14} />} label={text.visionStoreHeading} description={text.visionStoreDescription} enabled={settingsAi.vision.storeVisualDescriptions} onToggle={() => updateVision({ storeVisualDescriptions: !settingsAi.vision.storeVisualDescriptions })} />
@@ -1182,7 +1301,7 @@ function FileIcon() {
 
 function SummaryCard({ icon, title, description, actionLabel, actionIcon, onAction, children }: { icon: ReactNode; title: string; description: string; actionLabel: string; actionIcon: ReactNode; onAction: () => void; children: ReactNode }) {
   return (
-    <section className="flex min-h-[270px] flex-col rounded-md border border-line bg-slate-50/40 px-4 py-4">
+    <section className="settings-summary-card flex flex-col py-3">
       <div className="mb-4 flex items-start gap-3">
         <span className="mt-0.5 text-brand-orange">{icon}</span>
         <div className="min-w-0">
@@ -1192,7 +1311,7 @@ function SummaryCard({ icon, title, description, actionLabel, actionIcon, onActi
       </div>
       <div className="min-h-0 flex-1">{children}</div>
       <div className="mt-4 flex justify-end">
-        <button className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange" onClick={onAction}>
+        <button className="inline-flex min-h-11 items-center gap-2 rounded-md px-2 text-[12px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange" onClick={onAction}>
           {actionIcon}
           {actionLabel}
           <ArrowRight size={14} />
@@ -1225,7 +1344,7 @@ function SummaryRow({
         : "text-ink-primary";
 
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-line px-3 py-2.5 last:border-b-0">
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-2.5">
       <span className="flex min-w-0 items-center gap-2">
         {icon ? <span className="shrink-0 text-ink-secondary">{icon}</span> : null}
         <span className="truncate text-[11px] font-medium text-ink-secondary">{label}</span>
@@ -1389,6 +1508,8 @@ function normalizeAiStatus(ai: Partial<AiConfigStatus> | null | undefined): AiCo
     },
     openaiKeyConfigured: Boolean(ai?.openaiKeyConfigured),
     openaiKeyPreview: ai?.openaiKeyPreview ?? null,
+    credentialStorageError: ai?.credentialStorageError ?? null,
+    credentialProtection: ai?.credentialProtection,
   };
 }
 
@@ -1602,8 +1723,13 @@ function clampSettingsNumber(value: unknown, minimum: number, maximum: number, f
 }
 
 function AiDocumentalSettings({
+  privacyProject,
+  onSecurityChanged,
   ai,
   aiIndexStatus,
+  aiIndexBusy,
+  aiIndexError,
+  onRefreshAiIndex,
   text,
   onAiChange,
   onSaveOpenAiKey,
@@ -1611,18 +1737,28 @@ function AiDocumentalSettings({
   onRebuildAiIndex,
   onDeleteAiIndex,
 }: {
+  privacyProject?:{id:string;name:string}|null;
+  onSecurityChanged?:()=>void|Promise<void>;
   ai: AiConfigStatus;
   aiIndexStatus: AiIndexStatusResponse | null;
+  aiIndexBusy: boolean;
+  aiIndexError: string | null;
+  onRefreshAiIndex?: () => void;
   text: SettingsCopy;
   onAiChange: (ai: AiConfigStatus) => void;
-  onSaveOpenAiKey: (apiKey: string) => void;
+  onSaveOpenAiKey: (apiKey: string) => void | Promise<void>;
   onDeleteOpenAiKey: () => void;
   onRebuildAiIndex: () => void;
   onReindexImages: () => void;
   onDeleteAiIndex: () => void;
 }) {
+  const { english } = useContext(SettingsDepth);
+  const keyFieldId=useId(),keyErrorId=useId(),keyHintId=useId();
   const [apiKey, setApiKey] = useState("");
   const [keyEditorOpen, setKeyEditorOpen] = useState(false);
+  const [keySaving,setKeySaving] = useState(false);
+  const [keyError,setKeyError] = useState<string|null>(null);
+  const keyPending = useRef(false);
   const [localAi, setLocalAi] = useState<AiConfigStatus>(() => normalizeAiStatus(ai));
   const localAiRef = useRef<AiConfigStatus>(normalizeAiStatus(ai));
   const settingsAi = localAi;
@@ -1663,18 +1799,22 @@ function AiDocumentalSettings({
     });
   }
 
-  function saveApiKey() {
+  async function saveApiKey() {
     const nextKey = apiKey.trim();
-    if (!nextKey) return;
-    onSaveOpenAiKey(nextKey);
-    setApiKey("");
-    setKeyEditorOpen(false);
+    if (!nextKey || keyPending.current) return;
+    keyPending.current=true;setKeySaving(true);setKeyError(null);
+    try {await onSaveOpenAiKey(nextKey);setApiKey("");setKeyEditorOpen(false);}
+    catch(failure){setKeyError(getApiErrorMessage(failure,"No se ha podido guardar la clave. Se conserva el valor introducido para reintentar."));}
+    finally{keyPending.current=false;setKeySaving(false);}
   }
 
   return (
     <div className="space-y-5">
       <SettingsSectionIntro icon={<Brain size={24} />} title={text.aiHeading} description={text.aiDescription} />
 
+      <AiDataPolicyPanel language={english?"en":"es"}/>
+      <AiPrivacyPanel key={privacyProject?.id??"no-project"} project={privacyProject??null} english={english} onChanged={onSecurityChanged}/>
+      <CredentialSecurityPanel english={english} onChanged={onSecurityChanged}/>
       <SettingsPanel>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -1726,29 +1866,40 @@ function AiDocumentalSettings({
             </div>
           </div>
 
+          {settingsAi.credentialStorageError && <p role="alert" className="mt-3 text-sm text-red-700">{settingsAi.credentialStorageError}</p>}
+          {settingsAi.credentialProtection === "windows-dpapi-user" && <p className="mt-3 text-xs text-ink-secondary">Protección nativa del usuario de Windows. Las claves se configuran por dispositivo.</p>}
+          {settingsAi.credentialProtection === "android-keystore-aes-gcm" && <p className="mt-3 text-xs text-ink-secondary">Protección nativa de Android Keystore. Las claves se configuran por dispositivo.</p>}
+          {keyError && <p id={keyErrorId} role="alert" className="mt-3 text-sm text-red-700">{keyError}</p>}
           {keyEditorOpen ? (
             <div className="mt-3 grid gap-2 border-t border-line pt-3 md:grid-cols-[minmax(0,1fr)_auto_auto]">
+              <label className="sr-only" htmlFor={keyFieldId}>{english?"OpenAI API key":"Clave API de OpenAI"}</label>
               <input
-                className="h-9 min-w-0 rounded-md border border-line bg-white px-3 text-[11px] outline-none focus:border-brand-orange"
+                id={keyFieldId}
+                aria-describedby={[keyHintId,keyError?keyErrorId:null].filter(Boolean).join(" ")}
+                aria-invalid={keyError?true:undefined}
+                autoComplete="off"
+                className="min-h-11 min-w-0 rounded-md border border-line bg-white px-3 text-[11px] outline-none focus:border-brand-orange"
                 type="password"
+                disabled={keySaving}
                 value={apiKey}
                 placeholder={text.openAiKeyPlaceholder}
-                onChange={(event) => setApiKey(event.target.value)}
+                onChange={(event) => {setApiKey(event.target.value);if(keyError)setKeyError(null);}}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") saveApiKey();
+                  if (event.key === "Enter") {event.preventDefault();void saveApiKey();}
                 }}
               />
               <button
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
-                disabled={!apiKey.trim()}
-                onClick={saveApiKey}
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
+                disabled={!apiKey.trim() || keySaving}
+                onClick={() => void saveApiKey()}
               >
                 <KeyRound size={14} />
                 {text.saveKey}
               </button>
               {settingsAi.openaiKeyConfigured ? (
                 <button
-                  className="h-9 rounded-md border border-line px-3 text-[11px] font-semibold text-ink-primary hover:bg-panel"
+                  className="min-h-11 rounded-md border border-line px-3 text-[11px] font-semibold text-ink-primary hover:bg-panel"
+                  disabled={keySaving}
                   onClick={() => {
                     setApiKey("");
                     setKeyEditorOpen(false);
@@ -1761,7 +1912,7 @@ function AiDocumentalSettings({
           ) : null}
         </div>
 
-        <p className="mt-3 flex items-start gap-2 text-[11px] leading-5 text-ink-secondary">
+        <p id={keyHintId} className="mt-3 flex items-start gap-2 text-[11px] leading-5 text-ink-secondary">
           <ShieldCheck size={14} className="mt-0.5 shrink-0 text-ink-secondary" />
           {text.aiKeyPrivacy}
         </p>
@@ -1786,7 +1937,11 @@ function AiDocumentalSettings({
           guideLabel={text.aiModelGuide}
           guideDescription={text.aiModelGuideDescription}
         />
-          <ModelAccessCheck model={settingsAi.model}/>
+          <ModelAccessCheck language={english?"en":"es"} model={settingsAi.model}/>
+        <CapabilityToggleRow icon={<Eye size={14}/>} label={text.reviewTextEdits} description={text.reviewTextEditsHelp} enabled={settingsAi.agentic.confirmBeforeApplying} onToggle={() => {
+          const current=localAiRef.current;
+          commitAi({ ...current, agentic: { ...current.agentic, confirmBeforeApplying: !current.agentic.confirmBeforeApplying } });
+        }}/>
       </SettingsPanel>
 
       <SettingsPanel>
@@ -1798,12 +1953,16 @@ function AiDocumentalSettings({
           <Switch enabled={settingsAi.rag.enabled} label={text.ragContextHeading} onToggle={() => updateRag({ enabled: !settingsAi.rag.enabled })} />
         </div>
 
+        {(aiIndexError || aiIndexStatus?.error) && <p role="alert" className="mt-3 text-xs leading-5 text-red-800">{aiIndexError ?? aiIndexStatus?.error}</p>}
+        {onRefreshAiIndex && <button type="button" disabled={aiIndexBusy} onClick={onRefreshAiIndex} className="mt-3 inline-flex min-h-11 items-center gap-2 rounded px-3 text-xs hover:bg-panel disabled:opacity-50"><RefreshCw size={13}/>{english ? "Refresh status" : "Actualizar estado"}</button>}
+        {aiIndexBusy && <p role="status" className="mt-3 text-xs leading-5 text-ink-secondary">{english ? "Updating the local index…" : "Actualizando el índice local…"}</p>}
+        <AdvancedOptions customized={Boolean(settingsAi.rag.vectorStoreId)}>
         <div className="mt-4 overflow-hidden rounded-md border border-line bg-white">
           <div className="grid gap-0 md:grid-cols-[minmax(0,1.25fr)_minmax(240px,0.75fr)]">
             <div className="grid gap-0 sm:grid-cols-2 lg:grid-cols-4">
-              <RagMetric label={text.ragStatus} value={describeIndexStatus(aiIndexStatus?.status ?? settingsAi.rag.status)} tone={aiIndexStatus?.status === "updated" ? "success" : aiIndexStatus?.status === "error" ? "warning" : "neutral"} />
-              <RagMetric label={text.ragDocuments} value={documentCount ? String(documentCount) : text.summaryNone} />
-              <RagMetric label={text.summaryVectorStore} value={aiIndexStatus?.vectorStoreId ?? settingsAi.rag.vectorStoreId ?? text.summaryNone} />
+              <RagMetric label={text.ragStatus} value={describeIndexStatus(aiIndexStatus?.status ?? settingsAi.rag.status, english)} tone={aiIndexStatus?.status === "updated" ? "success" : aiIndexStatus?.status === "error" ? "warning" : "neutral"} />
+              <RagMetric label={text.ragDocuments} value={aiIndexStatus?.documentCountKnown === false ? text.unavailableValue : documentCount ? String(documentCount) : text.summaryNone} />
+              <RagMetric label={text.summaryVectorStore} value={(aiIndexStatus ? aiIndexStatus.vectorStoreId : settingsAi.rag.vectorStoreId) ?? text.summaryNone} />
               <RagMetric label={text.ragExactReady} value={aiIndexStatus?.localExactReady ? text.enabled : text.disabled} tone={aiIndexStatus?.localExactReady ? "success" : "neutral"} />
             </div>
             <div className="border-t border-line bg-panel px-4 py-3 md:border-l md:border-t-0">
@@ -1814,14 +1973,14 @@ function AiDocumentalSettings({
             <div className="min-w-0">
               <p className="text-[10px] font-semibold text-ink-secondary">{text.lastStatusLabel}</p>
               <p className={["mt-1 text-[11px] leading-5", aiIndexStatus?.error ? "text-red-700" : "text-ink-secondary"].join(" ")}>
-                {aiIndexStatus?.error ?? aiIndexStatus?.lastIndexedAt ?? settingsAi.rag.lastIndexedAt ?? text.ragNotIndexedMessage}
+                {aiIndexStatus?.error ?? (aiIndexStatus ? aiIndexStatus.lastIndexedAt : settingsAi.rag.lastIndexedAt) ?? text.ragNotIndexedMessage}
               </p>
             </div>
             <div className="flex flex-wrap justify-end gap-2">
               <button
                 type="button"
-                className="inline-flex h-8 items-center gap-2 rounded-md border border-brand-orange bg-white px-3 text-[11px] font-semibold text-brand-orange hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={!settingsAi.rag.enabled}
+                className="inline-flex min-h-11 items-center gap-2 rounded-md border border-brand-orange bg-white px-3 text-[11px] font-semibold text-brand-orange hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={aiIndexBusy || !settingsAi.rag.enabled}
                 onClick={onRebuildAiIndex}
               >
                 <RefreshCw size={13} />
@@ -1829,8 +1988,8 @@ function AiDocumentalSettings({
               </button>
               <button
                 type="button"
-                className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary hover:bg-panel disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={!aiIndexStatus?.indexedDocumentCount}
+                className="inline-flex min-h-11 items-center gap-2 rounded-md border border-line bg-white px-3 text-[11px] font-semibold text-ink-primary hover:bg-panel disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={aiIndexBusy || !aiIndexStatus?.indexRevision}
                 onClick={onDeleteAiIndex}
               >
                 <Trash2 size={13} />
@@ -1839,6 +1998,7 @@ function AiDocumentalSettings({
             </div>
           </div>
         </div>
+        </AdvancedOptions>
         {failedCount > 0 ? <p className="mt-2 text-[10px] leading-4 text-red-700">{text.ragFailed}: {failedCount}</p> : null}
       </SettingsPanel>
     </div>
@@ -1846,6 +2006,12 @@ function AiDocumentalSettings({
 }
 
 function SystemSettings({
+  project,
+  onBeforeBackup,
+  onRestorePrepared,
+  onBackupDirtyChange,
+  onBeforeChange,
+  onSettled,
   diagnostics,
   traceLogStatus,
   runtimeServicesStatus,
@@ -1855,6 +2021,10 @@ function SystemSettings({
   onOpenTraceLogFolder,
   onRefresh,
 }: {
+  project:{id:string;name:string}|null;
+  onBeforeBackup?:(projectId:string)=>Promise<void>;
+  onRestorePrepared?:(projectId:string,transferId:string)=>void;
+  onBackupDirtyChange?:(dirty:boolean)=>void;
   diagnostics: DiagnosticsConfig;
   traceLogStatus: TraceLogStatus | null;
   runtimeServicesStatus: RuntimeServicesStatus | null;
@@ -1863,7 +2033,8 @@ function SystemSettings({
   onDiagnosticsChange: (diagnostics: Partial<DiagnosticsConfig>) => void;
   onOpenTraceLogFolder: () => void;
   onRefresh: () => void;
-}) {
+} & StateTransitionAuthority) {
+  const { english } = useContext(SettingsDepth);
   const services = runtimeServicesStatus?.services ?? [];
   const runtimeService = services.find((service) => service.id === "local-runtime") ?? services[0] ?? null;
   const logFolder = traceLogStatus?.folderPath ?? text.preparingLogFolder;
@@ -1883,6 +2054,12 @@ function SystemSettings({
   return (
     <div className="space-y-4">
       <SettingsSectionIntro icon={<Settings size={24} />} title={text.systemNav} description={text.systemDescription} />
+
+      <StateMigrationPanel english={english} onBeforeChange={onBeforeChange} onSettled={onSettled}/>
+      <ProjectBackupPanel project={project} english={english} onBeforeBackup={onBeforeBackup} onRestorePrepared={onRestorePrepared} onDirtyChange={onBackupDirtyChange}/>
+      <StorageUsagePanel english={english}/>
+      <SafeDiagnosticsPanel english={english} copyText={copyText}/>
+      <AdvancedOptions><RuntimePerformancePanel english={english}/></AdvancedOptions>
 
       <section className="overflow-hidden rounded-md border border-line bg-white">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
@@ -1956,7 +2133,7 @@ function SystemSettings({
               <p className="min-w-0 truncate font-mono text-[10px] text-ink-secondary">{logFolder}</p>
               <button
                 className="inline-flex h-7 shrink-0 items-center gap-2 rounded-md border border-line bg-white px-2.5 text-[10px] font-semibold text-ink-primary hover:bg-brand-hover hover:text-brand-orange disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={!traceLogStatus?.folderPath}
+                disabled={!traceLogStatus?.folderPath||traceLogStatus.directoryExists===false}
                 onClick={onOpenTraceLogFolder}
               >
                 <FolderOpen size={13} />
@@ -1983,7 +2160,18 @@ function SettingsSectionIntro({ icon, title, description }: { icon: ReactNode; t
 }
 
 function SettingsPanel({ children }: { children: ReactNode }) {
-  return <section className="rounded-md border border-line bg-white px-4 py-4">{children}</section>;
+  return <section className="settings-panel rounded-md border border-line bg-white px-4 py-4">{children}</section>;
+}
+
+function AdvancedOptions({ children, customized = false }: { children: ReactNode; customized?: boolean }) {
+  const { advanced, setAdvanced, english } = useContext(SettingsDepth);
+  return <details className="settings-advanced" open={advanced}>
+    <summary onClick={event => { event.preventDefault(); setAdvanced(!advanced); }}>
+      {english ? "Advanced options" : "Opciones avanzadas"}{customized ? (english ? " · Active configuration" : " · Configuración activa") : ""}
+    </summary>
+    <p className="text-xs text-ink-secondary">{english ? "Switching views preserves every value." : "Cambiar de vista conserva todos los valores."}</p>
+    {children}
+  </details>;
 }
 
 function RagMetric({ label, value, tone = "neutral" }: { label: string; value: string; tone?: "neutral" | "success" | "warning" }) {
@@ -2106,21 +2294,6 @@ async function copyText(text: string) {
   } catch {
     return false;
   }
-}
-
-function buildServiceDiagnostic(service: RuntimeServicesStatus["services"][number]) {
-  return [
-    `status=${service.status}`,
-    `localContract=${service.endpoint}`,
-    `expectedProfile=${service.expectedProfile}`,
-    `profile=${service.profile ?? "unknown"}`,
-    `expectedVersion=${service.expectedVersion}`,
-    `version=${service.version ?? "unknown"}`,
-    `managedBy=${service.managedBy ?? "unknown"}`,
-    `appDataDir=${service.appDataDir ?? "unknown"}`,
-    `expectedAppDataDir=${service.expectedAppDataDir}`,
-    service.lastError ? `lastError=${service.lastError}` : null,
-  ].filter(Boolean).join("\n");
 }
 
 function AppearanceSettings({
@@ -2752,7 +2925,7 @@ function ThemeChoice({ option, selected, onSelect }: { option: { value: Appearan
       <Icon size={24} className="shrink-0" />
       <span className="min-w-0">
         <span className="block text-[13px] font-semibold">{option.label}</span>
-        <span className="mt-1 block text-[11px] leading-5 text-ink-secondary">{option.description}</span>
+        <span className={`settings-theme-description mt-1 block text-[11px] leading-5 ${selected ? "text-ink-primary" : "text-ink-secondary"}`}>{option.description}</span>
       </span>
     </button>
   );
@@ -2834,6 +3007,8 @@ function AiSettings({
   onReindexImages: () => void;
   onDeleteAiIndex: () => void;
 }) {
+  const keyFieldId=useId();
+  const {english}=useContext(SettingsDepth);
   const [apiKey, setApiKey] = useState("");
   const [localAi, setLocalAi] = useState<AiConfigStatus>(() => normalizeAiStatus(ai));
   const localAiRef = useRef<AiConfigStatus>(normalizeAiStatus(ai));
@@ -2931,8 +3106,11 @@ function AiSettings({
           </span>
         </div>
         <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2">
+          <label htmlFor={keyFieldId} className="sr-only">{english?"OpenAI API key":"Clave API de OpenAI"}</label>
           <input
-            className="h-9 min-w-0 flex-1 rounded-md border border-line bg-white px-3 text-[11px] outline-none focus:border-brand-orange"
+            id={keyFieldId}
+            autoComplete="off"
+            className="min-h-11 min-w-0 flex-1 rounded-md border border-line bg-white px-3 text-[11px] outline-none focus:border-brand-orange"
             type="password"
             value={apiKey}
             placeholder={openAiKeyPlaceholder}
@@ -3362,28 +3540,28 @@ function LimitField({
 function Switch({ label, enabled, onToggle }: { label: string; enabled: boolean; onToggle: () => void }) {
   return (
     <button
-      className={["relative h-6 w-11 shrink-0 rounded-full transition", enabled ? "bg-brand-orange" : "bg-line"].join(" ")}
+      className="grid h-11 w-11 shrink-0 place-items-center rounded-md"
       role="switch"
       aria-checked={enabled}
       aria-label={label}
       type="button"
       onClick={onToggle}
     >
-      <span
+      <span aria-hidden="true" data-settings-switch-track className={["relative block h-6 w-11 rounded-full transition", enabled ? "bg-brand-orange" : "bg-line"].join(" ")}><span
         className={[
           "absolute top-1 h-4 w-4 rounded-full bg-white shadow-subtle transition",
           enabled ? "left-6" : "left-1",
         ].join(" ")}
-      />
+      /></span>
     </button>
   );
 }
 
-function describeIndexStatus(status: AiIndexStatusResponse["status"]) {
-  if (status === "indexing") return "Indexando";
-  if (status === "updated") return "Actualizado";
+function describeIndexStatus(status: AiIndexStatusResponse["status"], english = false) {
+  if (status === "indexing") return english ? "Indexing" : "Indexando";
+  if (status === "updated") return english ? "Indexed" : "Indexado";
   if (status === "error") return "Error";
-  return "No indexado";
+  return english ? "Not indexed" : "No indexado";
 }
 
 function formatDateTime(value: string) {
@@ -3397,1053 +3575,12 @@ function formatDateTime(value: string) {
 
 type SettingsCopy = typeof settingsCopy.es;
 
-const settingsCopy = {
-  es: {
-    title: "Configuración de la app",
-    subtitle: "Ajustes locales de interfaz y diagnóstico.",
-    settingsIdle: "Sin cambios pendientes",
-    settingsSaving: "Guardando configuración",
-    settingsSaved: "Configuración guardada",
-    settingsSaveFailed: "No se pudo guardar la configuración",
-    settingsLocalOnly: "Solo preferencias locales",
-    close: "Cerrar",
-    closeSettings: "Cerrar configuración",
-    sectionsLabel: "Apartados de configuración",
-    summaryNav: "Resumen",
-    summaryNavDescription: "Vista general de configuración",
-    interfaceNav: "Interfaz",
-    interfaceNavDescription: "Apariencia y comportamiento",
-    exportNav: "Exportar",
-    exportNavDescription: "PDF, DOCX y Markdown",
-    skillsNav: "Skills de IA",
-    skillsNavDescription: "Capacidades base inspeccionables",
-    capabilitiesNav: "Capacidades",
-    capabilitiesNavDescription: "Funciones avanzadas de IA",
-    systemNav: "Sistema y diagnóstico",
-    systemNavDescription: "Servicios locales y trazas",
-    servicesNav: "Servicios",
-    servicesNavDescription: "Estado local",
-    appearanceNav: "Apariencia",
-    appearanceNavDescription: "Idioma y escala visual",
-    aiNav: "IA documental",
-    aiNavDescription: "OpenAI y contexto documental",
-    diagnosticsNav: "Trazas",
-    diagnosticsNavDescription: "Registro local de errores",
-    servicesHeading: "Estado de la aplicación",
-    servicesDescription: "Comprueba que archivos, historial, IA y diagnósticos locales funcionan correctamente en este dispositivo.",
-    servicesSummary: "Supervisión local",
-    servicesPending: "Consultando estado local",
-    lastChecked: "Última comprobación",
-    refreshServices: "Comprobar",
-    profileLabel: "Perfil activo",
-    startedAtLabel: "Arrancado",
-    versionLabel: "Versión activa",
-    appDataDirLabel: "Datos locales",
-    lastErrorLabel: "Último problema detectado",
-    copyDiagnostic: "Copiar diagnóstico",
-    copyDiagnosticCopied: "Diagnóstico copiado",
-    copyDiagnosticFailed: "No se pudo copiar",
-    checkConnection: "Probar conexión",
-    availableValue: "Disponible",
-    unavailableValue: "No disponible",
-    localAppServiceName: "Aplicación local",
-    localAppServiceDescription: "Gestiona archivos, historial, IA y diagnósticos en este dispositivo.",
-    desktopProfile: "Windows",
-    androidProfile: "Android",
-    unauthenticatedProfile: "Sin cuenta conectada",
-    yes: "Sí",
-    no: "No",
-    appearanceHeading: "Apariencia",
-    appearanceDescription: "Ajusta cómo se presenta la interfaz en este equipo.",
-    themeHeading: "Tema",
-    themeDescription: "Elige un modo claro, oscuro o sincronizado con el sistema.",
-    themeSystem: "Sistema",
-    themeLight: "Claro",
-    themeDark: "Oscuro",
-    themeSystemDescription: "Usa la configuración del sistema operativo",
-    themeLightDescription: "Interfaz clara y luminosa",
-    themeDarkDescription: "Interfaz oscura para baja luz",
-    primaryColorHeading: "Color principal",
-    primaryColorDescription: "Usa la misma gama visual que los proyectos para acentos, estados activos y acciones principales.",
-    primaryColorDefault: "Naranja",
-    primaryColorOption: "Color",
-    previewHeading: "Vista previa",
-    previewDescription: "Así se verá la interfaz con la configuración actual.",
-    previewPrimaryButton: "Nuevo documento",
-    previewSecondaryButton: "Importar",
-    previewActiveState: "Activo",
-    previewDocumentName: "documentacion-producto.md",
-    previewStatus: "Editando",
-    previewTextTitle: "Superficie de trabajo",
-    previewTextDescription: "La navegación, acciones y selección usan el color principal sin cambiar los colores semánticos.",
-    previewDocuments: "Documentos",
-    previewSearch: "Búsqueda",
-    previewRecent: "Recientes",
-    previewFavorites: "Favoritos",
-    previewTrash: "Papelera",
-    resetAppearance: "Restablecer apariencia",
-    exportDescription: "Define la plantilla comun usada al exportar documentos Markdown a PDF y DOCX.",
-    exportPageHeading: "Pagina",
-    exportPageDescription: "Tamano y margenes del documento exportado.",
-    exportPageSize: "Tamano",
-    exportMarginMm: "Margen lateral (mm)",
-    exportTopMarginMm: "Margen superior (mm)",
-    exportBottomMarginMm: "Margen inferior (mm)",
-    exportTextHeading: "Texto",
-    exportTextDescription: "Tipografia, color e interlineado del cuerpo.",
-    exportNormalTextHeading: "Texto normal",
-    exportFontFamily: "Tipografia",
-    exportNormalSize: "Tamano",
-    exportTextColor: "Color texto",
-    exportLineSpacing: "Interlineado",
-    exportSpaceBefore: "Espaciado anterior",
-    exportSpaceAfter: "Espaciado posterior",
-    exportHeadingsHeading: "Titulos",
-    exportHeadingsDescription: "Tipografia comun y estilos principales para titulos.",
-    exportHeadingLevel: "Nivel",
-    exportHeadingLevelName: "Titulo {level}",
-    exportHeadingFontFamily: "Tipografia",
-    exportHeadingFormat: "Formato",
-    exportHeadingSize: "Tamano",
-    exportHeadingSpaceBefore: "Antes",
-    exportHeadingSpaceAfter: "Despues",
-    exportHeadingColor: "Color",
-    exportTextFormatNormal: "Normal",
-    exportTextFormatBold: "Negrita",
-    exportTextFormatUnderline: "Subrayado",
-    exportTextFormatBoldUnderline: "Negrita y subrayado",
-    exportGeneralHeading: "General",
-    exportGeneralDescription: "Opciones comunes de salida.",
-    exportIncludeTitle: "Incluir titulo del archivo",
-    exportIncludeTitleDescription: "Anade el nombre del documento al inicio del PDF o DOCX.",
-    exportLinkColor: "Color enlaces",
-    exportRuleColor: "Color separador",
-    exportDiagramResolution: "Resolucion diagramas",
-    exportDiagramResolutionLow: "Baja",
-    exportDiagramResolutionMedium: "Media",
-    exportDiagramResolutionHigh: "Alta",
-    exportTemplateFileHeading: "Archivo ASCII",
-    exportTemplateFileDescription: "La plantilla basica se guarda como JSON editable por fuera de la app.",
-    exportResetTemplate: "Restablecer plantilla",
-    exportSettingsNote: "Estos ajustes se aplican unicamente a las exportaciones realizadas desde esta instalacion.",
-    languageLabel: "Idioma",
-    languageDescription: "Selecciona el idioma para la interfaz.",
-    zoomLabel: "Zoom de la interfaz",
-    zoomDescription: "Ajusta el tamaño de los elementos de la interfaz.",
-    zoomReduce: "Reducir",
-    zoomNormal: "Normal",
-    zoomIncrease: "Ampliar",
-    markdownCompatibilityHeading: "Compatibilidad Markdown",
-    markdownCompatibilityDescription: "Opciones para mejorar la compatibilidad con distintos editores y visores.",
-    markdownCompatibilityNote: "Mantén esta opción activa si el equipo acepta HTML inline en sus documentos Markdown. Desactívala si quieres limitar el editor a controles de Markdown estándar.",
-    underlineToggleLabel: "Mostrar formatos extendidos en el editor",
-    underlineToggleDescription: "El subrayado y el resaltado no forman parte de Markdown estándar y se guardarán como HTML inline controlado.",
-    underlineToggleAria: "Activar formatos Markdown extendidos",
-    aiHeading: "IA documental",
-    aiDescription: "Configura los modelos de IA y el contexto documental que usa la aplicación para responder.",
-    aiConfigured: "Clave configurada",
-    aiMissingKey: "Sin clave OpenAI",
-    enabled: "Activo",
-    disabled: "Inactivo",
-    openAiKeyPlaceholder: "sk-...",
-    openAiKeyConfiguredPlaceholder: "Clave configurada. Últimos 4 caracteres:",
-    openAiKeyConfiguredGenericPlaceholder: "Clave OpenAI configurada. Escribe una nueva para sustituirla.",
-    openAiKeyMissingPlaceholder: "Configura la API key de OpenAI para activar IA real",
-    saveKey: "Guardar",
-    updateKey: "Actualizar clave",
-    cancelKeyEdit: "Cancelar",
-    deleteKey: "Eliminar clave",
-    openAiKeyLastChars: "Últimos caracteres",
-    openAiProviderActive: "Proveedor activo",
-    openAiProviderMissing: "Pendiente de clave",
-    aiKeyPrivacy: "La clave se guarda localmente y no se escribe en proyectos, logs ni trazas.",
-    aiProviderHeading: "Proveedor de IA",
-    aiProviderDescription: "Conecta la aplicación con el servicio que utilizará para generar respuestas.",
-    aiModelHeading: "Modelo de respuesta",
-    aiModelDescription: "Elige el equilibrio entre inteligencia, velocidad y coste para las respuestas documentales.",
-    aiModelSelectorTitle: "Elige el modelo que mejor se adapte a tu tarea.",
-    aiModelRecommendedOnly: "Solo mostrar recomendados",
-    aiModelGuide: "Ver guía de modelos",
-    aiModelGuideDescription: "Equilibrado es la mejor opción para la mayoría de tareas de documentación.",
-    recommendedModel: "Recomendado",
-    intelligenceLabel: "Inteligencia",
-    costLabel: "Coste",
-    visionHeading: "Visión de imágenes",
-    visionDescription: "Controla cómo se usan las imágenes del proyecto como contexto IA y cuándo se indexan sus descripciones visuales.",
-    visionModelHeading: "Modelo visión",
-    visionDetailHeading: "Detalle",
-    visionDetailAuto: "Automático",
-    visionDetailLow: "Bajo",
-    visionDetailHigh: "Alto",
-    visionMaxImages: "Imágenes por prompt",
-    visionMaxSize: "Tamaño máx.",
-    visionIndexHeading: "Indexar imágenes en RAG",
-    visionIndexDescription: "Permite que el índice del proyecto incluya descripciones visuales generadas desde las imágenes.",
-    visionStoreHeading: "Guardar descripciones visuales",
-    visionStoreDescription: "Conserva metadatos locales para reutilizar contexto sin volver a analizar cada imagen.",
-    reindexImages: "Reindexar imágenes",
-    imageGenerationUnavailableTitle: "Generación de imágenes",
-    imageGenerationUnavailableDescription: "La app genera imágenes con OpenAI, las guarda en el proyecto y puede insertarlas en documentos cuando los permisos lo permiten.",
-    imageGenerationAvailableDescription: "Genera imágenes con OpenAI, guárdalas en el proyecto e insértalas en el documento cuando esté permitido.",
-    imageGenerationModelHeading: "Modelo imagen",
-    imageGenerationModelSelectorTitle: "Elige el modelo de imagen según calidad, coste y compatibilidad.",
-    imageGenerationModelGuideDescription: "Tarifas oficiales por tokens de entrada y salida. El consumo depende del modelo, tamaño y calidad; no se estima mediante una escala de puntuaciones.",
-    imageGenerationPricePerImage: "por imagen",
-    imageGenerationPricePer1kImage: "por imagen 1K",
-    imageGenerationSizeHeading: "Tamaño",
-    imageGenerationQualityHeading: "Calidad",
-    imageGenerationFormatHeading: "Formato",
-    imageGenerationFolderHeading: "Carpeta destino",
-    imageGenerationCustomFolderHeading: "Ruta personalizada",
-    imageGenerationAuto: "Automático",
-    imageGenerationQualityLow: "Baja",
-    imageGenerationQualityMedium: "Media",
-    imageGenerationQualityHigh: "Alta",
-    imageGenerationFolderDocument: "Carpeta del documento",
-    imageGenerationFolderGenerated: "assets/generated",
-    imageGenerationFolderCustom: "Personalizada",
-    imageGenerationInsertHeading: "Insertar en documento",
-    imageGenerationInsertDescription: "Permite añadir la imagen generada como referencia Markdown en el documento activo.",
-    imageGenerationDocumentContextHeading: "Usar contexto documental",
-    imageGenerationDocumentContextDescription: "Permite que la petición visual use el documento activo y fuentes adjuntas como contexto.",
-    imageGenerationModels: {
-      "gpt-image-2": {
-        name: "Máxima calidad",
-        description: "Modelo actual para generación y edición, con tamaños flexibles y coste superior en alta calidad o 2K/4K.",
-        price: "$0.006-$0.211",
-        tag: "Recomendado",
-        recommended: true,
-      },
-      "gpt-image-1.5": {
-        name: "Calidad anterior",
-        description: "Modelo previo con buen seguimiento de instrucciones y coste por imagen publicado.",
-        price: "$0.009-$0.133",
-        tag: "Avanzado",
-        recommended: false,
-      },
-      "gpt-image-1-mini": {
-        name: "Coste bajo",
-        description: "Variante eficiente para borradores visuales, ideas rápidas y menor coste operativo.",
-        price: "$0.005-$0.036",
-        tag: "Económico",
-        recommended: false,
-      },
-      "gpt-image-1": {
-        name: "Compatibilidad",
-        description: "Modelo anterior mantenido para compatibilidad con configuraciones existentes.",
-        price: "$0.011-$0.167",
-        tag: "Legacy",
-        recommended: false,
-      },
-    },
-    imageGenerationPermissionsTitle: "Permisos de imagen",
-    permissionGenerateImages: "Generar imágenes",
-    permissionGenerateImagesDescription: "Permite que la IA genere imágenes con el proveedor configurado.",
-    permissionCreateImageAssets: "Crear assets de imagen",
-    permissionCreateImageAssetsDescription: "Autoriza guardar imágenes generadas dentro del proyecto local.",
-    transcriptionHeading: "Audio y transcripción",
-    transcriptionDescription: "Controla el dictado usado por el micrófono del prompt y dónde se insertará el texto transcrito.",
-    transcriptionModelHeading: "Modelo",
-    transcriptionDefaultTarget: "Destino por defecto",
-    transcriptionDefaultLanguage: "Idioma por defecto",
-    transcriptionFavoriteLanguages: "Idiomas favoritos del micrófono",
-    transcriptionFavoriteLanguagesPlaceholder: "Selecciona idiomas",
-    transcriptionTargetPrompt: "Prompt",
-    transcriptionTargetDocument: "Documento",
-    transcriptionLanguages: {
-      auto: "Automático",
-      es: "Español",
-      en: "Inglés",
-      fr: "Francés",
-      de: "Alemán",
-      it: "Italiano",
-      pt: "Portugués",
-      ca: "Catalán",
-      eu: "Euskera",
-      gl: "Gallego",
-    },
-    aiModels: {
-      "gpt-5.4-mini": {
-        name: "Equilibrado",
-        description: "Buen criterio documental con coste bajo para uso diario.",
-        intelligence: "Alta",
-        cost: "Bajo",
-        price: "$0.75 entrada / $4.50 salida por 1M tokens",
-        recommended: true,
-      },
-      "gpt-5.4": {
-        name: "Avanzado",
-        description: "Más precisión para razonamiento y documentos complejos.",
-        intelligence: "Muy alta",
-        cost: "Medio",
-        price: "$2.50 entrada / $15 salida por 1M tokens",
-        recommended: false,
-      },
-      "gpt-5.5": {
-        name: "Máxima inteligencia",
-        description: "Elige esta opción cuando la calidad pesa más que el coste.",
-        intelligence: "Máxima",
-        cost: "Alto",
-        price: "$5 entrada / $30 salida por 1M tokens",
-        recommended: false,
-      },
-      "gpt-5.4-nano": {
-        name: "Económico",
-        description: "Respuestas rápidas y baratas para tareas simples.",
-        intelligence: "Media",
-        cost: "Muy bajo",
-        price: "$0.20 entrada / $1.25 salida por 1M tokens",
-        recommended: false,
-      },
-    },
-    aiPermissionsHeading: "Permisos de acciones",
-    aiPermissionsScope: "Límites de ejecución",
-    editDocuments: "Editar documentos",
-    editHandwrittenNotes: "Editar notas a mano",
-    drawHandwrittenNotes: "Dibujar en notas a mano",
-    createFolders: "Crear y mover carpetas",
-    createDocuments: "Crear, duplicar y mover documentos",
-    generateImages: "Generar imágenes",
-    createImageAssets: "Crear archivos de imagen",
-    insertImagesIntoDocuments: "Insertar imágenes en documentos",
-    useDocumentContextForImages: "Usar contexto documental en imágenes",
-    deleteDocuments: "Eliminar documentos y carpetas",
-    agenticHeading: "Investigación",
-    agenticDescription: "Investigaciones con planificación, fuentes, citas y creación de documentos revisables.",
-    agenticUnavailableTitle: "Investigación no disponible",
-    agenticUnavailableDescription: "La investigación necesita OpenAI configurado para consultar fuentes web y crear informes verificables.",
-    agenticModeHint: "Control desde el prompt",
-    webResearchHeading: "Investigación web",
-    webResearchDescription: "No disponible hasta que la app pueda consultar fuentes externas con citas, trazabilidad y control de coste.",
-    agenticConfirmHeading: "Confirmar antes de aplicar",
-    agenticConfirmDescription: "Las tareas pueden preparar cambios, pero no crear ni modificar documentos sin un checkpoint visible.",
-    agenticMaxSteps: "Pasos",
-    agenticMaxDocuments: "Documentos",
-    agenticMaxSources: "Fuentes",
-    agenticMaxCost: "Coste máximo por investigación",
-    researchPresetsHeading: "Tipos de investigación",
-    researchPresetsDescription: "Define cómo se comporta cada opción del menú + > Investigar. Las fuentes son candidatas evaluables; cada tipo puede tener su propio volumen.",
-    researchGlobalLimitsApply: "Aplican límites globales",
-    researchPresetQuick: "Rápida",
-    researchPresetQuickDescription: "Síntesis breve para responder una duda o decisión concreta.",
-    researchPresetDeep: "Profunda",
-    researchPresetDeepDescription: "Informe completo con metodología, contraste, citas y limitaciones.",
-    researchPresetCompare: "Comparar fuentes",
-    researchPresetCompareDescription: "Contrasta versiones, discrepancias y fiabilidad entre fuentes.",
-    researchPresetCurrentDocument: "Sobre este documento",
-    researchPresetCurrentDocumentDescription: "Usa el documento activo como base prioritaria.",
-    researchPresetDepth: "Profundidad",
-    researchPresetSources: "Fuentes",
-    researchPresetMaxSources: "Máx. fuentes",
-    researchPresetCandidateSources: "Máx. fuentes candidatas",
-    researchPresetAutoStart: "Auto inicio",
-    researchPresetDuration: "Tiempo estimado",
-    researchWebAlwaysOn: "Web activa",
-    researchPresetDiagramsDescription: "Permite que el agente incluya diagramas cuando aclaren el informe.",
-    researchPresetImagesDescription: "Permite que el agente genere o use imágenes cuando aporten valor.",
-    researchPresetLength: "Extensión",
-    researchPresetStyle: "Estilo",
-    researchPresetTables: "Tablas",
-    researchPresetDiagrams: "Diagramas",
-    researchPresetImages: "Imágenes",
-    researchPresetCitations: "Citas",
-    researchLengthBrief: "Breve",
-    researchLengthStandard: "Estándar",
-    researchLengthLong: "Largo",
-    researchLengthDeep: "Profundo",
-    researchStyleExecutive: "Ejecutivo",
-    researchStyleTechnical: "Técnico",
-    researchStyleComparison: "Comparativo",
-    researchStyleRegulatory: "Normativo",
-    researchStyleStateOfArt: "Estado del arte",
-    researchVisualNone: "No",
-    researchVisualIfUseful: "Si aporta valor",
-    researchVisualRequired: "Requerido",
-    researchImagesNone: "No",
-    researchImagesExisting: "Assets existentes",
-    researchImagesGenerate: "Generar si aporta valor",
-    researchCitationsNormal: "Normal",
-    researchCitationsStrict: "Estricto",
-    researchDepthQuick: "Rápida",
-    researchDepthStandard: "Estándar",
-    researchDepthDeep: "Profunda",
-    researchScopeProject: "Proyecto",
-    researchScopeWeb: "Web",
-    researchScopeWebProject: "Web + proyecto",
-    ragHeading: "Indexar documentación del proyecto",
-    ragDescription: "Índice local automático usado para añadir contexto documental a las respuestas IA.",
-    ragUnavailableTitle: "Índice local pendiente",
-    ragUnavailableDescription: "Puedes añadir documentos, imágenes y adjuntos como contexto explícito desde el prompt.",
-    ragAvailableDescription: "Construye un índice local de documentos y adjuntos de texto para seleccionar fragmentos relevantes como contexto IA.",
-    ragExplicitContextNotice: "Para trabajar con más contexto, adjunta archivos desde el prompt o arrástralos desde el árbol del proyecto.",
-    ragContextHeading: "Contexto documental (RAG)",
-    ragContextHelp: "El índice se guarda localmente y se reconstruye desde los archivos del proyecto. No crea un vector store remoto.",
-    ragNotIndexedMessage: "Índice pendiente de reconstrucción.",
-    rebuildAiIndex: "Reconstruir índice",
-    deleteAiIndex: "Limpiar índice",
-    ragStatus: "Estado",
-    ragDocuments: "Documentos disponibles",
-    ragFailed: "fallidos",
-    ragExactReady: "búsqueda exacta local lista",
-    rebuildIndex: "Reindexar ahora",
-    deleteIndex: "Eliminar índice",
-    currentModelLabel: "Modelo actual",
-    lastStatusLabel: "Último estado",
-    noIndexGenerated: "Aún no se ha generado el índice.",
-    diagnosticsHeading: "Trazas",
-    diagnosticsDescription: "Registra errores de la aplicación en un archivo local dedicado para revisar incidencias.",
-    traceToggleLabel: "Registro de trazas",
-    traceToggleDescription: "Los errores se registran siempre. Actívalo para conservar también trazas informativas de diagnóstico.",
-    traceToggleAria: "Activar registro de trazas",
-    logFolderLabel: "Carpeta de logs",
-    preparingLogFolder: "Preparando carpeta de logs",
-    openLogFolder: "Abrir carpeta en el explorador",
-    systemDescription: "Configura servicios locales, almacenamiento y herramientas de diagnóstico.",
-    storageHeading: "Datos locales y almacenamiento",
-    storageDescription: "Ubicaciones que usa la aplicación para guardar datos locales, configuración e índices.",
-    logsSensitiveNotice: "Los logs pueden contener información sensible. Úsalos solo para diagnóstico.",
-    summaryHeading: "Resumen de configuración",
-    summaryDescription: "Revisa los ajustes actuales de tu aplicación. Puedes cambiar cualquier configuración desde su sección correspondiente.",
-    summaryInterfaceDescription: "Apariencia general y comportamiento de la aplicación.",
-    summaryAiDescription: "Modelos de IA y contexto documental utilizado.",
-    summaryCapabilitiesDescription: "Funciones avanzadas que la IA puede utilizar.",
-    summarySystemDescription: "Rendimiento, almacenamiento y herramientas de diagnóstico.",
-    summaryAiProvider: "Proveedor de IA",
-    summaryProviderLabel: "Proveedor",
-    summaryModelLabel: "Modelo",
-    summaryCapabilityMetric: "Capacidad",
-    summaryCostMetric: "Coste",
-    summarySearch: "Búsqueda",
-    summaryVectorStore: "Vector store",
-    summaryNone: "Ninguno",
-    summaryDocumentsShort: "docs",
-    summaryImages: "Imágenes",
-    summaryImagesDescription: "Entender imágenes importadas",
-    summaryAudioDescription: "Transcribir audio a texto",
-    summaryPermissionsDescription: "Configurar lo que la IA puede hacer",
-    summaryAgenticDescription: "Investigación y ejecución de tareas",
-    summaryProductive: "Productivo",
-    summaryModelsHeading: "Modelos de IA utilizados",
-    summaryModelsDescription: "Modelos seleccionados por función, con capacidad, coste y unidad de precio.",
-    summaryMainAi: "IA principal (respuestas)",
-    summaryImageGenerationAi: "Imágenes (generación)",
-    summaryVisionAi: "Imágenes (visión)",
-    summaryAudioAi: "Audio y transcripción",
-    summaryAudioPricing: "$0.006 / $0.018",
-    summaryTokenPriceUnit: "por 1M tokens",
-    summaryEconomy: "Económico",
-    summaryHelpHeading: "¿Necesitas ayuda?",
-    summaryHelpDescription: "Consulta la guía rápida para entender cómo funciona cada sección.",
-    summaryHelpAction: "Ver guía rápida",
-    goToInterface: "Ir a Interfaz",
-    goToAi: "Ir a IA documental",
-    goToCapabilities: "Ir a Capacidades",
-    goToSystem: "Ir a Sistema y diagnóstico",
-    capabilitiesDescription: "Activa y configura las funciones avanzadas que la IA puede utilizar.",
-    capabilityDiagramsTitle: "1. Diagramas",
-    capabilityDiagramsDescription: "Creación, edición, visualización profesional y exportación de diagramas Mermaid.",
-    capabilityDiagramsEditorTitle: "Editor de diagramas",
-    capabilityDiagramsEditorDescription: "Controla el nivel visual permitido para diagramas insertados manualmente o generados por IA.",
-    capabilityDiagramsAiTitle: "Generación IA de diagramas",
-    capabilityDiagramsAiDescription: "Permite que la IA elija diagramas cuando ayuden más que texto, tablas o imágenes.",
-    diagramProfileHeading: "Perfil Mermaid",
-    diagramProfileCompatible: "Máxima compatibilidad",
-    diagramProfileVisualLocal: "Visual local",
-    diagramProfileAdvanced: "Experimental controlado",
-    diagramIconSetHeading: "Iconos",
-    diagramDefaultWidthHeading: "Anchura por defecto",
-    diagramImagePolicyHeading: "Imágenes internas",
-    diagramImagesDisabled: "Desactivadas",
-    diagramImagesProject: "Solo assets del proyecto",
-    diagramImagesExternalConfirm: "Externas con confirmación",
-    diagramBetaPolicyHeading: "Tipos beta",
-    diagramBetaDisabled: "Bloqueados",
-    diagramBetaAsk: "Avisar y validar",
-    diagramBetaEnabled: "Permitidos",
-    diagramAiModeHeading: "Modo IA",
-    diagramAiModeVisual: "Visual enriquecido",
-    diagramAiModeSafe: "Compatible",
-    diagramExportGuaranteeHeading: "Exportación",
-    diagramExportGuaranteeValue: "PDF y DOCX como imagen",
-    diagramLocalFirstHeading: "Local-first",
-    diagramLocalFirstValue: "Sin CDN por defecto",
-    capabilityImagesTitle: "2. Imágenes",
-    capabilityImagesDescription: "Comprensión de imágenes para trabajar con contenido visual importado al proyecto.",
-    capabilityGenerateImagesTitle: "Generación de imágenes",
-    capabilityUnderstandImagesTitle: "Entender imágenes (visión)",
-    capabilityUnderstandImagesDescription: "Analiza imágenes del proyecto y puede usarlas como contexto.",
-    capabilityAudioTitle: "3. Audio y transcripción",
-    capabilityAudioDescription: "Convierte voz en texto para usarla como prompt o incorporarla a documentos.",
-    capabilityPermissionsTitle: "4. Acciones permitidas",
-    capabilityPermissionsDescription: "Define hasta qué punto la IA puede modificar y gestionar el contenido del proyecto.",
-    capabilityAgenticTitle: "5. Investigación",
-    capabilityAgenticDescription: "Estado de las capacidades de planificación, investigación web y ejecución autónoma.",
-    qualityLow: "Baja",
-    qualityMedium: "Media",
-    qualityHigh: "Alta",
-    visionDetailLabel: "Detalle",
-    visionMaxImageSize: "Tamaño máximo por imagen",
-    transcriptionModelName: "Precisión alta en transcripción",
-    transcriptionModelDescription: "Optimizado para dictado y notas de trabajo.",
-    transcriptionDefaultTargetHelp: "Dónde se insertará la transcripción.",
-    transcriptionDefaultLanguageHelp: "Idioma usado si no se detecta.",
-    transcriptionFavoriteLanguagesHelp: "Idiomas que aparecerán como opciones rápidas en el menú del micrófono.",
-    permissionModeConservative: "Conservador",
-    permissionModeConservativeDescription: "Solo propone cambios.",
-    permissionModeAssisted: "Asistido",
-    permissionModeAssistedDescription: "Prepara cambios y pide confirmación antes.",
-    permissionModeProductive: "Productivo",
-    permissionModeProductiveDescription: "Puede aplicar cambios dentro de límites definidos.",
-    permissionModeCustom: "Personalizado",
-    permissionModeCustomDescription: "Configura permisos uno a uno.",
-    editDocumentsDescription: "Puede modificar el contenido de documentos.",
-    editHandwrittenNotesDescription: "Puede aplicar borradores en notas manuscritas abiertas.",
-    drawHandwrittenNotesDescription: "Puede generar trazos de dibujo dentro de una .knote activa.",
-    createFoldersDescription: "Puede crear, duplicar y mover carpetas.",
-    createDocumentsDescription: "Puede crear y organizar documentos del proyecto.",
-    deleteDocumentsDescription: "Puede eliminar documentos y carpetas.",
-    generateImagesDescription: "Permite generar imágenes mediante el proveedor configurado.",
-    createImageAssetsDescription: "Puede guardar imágenes como archivos en el proyecto.",
-    insertImagesIntoDocumentsDescription: "Puede añadir imágenes dentro de documentos.",
-    useDocumentContextForImagesDescription: "Permiso reservado para generación de imágenes; la visión usa contexto explícito del prompt.",
-    permissionScopeNotice: "Estos permisos se aplican a la IA en todas las tareas que realice dentro del proyecto.",
-    agenticDepthQuick: "Rápido",
-    agenticDepthGuided: "Guiado",
-    agenticDepthDeep: "Profundo guiado",
-    agenticDepthBoundedAutonomous: "Autónomo acotado",
-    agenticWebResearchHeading: "Investigación web",
-    agenticWebResearchDescription: "Permite consultar fuentes online con trazabilidad y control de coste.",
-    agenticLimitsImpact: "La investigación usa siempre web cuando OpenAI está configurado. Las fuentes candidatas y la extensión se proponen en el plan de cada investigación.",
-    capabilitiesPlaceholderDescription: "Esta sección agrupa las capacidades avanzadas de IA. Por ahora mantiene una vista de resumen; los controles detallados siguen disponibles en IA documental.",
-    capabilitiesEditInAi: "Configurar en IA documental",
-  },
-  en: {
-    title: "App settings",
-    subtitle: "Local interface and diagnostics settings.",
-    settingsIdle: "No pending changes",
-    settingsSaving: "Saving settings",
-    settingsSaved: "Settings saved",
-    settingsSaveFailed: "Settings could not be saved",
-    settingsLocalOnly: "Local preferences only",
-    close: "Close",
-    closeSettings: "Close settings",
-    sectionsLabel: "Settings sections",
-    summaryNav: "Summary",
-    summaryNavDescription: "Configuration overview",
-    interfaceNav: "Interface",
-    interfaceNavDescription: "Appearance and behavior",
-    exportNav: "Export",
-    exportNavDescription: "PDF, DOCX, and Markdown",
-    skillsNav: "AI Skills",
-    skillsNavDescription: "Inspectable base capabilities",
-    capabilitiesNav: "Capabilities",
-    capabilitiesNavDescription: "Advanced AI functions",
-    systemNav: "System and diagnostics",
-    systemNavDescription: "Local services and traces",
-    servicesNav: "Services",
-    servicesNavDescription: "Local status",
-    appearanceNav: "Appearance",
-    appearanceNavDescription: "Language and visual scale",
-    aiNav: "Documentation AI",
-    aiNavDescription: "OpenAI and document context",
-    diagnosticsNav: "Traces",
-    diagnosticsNavDescription: "Local error logging",
-    servicesHeading: "Application status",
-    servicesDescription: "Check that local files, history, AI, and diagnostics are working correctly on this device.",
-    servicesSummary: "Local supervision",
-    servicesPending: "Checking local status",
-    lastChecked: "Last checked",
-    refreshServices: "Check",
-    profileLabel: "Active profile",
-    startedAtLabel: "Started",
-    versionLabel: "Active version",
-    appDataDirLabel: "Local data",
-    lastErrorLabel: "Last detected problem",
-    copyDiagnostic: "Copy diagnostic",
-    copyDiagnosticCopied: "Diagnostic copied",
-    copyDiagnosticFailed: "Could not copy",
-    checkConnection: "Test connection",
-    availableValue: "Available",
-    unavailableValue: "Unavailable",
-    localAppServiceName: "Local application",
-    localAppServiceDescription: "Manages files, history, AI, and diagnostics on this device.",
-    desktopProfile: "Windows",
-    androidProfile: "Android",
-    unauthenticatedProfile: "No connected account",
-    yes: "Yes",
-    no: "No",
-    appearanceHeading: "Appearance",
-    appearanceDescription: "Adjust how the interface is presented on this computer.",
-    themeHeading: "Theme",
-    themeDescription: "Choose a light, dark, or system-synced mode.",
-    themeSystem: "System",
-    themeLight: "Light",
-    themeDark: "Dark",
-    themeSystemDescription: "Use the operating system setting",
-    themeLightDescription: "Clear and bright interface",
-    themeDarkDescription: "Dark interface for low light",
-    primaryColorHeading: "Primary color",
-    primaryColorDescription: "Use the same visual range as projects for accents, active states, and primary actions.",
-    primaryColorDefault: "Orange",
-    primaryColorOption: "Color",
-    previewHeading: "Preview",
-    previewDescription: "This is how the interface will look with the current configuration.",
-    previewPrimaryButton: "New document",
-    previewSecondaryButton: "Import",
-    previewActiveState: "Active",
-    previewDocumentName: "product-documentation.md",
-    previewStatus: "Editing",
-    previewTextTitle: "Workspace surface",
-    previewTextDescription: "Navigation, actions, and selection use the primary color without changing semantic colors.",
-    previewDocuments: "Documents",
-    previewSearch: "Search",
-    previewRecent: "Recent",
-    previewFavorites: "Favorites",
-    previewTrash: "Trash",
-    resetAppearance: "Reset appearance",
-    exportDescription: "Define the shared template used when exporting Markdown documents to PDF and DOCX.",
-    exportPageHeading: "Page",
-    exportPageDescription: "Exported document size and margins.",
-    exportPageSize: "Size",
-    exportMarginMm: "Side margin (mm)",
-    exportTopMarginMm: "Top margin (mm)",
-    exportBottomMarginMm: "Bottom margin (mm)",
-    exportTextHeading: "Text",
-    exportTextDescription: "Body typography, color, and line spacing.",
-    exportNormalTextHeading: "Normal text",
-    exportFontFamily: "Font",
-    exportNormalSize: "Size",
-    exportTextColor: "Text color",
-    exportLineSpacing: "Line spacing",
-    exportSpaceBefore: "Space before",
-    exportSpaceAfter: "Space after",
-    exportHeadingsHeading: "Headings",
-    exportHeadingsDescription: "Shared heading font and main heading styles.",
-    exportHeadingLevel: "Level",
-    exportHeadingLevelName: "Heading {level}",
-    exportHeadingFontFamily: "Font",
-    exportHeadingFormat: "Format",
-    exportHeadingSize: "Size",
-    exportHeadingSpaceBefore: "Before",
-    exportHeadingSpaceAfter: "After",
-    exportHeadingColor: "Color",
-    exportTextFormatNormal: "Normal",
-    exportTextFormatBold: "Bold",
-    exportTextFormatUnderline: "Underline",
-    exportTextFormatBoldUnderline: "Bold and underline",
-    exportGeneralHeading: "General",
-    exportGeneralDescription: "Common output options.",
-    exportIncludeTitle: "Include file title",
-    exportIncludeTitleDescription: "Adds the document name at the start of the PDF or DOCX.",
-    exportLinkColor: "Link color",
-    exportRuleColor: "Rule color",
-    exportDiagramResolution: "Diagram resolution",
-    exportDiagramResolutionLow: "Low",
-    exportDiagramResolutionMedium: "Medium",
-    exportDiagramResolutionHigh: "High",
-    exportTemplateFileHeading: "ASCII file",
-    exportTemplateFileDescription: "The basic template is saved as JSON and can be edited outside the app.",
-    exportResetTemplate: "Reset template",
-    exportSettingsNote: "These settings apply only to exports made from this installation.",
-    languageLabel: "Language",
-    languageDescription: "Select the interface language.",
-    zoomLabel: "Interface zoom",
-    zoomDescription: "Adjust the size of interface elements.",
-    zoomReduce: "Reduce",
-    zoomNormal: "Normal",
-    zoomIncrease: "Increase",
-    markdownCompatibilityHeading: "Markdown compatibility",
-    markdownCompatibilityDescription: "Options to improve compatibility with different editors and viewers.",
-    markdownCompatibilityNote: "Keep this option enabled if the team accepts inline HTML in Markdown documents. Disable it to keep the editor limited to standard Markdown controls.",
-    underlineToggleLabel: "Show extended formats in the editor",
-    underlineToggleDescription: "Underline and highlight are not part of standard Markdown and will be saved as controlled inline HTML.",
-    underlineToggleAria: "Enable extended Markdown formats",
-    aiHeading: "Documentation AI",
-    aiDescription: "Configure the AI models and document context the application uses to answer.",
-    aiConfigured: "Key configured",
-    aiMissingKey: "No OpenAI key",
-    enabled: "Enabled",
-    disabled: "Disabled",
-    openAiKeyPlaceholder: "sk-...",
-    openAiKeyConfiguredPlaceholder: "Key configured. Last 4 characters:",
-    openAiKeyConfiguredGenericPlaceholder: "OpenAI key configured. Type a new one to replace it.",
-    openAiKeyMissingPlaceholder: "Configure the OpenAI API key to enable real AI",
-    saveKey: "Save",
-    updateKey: "Update key",
-    cancelKeyEdit: "Cancel",
-    deleteKey: "Delete key",
-    openAiKeyLastChars: "Last characters",
-    openAiProviderActive: "Active provider",
-    openAiProviderMissing: "Key required",
-    aiKeyPrivacy: "The key is stored locally and is not written to projects, logs, or traces.",
-    aiProviderHeading: "AI provider",
-    aiProviderDescription: "Connect the application with the service used to generate responses.",
-    aiModelHeading: "Response model",
-    aiModelDescription: "Choose the balance between intelligence, speed, and cost for documentation answers.",
-    aiModelSelectorTitle: "Choose the model that best fits your task.",
-    aiModelRecommendedOnly: "Only show recommended",
-    aiModelGuide: "View model guide",
-    aiModelGuideDescription: "Balanced is the best option for most documentation tasks.",
-    recommendedModel: "Recommended",
-    intelligenceLabel: "Intelligence",
-    costLabel: "Cost",
-    visionHeading: "Image vision",
-    visionDescription: "Control how project images are used as AI context and when visual descriptions are indexed.",
-    visionModelHeading: "Vision model",
-    visionDetailHeading: "Detail",
-    visionDetailAuto: "Automatic",
-    visionDetailLow: "Low",
-    visionDetailHigh: "High",
-    visionMaxImages: "Images per prompt",
-    visionMaxSize: "Max size",
-    visionIndexHeading: "Index images in RAG",
-    visionIndexDescription: "Allow the project index to include visual descriptions generated from images.",
-    visionStoreHeading: "Store visual descriptions",
-    visionStoreDescription: "Keep local metadata to reuse context without analyzing each image again.",
-    reindexImages: "Reindex images",
-    imageGenerationUnavailableTitle: "Image generation",
-    imageGenerationUnavailableDescription: "The app generates images with OpenAI, saves them in the project, and can insert them into documents when permissions allow it.",
-    imageGenerationAvailableDescription: "Generate images with OpenAI, save them in the project, and insert them into documents when allowed.",
-    imageGenerationModelHeading: "Image model",
-    imageGenerationModelSelectorTitle: "Choose the image model by quality, cost, and compatibility.",
-    imageGenerationModelGuideDescription: "Prices are indicative ranges per 1K image; 2K/4K sizes and high quality increase cost. gpt-image-2 prioritizes quality, not minimum cost.",
-    imageGenerationPricePerImage: "per image",
-    imageGenerationPricePer1kImage: "per 1K image",
-    imageGenerationSizeHeading: "Size",
-    imageGenerationQualityHeading: "Quality",
-    imageGenerationFormatHeading: "Format",
-    imageGenerationFolderHeading: "Destination folder",
-    imageGenerationCustomFolderHeading: "Custom path",
-    imageGenerationAuto: "Automatic",
-    imageGenerationQualityLow: "Low",
-    imageGenerationQualityMedium: "Medium",
-    imageGenerationQualityHigh: "High",
-    imageGenerationFolderDocument: "Document folder",
-    imageGenerationFolderGenerated: "assets/generated",
-    imageGenerationFolderCustom: "Custom",
-    imageGenerationInsertHeading: "Insert into document",
-    imageGenerationInsertDescription: "Allows the generated image to be inserted as a Markdown reference in the active document.",
-    imageGenerationDocumentContextHeading: "Use document context",
-    imageGenerationDocumentContextDescription: "Allows the visual request to use the active document and attached sources as context.",
-    imageGenerationModels: {
-      "gpt-image-2": {
-        name: "Highest quality",
-        description: "Current model for generation and editing, with flexible sizes and higher cost at high quality or 2K/4K.",
-        price: "$0.006-$0.211",
-        tag: "Recommended",
-        recommended: true,
-      },
-      "gpt-image-1.5": {
-        name: "Previous quality",
-        description: "Previous model with strong instruction following and published per-image cost.",
-        price: "$0.009-$0.133",
-        tag: "Advanced",
-        recommended: false,
-      },
-      "gpt-image-1-mini": {
-        name: "Low cost",
-        description: "Efficient variant for visual drafts, fast ideas, and lower operating cost.",
-        price: "$0.005-$0.036",
-        tag: "Economy",
-        recommended: false,
-      },
-      "gpt-image-1": {
-        name: "Compatibility",
-        description: "Previous model kept for compatibility with existing configurations.",
-        price: "$0.011-$0.167",
-        tag: "Legacy",
-        recommended: false,
-      },
-    },
-    imageGenerationPermissionsTitle: "Image permissions",
-    permissionGenerateImages: "Generate images",
-    permissionGenerateImagesDescription: "Allows the AI to generate images with the configured provider.",
-    permissionCreateImageAssets: "Create image assets",
-    permissionCreateImageAssetsDescription: "Authorizes saving generated images inside the local project.",
-    transcriptionHeading: "Audio and transcription",
-    transcriptionDescription: "Controls dictation from the prompt microphone and where the transcribed text will be inserted.",
-    transcriptionModelHeading: "Model",
-    transcriptionDefaultTarget: "Default target",
-    transcriptionDefaultLanguage: "Default language",
-    transcriptionFavoriteLanguages: "Microphone favorite languages",
-    transcriptionFavoriteLanguagesPlaceholder: "Select languages",
-    transcriptionTargetPrompt: "Prompt",
-    transcriptionTargetDocument: "Document",
-    transcriptionLanguages: {
-      auto: "Automatic",
-      es: "Spanish",
-      en: "English",
-      fr: "French",
-      de: "German",
-      it: "Italian",
-      pt: "Portuguese",
-      ca: "Catalan",
-      eu: "Basque",
-      gl: "Galician",
-    },
-    aiModels: {
-      "gpt-5.4-mini": {
-        name: "Balanced",
-        description: "Strong documentation judgment with low cost for daily work.",
-        intelligence: "High",
-        cost: "Low",
-        price: "$0.75 input / $4.50 output per 1M tokens",
-        recommended: true,
-      },
-      "gpt-5.4": {
-        name: "Advanced",
-        description: "More precision for reasoning and complex documents.",
-        intelligence: "Very high",
-        cost: "Medium",
-        price: "$2.50 input / $15 output per 1M tokens",
-        recommended: false,
-      },
-      "gpt-5.5": {
-        name: "Max intelligence",
-        description: "Use when answer quality matters more than cost.",
-        intelligence: "Maximum",
-        cost: "High",
-        price: "$5 input / $30 output per 1M tokens",
-        recommended: false,
-      },
-      "gpt-5.4-nano": {
-        name: "Economy",
-        description: "Fast, inexpensive answers for simple tasks.",
-        intelligence: "Medium",
-        cost: "Very low",
-        price: "$0.20 input / $1.25 output per 1M tokens",
-        recommended: false,
-      },
-    },
-    aiPermissionsHeading: "Action permissions",
-    aiPermissionsScope: "Execution limits",
-    editDocuments: "Edit documents",
-    editHandwrittenNotes: "Edit handwritten notes",
-    drawHandwrittenNotes: "Draw in handwritten notes",
-    createFolders: "Create and move folders",
-    createDocuments: "Create, duplicate, and move documents",
-    generateImages: "Generate images",
-    createImageAssets: "Create image files",
-    insertImagesIntoDocuments: "Insert images in documents",
-    useDocumentContextForImages: "Use document context for images",
-    deleteDocuments: "Delete documents and folders",
-    agenticHeading: "Research",
-    agenticDescription: "Research with planning, sources, citations, and reviewable document creation.",
-    agenticUnavailableTitle: "Research unavailable",
-    agenticUnavailableDescription: "Research requires OpenAI configuration to consult web sources and create verifiable reports.",
-    agenticModeHint: "Controlled from prompt",
-    webResearchHeading: "Web research",
-    webResearchDescription: "Unavailable until the app can consult external sources with citations, traceability, and cost control.",
-    agenticConfirmHeading: "Confirm before applying",
-    agenticConfirmDescription: "Tasks can prepare changes, but cannot create or modify documents without a visible checkpoint.",
-    agenticMaxSteps: "Steps",
-    agenticMaxDocuments: "Documents",
-    agenticMaxSources: "Sources",
-    agenticMaxCost: "Max cost per research",
-    researchPresetsHeading: "Research types",
-    researchPresetsDescription: "Define how each + > Research option behaves. Sources are evaluable candidates; each type can use its own volume.",
-    researchGlobalLimitsApply: "Global limits apply",
-    researchPresetQuick: "Quick",
-    researchPresetQuickDescription: "Short synthesis for a concrete question or decision.",
-    researchPresetDeep: "Deep",
-    researchPresetDeepDescription: "Full report with methodology, contrast, citations, and limitations.",
-    researchPresetCompare: "Compare sources",
-    researchPresetCompareDescription: "Contrasts versions, discrepancies, and source reliability.",
-    researchPresetCurrentDocument: "About this document",
-    researchPresetCurrentDocumentDescription: "Uses the active document as the priority basis.",
-    researchPresetDepth: "Depth",
-    researchPresetSources: "Sources",
-    researchPresetMaxSources: "Max sources",
-    researchPresetCandidateSources: "Max candidate sources",
-    researchPresetAutoStart: "Auto start",
-    researchPresetDuration: "Estimated time",
-    researchWebAlwaysOn: "Web on",
-    researchPresetDiagramsDescription: "Allows the agent to include diagrams when they clarify the report.",
-    researchPresetImagesDescription: "Allows the agent to generate or use images when they add value.",
-    researchPresetLength: "Length",
-    researchPresetStyle: "Style",
-    researchPresetTables: "Tables",
-    researchPresetDiagrams: "Diagrams",
-    researchPresetImages: "Images",
-    researchPresetCitations: "Citations",
-    researchLengthBrief: "Brief",
-    researchLengthStandard: "Standard",
-    researchLengthLong: "Long",
-    researchLengthDeep: "Deep",
-    researchStyleExecutive: "Executive",
-    researchStyleTechnical: "Technical",
-    researchStyleComparison: "Comparative",
-    researchStyleRegulatory: "Regulatory",
-    researchStyleStateOfArt: "State of the art",
-    researchVisualNone: "No",
-    researchVisualIfUseful: "If useful",
-    researchVisualRequired: "Required",
-    researchImagesNone: "No",
-    researchImagesExisting: "Existing assets",
-    researchImagesGenerate: "Generate if useful",
-    researchCitationsNormal: "Normal",
-    researchCitationsStrict: "Strict",
-    researchDepthQuick: "Quick",
-    researchDepthStandard: "Standard",
-    researchDepthDeep: "Deep",
-    researchScopeProject: "Project",
-    researchScopeWeb: "Web",
-    researchScopeWebProject: "Web + project",
-    ragHeading: "Index project documentation",
-    ragDescription: "Automatic local index used to add document context to AI answers.",
-    ragUnavailableTitle: "Local index pending",
-    ragUnavailableDescription: "You can add documents, images, and attachments as explicit context from the prompt.",
-    ragAvailableDescription: "Builds a local index of documents and text attachments to select relevant fragments as AI context.",
-    ragExplicitContextNotice: "To work with more context, attach files from the prompt or drag them from the project tree.",
-    ragContextHeading: "Document context (RAG)",
-    ragContextHelp: "The index is stored locally and rebuilt from project files. It does not create a remote vector store.",
-    ragNotIndexedMessage: "Index rebuild pending.",
-    rebuildAiIndex: "Rebuild index",
-    deleteAiIndex: "Clear index",
-    ragStatus: "Status",
-    ragDocuments: "Available documents",
-    ragFailed: "failed",
-    ragExactReady: "local exact search ready",
-    rebuildIndex: "Reindex now",
-    deleteIndex: "Delete index",
-    currentModelLabel: "Current model",
-    lastStatusLabel: "Last status",
-    noIndexGenerated: "The index has not been generated yet.",
-    diagnosticsHeading: "Traces",
-    diagnosticsDescription: "Record application errors in a dedicated local file for troubleshooting.",
-    traceToggleLabel: "Trace logging",
-    traceToggleDescription: "Errors are always logged. Enable this to also keep informational diagnostic traces.",
-    traceToggleAria: "Enable trace logging",
-    logFolderLabel: "Log folder",
-    preparingLogFolder: "Preparing log folder",
-    openLogFolder: "Open folder in Explorer",
-    systemDescription: "Configure local services, storage, and diagnostic tools.",
-    storageHeading: "Local data and storage",
-    storageDescription: "Locations used by the application to store local data, configuration, and indexes.",
-    logsSensitiveNotice: "Logs may contain sensitive information. Use them only for diagnostics.",
-    summaryHeading: "Configuration summary",
-    summaryDescription: "Review the current app settings. You can change any setting from its corresponding section.",
-    summaryInterfaceDescription: "General appearance and application behavior.",
-    summaryAiDescription: "AI models and document context in use.",
-    summaryCapabilitiesDescription: "Advanced functions the AI can use.",
-    summarySystemDescription: "Performance, storage, and diagnostic tools.",
-    summaryAiProvider: "AI provider",
-    summaryProviderLabel: "Provider",
-    summaryModelLabel: "Model",
-    summaryCapabilityMetric: "Capability",
-    summaryCostMetric: "Cost",
-    summarySearch: "Search",
-    summaryVectorStore: "Vector store",
-    summaryNone: "None",
-    summaryDocumentsShort: "docs",
-    summaryImages: "Images",
-    summaryImagesDescription: "Understand imported images",
-    summaryAudioDescription: "Transcribe audio to text",
-    summaryPermissionsDescription: "Configure what AI can do",
-    summaryAgenticDescription: "Research and task execution",
-    summaryProductive: "Productive",
-    summaryModelsHeading: "AI models in use",
-    summaryModelsDescription: "Selected models by function, with capability, cost, and price unit.",
-    summaryMainAi: "Main AI (responses)",
-    summaryImageGenerationAi: "Images (generation)",
-    summaryVisionAi: "Images (vision)",
-    summaryAudioAi: "Audio and transcription",
-    summaryAudioPricing: "$0.006 / $0.018",
-    summaryTokenPriceUnit: "per 1M tokens",
-    summaryEconomy: "Economy",
-    summaryHelpHeading: "Need help?",
-    summaryHelpDescription: "Open the quick guide to understand how each section works.",
-    summaryHelpAction: "View quick guide",
-    goToInterface: "Go to Interface",
-    goToAi: "Go to Documentation AI",
-    goToCapabilities: "Go to Capabilities",
-    goToSystem: "Go to System and diagnostics",
-    capabilitiesDescription: "Enable and configure the advanced functions the AI can use.",
-    capabilityDiagramsTitle: "1. Diagrams",
-    capabilityDiagramsDescription: "Mermaid diagram creation, editing, professional visualization, and export.",
-    capabilityDiagramsEditorTitle: "Diagram editor",
-    capabilityDiagramsEditorDescription: "Controls the visual level allowed for manually inserted or AI-generated diagrams.",
-    capabilityDiagramsAiTitle: "AI diagram generation",
-    capabilityDiagramsAiDescription: "Allows AI to choose diagrams when they explain better than text, tables, or images.",
-    diagramProfileHeading: "Mermaid profile",
-    diagramProfileCompatible: "Maximum compatibility",
-    diagramProfileVisualLocal: "Local visual",
-    diagramProfileAdvanced: "Controlled experimental",
-    diagramIconSetHeading: "Icons",
-    diagramDefaultWidthHeading: "Default width",
-    diagramImagePolicyHeading: "Internal images",
-    diagramImagesDisabled: "Disabled",
-    diagramImagesProject: "Project assets only",
-    diagramImagesExternalConfirm: "External with confirmation",
-    diagramBetaPolicyHeading: "Beta types",
-    diagramBetaDisabled: "Blocked",
-    diagramBetaAsk: "Warn and validate",
-    diagramBetaEnabled: "Allowed",
-    diagramAiModeHeading: "AI mode",
-    diagramAiModeVisual: "Rich visual",
-    diagramAiModeSafe: "Compatible",
-    diagramExportGuaranteeHeading: "Export",
-    diagramExportGuaranteeValue: "PDF and DOCX as image",
-    diagramLocalFirstHeading: "Local-first",
-    diagramLocalFirstValue: "No CDN by default",
-    capabilityImagesTitle: "2. Images",
-    capabilityImagesDescription: "Image understanding for working with visual content imported into the project.",
-    capabilityGenerateImagesTitle: "Image generation",
-    capabilityUnderstandImagesTitle: "Understand images (vision)",
-    capabilityUnderstandImagesDescription: "Analyze project images and use them as context.",
-    capabilityAudioTitle: "3. Audio and transcription",
-    capabilityAudioDescription: "Convert voice into text to use as a prompt or add to documents.",
-    capabilityPermissionsTitle: "4. Allowed actions",
-    capabilityPermissionsDescription: "Define how far the AI can modify and manage project content.",
-    capabilityAgenticTitle: "5. Agentic tasks",
-    capabilityAgenticDescription: "Status of planning, web research, and autonomous execution capabilities.",
-    qualityLow: "Low",
-    qualityMedium: "Medium",
-    qualityHigh: "High",
-    visionDetailLabel: "Detail",
-    visionMaxImageSize: "Maximum size per image",
-    transcriptionModelName: "High transcription precision",
-    transcriptionModelDescription: "Optimized for dictation and working notes.",
-    transcriptionDefaultTargetHelp: "Where the transcription will be inserted.",
-    transcriptionDefaultLanguageHelp: "Language used if none is detected.",
-    transcriptionFavoriteLanguagesHelp: "Languages shown as quick options in the microphone menu.",
-    permissionModeConservative: "Conservative",
-    permissionModeConservativeDescription: "Only proposes changes.",
-    permissionModeAssisted: "Assisted",
-    permissionModeAssistedDescription: "Prepares changes and asks before applying.",
-    permissionModeProductive: "Productive",
-    permissionModeProductiveDescription: "Can apply changes within defined limits.",
-    permissionModeCustom: "Custom",
-    permissionModeCustomDescription: "Configure permissions one by one.",
-    editDocumentsDescription: "Can modify document content.",
-    editHandwrittenNotesDescription: "Can apply drafts to open handwritten notes.",
-    drawHandwrittenNotesDescription: "Can generate drawing strokes inside an active .knote.",
-    createFoldersDescription: "Can create, duplicate, and move folders.",
-    createDocumentsDescription: "Can create and organize project documents.",
-    deleteDocumentsDescription: "Can delete documents and folders.",
-    generateImagesDescription: "Allows images to be generated with the configured provider.",
-    createImageAssetsDescription: "Can save images as project files.",
-    insertImagesIntoDocumentsDescription: "Can add images inside documents.",
-    useDocumentContextForImagesDescription: "Reserved for image generation; vision uses explicit prompt context.",
-    permissionScopeNotice: "These permissions apply to AI across every task it performs inside the project.",
-    agenticDepthQuick: "Quick",
-    agenticDepthGuided: "Guided",
-    agenticDepthDeep: "Deep guided",
-    agenticDepthBoundedAutonomous: "Bounded autonomous",
-    agenticWebResearchHeading: "Web research",
-    agenticWebResearchDescription: "Allow online source lookup with traceability and cost control.",
-    agenticLimitsImpact: "Research always uses web when OpenAI is configured. Candidate sources and report length are proposed in each research plan.",
-    capabilitiesPlaceholderDescription: "This section groups advanced AI capabilities. For now it keeps a summary view; detailed controls remain available in Documentation AI.",
-    capabilitiesEditInAi: "Configure in Documentation AI",
-  },
-};
-
-function useStableSection(open: boolean): [AppSettingsSection, (section: AppSettingsSection) => void] {
+function useStableSection(open: boolean, initialSection: AppSettingsSection): [AppSettingsSection, (section: AppSettingsSection) => void] {
   const [activeSection, setActiveSection] = useState<AppSettingsSection>("summary");
 
   useEffect(() => {
-    if (open) setActiveSection("summary");
-  }, [open]);
+    if (open) setActiveSection(initialSection);
+  }, [open, initialSection]);
 
   return [activeSection, setActiveSection];
 }

@@ -27,10 +27,10 @@ describe("remaining local API boundary contracts", () => {
     expect(requestJson).toHaveBeenLastCalledWith("/api/projects/project-1/external-changes");
     await scanExternalChanges("project-1");
     expect(requestJson).toHaveBeenLastCalledWith("/api/projects/project-1/external-changes/scan", { method: "POST" });
-    await importExternalChanges("project-1", { decisions: [{ itemId: "change-1", decision: "include" }], syncRemote: false });
+    await importExternalChanges("project-1", { revision: "review-current", decisions: [{ itemId: "change-1", decision: "include" }], syncRemote: false });
     expect(requestJson).toHaveBeenLastCalledWith("/api/projects/project-1/external-changes/import", {
       method: "POST",
-      body: JSON.stringify({ decisions: [{ itemId: "change-1", decision: "include" }], syncRemote: false }),
+      body: JSON.stringify({ revision: "review-current", decisions: [{ itemId: "change-1", decision: "include" }], syncRemote: false }),
     });
     await getUserNotes();
     expect(requestJson).toHaveBeenLastCalledWith("/api/notes");
@@ -48,7 +48,8 @@ describe("remaining local API boundary contracts", () => {
     });
     await getVersionContent("docs/Plan.md", "version/1");
     expect(requestJson).toHaveBeenLastCalledWith("/api/documents/docs%2FPlan.md/versions/version%2F1/content");
-    await restoreVersion("docs/Plan.md", "version/1");
-    expect(requestJson).toHaveBeenLastCalledWith("/api/documents/docs%2FPlan.md/versions/version%2F1/restore", { method: "POST" });
+    const base = {mtimeNs:0,size:4,sha256:"saved"};
+    await restoreVersion("docs/Plan.md", "version/1", base);
+    expect(requestJson).toHaveBeenLastCalledWith("/api/documents/docs%2FPlan.md/versions/version%2F1/restore", { method: "POST", body: JSON.stringify({baseFingerprint:base,expectedDraftWriteRevision:null}) });
   });
 });

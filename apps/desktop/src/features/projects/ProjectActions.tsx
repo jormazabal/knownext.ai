@@ -1,3 +1,5 @@
+import {CloudSyncDialog} from "../cloudSync/CloudSyncDialog";
+import {AiBudgetControls} from "./AiBudgetControls";
 import {
   BarChart3,
   ChevronRight,
@@ -14,9 +16,12 @@ import {
   UserPlus,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
+import { ModalFrame } from "../../components/ui/ModalFrame";
 import { createPortal } from "react-dom";
 import type { AiUsageCapabilitySummary, AiUsageModelSummary, AiUsageSummaryResponse, AppearanceConfig, AuthStatus } from "../../types/domain";
+import {useAiUsageScope} from "./useAiUsageScope";
+import {AiUsageLedgerControls} from "./AiUsageLedgerControls";
 
 type ProjectActionsProps = {
   appVersion: string;
@@ -50,7 +55,10 @@ export function ProjectActions({
   onOpenReleaseNotes,
 }: ProjectActionsProps) {
   const text = projectActionsCopy[language];
+  const [cloudSyncOpen, setCloudSyncOpen] = useState(false);
+  const openCloudSync = () => setCloudSyncOpen(true);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const accountButtonRef = useRef<HTMLButtonElement | null>(null);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const narrowActionsMode = useNarrowActionsMode();
 
@@ -66,7 +74,10 @@ export function ProjectActions({
     }
 
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setAccountMenuOpen(false);
+      if (event.key === "Escape" && !event.isComposing) {
+        setAccountMenuOpen(false);
+        accountButtonRef.current?.focus();
+      }
     }
 
     window.addEventListener("mousedown", closeAccountMenu);
@@ -85,11 +96,15 @@ export function ProjectActions({
   if (compact) {
     return (
       <div ref={accountMenuRef} className="relative z-[140]">
+        {cloudSyncOpen && renderProjectActionsPortal(<CloudSyncDialog onClose={() => setCloudSyncOpen(false)} fallbackFocus={() => accountButtonRef.current}/>)}
         <button
-          className="grid h-8 w-8 place-items-center rounded-full bg-brand-hover text-[11px] font-semibold text-brand-orange hover:bg-brand-orange hover:text-white"
+          className="grid h-8 w-8 place-items-center rounded-full bg-brand-hover [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 max-[760px]:h-11 max-[760px]:w-11 text-[11px] font-semibold text-brand-orange hover:bg-brand-orange hover:text-white"
           data-tooltip={accountName}
           data-tooltip-placement="right"
+          ref={accountButtonRef}
           aria-label={accountName}
+          aria-haspopup={narrowActionsMode ? "dialog" : "menu"}
+          onKeyDown={event => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setAccountMenuOpen(true); } }}
           aria-expanded={accountMenuOpen}
           onClick={() => {
             setAccountMenuOpen((isOpen) => !isOpen);
@@ -108,6 +123,7 @@ export function ProjectActions({
           orphanDraftCount={orphanDraftCount}
           isCheckingForUpdates={isCheckingForUpdates}
           accountMenuOpen={accountMenuOpen}
+          triggerRef={accountButtonRef}
           placement="right"
           narrowMode={narrowActionsMode}
           onRunAction={runAccountAction}
@@ -118,16 +134,21 @@ export function ProjectActions({
           onOpenRecoverableDrafts={onOpenRecoverableDrafts}
           onCheckForUpdates={onCheckForUpdates}
           onOpenReleaseNotes={onOpenReleaseNotes}
+          onOpenCloudSync={openCloudSync}
         />
       </div>
     );
   }
 
   return (
-    <div className="relative z-[140] mt-auto flex h-10 shrink-0 items-center border-t border-line bg-white px-3 text-[11px] text-ink-secondary">
+    <div className="relative z-[140] mt-auto flex h-10 max-[760px]:h-12 [@media(pointer:coarse)]:h-12 shrink-0 items-center border-t border-line bg-white px-3 text-[11px] text-ink-secondary">
       <div ref={accountMenuRef} className="relative w-full min-w-0">
+        {cloudSyncOpen && renderProjectActionsPortal(<CloudSyncDialog onClose={() => setCloudSyncOpen(false)} fallbackFocus={() => accountButtonRef.current}/>)}
         <button
-          className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-1 text-left hover:bg-brand-hover"
+          className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-1 text-left hover:bg-brand-hover [@media(pointer:coarse)]:h-11 max-[760px]:h-11"
+          ref={accountButtonRef}
+          aria-haspopup={narrowActionsMode ? "dialog" : "menu"}
+          onKeyDown={event => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setAccountMenuOpen(true); } }}
           aria-expanded={accountMenuOpen}
           onClick={() => {
             setAccountMenuOpen((isOpen) => !isOpen);
@@ -149,6 +170,7 @@ export function ProjectActions({
           orphanDraftCount={orphanDraftCount}
           isCheckingForUpdates={isCheckingForUpdates}
           accountMenuOpen={accountMenuOpen}
+          triggerRef={accountButtonRef}
           placement="center"
           narrowMode={narrowActionsMode}
           onRunAction={runAccountAction}
@@ -159,6 +181,7 @@ export function ProjectActions({
           onOpenRecoverableDrafts={onOpenRecoverableDrafts}
           onCheckForUpdates={onCheckForUpdates}
           onOpenReleaseNotes={onOpenReleaseNotes}
+          onOpenCloudSync={openCloudSync}
         />
       </div>
     </div>
@@ -176,6 +199,7 @@ function AccountActionsMenu({
   orphanDraftCount,
   isCheckingForUpdates,
   accountMenuOpen,
+  triggerRef,
   placement,
   narrowMode,
   onRunAction,
@@ -186,6 +210,7 @@ function AccountActionsMenu({
   onOpenRecoverableDrafts,
   onCheckForUpdates,
   onOpenReleaseNotes,
+  onOpenCloudSync,
 }: {
   appVersion: string;
   language: AppearanceConfig["language"];
@@ -197,6 +222,7 @@ function AccountActionsMenu({
   orphanDraftCount: number;
   isCheckingForUpdates: boolean;
   accountMenuOpen: boolean;
+  triggerRef: RefObject<HTMLButtonElement | null>;
   placement: "center" | "right";
   narrowMode: boolean;
   onRunAction: (action: () => void) => void;
@@ -207,12 +233,15 @@ function AccountActionsMenu({
   onOpenRecoverableDrafts: () => void;
   onCheckForUpdates: () => void;
   onOpenReleaseNotes: () => void;
+  onOpenCloudSync: () => void;
 }) {
   const [usagePanelOpen, setUsagePanelOpen] = useState(false);
   const [usagePanelPinned, setUsagePanelPinned] = useState(false);
   const [usageDialogOpen, setUsageDialogOpen] = useState(false);
   const usageOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const usageCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const desktopMenuRef = useRef<HTMLDivElement | null>(null);
+  const focusUsage = useRef(false);
   const usagePanelVisible = usagePanelOpen || usagePanelPinned;
 
   useEffect(() => {
@@ -229,6 +258,26 @@ function AccountActionsMenu({
     setUsageDialogOpen(false);
     cancelUsageTimers();
   }, [accountMenuOpen]);
+
+  useEffect(() => {
+    if (!accountMenuOpen || narrowMode) return;
+    const menu = desktopMenuRef.current;
+    menu?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus();
+    return () => {
+      if (menu?.contains(document.activeElement) || document.activeElement === document.body) {
+        queueMicrotask(() => {
+          if (!document.activeElement?.closest('[role="dialog"],[role="alertdialog"]')) triggerRef.current?.focus({ preventScroll: true });
+        });
+      }
+    };
+  }, [accountMenuOpen, narrowMode]);
+
+  useEffect(() => {
+    if (usagePanelVisible && focusUsage.current) {
+      focusUsage.current = false;
+      desktopMenuRef.current?.querySelector<HTMLElement>('[data-ai-usage-panel] button')?.focus();
+    }
+  }, [usagePanelVisible]);
 
   function cancelUsageTimers() {
     if (usageOpenTimerRef.current) {
@@ -279,16 +328,23 @@ function AccountActionsMenu({
 
   function openUsageDialog() {
     cancelUsageTimers();
-    setUsageDialogOpen(true);
+    if (narrowMode) setUsageDialogOpen(true);
+    else {
+      focusUsage.current = true;
+      pinUsagePanel();
+      desktopMenuRef.current?.querySelector<HTMLElement>('[data-ai-usage-panel] button')?.focus();
+    }
   }
 
+  // Closed actions must also leave the focus order and accessibility tree.
+  if (!accountMenuOpen) return null;
   if (narrowMode) {
-    if (!accountMenuOpen) return null;
 
     if (usageDialogOpen) {
       return renderProjectActionsPortal(
         <AiUsagePanel
           variant="dialog"
+          fallbackFocus={() => triggerRef.current}
           text={text}
           language={language}
           summary={aiUsageSummary}
@@ -301,17 +357,15 @@ function AccountActionsMenu({
     }
 
     return renderProjectActionsPortal(
-      <div className="fixed inset-0 z-[160] flex items-end justify-center bg-black/20 px-4 py-4" role="presentation" onMouseDown={onCloseAccountMenu}>
+      <ModalFrame label={text.accountOptionsTitle} onClose={onCloseAccountMenu} fallbackFocus={() => triggerRef.current} className="!z-[160] !items-end">
+        <div className="absolute inset-0" aria-hidden="true" onMouseDown={onCloseAccountMenu} />
         <section
-          className="flex max-h-[min(560px,calc(100dvh-32px))] w-[min(420px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="account-actions-title"
+          className="relative flex max-h-[min(560px,calc(100dvh-32px))] w-[min(420px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
           onMouseDown={(event) => event.stopPropagation()}
         >
           <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-line px-4">
             <h2 id="account-actions-title" className="text-[13px] font-semibold text-ink-primary">{text.accountOptionsTitle}</h2>
-            <button className="grid h-8 w-8 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange" aria-label={text.accountOptionsClose} onClick={onCloseAccountMenu}>
+            <button className="grid h-11 w-11 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange" aria-label={text.accountOptionsClose} onClick={onCloseAccountMenu}>
               <X size={16} />
             </button>
           </header>
@@ -334,18 +388,42 @@ function AccountActionsMenu({
               onOpenRecoverableDrafts={onOpenRecoverableDrafts}
               onCheckForUpdates={onCheckForUpdates}
               onOpenReleaseNotes={onOpenReleaseNotes}
+              onOpenCloudSync={onOpenCloudSync}
               onOpenAiUsage={openUsageDialog}
               onScheduleUsageOpen={scheduleUsageOpen}
               onScheduleUsageClose={scheduleUsageClose}
             />
           </div>
         </section>
-      </div>,
+      </ModalFrame>,
     );
   }
 
   return (
     <div
+      ref={desktopMenuRef}
+      onKeyDown={event => {
+        // The flyout has forms: arrow keys there retain their normal meaning.
+        if (!(event.target as HTMLElement).closest('[role="menu"]')) return;
+        const items = Array.from(desktopMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? []);
+        const index = items.indexOf(document.activeElement as HTMLButtonElement);
+        if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+          event.preventDefault(); event.stopPropagation();
+          const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+          items[next]?.focus();
+        } else if (event.key === "ArrowRight" && (event.target as HTMLElement).getAttribute("aria-haspopup") === "dialog") {
+          event.preventDefault(); openUsageDialog();
+        } else if (event.key === "Escape" || event.key === "Tab") {
+          event.preventDefault(); event.stopPropagation();
+          if (event.key === "Tab") {
+            const candidates = Array.from(document.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]'))
+              .filter(el => !desktopMenuRef.current?.contains(el) && !el.closest('[hidden],[inert]') && el.tabIndex >= 0 && getComputedStyle(el).display !== "none" && getComputedStyle(el).visibility !== "hidden");
+            const index = candidates.indexOf(triggerRef.current!);
+            (candidates[index + (event.shiftKey ? -1 : 1)] ?? triggerRef.current)?.focus();
+          } else triggerRef.current?.focus();
+          onCloseAccountMenu();
+        }
+      }}
       className={[
         "absolute bottom-[38px] z-[140] w-[252px] transition",
         placement === "right" ? "left-10" : "left-1/2 -translate-x-1/2",
@@ -371,6 +449,7 @@ function AccountActionsMenu({
         onOpenRecoverableDrafts={onOpenRecoverableDrafts}
         onCheckForUpdates={onCheckForUpdates}
         onOpenReleaseNotes={onOpenReleaseNotes}
+              onOpenCloudSync={onOpenCloudSync}
         onOpenAiUsage={openUsageDialog}
         onScheduleUsageOpen={scheduleUsageOpen}
         onScheduleUsageClose={scheduleUsageClose}
@@ -410,6 +489,7 @@ function AccountActionsMenuContent({
   onOpenRecoverableDrafts,
   onCheckForUpdates,
   onOpenReleaseNotes,
+  onOpenCloudSync,
   onOpenAiUsage,
   onScheduleUsageOpen,
   onScheduleUsageClose,
@@ -431,12 +511,13 @@ function AccountActionsMenuContent({
   onOpenRecoverableDrafts: () => void;
   onCheckForUpdates: () => void;
   onOpenReleaseNotes: () => void;
+  onOpenCloudSync: () => void;
   onOpenAiUsage: () => void;
   onScheduleUsageOpen: () => void;
   onScheduleUsageClose: () => void;
 }) {
   return (
-    <div className={className}>
+    <div className={className} role={narrowMode ? undefined : "menu"} aria-label={narrowMode ? undefined : text.accountOptionsTitle}>
       <div className="px-2 py-2">
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-2">
@@ -445,19 +526,21 @@ function AccountActionsMenuContent({
             </span>
             <div className="min-w-0">
               <p className="truncate text-[11px] font-semibold text-ink-primary">{accountName}</p>
-              <p className="mt-0.5 text-[10px] leading-4 text-ink-secondary">
+              {authStatus.user && <p className="mt-0.5 text-[10px] leading-4 text-ink-secondary">
                 {authStatus.isAuthenticated ? text.githubConnectedStatus : text.githubBlockedStatus}
-              </p>
+              </p>}
             </div>
           </div>
           <span className="shrink-0 rounded border border-line bg-panel px-1.5 py-0.5 text-[10px] font-medium text-ink-secondary">
             v{appVersion}
           </span>
         </div>
+        {(authStatus.storageError||authStatus.credentialStorageError)&&<p role="alert" className="mt-2 break-words text-xs leading-5 text-red-700">{authStatus.storageError||authStatus.credentialStorageError}</p>}
         <div className="mt-2 flex items-center gap-2">
           {authStatus.isAuthenticated ? (
             <button
-              className="inline-flex h-7 items-center gap-1.5 rounded border border-line px-2 text-[10px] font-semibold text-ink-secondary hover:bg-red-50 hover:text-red-700"
+        role={narrowMode ? undefined : "menuitem"}
+              className="inline-flex min-h-11 items-center gap-1.5 rounded border border-line px-2 text-[10px] font-semibold text-ink-secondary hover:bg-red-50 hover:text-red-700"
               onClick={() => onRunAction(onLogout)}
             >
               <LogOut size={13} />
@@ -465,7 +548,8 @@ function AccountActionsMenuContent({
             </button>
           ) : (
             <button
-              className="inline-flex h-7 items-center gap-1.5 rounded bg-brand-orange px-2 text-[10px] font-semibold text-white hover:bg-brand-dark"
+        role={narrowMode ? undefined : "menuitem"}
+              className="inline-flex min-h-11 items-center gap-1.5 rounded bg-brand-orange px-2 text-[10px] font-semibold text-white hover:bg-brand-dark"
               onClick={() => onRunAction(onLoginGithub)}
             >
               <UserPlus size={13} />
@@ -475,15 +559,20 @@ function AccountActionsMenuContent({
         </div>
       </div>
       <div className="my-1 border-t border-line" />
+      <button role={narrowMode ? undefined : "menuitem"} className="flex min-h-11 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover" onClick={() => onRunAction(onOpenCloudSync)}>
+        <RefreshCw size={14}/><span>{text.cloudSync}</span>
+      </button>
       <button
-        className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
+        role={narrowMode ? undefined : "menuitem"}
+        className="flex min-h-11 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
         onClick={() => onRunAction(onOpenAppSettings)}
       >
         <Settings size={14} />
         <span>{text.appSettings}</span>
       </button>
       <button
-        className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
+        role={narrowMode ? undefined : "menuitem"}
+        className="flex min-h-11 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
         onClick={() => onRunAction(onOpenRecoverableDrafts)}
       >
         <FileClock size={14} />
@@ -496,9 +585,11 @@ function AccountActionsMenuContent({
       </button>
       <div className="relative" onMouseEnter={narrowMode ? undefined : onScheduleUsageOpen} onMouseLeave={narrowMode ? undefined : onScheduleUsageClose}>
         <button
-          className={`flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover ${usagePanelVisible ? "bg-brand-hover" : ""}`}
+        role={narrowMode ? undefined : "menuitem"}
+          className={`flex min-h-11 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover ${usagePanelVisible ? "bg-brand-hover" : ""}`}
           aria-haspopup="dialog"
-          onClick={narrowMode ? onOpenAiUsage : undefined}
+          aria-expanded={usagePanelVisible}
+          onClick={onOpenAiUsage}
           onFocus={narrowMode ? undefined : onScheduleUsageOpen}
         >
           <BarChart3 size={14} />
@@ -507,7 +598,8 @@ function AccountActionsMenuContent({
         </button>
       </div>
       <button
-        className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
+        role={narrowMode ? undefined : "menuitem"}
+        className="flex min-h-11 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
         onClick={() => onRunAction(onOpenReleaseNotes)}
       >
         <ScrollText size={14} />
@@ -515,7 +607,8 @@ function AccountActionsMenuContent({
       </button>
       <div className="my-1 border-t border-line" />
       <button
-        className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
+        role={narrowMode ? undefined : "menuitem"}
+        className="flex min-h-11 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
         disabled={isCheckingForUpdates}
         onClick={() => onRunAction(onCheckForUpdates)}
       >
@@ -528,15 +621,17 @@ function AccountActionsMenuContent({
 
 function AiUsagePanel({
   variant = "flyout",
+  fallbackFocus,
   text,
   language,
-  summary,
+  summary:initialSummary,
   onClose,
   onPin,
   onHoverEnter,
   onHoverLeave,
 }: {
   variant?: "flyout" | "dialog";
+  fallbackFocus?: () => HTMLElement | null;
   text: ProjectActionsCopy;
   language: AppearanceConfig["language"];
   summary: AiUsageSummaryResponse | null;
@@ -546,52 +641,70 @@ function AiUsagePanel({
   onHoverLeave: () => void;
 }) {
   const [view, setView] = useState<"capability" | "model">("capability");
-  const monthLabel = formatUsageMonth(summary?.month, language);
+  const scope=useAiUsageScope(initialSummary);
+  const summary=scope.summary;
+  const english=language==="en";
+  const monthLabel = formatUsageMonth(scope.query.month, language);
   const capabilityRows = getCapabilityUsageRows(summary);
   const modelRows = summary?.models ?? [];
   const activeRows = view === "capability" ? capabilityRows : modelRows;
   const totals = getUsageTotals(summary);
   const hasUsage = totals.interactions > 0 || totals.totalTokens > 0 || totals.estimatedCost > 0;
+  const unpriced=(summary?.legacyEntries??0)+(summary?.unpricedEntries??0);
 
-  const content = (
-    <>
+  const header = (
       <div className="flex items-start gap-3">
         <div className="grid h-8 w-8 shrink-0 place-items-center rounded border border-brand-orange/20 bg-brand-hover text-brand-orange">
           <BarChart3 size={15} />
         </div>
         <div className="min-w-0 flex-1">
           <p id={variant === "dialog" ? "ai-usage-dialog-title" : undefined} className="text-[12px] font-semibold text-ink-primary">{text.aiUsageTitle}</p>
-          <p className="mt-0.5 text-[10px] font-medium text-ink-secondary">{monthLabel}</p>
+          <p className="mt-0.5 text-[10px] font-medium text-ink-secondary">{monthLabel}{summary?.periodTimeZone&&<span> · UTC</span>}</p>
         </div>
         <button
           type="button"
-          className="grid h-7 w-7 shrink-0 place-items-center rounded text-ink-secondary hover:bg-panel hover:text-ink-primary"
+          className="grid h-11 w-11 shrink-0 place-items-center rounded text-ink-secondary hover:bg-panel hover:text-ink-primary"
           aria-label={text.aiUsageClose}
           onClick={onClose}
         >
           <X size={14} />
         </button>
       </div>
+  );
+  const content = (
+    <>
+      <div className="mt-3 space-y-2 text-xs">
+        <label className="block">{english?"Project scope":"Alcance del proyecto"}<select value={scope.query.projectId} onChange={event=>void scope.load({...scope.query,projectId:event.target.value})} className="mt-1 min-h-11 w-full min-w-0 rounded border border-line bg-white px-2"><option value="">{english?"All projects":"Todos los proyectos"}</option>{scope.projects.map(project=><option key={project.id} value={project.id}>{project.name}{project.state==="retired"?(english?" · removed":" · retirado"):project.state==="unavailable"?` · ${project.id}`:""}</option>)}{scope.query.projectId&&!scope.projects.some(project=>project.id===scope.query.projectId)&&<option value={scope.query.projectId}>{english?"Selected project":"Proyecto seleccionado"}</option>}</select></label>
+        <div className="flex items-end gap-2"><label className="min-w-0 flex-1">{english?"Usage month (UTC)":"Mes de consumo (UTC)"}<input type="month" value={scope.query.month} onChange={event=>void scope.load({...scope.query,month:event.target.value})} className="mt-1 min-h-11 w-full min-w-0 rounded border border-line bg-white px-2"/></label><button type="button" onClick={()=>void scope.load()} disabled={scope.loading} className="min-h-11 shrink-0 rounded px-2 text-brand-dark hover:bg-brand-hover disabled:opacity-50">{english?"Refresh":"Actualizar"}</button></div>
+      </div>
+      {scope.loading&&<p role="status" className="mt-2 text-xs">{english?"Reading the selected scope…":"Consultando el alcance elegido…"}</p>}
+      {scope.error&&<p role="alert" className="mt-2 text-xs leading-5 text-red-700">{scope.error}</p>}
+      <AiBudgetControls key={`${scope.query.month}:${scope.query.projectId}`} month={scope.query.month} projectId={scope.query.projectId}/>
+      {summary?.coverage&&<p className="mt-2 text-[11px] leading-5 text-ink-secondary">{summary.coverage==="local-period-aggregates"?(english?"Local period totals with recent detail; not the provider's complete bill.":"Totales locales por periodo y detalle reciente; no equivale a toda la facturación del proveedor."):(english?"Local estimate from retained records; not the provider's complete bill.":"Estimación de los registros locales conservados; no equivale a toda la facturación del proveedor.")}</p>}
+      {summary?.legacyWindowOnly&&<p className="mt-2 text-xs leading-5 text-ink-secondary">{english?"Earlier history is limited to records available at conversion.":"El histórico anterior se limita a los registros disponibles al convertir."}</p>}
+      {unpriced>0&&<p role="status" className="mt-2 text-xs leading-5">{english?`${unpriced} ${unpriced===1?"record has":"records have"} no available EUR amount. Totals include only available amounts.`:`${unpriced} ${unpriced===1?"registro":"registros"} sin importe EUR disponible. El total recoge solo los importes disponibles.`}</p>}
+      {!!summary?.unscopedEntries&&<p className="mt-2 text-xs leading-5 text-ink-secondary">{english?`${summary.unscopedEntries} retained ${summary.unscopedEntries===1?"record has":"records have"} no attributable period.`:`${summary.unscopedEntries} ${summary.unscopedEntries===1?"registro conservado no tiene":"registros conservados no tienen"} periodo atribuible.`}</p>}
 
       <div className="mt-3 grid grid-cols-2 rounded border border-line bg-panel p-0.5">
         <button
           type="button"
-          className={`h-7 rounded text-[10px] font-semibold transition ${view === "capability" ? "bg-white text-brand-orange shadow-sm" : "text-ink-secondary hover:text-ink-primary"}`}
+          className={`min-h-11 rounded text-[10px] font-semibold transition ${view === "capability" ? "bg-white text-brand-orange shadow-sm" : "text-ink-secondary hover:text-ink-primary"}`}
           onClick={() => setView("capability")}
         >
           {text.aiUsageByCapability}
         </button>
         <button
           type="button"
-          className={`h-7 rounded text-[10px] font-semibold transition ${view === "model" ? "bg-white text-brand-orange shadow-sm" : "text-ink-secondary hover:text-ink-primary"}`}
+          className={`min-h-11 rounded text-[10px] font-semibold transition ${view === "model" ? "bg-white text-brand-orange shadow-sm" : "text-ink-secondary hover:text-ink-primary"}`}
           onClick={() => setView("model")}
         >
           {text.aiUsageByModel}
         </button>
       </div>
 
-      {summary?.costNote && <div className="my-3 rounded border border-line p-3 text-xs text-ink-secondary"><p>{summary.costNote}</p><p>Registros heredados: {summary.legacyEntries ?? 0} · Sin importe EUR disponible: {summary.unpricedEntries ?? 0}</p><p>Estimación USD disponible: ${(summary.totalEstimatedCostUsd ?? 0).toFixed(4)}</p>{summary.exchangeRate?.usdPerEur ? <p>Cambio aplicado por trabajo. Última referencia: 1 EUR = {summary.exchangeRate.usdPerEur} USD · {summary.exchangeRate.date} {summary.exchangeRate.source && <a href={summary.exchangeRate.source} target="_blank" rel="noreferrer">BCE</a>}</p> : <p>EUR no disponible hasta obtener la referencia del BCE.</p>}</div>}
-      {hasUsage ? (
+      {summary?.costNote && <details className="my-2 text-xs leading-5 text-ink-secondary"><summary className="flex min-h-11 cursor-pointer items-center">{english?"Data scope and quality":"Alcance y calidad de los datos"}</summary><p>{summary.costNote}</p><p>Registros heredados: {summary.legacyEntries ?? 0} · Sin importe EUR disponible: {summary.unpricedEntries ?? 0}</p><p>Sin periodo atribuible: {summary.unscopedEntries??0} · Detalle reciente: {summary.retainedEntries??"—"}/{summary.entryLimit??5000}</p>{summary.recordedEntries!==undefined&&<p>Registros contabilizados por periodo: {summary.recordedEntries}</p>}<p>Estimación USD disponible: ${(summary.totalEstimatedCostUsd ?? 0).toFixed(4)}</p>{summary.projectNamesComplete===false&&<p>Lista de proyectos parcial; no se consideran vacías las asociaciones no consultadas.</p>}{summary.exchangeRate?.usdPerEur ? <p>Cambio aplicado por trabajo. Última referencia: 1 EUR = {summary.exchangeRate.usdPerEur} USD · {summary.exchangeRate.date} {summary.exchangeRate.source && <a href={summary.exchangeRate.source} target="_blank" rel="noreferrer">BCE</a>}</p> : <p>{english?"No current exchange reference is available. Already recorded EUR amounts keep their applied rate.":"No hay referencia actual disponible. Los importes EUR ya registrados conservan el cambio que se les aplicó."}</p>}<AiUsageLedgerControls english={english} onChanged={()=>scope.load()}/></details>}
+      {summary?.exchangeRateWarning&&<p role="alert" className="my-3 rounded bg-orange-50 p-3 text-xs leading-5 text-brand-dark">{summary.exchangeRateWarning} {language==="en"?"No conversion has been assumed; the saved reference is preserved.":"No se presupone conversión; la referencia guardada se conserva."}</p>}
+      {!summary ? (scope.loading?null:<div role="status" className="mt-3 rounded bg-panel px-3 py-4"><p className="text-xs font-semibold">{text.aiUsageUnavailableTitle}</p><p className="mt-1 text-xs leading-5 text-ink-secondary">{text.aiUsageUnavailableDetail}</p></div>) : hasUsage ? (
         <div className="mt-3 space-y-1.5">
           {activeRows.length > 0 ? (
             activeRows.map((row) => (
@@ -602,6 +715,7 @@ function AiUsagePanel({
                 interactions={row.interactions}
                 tokens={row.totalTokens}
                 cost={row.estimatedCost}
+                unpricedEntries={row.unpricedEntries}
                 language={language}
                 text={text}
               />
@@ -618,6 +732,7 @@ function AiUsagePanel({
             interactions={totals.interactions}
             tokens={totals.totalTokens}
             cost={totals.estimatedCost}
+            unpricedEntries={unpriced}
             language={language}
             text={text}
             total
@@ -625,8 +740,8 @@ function AiUsagePanel({
         </div>
       ) : (
         <div className="mt-3 rounded border border-dashed border-line bg-panel px-3 py-4">
-          <p className="text-[11px] font-semibold text-ink-primary">{text.aiUsageEmptyTitle}</p>
-          <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{text.aiUsageEmptyDetail}</p>
+          <p className="text-[11px] font-semibold text-ink-primary">{summary.unscopedEntries?(english?"No records attributable to this scope":"Sin registros atribuibles a este alcance"):text.aiUsageEmptyTitle}</p>
+          <p className="mt-1 text-[10px] leading-4 text-ink-secondary">{summary.coverage?(english?"No retained local records match the selected project and month.":"No hay registros locales conservados para el proyecto y el mes elegidos."):text.aiUsageEmptyDetail}</p>
         </div>
       )}
     </>
@@ -634,33 +749,37 @@ function AiUsagePanel({
 
   if (variant === "dialog") {
     return (
-      <div className="fixed inset-0 z-[170] flex items-end justify-center bg-black/20 px-4 py-4" role="presentation" onMouseDown={onClose}>
+      <ModalFrame label={text.aiUsageTitle} onClose={onClose} fallbackFocus={fallbackFocus} className="!z-[170] !items-end">
+        <div className="absolute inset-0" aria-hidden="true" onMouseDown={onClose} />
         <section
-          className="flex max-h-[min(560px,calc(100dvh-32px))] w-[min(420px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="ai-usage-dialog-title"
+          className="relative flex max-h-[min(560px,calc(100dvh-32px))] w-[min(420px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
           onMouseDown={(event) => event.stopPropagation()}
         >
-          <div className="min-h-0 flex-1 overflow-y-auto p-3">{content}</div>
+          <div className="shrink-0 px-3 pt-3">{header}</div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">{content}</div>
         </section>
-      </div>
+      </ModalFrame>
     );
   }
 
   return (
     <div
+      data-ai-usage-panel
+      role="region"
+      aria-label={text.aiUsageTitle}
       onMouseEnter={onHoverEnter}
       onMouseLeave={onHoverLeave}
+      onFocusCapture={onPin}
       onMouseDown={(event) => {
         event.stopPropagation();
         onPin();
       }}
       className={[
-        "absolute bottom-0 left-[calc(100%-1px)] z-[150] w-[360px] rounded-md border border-line bg-white p-3 shadow-menu",
+        "absolute bottom-0 left-[calc(100%-1px)] z-[150] flex max-h-[calc(100dvh-80px)] w-[360px] flex-col rounded-md border border-line bg-white shadow-menu",
       ].join(" ")}
     >
-      {content}
+      <div className="shrink-0 px-3 pt-3">{header}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">{content}</div>
     </div>
   );
 }
@@ -671,6 +790,7 @@ function AiUsageRow({
   interactions,
   tokens,
   cost,
+  unpricedEntries=0,
   language,
   text,
   total = false,
@@ -680,19 +800,20 @@ function AiUsageRow({
   interactions: number;
   tokens: number;
   cost: number;
+  unpricedEntries?:number;
   language: AppearanceConfig["language"];
   text: ProjectActionsCopy;
   total?: boolean;
 }) {
   return (
-    <div className={`grid grid-cols-[minmax(0,1.55fr)_52px_68px_72px] items-center gap-2 rounded border px-2.5 py-2 ${total ? "border-brand-orange/30 bg-brand-hover" : "border-line bg-white"}`}>
+    <div className={`grid grid-cols-[minmax(0,1.55fr)_52px_68px_72px] max-[760px]:grid-cols-[minmax(0,1fr)_60px_70px] items-center gap-2 rounded border px-2.5 py-2 ${total ? "border-brand-orange/30 bg-brand-hover" : "border-line bg-white"}`}>
       <div className={`flex min-w-0 items-center gap-2 ${total ? "text-brand-orange" : "text-ink-primary"}`}>
         {icon ? <span className={`grid h-4 w-4 shrink-0 place-items-center ${total ? "text-brand-orange" : "text-ink-secondary"}`}>{icon}</span> : null}
-        <p className="truncate text-[11px] font-semibold">{label}</p>
+        <div className="min-w-0"><p className="break-words text-[11px] font-semibold [overflow-wrap:anywhere]">{label}</p><p className="min-[761px]:hidden mt-1 text-[10px] text-ink-secondary"><span>{formatInteger(interactions,language)}</span> {text.aiUsageInteractionsShort}</p></div>
       </div>
-      <AiUsageCell label={text.aiUsageInteractionsShort} value={formatInteger(interactions, language)} alignRight />
+      <div className="max-[760px]:hidden"><AiUsageCell label={text.aiUsageInteractionsShort} value={formatInteger(interactions, language)} alignRight /></div>
       <AiUsageCell label={text.aiUsageTokens} value={formatCompactInteger(tokens, language)} alignRight />
-      <AiUsageCell label={text.aiUsageCost} value={formatCurrency(cost, language)} alignRight />
+      <AiUsageCell label={unpricedEntries>0?(language==="en"?"EUR available":"EUR disponible"):text.aiUsageCost} value={unpricedEntries>=interactions&&unpricedEntries>0?"—":formatCurrency(cost, language)} alignRight />
     </div>
   );
 }
@@ -700,8 +821,8 @@ function AiUsageRow({
 function AiUsageCell({ label, value, alignRight = false }: { label: string; value: string; alignRight?: boolean }) {
   return (
     <div className={alignRight ? "text-right" : ""}>
-      <p className="text-[8px] font-semibold uppercase leading-none text-ink-secondary">{label}</p>
-      <p className="mt-1 truncate font-mono text-[10px] font-semibold leading-none text-ink-primary">{value}</p>
+      <p className="text-[9px] font-semibold uppercase leading-none text-ink-secondary">{label}</p>
+      <p className="mt-1 truncate font-mono text-[12px] font-semibold leading-none text-ink-primary">{value}</p>
     </div>
   );
 }
@@ -717,6 +838,7 @@ const projectActionsCopy = {
     accountOptionsClose: "Cerrar opciones de cuenta",
     connectGithub: "Conectar GitHub",
     appSettings: "Configuración de la app",
+    cloudSync: "Sincronización del proyecto",
     logout: "Cerrar sesión",
     checkingUpdates: "Buscando actualizaciones",
     checkUpdates: "Buscar actualizaciones",
@@ -739,6 +861,8 @@ const projectActionsCopy = {
     aiUsageVision: "Visión",
     aiUsageAudio: "Audio",
     aiUsageAgentic: "Investigación",
+    aiUsageUnavailableTitle: "Resumen no disponible",
+    aiUsageUnavailableDetail: "No se ha podido consultar el consumo. La ausencia de datos no indica que el coste sea cero.",
     aiUsageEmptyTitle: "Sin uso registrado",
     aiUsageEmptyDetail: "Las estadísticas aparecerán cuando se complete una interacción real con IA.",
     releaseNotes: "Notas de release",
@@ -752,6 +876,7 @@ const projectActionsCopy = {
     accountOptionsClose: "Close account options",
     connectGithub: "Connect GitHub",
     appSettings: "App settings",
+    cloudSync: "Project synchronization",
     logout: "Sign out",
     checkingUpdates: "Checking for updates",
     checkUpdates: "Check for updates",
@@ -774,6 +899,8 @@ const projectActionsCopy = {
     aiUsageVision: "Vision",
     aiUsageAudio: "Audio",
     aiUsageAgentic: "Agentic tasks",
+    aiUsageUnavailableTitle: "Summary unavailable",
+    aiUsageUnavailableDetail: "Usage could not be read. Missing data does not mean zero cost.",
     aiUsageEmptyTitle: "No usage recorded",
     aiUsageEmptyDetail: "Statistics will appear after a real AI interaction completes.",
     releaseNotes: "Release notes",
@@ -853,8 +980,8 @@ function emptyCapabilityUsage(
 function getUsageTotals(summary: AiUsageSummaryResponse | null) {
   const models = summary?.models ?? [];
   return {
-    interactions: models.reduce((total, model) => total + model.interactions, 0),
-    totalTokens: models.reduce((total, model) => total + model.totalTokens, 0),
+    interactions: summary?.totalInteractions??models.reduce((total, model) => total + model.interactions, 0),
+    totalTokens: summary?.totalTokens??models.reduce((total, model) => total + model.totalTokens, 0),
     estimatedCost: summary?.totalEstimatedCost ?? models.reduce((total, model) => total + model.estimatedCost, 0),
   };
 }

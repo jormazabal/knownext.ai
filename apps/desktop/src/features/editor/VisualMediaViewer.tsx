@@ -1,5 +1,6 @@
 import { Maximize2, Minus, Plus, X } from "lucide-react";
-import { useEffect, useMemo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import {ModalFrame} from "../../components/ui/ModalFrame";
 import { renderMermaidSvg } from "./mermaidDiagrams";
 
 export type VisualMediaViewerMedia =
@@ -21,32 +22,27 @@ type VisualMediaViewerProps = {
 };
 
 export function VisualMediaViewer({ media, onClose }: VisualMediaViewerProps) {
+  const mediaKind=media.kind,imageSource=media.kind==="image"?media.src:null,providedSvg=media.kind==="diagram"?media.svg??null:null,diagramCode=media.kind==="diagram"?media.code??null:null;
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [drag, setDrag] = useState<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
+  const [dragging,setDragging]=useState(false);
+  const viewport=useRef<HTMLDivElement>(null),points=useRef(new Map<number,{x:number;y:number}>()),view=useRef({zoom:1,pan:{x:0,y:0}});
+  const gesture=useRef<{distance:number;center:{x:number;y:number};zoom:number;pan:{x:number;y:number}}|null>(null);
   const [diagramSvg, setDiagramSvg] = useState(media.kind === "diagram" ? media.svg ?? null : null);
   const [diagramImageUrl, setDiagramImageUrl] = useState<string | null>(null);
   const [diagramError, setDiagramError] = useState<string | null>(null);
   const diagramFrame = useMemo(() => (media.kind === "diagram" ? readSvgFrame(diagramSvg) : null), [diagramSvg, media.kind]);
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  useEffect(()=>{cancelGesture();applyView(1,{x:0,y:0});return cancelGesture;},[mediaKind,imageSource,providedSvg,diagramCode]);
 
   useEffect(() => {
-    if (media.kind !== "diagram") return;
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
-    setDiagramSvg(media.svg ?? null);
+    if (mediaKind !== "diagram") return;
+    setDiagramSvg(providedSvg);
     setDiagramError(null);
-    if (media.svg || !media.code?.trim()) return;
+    if (providedSvg || !diagramCode?.trim()) return;
 
     let cancelled = false;
-    renderMermaidSvg(media.code, "knownext-fullscreen-diagram")
+    renderMermaidSvg(diagramCode, "knownext-fullscreen-diagram")
       .then((svg) => {
         if (!cancelled) setDiagramSvg(svg);
       })
@@ -56,7 +52,7 @@ export function VisualMediaViewer({ media, onClose }: VisualMediaViewerProps) {
     return () => {
       cancelled = true;
     };
-  }, [media]);
+  }, [mediaKind,providedSvg,diagramCode]);
 
   useEffect(() => {
     if (media.kind !== "diagram" || !diagramSvg) {
@@ -71,78 +67,70 @@ export function VisualMediaViewer({ media, onClose }: VisualMediaViewerProps) {
     };
   }, [diagramSvg, media.kind]);
 
-  function setZoomLevel(nextZoom: number) {
-    const boundedZoom = Math.max(0.5, Math.min(4, Math.round(nextZoom * 100) / 100));
-    setZoom(boundedZoom);
-    if (boundedZoom <= 1) setPan({ x: 0, y: 0 });
+  function applyView(nextZoom:number,nextPan:{x:number;y:number}){
+    const bounded=Math.max(0.5,Math.min(4,Math.round(nextZoom*100)/100));
+    if(!Number.isFinite(bounded)||!Number.isFinite(nextPan.x)||!Number.isFinite(nextPan.y))return;
+    const position=bounded<=1?{x:0,y:0}:nextPan;view.current={zoom:bounded,pan:position};setZoom(bounded);setPan(position);
   }
-
-  function resetView() {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
+  function cancelGesture(){const captured=[...points.current.keys()];points.current.clear();gesture.current=null;setDragging(false);for(const id of captured){try{if(viewport.current?.hasPointerCapture?.(id))viewport.current.releasePointerCapture(id);}catch{/* Capture may already have been cancelled by the device. */}}}
+  function setZoomLevel(nextZoom:number){cancelGesture();applyView(nextZoom,view.current.pan);}
+  function resetView(){cancelGesture();applyView(1,{x:0,y:0});}
+  function baseline(){const values=[...points.current.values()];if(!values.length){gesture.current=null;setDragging(false);return;}const a=values[0],b=values[1];gesture.current={distance:b?Math.hypot(b.x-a.x,b.y-a.y):0,center:b?{x:(a.x+b.x)/2,y:(a.y+b.y)/2}:a,zoom:view.current.zoom,pan:{...view.current.pan}};setDragging(values.length>1||view.current.zoom>1);}
+  function handlePointerDown(event:ReactPointerEvent<HTMLDivElement>){
+    if(event.pointerType==="mouse"&&event.button!==0||points.current.size>=2)return;
+    points.current.set(event.pointerId,{x:event.clientX,y:event.clientY});try{event.currentTarget.setPointerCapture?.(event.pointerId);}catch{/* Cancellation is handled without retaining capture state. */}baseline();
   }
-
-  function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
-    if (zoom <= 1) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    setDrag({
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      originX: pan.x,
-      originY: pan.y,
-    });
+  function handlePointerMove(event:ReactPointerEvent<HTMLDivElement>){
+    if(!points.current.has(event.pointerId)||!gesture.current)return;points.current.set(event.pointerId,{x:event.clientX,y:event.clientY});const base=gesture.current,values=[...points.current.values()],a=values[0],b=values[1];
+    if(b){const distance=Math.hypot(b.x-a.x,b.y-a.y);if(base.distance<=0||!Number.isFinite(distance))return;const z=Math.max(0.5,Math.min(4,base.zoom*distance/base.distance)),center={x:(a.x+b.x)/2,y:(a.y+b.y)/2},bounds=event.currentTarget.getBoundingClientRect(),origin={x:bounds.left+bounds.width/2,y:bounds.top+bounds.height/2};applyView(z,{x:center.x-origin.x-(base.center.x-origin.x-base.pan.x)*z/base.zoom,y:center.y-origin.y-(base.center.y-origin.y-base.pan.y)*z/base.zoom});}
+    else if(view.current.zoom>1)applyView(view.current.zoom,{x:base.pan.x+a.x-base.center.x,y:base.pan.y+a.y-base.center.y});
   }
-
-  function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    setPan({
-      x: drag.originX + event.clientX - drag.startX,
-      y: drag.originY + event.clientY - drag.startY,
-    });
-  }
-
-  function handlePointerUp(event: ReactPointerEvent<HTMLDivElement>) {
-    if (drag?.pointerId === event.pointerId) setDrag(null);
-  }
+  function handlePointerUp(event:ReactPointerEvent<HTMLDivElement>){if(!points.current.delete(event.pointerId))return;try{if(event.currentTarget.hasPointerCapture?.(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId);}catch{/* A lost capture cannot continue dragging. */}baseline();}
+  function handleLostCapture(event:ReactPointerEvent<HTMLDivElement>){if(points.current.has(event.pointerId))cancelGesture();}
 
   const title = media.kind === "image" ? media.alt || "Imagen" : media.label || "Diagrama";
 
   return (
-    <div className="fixed inset-0 z-[120] flex flex-col bg-[#111827]/95 text-white" data-knownext-media-viewer="true" role="dialog" aria-modal="true" aria-label={`Vista completa: ${title}`}>
-      <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4">
-        <p className="min-w-0 truncate text-[12px] font-semibold">{title}</p>
+    <ModalFrame label={`Vista completa: ${title}`} onClose={onClose} className="!z-[120] !flex !flex-col !items-stretch !justify-start !overflow-hidden !bg-[#111827]/95 !p-0 text-white">
+    <div className="flex h-full min-h-0 w-full flex-col" data-knownext-media-viewer="true">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-1 border-b border-white/10 px-2 py-1 sm:flex-nowrap sm:px-4">
+        <p className="min-w-0 basis-full truncate text-[12px] font-semibold sm:basis-auto">{title}</p>
         <div className="flex items-center gap-1">
-          <button type="button" className="knownext-media-viewer-button" aria-label="Reducir zoom" title="Reducir zoom" onClick={() => setZoomLevel(zoom - 0.25)}>
+          <button type="button" className="knownext-media-viewer-button !min-h-11 !min-w-11" aria-label="Reducir zoom" title="Reducir zoom" onClick={() => setZoomLevel(zoom - 0.25)}>
             <Minus size={16} />
           </button>
-          <button type="button" className="knownext-media-viewer-button min-w-12 px-2 text-[11px] font-semibold" aria-label="Zoom al 100%" title="Zoom al 100%" onClick={() => setZoomLevel(1)}>
-            100%
+          <button type="button" className="knownext-media-viewer-button !min-h-11 !min-w-11 min-w-12 px-2 text-[11px] font-semibold" aria-label="Zoom al 100%" title="Zoom al 100%" onClick={() => setZoomLevel(1)}>
+            <output aria-label="Nivel de zoom">{Math.round(zoom*100)}%</output>
           </button>
-          <button type="button" className="knownext-media-viewer-button px-2 text-[11px] font-semibold" aria-label="Ajustar a pantalla" title="Ajustar" onClick={resetView}>
+          <button type="button" className="knownext-media-viewer-button !min-h-11 !min-w-11 px-2 text-[11px] font-semibold" aria-label="Ajustar a pantalla" title="Ajustar" onClick={resetView}>
             <Maximize2 size={14} />
             <span>Ajustar</span>
           </button>
-          <button type="button" className="knownext-media-viewer-button" aria-label="Aumentar zoom" title="Aumentar zoom" onClick={() => setZoomLevel(zoom + 0.25)}>
+          <button type="button" className="knownext-media-viewer-button !min-h-11 !min-w-11" aria-label="Aumentar zoom" title="Aumentar zoom" onClick={() => setZoomLevel(zoom + 0.25)}>
             <Plus size={16} />
           </button>
-          <button type="button" className="knownext-media-viewer-button ml-2" aria-label="Cerrar" title="Cerrar" onClick={onClose}>
+          <button type="button" className="knownext-media-viewer-button !min-h-11 !min-w-11 ml-2" data-autofocus aria-label="Cerrar" title="Cerrar" onClick={onClose}>
             <X size={17} />
           </button>
         </div>
       </header>
 
       <div
-        className={["relative grid min-h-0 flex-1 place-items-center overflow-hidden p-6", zoom > 1 ? drag ? "cursor-grabbing" : "cursor-grab" : "cursor-default"].join(" ")}
+        ref={viewport}
+        data-knownext-media-viewport="true"
+        style={{touchAction:"none"}}
+        className={["relative grid min-h-0 flex-1 place-items-center overflow-hidden p-6", zoom > 1 ? dragging ? "cursor-grabbing" : "cursor-grab" : "cursor-default"].join(" ")}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
+        onPointerCancel={cancelGesture}
+        onLostPointerCapture={handleLostCapture}
       >
         <div
           className="knownext-media-viewer-content"
           style={{
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transition:dragging?"none":undefined,
           }}
         >
           {media.kind === "image" ? (
@@ -169,6 +157,7 @@ export function VisualMediaViewer({ media, onClose }: VisualMediaViewerProps) {
         </div>
       </div>
     </div>
+    </ModalFrame>
   );
 }
 

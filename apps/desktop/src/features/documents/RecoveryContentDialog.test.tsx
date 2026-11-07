@@ -1,0 +1,21 @@
+import {act,cleanup,fireEvent,render,screen,waitFor} from "@testing-library/react";
+import {afterEach,expect,it,vi} from "vitest";
+import {RecoveryContentDialog} from "./RecoveryContentDialog";
+import {reviewRecoveryContent,deliverRecoveryContent} from "../../lib/api/recoveryExtract";
+import type {RecoveryContentReview} from "../../types/recoveryExtract";
+vi.mock("../../lib/api/recoveryExtract",()=>({reviewRecoveryContent:vi.fn(),deliverRecoveryContent:vi.fn()}));
+afterEach(()=>{cleanup();vi.resetAllMocks();});
+const review:RecoveryContentReview={schemaVersion:1,key:"recovery-owned-text-0001",revision:"a".repeat(64),copySha256:"b".repeat(64),kind:"document",fileName:"Recovered.md",byteLength:20,text:"Texto recuperable",previewTruncated:true,canExport:true,canRestore:false,provenanceVerified:false,checkedAt:"2026-11-02T12:00:00Z"};
+it("shows a note summary and exports a separate structured note without a project target",async()=>{
+ vi.mocked(reviewRecoveryContent).mockResolvedValueOnce({...review,schemaVersion:2,kind:"handwritten-note",pageCount:3,strokeCount:42,text:"",previewTruncated:false,fileName:"Recovered.knote"});vi.mocked(deliverRecoveryContent).mockResolvedValueOnce({status:"saved",requestId:"owned-note-delivery",completedAt:review.checkedAt});
+ render(<RecoveryContentDialog copyKey={review.key} onClose={vi.fn()}/>);await screen.findByRole("region",{name:"Resumen de nota manuscrita"});expect(screen.getByText("3 páginas · 42 trazos")).toBeInTheDocument();expect(screen.queryByText("El texto está vacío.")).not.toBeInTheDocument();expect(screen.queryByLabelText("Proyecto de destino")).not.toBeInTheDocument();fireEvent.click(screen.getByRole("checkbox"));fireEvent.click(screen.getByRole("button",{name:"Extraer a archivo nuevo"}));await screen.findByText(/Nota guardada en un archivo nuevo/);expect(deliverRecoveryContent).toHaveBeenCalledOnce();
+});
+it("requires explicit provenance acknowledgement and a new review after an uncertain delivery",async()=>{
+ vi.mocked(reviewRecoveryContent).mockResolvedValue(review);vi.mocked(deliverRecoveryContent).mockRejectedValueOnce(Error("No se confirmó el destino. Compruébalo antes de repetir.")).mockResolvedValueOnce({status:"saved",requestId:"owned-delivery",completedAt:review.checkedAt});
+ render(<RecoveryContentDialog copyKey={review.key} onClose={vi.fn()}/>);await screen.findByText("Texto recuperable");const extract=screen.getByRole("button",{name:"Extraer a archivo nuevo"});expect(extract).toBeDisabled();expect(screen.getByText(/Extracto de 2.000/)).toBeInTheDocument();fireEvent.click(screen.getByRole("checkbox"));fireEvent.click(extract);await screen.findByRole("alert");expect(deliverRecoveryContent).toHaveBeenCalledOnce();expect(screen.queryByRole("button",{name:"Extraer a archivo nuevo"})).not.toBeInTheDocument();
+ fireEvent.click(screen.getByRole("button",{name:"Revisar contenido"}));await screen.findByText("Texto recuperable");expect(screen.getByRole("checkbox")).not.toBeChecked();fireEvent.click(screen.getByRole("checkbox"));fireEvent.click(screen.getByRole("button",{name:"Extraer a archivo nuevo"}));await screen.findByText(/Texto guardado en un archivo nuevo/);expect(deliverRecoveryContent).toHaveBeenCalledTimes(2);expect(reviewRecoveryContent).toHaveBeenCalledTimes(2);expect(screen.queryByRole("button",{name:"Extraer a archivo nuevo"})).not.toBeInTheDocument();
+});
+it("ignores a late review for another copy without losing the new scope",async()=>{
+ let finish!:(value:RecoveryContentReview)=>void;vi.mocked(reviewRecoveryContent).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;})).mockResolvedValueOnce({...review,key:"recovery-other-text-0002",text:"Otra copia"});
+ const view=render(<RecoveryContentDialog copyKey={review.key} onClose={vi.fn()}/>);await waitFor(()=>expect(reviewRecoveryContent).toHaveBeenCalledOnce());view.rerender(<RecoveryContentDialog copyKey="recovery-other-text-0002" onClose={vi.fn()}/>);await screen.findByText("Otra copia");await act(async()=>finish(review));expect(screen.queryByText("Texto recuperable")).not.toBeInTheDocument();expect(screen.getByText("Otra copia")).toBeInTheDocument();expect(deliverRecoveryContent).not.toHaveBeenCalled();
+});

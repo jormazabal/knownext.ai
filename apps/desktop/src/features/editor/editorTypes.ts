@@ -28,10 +28,17 @@ export type MarkdownEditorAction =
   | "redo";
 
 export type MarkdownEditorController = {
+  getMarkdownSnapshot: () => string;
+  matchesMarkdown: (markdown: string) => boolean;
+  getHeadings?: () => import("./documentTools").DocumentHeading[];
+  findText?: (query: string, options?: import("./documentTools").DocumentFindOptions) => import("./documentTools").DocumentMatch[];
+  navigateTo?: (position: number, endPosition?: number) => boolean;
+  replaceText?: (query: string, replacement: string, all: boolean, index?: number, options?: import("./documentTools").DocumentFindOptions) => number;
   run: (action: MarkdownEditorAction, options?: MarkdownEditorActionOptions) => boolean;
   replaceMarkdown: (markdown: string, options?: MarkdownEditorReplaceOptions) => boolean;
   replaceRange: (from: number, to: number, markdown: string, options?: MarkdownEditorReplaceOptions) => boolean;
   insertMarkdown: (markdown: string, options?: MarkdownEditorReplaceOptions) => boolean;
+  appendMarkdown?: (markdown: string, options?: MarkdownEditorReplaceOptions) => boolean;
   insertMarkdownAt: (position: number, markdown: string, options?: MarkdownEditorReplaceOptions) => boolean;
   replaceImageAt: (position: number, markdown: string, options?: MarkdownEditorReplaceOptions) => boolean;
   deleteImageAt: (position: number, options?: MarkdownEditorReplaceOptions) => boolean;
@@ -76,6 +83,10 @@ export type MarkdownEditorExternalOperation = {
   id: string;
   documentId: string;
   aiEditOperationId?: string;
+  aiEditOperationIds?: string[];
+  aiProposalId?: string;
+  failureReason?: "source_changed" | "editor_apply_failed";
+  expectedMarkdown?: string;
   kind?: "replace_document" | "replace_range" | "insert_at";
   markdown: string;
   from?: number | null;
@@ -90,6 +101,7 @@ export type MarkdownEditorImageEditTarget = {
   src: string;
   alt: string;
   title?: string | null;
+  sizingReadOnly?: boolean;
 };
 
 export type MarkdownEditorDiagramEditTarget = {

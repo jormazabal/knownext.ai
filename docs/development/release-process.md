@@ -156,3 +156,37 @@ If Android infrastructure fails after Windows assets were built and verified, fi
 The SDK setup explicitly requests `platform-tools`; the deprecated `tools` package is no longer distributed by Google and fails the old action default. The 2.6.0 initial run passed Windows but hit that SDK setup failure before compiling Android.
 
 Android release builds pin Temurin Java 21 instead of inheriting the runner default. The recovery build compiled Rust successfully but Gradle 8.14.3 rejected the newer runner Java with `Unsupported class file major version 69`; Java 21 matches the validated local Kotlin build.
+
+
+## Local candidate before publication
+
+A local candidate may use VERSION3.0.0 with a C1 label in its notes before any tag or public release exists. Keep all checked manifests aligned and rebuild packaging inputs. Do not run release.yml or publish assets during local acceptance. When the user requires reuse of a completed regression, preserve its evidence/inputs and run only checks invalidated by version, packaging or reproduced defects; do not call release:check blindly because it repeats both full suites. This does not assert that the remote release gate has run.
+
+Windows isolation uses the explicit tauri.candidate.conf.json overlay: separate productName/identifier and MSI UpgradeCode, updater artifacts disabled only for the QA bundle. The normal updater key and production UpgradeCode stay unchanged. This package validates local installation/runtime, not signed production upgrade. Android QA debug uses its separate applicationId and existing debug certificate; emulator x86_64 does not certify ARM64 hardware. No production keys are regenerated.
+
+The3.0 download links in the candidate source refer to the future release; they are not verified public downloads before publication. Signing preflight failures remain blocking for distributable signed assets, even if a local QA installer can be built and installed.
+
+
+## Per-user Windows license resource contract (C1)
+
+The custom WiX template explicitly installs the single reviewed Noto OFL resource under a component with an HKCU registry key path and four empty-directory removal rules. Its stable component GUID uses the upgrade-family UUID, distinct between production and the C1 overlay. Handlebars variables in registry paths retain the template double-backslash escaping; inspect the generated MSI Registry table before accepting a packaging change.
+
+`pnpm --filter @knownext/desktop tauri:build` supplies the repository license path through `scripts/build-windows.mjs`. The beforeBundleCommand guard accepts exactly the configured OFL resource and rejects absent/replaced/additional mappings or an unrelated source path. Future resources require an explicit template/guard review. The Windows release workflow supplies the same public source-path variable; this preparation has not executed that workflow.
+
+To repackage a previously compiled local C1 binary without repeating Rust/frontend builds, set TAURI_KNOWNEXT_FONT_LICENSE to the absolute repository OFL path and use the Tauri bundle command with the candidate overlay and --no-sign. This option applies only to local QA. Distribution still requires the existing signing identities. Keep the application-build commit and installer-definition commit separate in the evidence when a template-only fix is repackaged.
+
+## 3.0 publication authority and reproducible providers
+
+The7November2026 user instruction authorizes closing release blockers, integration, PR/merge, tagging and publication for Windows/Android. It supersedes the earlier no-publication limit of the C1/Proton QA phases for this delivery. Earlier receipts remain historical evidence; they are not rewritten as production-upgrade acceptance.
+
+Three agents coordinate release/integration, Windows SDK/MSI and Android APK/update. Existing updater and Android keys are reused from Actions secrets, never printed/exported to QA profiles or regenerated.
+
+Quality runs the full regression once on the reviewed PR and records the source tree, Node/Rust/pnpm/Git versions and runner image after both suites pass. `pnpm release:check` always validates version, build, bundle and packaging-script contracts. It may reuse regression only after authenticating a successful same-repository/workflow run, identical Git tree, matching tools/image and successful frontend/native steps. Missing, expired, fork, skipped, failed or changed evidence runs a fresh regression; local invocation retains that default. Native contract tests use an OFL-only resource overlay and fake provider drivers, not product packaging. Signed builds independently require real native SDK assets.
+
+Windows prepares `scripts/prepare-proton-windows.ps1 -WriteGitHubEnvironment` with .NET10.0.403/Rust1.95.0 before bundling. Source revisions, Rust/NuGet locks, static CRT, ABI/import guards and notices are required. Explicit WiX HKCU components contain DLLs, provenance and notices. Updater key, UpgradeCode and font component remain continuous with2.6.0.
+
+Android builds SDK/crypto/OpenSSL from pinned sources on Ubuntu, links the app forAPI24 and guards Proton atAPI29. Its APK guard verifies the2.6certificate, applicationId/versionCode, five exact ARM64 libraries/alignment, provenance and notices. The experimental GPL-labelled AAR is not redistributed. Corresponding-source archives are extra release assets.
+
+Before publication check all seven mandatory assets, signatures against the configured updater key, Android certificate/hash and manifests. Android2.6→3 is tested in the owned synthetic AVD with ARM64 translation, not physical ARM. Windows MSI identity/layout and C1 installation do not prove a production-profile update; do not replace a running personal installation merely to obtain that evidence.
+
+Proton is experimental for personal non-commercial use, with the honest `external-drive-knownext@3.0.0-alpha` identifier and third-party disclosure. Hosted-service guidelines remain separate from the MIT source license. Physical/token-expiry/24h and other extended acceptance remain visible in release notes.

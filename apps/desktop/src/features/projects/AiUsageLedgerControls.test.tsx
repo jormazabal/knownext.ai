@@ -1,0 +1,33 @@
+import {act,cleanup,fireEvent,render,screen,waitFor} from "@testing-library/react";
+import {afterEach,expect,it,vi} from "vitest";
+const{getAiUsageLedger,upgradeAiUsageLedger}=vi.hoisted(()=>({getAiUsageLedger:vi.fn(),upgradeAiUsageLedger:vi.fn()}));
+vi.mock("../../lib/api/aiUsageLedger",()=>({getAiUsageLedger,upgradeAiUsageLedger}));
+import {AiUsageLedgerControls} from "./AiUsageLedgerControls";
+afterEach(()=>{cleanup();vi.resetAllMocks();});
+const old={id:"ai-usage-ledger",revision:"owned-original",schemaVersion:1,needsUpgrade:true,recentEntries:5000,recentLimit:5000,groupLimit:20000};
+const ready={...old,schemaVersion:2,revision:"owned-converted",needsUpgrade:false,recordedEntries:5001,originalCopyStatus:"verified"};
+it("observes unknown conversion without replay and refreshes the current scope callback",async()=>{
+  let reject!:(error:Error)=>void;
+  getAiUsageLedger.mockResolvedValueOnce(old).mockResolvedValueOnce(ready);
+  upgradeAiUsageLedger.mockImplementation(()=>new Promise((_,fail)=>{reject=fail;}));
+  const previous=vi.fn(),current=vi.fn();
+  const view=render(<AiUsageLedgerControls onChanged={previous}/>);
+  fireEvent.click(screen.getByRole("button",{name:"Revisar conservación"}));
+  fireEvent.click(await screen.findByRole("button",{name:"Conservar y convertir"}));
+  view.rerender(<AiUsageLedgerControls onChanged={current}/>);
+  await act(async()=>reject(new Error("ACK sin confirmar")));
+  expect(await screen.findByRole("alert")).toHaveTextContent("ACK sin confirmar");
+  fireEvent.click(screen.getByRole("button",{name:"Comprobar estado"}));
+  await screen.findByText("Copia original verificada.");
+  expect(upgradeAiUsageLedger).toHaveBeenCalledTimes(1);expect(getAiUsageLedger).toHaveBeenCalledTimes(2);
+  expect(previous).not.toHaveBeenCalled();await waitFor(()=>expect(current).toHaveBeenCalledOnce());
+  expect(screen.getByRole("status")).toHaveTextContent("5001 registros contabilizados · 5000 detalles recientes");
+});
+it("blocks conversion after a failed read while preserving the previous review",async()=>{
+  getAiUsageLedger.mockResolvedValueOnce(old).mockRejectedValueOnce(new Error("Lectura no disponible"));
+  render(<AiUsageLedgerControls onChanged={vi.fn()}/>);
+  fireEvent.click(screen.getByRole("button",{name:"Revisar conservación"}));await screen.findByRole("button",{name:"Conservar y convertir"});
+  fireEvent.click(screen.getByRole("button",{name:"Revisar conservación"}));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Lectura no disponible");
+  expect(screen.queryByRole("button",{name:"Conservar y convertir"})).not.toBeInTheDocument();expect(upgradeAiUsageLedger).not.toHaveBeenCalled();
+});

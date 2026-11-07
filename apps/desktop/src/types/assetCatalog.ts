@@ -1,0 +1,6 @@
+import type {LocalReferenceTarget} from "./documentReferences";
+export type AssetCatalogItem={target:LocalReferenceTarget;extension:string;sizeBytes:number|null;textCapability:"plain"|"pdf"|"office"|"note"|"none";incomingCount:number;outgoingCount:number};
+export type AssetCatalog={schemaVersion:1;projectId:string;scope:"saved-files";items:AssetCatalogItem[];complete:boolean;limited:boolean;warnings:string[];queriedAt:string;readOnly:true;startsAi:false;visitedEntries:number;scannedDocuments:number;readBytes:number};
+export type AssetCatalogLink={source:LocalReferenceTarget;target:LocalReferenceTarget|null;rawTarget:string;line:number;column:number;external:boolean;image:boolean};
+export type AssetLinks={schemaVersion:1;projectId:string;asset:LocalReferenceTarget;scope:"saved-markdown";incoming:AssetCatalogLink[];outgoing:AssetCatalogLink[];includesDescendants:boolean;complete:boolean;limited:boolean;warnings:string[];queriedAt:string;readOnly:true;startsAi:false};
+export type AssetText={schemaVersion:1;projectId:string;asset:LocalReferenceTarget;scope:"saved-file";status:"available"|"no-text"|"unsupported"|"unavailable"|"limited";text:string;pages:{number:number|null;pageId:string|null;text:string}[];sourceSha256:string|null;sourceBytes:number|null;warnings:string[];queriedAt:string;readOnly:true;startsAi:false};

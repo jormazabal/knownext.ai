@@ -1,0 +1,27 @@
+{
+  "productName": "KnowNext.ai C1",
+  "identifier": "ai.knownext.desktop.v3candidate",
+  "app": {
+    "windows": [{
+      "title": "KnowNext.ai 3.0 · C1 local",
+      "width": 1280,
+      "height": 900,
+      "minWidth": 360,
+      "minHeight": 520,
+      "resizable": true,
+      "fullscreen": false,
+      "decorations": false
+    }]
+  },
+  "bundle": {
+    "createUpdaterArtifacts": false,
+    "windows": {
+      "wix": {
+        "upgradeCode": "bd86fd5f-4124-45b6-967a-ec0bb72bf5ed"
+      }
+    }
+  },
+  "plugins": {
+    "updater": { "endpoints": [] }
+  }
+}

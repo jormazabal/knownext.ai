@@ -1,5 +1,10 @@
 import type { DocumentConflictStatus, HandwrittenNoteContent, HandwrittenNoteRecord } from "../types/domain";
 
+export function sameHandwrittenRevision(current: HandwrittenNoteSession | undefined, expected: HandwrittenNoteSession): boolean {
+  return !!current && current.content === expected.content && current.savedContent === expected.savedContent
+    && current.note === expected.note && current.loadVersion === expected.loadVersion;
+}
+
 export type HandwrittenNoteSession = {
   note: HandwrittenNoteRecord | null;
   content: HandwrittenNoteContent | null;
@@ -12,13 +17,35 @@ export type HandwrittenNoteSession = {
   baseFingerprint?: HandwrittenNoteRecord["baseFingerprint"] | null;
   savedContentHash?: string | null;
   draftContentHash?: string | null;
+  draftWriteRevision?: string | null;
+  draftWriteConflict?: boolean;
   conflictStatus: DocumentConflictStatus;
   diskChanged: boolean;
   orphaned: boolean;
   hasRecoveredDraft: boolean;
   draftUpdatedAt?: string | null;
   pendingDraftDiscard: boolean;
+  pendingLoad?: { requestId: number; content: string; savedContent: string; note: HandwrittenNoteRecord | null; nextVersion: number };
+  loadError?: string;
 };
+
+export function beginHandwrittenLoad(session: HandwrittenNoteSession | undefined, requestId: number, force: boolean): HandwrittenNoteSession {
+  const current = session ?? createEmptyHandwrittenNoteSession(0);
+  return { ...current, loadError: undefined, isLoading: true, pendingLoad: {
+    requestId, note: current.note, nextVersion: current.loadVersion + (force ? 1 : 0), content: current.content ? stringifyHandwrittenContent(current.content) : "",
+    savedContent: current.savedContent ? stringifyHandwrittenContent(current.savedContent) : "",
+  } };
+}
+
+export function settleHandwrittenLoad(session: HandwrittenNoteSession | undefined, requestId: number, record?: HandwrittenNoteRecord): HandwrittenNoteSession | undefined {
+  const pending = session?.pendingLoad;
+  if (!session || pending?.requestId !== requestId) return session;
+  const { pendingLoad: _pending, ...current } = session;
+  const changed = session.note !== pending.note || (session.content ? stringifyHandwrittenContent(session.content) : "") !== pending.content
+    || (session.savedContent ? stringifyHandwrittenContent(session.savedContent) : "") !== pending.savedContent;
+  if (record && !changed) return createLoadedHandwrittenNoteSession(record, { ...current, loadVersion: pending.nextVersion });
+  return { ...current, isLoading: false, loadError: record ? undefined : "No se pudo cargar la nota. Los trazos abiertos se conservan." };
+}
 
 export function createEmptyHandwrittenNoteSession(loadVersion: number): HandwrittenNoteSession {
   return {
@@ -59,6 +86,8 @@ export function createLoadedHandwrittenNoteSession(record: HandwrittenNoteRecord
     baseFingerprint: record.baseFingerprint,
     savedContentHash: record.savedContentHash ?? record.diskContentHash ?? null,
     draftContentHash: hasRecoveredDraft ? record.draftContentHash ?? null : null,
+    draftWriteRevision: record.draftWriteRevision ?? null,
+    draftWriteConflict: Boolean(record.draftWriteConflict),
     conflictStatus: record.conflictStatus ?? (record.diskChanged ? "disk-changed" : "none"),
     diskChanged: Boolean(record.diskChanged),
     orphaned: Boolean(record.orphaned),
@@ -102,9 +131,9 @@ export function applyLocalHandwrittenNoteEdit(session: HandwrittenNoteSession, c
   };
 }
 
-export function shouldPersistHandwrittenDraft(session: HandwrittenNoteSession) {
+export function shouldPersistHandwrittenDraft(session: HandwrittenNoteSession, forceProtection = false) {
   if (!session.note || !session.content || session.isLoading || !session.isDirty) return false;
-  return stringifyHandwrittenContent(session.content) !== session.lastDraftContentJson;
+  return forceProtection || stringifyHandwrittenContent(session.content) !== session.lastDraftContentJson;
 }
 
 export function shouldDiscardPersistedHandwrittenDraft(session: HandwrittenNoteSession) {
@@ -118,6 +147,25 @@ export function shouldDiscardPersistedHandwrittenDraft(session: HandwrittenNoteS
 
 export function handwrittenContentMatchesSaved(content: HandwrittenNoteContent, savedContent: HandwrittenNoteContent) {
   return stringifyHandwrittenContent(content) === stringifyHandwrittenContent(savedContent);
+}
+
+export function acknowledgeHandwrittenSave(session: HandwrittenNoteSession, saved: HandwrittenNoteRecord, submitted: HandwrittenNoteContent): HandwrittenNoteSession {
+  const edited = Boolean(session.content && stringifyHandwrittenContent(session.content) !== stringifyHandwrittenContent(submitted));
+  const content = edited ? session.content! : saved.content;
+  const dirty = !handwrittenContentMatchesSaved(content, saved.content);
+  return {
+    ...session, note: saved, content, savedContent: saved.content,
+    isDirty: dirty, saveState: dirty ? "idle" : "saved",
+    lastDraftContentJson: stringifyHandwrittenContent(saved.content),
+    baseFingerprint: saved.baseFingerprint,
+    savedContentHash: saved.savedContentHash ?? saved.diskContentHash ?? null,
+    draftContentHash: dirty ? session.draftContentHash : null,
+    draftWriteRevision: saved.draftWriteConflict ? session.draftWriteRevision : saved.draftWriteRevision ?? null,
+    draftWriteConflict: Boolean(saved.draftWriteConflict),
+    conflictStatus: "none", diskChanged: false, orphaned: false,
+    hasRecoveredDraft: dirty ? session.hasRecoveredDraft : false,
+    draftUpdatedAt: dirty ? session.draftUpdatedAt : null, pendingDraftDiscard: false,
+  };
 }
 
 export function stringifyHandwrittenContent(content: HandwrittenNoteContent) {

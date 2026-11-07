@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { applyNativeAppearance } from "../runtime/nativeAppearance";
 import type { AppearanceAccentColor, AppearanceConfig, AppearanceThemeMode } from "../../types/domain";
 
 export type ResolvedThemeMode = "light" | "dark";
@@ -21,11 +22,11 @@ type AccentTokens = {
 
 export const accentPalettes: AccentPalette[] = [
   createPalette("orange", "Naranja", "#F37021", {
-    light: ["243 112 33", "216 90 18", "255 241 232", "254 215 190", "251 146 60"],
-    dark: ["251 146 60", "255 177 112", "67 39 24", "154 74 28", "251 146 60"],
+    light: ["166 65 37", "135 53 31", "255 241 232", "254 215 190", "166 65 37"],
+    dark: ["242 160 128", "255 187 158", "67 39 24", "154 74 28", "242 160 128"],
   }),
   createPalette("amber", "Ámbar", "#F59E0B", {
-    light: ["245 158 11", "217 119 6", "255 247 237", "253 230 138", "245 158 11"],
+    light: ["180 83 9", "146 64 14", "255 247 237", "253 230 138", "180 83 9"],
     dark: ["251 191 36", "252 211 77", "62 46 19", "146 99 11", "251 191 36"],
   }),
   createPalette("yellow", "Amarillo", "#FACC15", {
@@ -33,19 +34,19 @@ export const accentPalettes: AccentPalette[] = [
     dark: ["250 204 21", "253 224 71", "57 50 18", "133 102 4", "250 204 21"],
   }),
   createPalette("lime", "Lima", "#A3E635", {
-    light: ["101 163 13", "77 124 15", "247 254 231", "217 249 157", "101 163 13"],
+    light: ["77 124 15", "63 98 18", "247 254 231", "217 249 157", "77 124 15"],
     dark: ["163 230 53", "190 242 100", "38 55 18", "87 117 19", "163 230 53"],
   }),
   createPalette("olive", "Oliva", "#65A30D", {
-    light: ["101 163 13", "77 124 15", "247 254 231", "190 242 100", "101 163 13"],
+    light: ["77 124 15", "63 98 18", "247 254 231", "190 242 100", "77 124 15"],
     dark: ["132 204 22", "163 230 53", "36 52 20", "77 124 15", "132 204 22"],
   }),
   createPalette("green", "Verde", "#16A34A", {
-    light: ["22 163 74", "21 128 61", "240 253 244", "187 247 208", "22 163 74"],
+    light: ["21 128 61", "22 101 52", "240 253 244", "187 247 208", "21 128 61"],
     dark: ["74 222 128", "134 239 172", "21 52 34", "34 115 69", "74 222 128"],
   }),
   createPalette("cyan", "Cian", "#0891B2", {
-    light: ["8 145 178", "14 116 144", "236 254 255", "165 243 252", "8 145 178"],
+    light: ["14 116 144", "21 94 117", "236 254 255", "165 243 252", "14 116 144"],
     dark: ["34 211 238", "103 232 249", "18 52 58", "21 113 129", "34 211 238"],
   }),
   createPalette("blue", "Azul", "#2563EB", {
@@ -65,7 +66,7 @@ export const accentPalettes: AccentPalette[] = [
     dark: ["251 113 133", "253 164 175", "68 26 38", "159 18 57", "251 113 133"],
   }),
   createPalette("red", "Rojo", "#DC2626", {
-    light: ["220 38 38", "185 28 28", "254 242 242", "254 202 202", "220 38 38"],
+    light: ["210 33 33", "185 28 28", "254 242 242", "254 202 202", "210 33 33"],
     dark: ["248 113 113", "252 165 165", "69 28 28", "153 27 27", "248 113 113"],
   }),
 ];
@@ -93,10 +94,12 @@ export function getAccentPalette(primaryColor: AppearanceAccentColor): AccentPal
 }
 
 export function applyAppearanceAttributes(appearance: AppearanceConfig, resolvedTheme: ResolvedThemeMode) {
+  document.documentElement.lang = appearance.language === "en" ? "en" : "es";
   document.documentElement.dataset.theme = resolvedTheme;
   document.documentElement.dataset.themePreference = appearance.themeMode;
   document.documentElement.dataset.accent = getAccentPalette(appearance.primaryColor).id;
   document.documentElement.style.colorScheme = resolvedTheme;
+  applyNativeAppearance(resolvedTheme);
 }
 
 function readSystemTheme(): ResolvedThemeMode {

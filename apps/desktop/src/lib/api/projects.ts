@@ -1,4 +1,5 @@
 import { requestDataUrl, requestFormData, requestJson } from "./client";
+import { validateProjectImportFile } from "./fileImports";
 import type {
   AssetImportResponse,
   AssetMetadata,
@@ -117,21 +118,25 @@ export async function setActiveProject(projectId: string): Promise<Project> {
 }
 
 export async function importProjectImage(projectId: string, parentId: string | null, file: File): Promise<AssetImportResponse> {
+  validateProjectImportFile(file);
   const formData = new FormData();
   formData.append("file", file);
   const params = new URLSearchParams();
+  params.set("collision","keep-both");
   if (parentId) params.set("parentId", parentId);
   const query = params.toString();
-  return requestFormData<AssetImportResponse>(`/api/projects/${projectId}/assets/images${query ? `?${query}` : ""}`, formData);
+  return requestFormData<AssetImportResponse>(`/api/projects/${encodeURIComponent(projectId)}/assets/images?${query}`, formData);
 }
 
 export async function importProjectAttachment(projectId: string, parentId: string | null, file: File): Promise<FileOperationResult> {
+  validateProjectImportFile(file);
   const formData = new FormData();
   formData.append("file", file);
   const params = new URLSearchParams();
+  params.set("collision","keep-both");
   if (parentId) params.set("parentId", parentId);
   const query = params.toString();
-  return requestFormData<FileOperationResult>(`/api/projects/${projectId}/attachments${query ? `?${query}` : ""}`, formData);
+  return requestFormData<FileOperationResult>(`/api/projects/${encodeURIComponent(projectId)}/attachments?${query}`, formData);
 }
 
 export async function getProjectImage(projectId: string, assetId: string): Promise<AssetMetadata> {

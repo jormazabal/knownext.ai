@@ -1,0 +1,3 @@
+export type PortablePreferenceValues={appearance:{language?:string;themeMode?:string;primaryColor?:string;zoomPercent?:number;markdownExtendedUnderlineEnabled?:boolean};layout:{sidebarWidth?:number;historyWidth?:number}};
+export type PortablePreferencesReview={schemaVersion:1;projectId:string;revision:string;checkedAt:string;source:"Archivo KnowNext/Preferencias.json";imported:PortablePreferenceValues;observed:PortablePreferenceValues;canApply:boolean;dataOnly:true;changesAi:false};
+export type PortablePreferencesResult={schemaVersion:1;projectId:string;requestRevision:string;status:"applied"|"unchanged";checkedAt:string;changesAi:false;review:PortablePreferencesReview};

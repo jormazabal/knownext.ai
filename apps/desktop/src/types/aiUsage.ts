@@ -1,0 +1,2 @@
+export type AiUsageQuery={month:string;projectId:string};
+export type AiUsageLedgerInfo={id:"ai-usage-ledger";checkedAt:string;revision:string;schemaVersion:number;needsUpgrade:boolean;recentEntries:number;recentLimit:number;groupLimit:number;recordedEntries?:number;periodGroups?:number;legacyWindowOnly?:boolean;createdAt?:string;originalCopyPreserved?:boolean;originalCopyStatus?:"verified"|"unavailable"|"not-needed"};

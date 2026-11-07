@@ -128,3 +128,22 @@
   inset: -8px -16px;
   content: "";
 }
+
+.knownext-editor .image-wrapper[data-knownext-sizing-readonly="true"] .image-resize-handle { display: none !important; }
+.knownext-image-edit-action:disabled { opacity: .45; cursor: not-allowed; }
+
+
+/* Opaque data stays in the normal document flow; its source is secondary. */
+.knownext-editor .knownext-preserved-block { margin: .75rem 0; padding: 0 .75rem; border-radius: 6px; background: #FAFAFA; color: #6B7280; font-size: 12px; }
+.knownext-editor .knownext-preserved-block summary { display: list-item; min-height: 44px; align-content: center; cursor: pointer; font-weight: 500; }
+.knownext-editor .knownext-preserved-block p { font-size: 12px; margin: 0 0 .5rem; }
+.knownext-editor .knownext-preserved-block pre { max-height: 180px; max-width: 100%; overflow: auto; margin: 0 0 .75rem; padding: .5rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.knownext-editor .knownext-editor-paste-notice { position: absolute; top: .5rem; left: .5rem; right: .5rem; z-index: 4; padding: .5rem .75rem; border-radius: 6px; background: #FFF1E8; color: #111827; font-size: 12px; box-shadow: 0 2px 8px #1118270a; }
+.knownext-editor .knownext-editor-paste-notice p { margin: 0; font-size: 12px; }
+.knownext-editor .knownext-editor-paste-notice > div { display: flex; flex-wrap: wrap; gap: .5rem; }
+.knownext-editor .knownext-editor-paste-notice button { min-height: 44px; padding: 0 .5rem; font-weight: 500; color: #9A3412; border-radius: 4px; }
+
+[data-theme="dark"] .knownext-editor .knownext-preserved-block { background: #1F2937; color: #D1D5DB; }
+[data-theme="dark"] .knownext-editor .knownext-editor-paste-notice { background: #3D291E; color: #F3F4F6; }
+[data-theme="dark"] .knownext-editor .knownext-editor-paste-notice button { color: #FDBA74; }

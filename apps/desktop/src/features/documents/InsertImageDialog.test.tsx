@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InsertImageDialog } from "./InsertImageDialog";
 import type { AssetImportResponse, AssetMetadata, DocumentTreeNode } from "../../types/domain";
@@ -6,6 +6,66 @@ import type { AssetImportResponse, AssetMetadata, DocumentTreeNode } from "../..
 describe("InsertImageDialog", () => {
   afterEach(() => {
     cleanup();
+  });
+
+  it("keeps the selected file and ALT after an upload failure and retries explicitly",async()=>{
+    const upload=vi.fn().mockRejectedValueOnce(new Error("No hay espacio suficiente")).mockResolvedValue(importedImage);
+    const build=vi.fn().mockResolvedValue({markdown:"![Texto conservado](docs/nueva.png)",asset:importedImage.asset});
+    const insert=vi.fn();const {container}=renderDialog({onImportImage:upload,onBuildReference:build,onInsert:insert});
+    fireEvent.change(screen.getByLabelText(/Texto alternativo/),{target:{value:"Texto conservado"}});
+    fireEvent.click(screen.getByRole("button",{name:"Subir"}));
+    const file=new File(["image"],"nueva.png",{type:"image/png"});
+    fireEvent.change(container.querySelector('input[type="file"]')!,{target:{files:[file]}});
+    expect(await screen.findByRole("alert")).toHaveTextContent("No hay espacio suficiente");
+    expect(screen.getByLabelText(/Texto alternativo/)).toHaveValue("Texto conservado");
+    fireEvent.click(screen.getByRole("button",{name:"Reintentar subida"}));
+    await waitFor(()=>expect(insert).toHaveBeenCalledTimes(1));
+    expect(upload).toHaveBeenCalledTimes(2);expect(upload.mock.calls[1][1]).toBe(file);
+  });
+
+  it("retries only the reference after the image was imported and prevents duplicate uploads",async()=>{
+    let resolve!: (value:AssetImportResponse)=>void;
+    const upload=vi.fn().mockReturnValue(new Promise<AssetImportResponse>(r=>{resolve=r;}));
+    const build=vi.fn().mockRejectedValueOnce(new Error("Referencia no disponible")).mockResolvedValue({markdown:"![Nueva](docs/nueva.png)",asset:importedImage.asset});
+    const insert=vi.fn();const {container}=renderDialog({onImportImage:upload,onBuildReference:build,onInsert:insert});
+    fireEvent.click(screen.getByRole("button",{name:"Subir"}));
+    const input=container.querySelector('input[type="file"]')!;
+    const file=new File(["image"],"nueva.png",{type:"image/png"});
+    fireEvent.change(input,{target:{files:[file]}});fireEvent.change(input,{target:{files:[file]}});
+    expect(upload).toHaveBeenCalledTimes(1);
+    await act(async()=>resolve(importedImage));
+    expect(await screen.findByRole("alert")).toHaveTextContent("La imagen ya está en el proyecto");
+    fireEvent.click(screen.getByRole("button",{name:"Reintentar inserción"}));
+    await waitFor(()=>expect(insert).toHaveBeenCalledTimes(1));
+    expect(upload).toHaveBeenCalledTimes(1);expect(build).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not insert a late imported image after changing document or closing",async()=>{
+    let resolve!: (value:AssetImportResponse)=>void;
+    const upload=vi.fn().mockImplementation(()=>new Promise<AssetImportResponse>(r=>{resolve=r;}));
+    const build=vi.fn();const insert=vi.fn();const {container,unmount,rerender}=renderDialog({onImportImage:upload,onBuildReference:build,onInsert:insert});
+    fireEvent.click(screen.getByRole("button",{name:"Subir"}));
+    fireEvent.change(container.querySelector('input[type="file"]')!,{target:{files:[new File(["image"],"nueva.png")]}});
+    const props={activeProjectId:"project-1",activeDocumentPath:"docs/Notas.md",tree,onClose:vi.fn(),onImportImage:upload,onBuildReference:build,onInsert:insert};
+    rerender(<InsertImageDialog {...props} activeDocumentId="doc-2"/>);
+    rerender(<InsertImageDialog {...props} activeDocumentId="doc-1"/>);
+    await act(async()=>resolve(importedImage));
+    expect(build).not.toHaveBeenCalled();expect(insert).not.toHaveBeenCalled();
+    fireEvent.change(container.querySelector('input[type="file"]')!,{target:{files:[new File(["image"],"another.png")]}});
+    unmount();await act(async()=>resolve(importedImage));
+    expect(build).not.toHaveBeenCalled();expect(insert).not.toHaveBeenCalled();
+  });
+
+  it("reviews a kept copy before inserting its effective name",async()=>{
+    const imported={...importedImage,asset:{...importedImage.asset,name:"nueva (2).png"},warnings:["Importado como nueva (2).png; el archivo existente se ha conservado"],importReceipt:{id:"import-qa",projectId:"project-1",requestedName:"nueva.png",storedName:"nueva (2).png",path:"docs/nueva (2).png",renamed:true,committed:true as const,bytes:10,sha256:"a".repeat(64),treeAvailable:true,checkedAt:"2026-11-01T00:00:00Z"}};
+    const upload=vi.fn().mockResolvedValue(imported);const build=vi.fn().mockResolvedValue({markdown:"![Nueva](docs/nueva%20(2).png)",asset:imported.asset});const insert=vi.fn();
+    const {container}=renderDialog({onImportImage:upload,onBuildReference:build,onInsert:insert});
+    fireEvent.click(screen.getByRole("button",{name:"Subir"}));
+    fireEvent.change(container.querySelector('input[type="file"]')!,{target:{files:[new File(["image"],"nueva.png")]}});
+    expect(await screen.findByRole("status")).toHaveTextContent("el archivo existente se ha conservado");
+    expect(build).not.toHaveBeenCalled();expect(insert).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button",{name:"Insertar imagen guardada"}));
+    await waitFor(()=>expect(insert).toHaveBeenCalledTimes(1));expect(upload).toHaveBeenCalledTimes(1);
   });
 
   it("filters project images and inserts the selected asset reference", async () => {
@@ -106,6 +166,15 @@ describe("InsertImageDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
 
     expect(onInsert).toHaveBeenCalledWith("![Nueva imagen contextual](https://example.com/new.png)");
+  });
+
+  it("changing only a local image description preserves its exact source query and fragment", async()=>{
+    const onInsert=vi.fn();const onBuildReference=vi.fn();
+    renderDialog({variant:'edit',initialAltText:'Antes',initialUrl:'assets/arquitectura.png?raw=1#detalle',onInsert,onBuildReference});
+    fireEvent.change(screen.getByLabelText(/Texto alternativo/),{target:{value:'Plano [A] *literal*'}});
+    fireEvent.click(screen.getByRole('button',{name:'Guardar cambios'}));
+    await waitFor(()=>expect(onInsert).toHaveBeenCalledWith('![Plano \\[A\\] \\*literal\\*](assets/arquitectura.png?raw=1#detalle)'));
+    expect(onBuildReference).not.toHaveBeenCalled();
   });
 
   it("does not expose document display size configuration when inserting images", async () => {

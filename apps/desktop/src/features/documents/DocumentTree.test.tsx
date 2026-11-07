@@ -59,6 +59,64 @@ const nodes: DocumentTreeNode[] = [
 afterEach(() => cleanup());
 
 describe("DocumentTree", () => {
+  it("routes selection actions and a group drag through a single reviewed batch",async()=>{
+    const batch=vi.fn(),move=vi.fn();
+    render(<DocumentTree nodes={nodes} activeDocumentId="" onOpenDocument={vi.fn()} onActivateTreeNode={vi.fn()} onSelectTreeNode={vi.fn()} onCreateFolder={vi.fn()} onCreateDocument={vi.fn()} onExpandTree={vi.fn()} onCollapseTree={vi.fn()} onConfigureProject={vi.fn()} onRenameNode={vi.fn()} onToggleNode={vi.fn()} onContextAction={vi.fn()} onMoveNode={move} onBatchAction={batch}/>);
+    await userEvent.click(screen.getByRole("button",{name:"Seleccionar"}));
+    fireEvent.keyDown(screen.getByRole("treeitem",{name:"requisitos-funcionales.md"}),{key:" "});
+    fireEvent.keyDown(screen.getByRole("treeitem",{name:"diagram.png"}),{key:" "});
+    fireEvent.change(screen.getByRole("combobox",{name:"Más acciones de selección"}),{target:{value:"export"}});
+    expect(batch).toHaveBeenLastCalledWith("export",["doc-functional","image-diagram"]);
+    const dataTransfer=createDataTransfer();
+    fireEvent.dragStart(screen.getByRole("treeitem",{name:"requisitos-funcionales.md"}).querySelector('.tree-row')!,{dataTransfer});
+    expect(JSON.parse(dataTransfer.getData(DOCUMENT_TREE_NODE_DRAG_MIME)).nodeIds).toEqual(["doc-functional","image-diagram"]);
+    const target=screen.getByRole("treeitem",{name:"Archivo"}).querySelector('.tree-row')!;
+    fireEvent.dragOver(target,{dataTransfer});fireEvent.drop(target,{dataTransfer});
+    expect(batch).toHaveBeenLastCalledWith("move",["doc-functional","image-diagram"],"folder-archive");
+    expect(move).not.toHaveBeenCalled();
+  });
+  it("opens a document with one touch while a mouse click keeps selection separate", () => {
+    const open = vi.fn(), activate = vi.fn();
+    render(<DocumentTree nodes={nodes} activeDocumentId="" onOpenDocument={open} onActivateTreeNode={activate} onSelectTreeNode={vi.fn()} onCreateFolder={vi.fn()} onCreateDocument={vi.fn()} onExpandTree={vi.fn()} onCollapseTree={vi.fn()} onConfigureProject={vi.fn()} onRenameNode={vi.fn()} onToggleNode={vi.fn()} onContextAction={vi.fn()} onMoveNode={vi.fn()}/>);
+    const row = screen.getByRole("treeitem",{name:"requisitos-funcionales.md"}).querySelector('.tree-row')!;
+    fireEvent.click(row);
+    expect(activate).toHaveBeenCalledWith("doc-functional");
+    expect(open).not.toHaveBeenCalled();
+    const tap = new MouseEvent('click',{bubbles:true});
+    Object.defineProperty(tap,'pointerType',{value:'touch'});
+    fireEvent(row,tap);
+    expect(open).toHaveBeenCalledOnce();
+    expect(open).toHaveBeenCalledWith("doc-functional","requisitos-funcionales.md");
+  });
+  it("keeps hidden mixed selections and supports keyboard range selection", async () => {
+    const batch = vi.fn();
+    render(<DocumentTree nodes={nodes} activeDocumentId="" onOpenDocument={vi.fn()} onActivateTreeNode={vi.fn()} onSelectTreeNode={vi.fn()} onCreateFolder={vi.fn()} onCreateDocument={vi.fn()} onExpandTree={vi.fn()} onCollapseTree={vi.fn()} onConfigureProject={vi.fn()} onRenameNode={vi.fn()} onToggleNode={vi.fn()} onContextAction={vi.fn()} onMoveNode={vi.fn()} onBatchAction={batch}/>);
+    await userEvent.click(screen.getByRole("button",{name:"Seleccionar"}));
+    fireEvent.keyDown(screen.getByRole("treeitem",{name:"Requisitos"}),{key:" "});
+    fireEvent.keyDown(screen.getByRole("treeitem",{name:"requisitos-funcionales.md"}),{key:" ",shiftKey:true});
+    expect(screen.getByRole("status")).toHaveTextContent("2 seleccionados");
+    await userEvent.click(screen.getByRole("button",{name:"Vista del árbol"}));
+    await userEvent.click(screen.getByRole("button",{name:"Solo archivos"}));
+    expect(screen.getByRole("status")).toHaveTextContent("2 ocultos");
+    await userEvent.click(screen.getByRole("button",{name:"Papelera"}));
+    expect(batch).toHaveBeenCalledWith("trash",["folder-requirements","doc-functional"]);
+    fireEvent.keyDown(screen.getByRole("tree"),{key:"Escape"});
+    expect(screen.getByRole("tree")).not.toHaveAttribute("aria-multiselectable");
+  });
+  it("navigates the visible hierarchy by keyboard and opens files with Enter", () => {
+    const onOpenDocument = vi.fn();
+    render(<DocumentTree nodes={nodes} activeDocumentId="" onOpenDocument={onOpenDocument} onActivateTreeNode={vi.fn()} onSelectTreeNode={vi.fn()} onCreateFolder={vi.fn()} onCreateDocument={vi.fn()} onExpandTree={vi.fn()} onCollapseTree={vi.fn()} onConfigureProject={vi.fn()} onRenameNode={vi.fn()} onToggleNode={vi.fn()} onContextAction={vi.fn()} onMoveNode={vi.fn()} />);
+    screen.getByRole("tree").focus();
+    const folder = screen.getByRole("treeitem", { name: "Requisitos" });
+    expect(folder).toHaveFocus();
+    fireEvent.keyDown(folder, { key: "ArrowDown" });
+    const file = screen.getByRole("treeitem", { name: "requisitos-funcionales.md" });
+    expect(file).toHaveFocus();
+    fireEvent.keyDown(file, { key: "Enter" });
+    expect(onOpenDocument).toHaveBeenCalledWith("doc-functional", "requisitos-funcionales.md");
+    fireEvent.keyDown(file, { key: "ArrowLeft" });
+    expect(folder).toHaveFocus();
+  });
   it("opens folder recording with the right mouse button without the browser menu", () => {
     const onContextAction=vi.fn();
     render(<DocumentTree nodes={nodes} activeDocumentId="" onOpenDocument={vi.fn()} onActivateTreeNode={vi.fn()} onSelectTreeNode={vi.fn()} onCreateFolder={vi.fn()} onCreateDocument={vi.fn()} onExpandTree={vi.fn()} onCollapseTree={vi.fn()} onConfigureProject={vi.fn()} onRenameNode={vi.fn()} onToggleNode={vi.fn()} onContextAction={onContextAction} onMoveNode={vi.fn()} />);
@@ -1160,3 +1218,43 @@ function createDataTransfer() {
     getData: (key: string) => data.get(key) ?? "",
   };
 }
+
+
+describe("DocumentTree name search modal", () => {
+  const props=()=>({nodes,activeDocumentId:"doc-functional",onOpenDocument:vi.fn(),onSelectTreeNode:vi.fn(),onActivateTreeNode:vi.fn(),onMoveNode:vi.fn(),onCreateFolder:vi.fn(),onCreateDocument:vi.fn(),onExpandTree:vi.fn(),onCollapseTree:vi.fn(),onConfigureProject:vi.fn(),onRenameNode:vi.fn(),onToggleNode:vi.fn(),onContextAction:vi.fn()});
+  it("isolates name search, focuses the query, traps Tab and returns to the toolbar", async () => {
+    const {container}=render(<><DocumentTree {...props()}/><button>Background action</button></>);
+    const opener=screen.getByRole("button",{name:"Buscar archivos y carpetas"});
+    await userEvent.click(opener);
+    const dialog=screen.getByRole("dialog",{name:"Buscar archivos y carpetas"});
+    const input=within(dialog).getByRole("textbox",{name:"Buscar archivos y carpetas"});
+    expect(input).toHaveFocus();expect(container.inert).toBe(true);
+    const close=within(dialog).getByRole("button",{name:"Cerrar b\u00fasqueda"});
+    expect(close).toHaveClass("h-11","w-11");
+    close.focus();await userEvent.tab();expect(input).toHaveFocus();
+    await userEvent.keyboard("{Escape}");expect(opener).toHaveFocus();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();expect(container.inert).toBe(false);
+  });
+  it("preserves name search completion and selection by Tab", async () => {
+    const p=props();render(<DocumentTree {...p}/>);
+    const opener=screen.getByRole("button",{name:"Buscar archivos y carpetas"});
+    await userEvent.click(opener);
+    await userEvent.type(screen.getByRole("textbox",{name:"Buscar archivos y carpetas"}),"requisitos-func");
+    expect(screen.getByRole("option")).toHaveTextContent("requisitos-funcionales.md");
+    await userEvent.keyboard("{Tab}");
+    expect(p.onSelectTreeNode).toHaveBeenCalledWith("doc-functional","document","requisitos-funcionales.md");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();expect(opener).toHaveFocus();
+  });
+  it("does not select a name search result on Shift+Tab", async () => {
+    const p=props();render(<DocumentTree {...p}/>);
+    await userEvent.click(screen.getByRole("button",{name:"Buscar archivos y carpetas"}));
+    const dialog=screen.getByRole("dialog",{name:"Buscar archivos y carpetas"});
+    const input=within(dialog).getByRole("textbox",{name:"Buscar archivos y carpetas"});
+    await userEvent.type(input,"requisitos-func");
+    await userEvent.tab({shift:true});
+    expect(p.onSelectTreeNode).not.toHaveBeenCalled();
+    expect(dialog).toBeInTheDocument();expect(input).toHaveValue("requisitos-func");
+    expect(within(dialog).getByRole("option")).toHaveFocus();
+  });
+
+});

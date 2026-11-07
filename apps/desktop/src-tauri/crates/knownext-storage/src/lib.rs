@@ -1,5 +1,134 @@
 #![recursion_limit = "256"]
 
+mod atomic_io;
+mod recording_runtime;
+mod runtime_health;
+mod state_io;
+mod projects_runtime;
+mod documents_runtime;
+mod settings_runtime;
+mod audio_transcription;
+mod export_styles;
+mod application_notes;
+mod github_auth;
+mod activity_runtime;
+mod context_runtime;
+mod ai_application;
+mod mixed_application_guard;
+mod local_file_identity;
+mod project_tree;
+mod runtime_owner;
+mod project_owner;
+pub use runtime_owner::{acquire_runtime_owner,RuntimeOwner};
+mod path_policy;
+mod trash;
+mod batch;
+mod local_search;
+mod local_corpus;
+mod credential_store;
+mod draft_store;
+mod draft_versions;
+mod document_recovery;
+mod orphan_recovery;
+mod recovery_review;
+mod recovery_inventory;
+mod recovery_lifecycle;
+mod operation_journal;
+mod slow_runtime;
+pub use slow_runtime::{is_slow_runtime_work,dispatch_slow_runtime,cooperative_runtime_work,runtime_resource};
+mod compatibility_inventory;
+mod recovery_quotas;
+mod recovery_copy_storage;
+mod retention_generation;
+mod recovery_incomplete;
+mod recovery_local_edits;
+mod version_history;
+mod file_moves;
+mod document_links;
+mod document_references;
+mod file_references;
+mod project_capabilities;
+mod local_state;
+mod ai_interaction;
+mod ai_results;
+mod export_execution;
+mod export_profiles;
+mod export_batch;
+pub use export_batch::{dispatch_export_batch,is_export_batch_work};
+mod document_templates;
+mod project_transfer;
+mod portable_preferences;
+mod portable_workspace;
+mod project_lifecycle;
+mod project_locations;
+pub use project_locations::{reviewed_location_owner,location_recording_blocker};
+mod storage_usage;
+mod ai_index_store;
+mod ai_data_policy;
+mod security_controls;
+mod ai_privacy;
+pub use ai_privacy::PrivatePermit;
+mod input_limits;
+pub use input_limits::validate_runtime_input;
+mod ai_private_state;
+mod ai_context_origin;
+mod ai_operational_state;
+mod ancillary_state;
+mod state_migrations;
+mod document_conflicts;
+mod conflict_attempts;
+mod handwritten_conflicts;
+mod index_rebuild;
+pub use index_rebuild::{dispatch_index_rebuild,index_rebuild_project};
+mod request_scope;
+mod preview_store;
+mod file_imports;
+mod asset_work;
+mod image_inventory_work;
+pub use asset_work::{asset_work_request,dispatch_asset_work,AssetWorkKind};
+mod portable_paths;
+mod history_milestones;
+mod history_groups;
+mod history_views;
+mod history_restore;
+mod meeting_minutes;
+mod handwritten_ocr;
+mod ai_change_history;
+mod document_replace;
+mod remote_conflicts;
+mod project_sync;
+mod cloud_sync;
+mod cloud_providers;
+mod proton_sync;
+mod proton_direct;
+mod proton_github_migration;
+pub use proton_direct::{initialize_proton_browser,initialize_proton_library};
+#[cfg(target_os="android")]
+pub use knownext_proton::initialize_android_protector as initialize_android_proton_protector;
+mod asset_queries;
+mod asset_catalog;
+mod handwritten_assets;
+mod preview_queries;
+mod research_workflow;
+mod research_evidence_review;
+mod scheduled_backups;
+mod scheduled_backup_work;
+pub use scheduled_backup_work::is_scheduled_backup_work;
+mod provider_work;
+pub use provider_work::is_provider_work;
+mod external_changes;
+mod favorites;
+mod diagnostics;
+mod runtime_performance;
+pub use project_lifecycle::{dispatch_project_lifecycle,is_project_lifecycle_work};
+mod document_validation;
+pub use document_templates::read_transfer_file;
+pub use project_transfer::{dispatch_project_transfer, is_project_transfer_work, is_portable_history_work};
+pub use export_execution::{dispatch_export,dispatch_export_content,is_export_request,is_export_content_request,stage_export_content,StagedUserExport};
+pub use ai_interaction::{dispatch_interaction, interaction_project_id};
+#[cfg(target_os = "android")]
+pub use credential_store::initialize_android_credential_protector;
+
 use base64::Engine;
 use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
@@ -19,10 +148,23 @@ pub struct LocalApi {
     version: String,
     profile: String,
     started_at: String,
+    credential_gate:std::sync::Arc<std::sync::Mutex<()>>,
+    batch_deliveries:std::sync::Arc<std::sync::Mutex<BTreeSet<String>>>,
+    private_activity:std::sync::Arc<std::sync::Mutex<ai_privacy::Activity>>,
+    auth_gate:std::sync::Arc<std::sync::Mutex<()>>,
+    auth_generation:std::sync::Arc<std::sync::atomic::AtomicU64>,
+    research_gate: std::sync::Arc<std::sync::Mutex<()>>,
+    usage_gate: std::sync::Arc<std::sync::Mutex<()>>,
+    runtime_id: String,
+    runtime_performance: std::sync::Arc<runtime_performance::RuntimePerformance>,
+    scheduled_backup_cursor: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    background_work: knownext_core::operations::BackgroundActivity,
+    research_failures: std::sync::Arc<std::sync::Mutex<BTreeSet<String>>>,
+    project_owners: std::sync::Arc<std::sync::Mutex<BTreeMap<PathBuf,std::sync::Arc<project_owner::ProjectOwner>>>>,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase",deny_unknown_fields)]
 pub struct LocalApiFile {
     pub field_name: String,
     pub name: String,
@@ -46,124 +188,89 @@ pub struct LocalApiContentResponse {
     pub data_base64: String,
 }
 
-#[derive(Clone, Default)]
-struct AiUsageAccumulator {
-    interactions: u64,
-    input_tokens: u64,
-    cached_input_tokens: u64,
-    output_tokens: u64,
-    reasoning_tokens: u64,
-    embedding_tokens: u64,
-    total_tokens: u64,
-    estimated_cost: f64,
-    usage_sources: BTreeSet<String>,
-}
-
 type ApiResult = Result<LocalApiResponse, String>;
 
 const AI_CONVERSATION_MAX_EVENTS: usize = 2_000;
 
 impl LocalApi {
-    pub fn model_access(key: &str, model: &str) -> Result<Value, String> {
-        let descriptor = knownext_core::model_catalog::model(model)
-            .ok_or("Modelo desconocido en el catálogo")?;
-        let response = knownext_core::http_client_builder()
-            .timeout(Duration::from_secs(20))
-            .build()
-            .map_err(|e| e.to_string())?
-            .get(format!("https://api.openai.com/v1/models/{model}"))
-            .bearer_auth(key)
-            .send()
-            .map_err(|_| "No se pudo comprobar el acceso a OpenAI".to_string())?;
-        Ok(
-            json!({"model":model,"catalogAvailable":true,"status":descriptor["status"],"accountVisible":response.status().is_success(),"httpStatus":response.status().as_u16(),"requestValidated":false,"message":"La visibilidad en la cuenta no confirma una generación. No se ha realizado una petición de generación facturable."}),
-        )
-    }
-    /// Local-only credential snapshot for background jobs. Never sent to React.
-    pub fn recording_credential(&self) -> Result<String, String> {
-        self.openai_key()
-            .ok_or_else(|| "Configura la clave de OpenAI en IA documental".into())
-    }
-
-    pub fn create_recording_document(
-        &self,
-        session_id: &str,
-        project_id: &str,
-        folder_id: Option<&str>,
-        name: &str,
-        markdown: &str,
-    ) -> Result<String, String> {
-        use std::io::{Read, Write};
-        let parent = self.node_relative(project_id, folder_id)?;
-        let root = self
-            .project_root(project_id)?
-            .canonicalize()
-            .map_err(|e| e.to_string())?;
-        let directory = self
-            .resolve_project_relative(project_id, parent.as_deref().unwrap_or(""))?
-            .canonicalize()
-            .map_err(|_| "La carpeta de destino ya no está disponible. Elige otra.".to_string())?;
-        if !directory.is_dir() || !directory.starts_with(&root) {
-            return Err("Destino fuera del proyecto".into());
-        }
-        if let Some(folder) = folder_id {
-            if !folder.starts_with(&format!("{project_id}::")) {
-                return Err("La carpeta no pertenece al proyecto".into());
-            }
-        }
-        let stem = name.trim().trim_end_matches(".md");
-        if stem.is_empty()
-            || stem.len() > 150
-            || stem
-                .chars()
-                .any(|c| c.is_control() || "<>:\"/\\|?*".contains(c))
-            || stem == "."
-            || stem == ".."
-        {
-            return Err("Nombre de documento inválido".into());
-        }
-        let markers = [format!("[knownext-recording:{session_id}]: #"),format!("<!-- knownext-recording:{session_id} -->")];
-        // Recover a crash after publication but before updating the manifest.
-        for entry in std::fs::read_dir(&directory)
-            .map_err(|e| e.to_string())?
-            .flatten()
-        {
-            if entry.path().extension().is_some_and(|e| e == "md") {
-                if let Ok(mut file) = std::fs::File::open(entry.path()) {
-                    let mut head = [0u8; 256];
-                    let read=file.read(&mut head).map_err(|e|e.to_string())?;
-                    if markers.iter().any(|marker|head[..read].starts_with(marker.as_bytes())) {
-                        return Ok(doc_id(
-                            project_id,
-                            &join_relative(parent.as_deref(), &entry.file_name().to_string_lossy()),
-                        ));
-                    }
-                }
-            }
-        }
-        for suffix in 0..10000 {
-            let filename = if suffix == 0 {
-                format!("{stem}.md")
-            } else {
-                format!("{stem} ({suffix}).md")
-            };
-            let mut temp =
-                tempfile::NamedTempFile::new_in(&directory).map_err(|e| e.to_string())?;
-            temp.write_all(markdown.as_bytes())
-                .map_err(|e| e.to_string())?;
-            temp.as_file().sync_all().map_err(|e| e.to_string())?;
-            match temp.persist_noclobber(directory.join(&filename)) {
-                Ok(_) => {
-                    return Ok(doc_id(
-                        project_id,
-                        &join_relative(parent.as_deref(), &filename),
-                    ))
-                }
-                Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(e) => return Err(e.to_string()),
-            }
-        }
-        Err("No se ha encontrado un nombre libre".into())
+    /// Audited snapshots, diagnostics and cooperative stop signals bypass document mutations.
+    pub fn is_independent_snapshot(method: &str, path: &str) -> bool {
+        let parts: Vec<_> = path.split('?').next().unwrap_or("").trim_matches('/').split('/').collect();
+        matches!((method,parts.as_slice()),
+            ("GET",["api","projects",_,"nodes","batch",_]) |
+            ("POST",["api","projects",_,"nodes","batch",_,"cancel"]) |
+            ("POST",["api","projects",_,"search","content"]) |
+            ("POST",["api","projects",_,"location","review"]) |
+            ("GET",["api","recovery","drafts" | "archives"]) |
+            ("GET",["api","recovery","conflict-attempts"]) |
+            ("GET",["api","recovery","conflict-attempt-archives"]) |
+            ("GET",["api","recovery","conflict-attempts",_]) |
+            ("GET",["api","recovery","conflict-attempts",_,"package-review"]) |
+            ("GET",["api","recovery","conflict-attempts",_,"retention"]) |
+            ("GET",["api","recovery","conflict-attempts",_,"payloads"]) |
+            ("GET",["api","recovery","formats"|"families"]) |
+            ("GET",["api","recovery","families",_]) |
+            ("POST",["api","recovery","families",_,_,"review"]) |
+            ("GET",["api","projects",_,"scheduled-backups"]) |
+            ("GET",["api","projects",_,"scheduled-backups",_]) |
+            ("GET",["api","projects",_,"protection"]) |
+            ("GET",["api","recovery","storage"]) |
+            ("GET",["api","recovery","storage","quotas"]) |
+            ("GET",["api","drafts","orphans"]) |
+            ("GET",["api","recovery","orphans"]) |
+            ("POST",["api","recovery","drafts",_,"preview"]) |
+            ("POST",["api","recovery","local-edits",_,"review"]) |
+            ("GET",["api","documents",_,"links"]) |
+            ("GET",["api","documents",_,"history"]) |
+            ("GET",["api","documents",_,"history","groups"]) |
+            ("GET",["api","documents",_,"remote-conflict"]) |
+            ("POST",["api","documents"|"handwritten-notes",_,"conflict-attempts",_,"review"]) |
+            ("GET",["api","projects",_,"sync","remote-review"]) |
+            ("GET",["api","projects",_,"sync","graph-joins",_]) |
+            ("GET",["api","projects",_,"tree"]) |
+            ("POST",["api","projects",_,"sync","history-copies","review"]) |
+            ("GET",["api","projects",_,"sync","history-copies",_]) |
+            ("GET",["api","documents",_,"versions"]) |
+            ("GET",["api","documents",_,"versions",_,"content"]) |
+            ("GET",["api","project-transfers"]) |
+            ("GET",["api","project-templates"]) |
+            ("GET",["api","retired-projects"]) |
+            ("GET",["api","storage","usage"]) |
+            ("GET",["api","ai","usage","summary"|"ledger"|"budget"]) |
+            ("GET",["api","storage","preview-cleanup"]) |
+            ("GET",["api","ai","data-policy"]) |
+            ("GET",["api","recovery","upgrade" | "upgrades"]) |
+            ("GET",["api","recovery","archives",_,"content-review"]) |
+            ("POST",["api","projects",_,"sync","mixed-selections","review"]) |
+            ("GET",["api","projects",_,"sync","mixed-selections",_]) |
+            ("GET",["api","projects",_,"sync","mixed-selections",_,"application"]) |
+            ("GET",["api","projects",_,"sync","mixed-selections",_,"application","retention"]) |
+            ("GET",["api","projects",_,"sync","mixed-selections",_,"application","backup"]) |
+            ("POST",["api","projects",_,"sync","mixed-selections",_,"application","review"]) |
+            ("GET",["api","recovery","system"]) |
+            ("GET",["api","recovery","system",_]) |
+            ("GET",["api","recovery","upgrades",_]) |
+            ("GET",["api","recovery","upgrades",_,"retention"]) |
+            ("GET",["api","projects",_,"history-restores"|"document-replacements"|"ai-changes"|"meeting-minutes"|"handwritten-ocr",..]) |
+            ("POST",["api","projects",_,"history-restores","review"|"preview"]) |
+            ("POST",["api","projects",_,"meeting-minutes","review"]) |
+            ("GET",["api","handwritten-notes",_,"ocr",..]) |
+            ("POST",["api","projects",_,"document-replacements","review"]) |
+            ("POST",["api","projects",_,"ai-changes",_,"review"|"page-preview"]) |
+            ("GET",["api","projects",_,"research-evidence",_]) |
+            ("POST",["api","projects",_,"research-evidence",_,"prepare"]) |
+            ("GET",["api","projects",_,"asset-catalog",..]) |
+            ("GET",["api","project-templates","catalogue-attempts",..]) |
+            ("GET",["api","projects",_,"favorites"]) |
+            ("GET",["api","projects",_,"portable-preferences"]) |
+            ("GET",["api","projects",_,"portable-history"]) |
+            ("POST",["api","projects",_,"portable-history",_,"review"]) |
+            ("GET",["api","projects",_,"portable-recordings"]) |
+            ("POST",["api","projects",_,"portable-recordings",_,"review"]) |
+            ("GET",["api","projects",_,"portable-drafts"]) |
+            ("POST",["api","projects",_,"portable-drafts",_,"review"]) |
+            ("GET",["api","runtime","diagnostics" | "logging"]) |
+            ("POST",["api","runtime","logging"]))
     }
     pub fn new(app_data_dir: PathBuf, version: String, profile: String) -> Self {
         let _ = std::fs::create_dir_all(&app_data_dir);
@@ -172,6406 +279,21 @@ impl LocalApi {
             version,
             profile,
             started_at: knownext_core::now_iso(),
+            auth_gate:Default::default(),auth_generation:Default::default(),
+            research_gate: Default::default(),
+            usage_gate: Default::default(),
+            runtime_id: knownext_core::compact_id("runtime"),
+            runtime_performance: Default::default(),
+            scheduled_backup_cursor: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            credential_gate:Default::default(),
+            batch_deliveries:Default::default(),
+            private_activity:Default::default(),
+            background_work: Default::default(),
+            research_failures: Default::default(),
+            project_owners: Default::default(),
         }
     }
 
-    pub fn health(&self) -> Value {
-        json!({
-            "app": "knownext",
-            "schemaVersion": 3,
-            "status": "ok",
-            "service": "local-tauri-rust",
-            "version": self.version,
-            "profile": self.profile,
-            "host": "local-tauri",
-            "port": null,
-            "endpoint": "tauri://local-api",
-            "instanceId": "tauri-rust-local",
-            "startedAt": self.started_at,
-            "managedBy": "tauri",
-            "appDataDir": self.app_data_dir.to_string_lossy(),
-        })
-    }
-
-    pub fn git_diagnostics(&self) -> Value {
-        let git = git_version();
-        let git_available = git.is_ok();
-        let git_version = git.as_ref().ok().cloned();
-        let git_error = git.err();
-        let registry = self.registry();
-        let active_project_id = registry.get("activeProjectId").and_then(Value::as_str);
-        let active_project = self.list_projects().into_iter().find(|project| {
-            project["id"].as_str() == active_project_id
-                || project["active"].as_bool().unwrap_or(false)
-        });
-        let folder_path = active_project
-            .as_ref()
-            .and_then(|project| project["folderPath"].as_str())
-            .map(str::to_string);
-        let root = folder_path.as_ref().map(PathBuf::from);
-        let root_exists = root.as_ref().map(|path| path.exists()).unwrap_or(false);
-        let git_initialized = root
-            .as_ref()
-            .map(|path| path.join(".git").exists())
-            .unwrap_or(false);
-        let origin = root
-            .as_ref()
-            .filter(|_| git_initialized)
-            .and_then(|path| git_remote_url(path, "origin").ok().flatten());
-        let sync_mode = active_project
-            .as_ref()
-            .and_then(|project| project["syncMode"].as_str())
-            .unwrap_or("none");
-        let is_github = is_github_sync_mode(sync_mode);
-        let auth = self.auth_status();
-        let authenticated = auth["isAuthenticated"].as_bool().unwrap_or(false);
-        let remote_access = if !is_github {
-            "not-configured"
-        } else if !authenticated {
-            "unauthenticated"
-        } else if origin.is_none() {
-            "unknown"
-        } else {
-            "available"
-        };
-        json!({
-            "gitAvailable": git_available,
-            "gitVersion": git_version,
-            "lastError": git_error,
-            "projectId": active_project.as_ref().and_then(|project| project["id"].as_str()),
-            "projectName": active_project.as_ref().and_then(|project| project["name"].as_str()),
-            "folderPath": folder_path,
-            "folderExists": root_exists,
-            "gitInitialized": git_initialized,
-            "origin": origin,
-            "syncMode": sync_mode,
-            "versioningMode": active_project.as_ref().and_then(|project| project["versioningMode"].as_str()),
-            "githubConfigured": is_github,
-            "githubAuthenticated": authenticated,
-            "remoteAccess": remote_access,
-            "checkedAt": knownext_core::now_iso()
-        })
-    }
-
-    pub fn handle(
-        &self,
-        method: &str,
-        raw_path: &str,
-        body: Value,
-        files: Vec<LocalApiFile>,
-    ) -> ApiResult {
-        let (path, query) = split_path(raw_path);
-        let segment_strings = path
-            .trim_matches('/')
-            .split('/')
-            .map(knownext_core::percent_decode)
-            .collect::<Vec<_>>();
-        let segments = segment_strings
-            .iter()
-            .map(String::as_str)
-            .collect::<Vec<_>>();
-        let method = method.to_ascii_uppercase();
-
-        match (method.as_str(), segments.as_slice()) {
-            ("GET", ["health"]) => ok(self.health()),
-            ("GET", ["api", "config"]) => ok(self.read_config()),
-            ("PUT", ["api", "config"]) => ok(self.update_config(body)),
-            ("GET", ["api", "config", "ai"]) => ok(self.ai_config_status()),
-            ("PUT", ["api", "config", "ai"]) => ok(self.update_ai_config(body)),
-            ("GET", ["api", "ai", "skills"]) => ok(knownext_ai_skills::list_ai_skills_json()),
-            ("POST", ["api", "ai", "skills", "selection-preview"]) => {
-                ok(knownext_ai_skills::selection_preview_json(&body))
-            }
-            ("GET", ["api", "ai", "skills", skill_id]) => {
-                if let Some(skill) = knownext_ai_skills::get_ai_skill_json(skill_id) {
-                    ok(skill)
-                } else {
-                    bad(404, "Skill de IA no encontrada.")
-                }
-            }
-            ("POST", ["api", "ai", "skills", skill_id, "validate"]) => {
-                if let Some(validation) = knownext_ai_skills::validate_ai_skill_json(skill_id) {
-                    ok(validation)
-                } else {
-                    bad(404, "Skill de IA no encontrada.")
-                }
-            }
-            ("POST", ["api", "transcription"]) => ok(self.transcribe_audio(body, files)),
-            ("GET", ["api", "config", "export-template"]) => ok(self.read_export_template()),
-            ("PUT", ["api", "config", "export-template"]) => ok(self.update_export_template(body)),
-            ("POST", ["api", "config", "export-template", "reset"]) => {
-                ok(self.reset_export_template())
-            }
-            ("GET", ["api", "config", "export-template", "path"]) => {
-                ok(json!({ "path": self.export_template_path().to_string_lossy() }))
-            }
-            ("GET", ["api", "notes"]) => ok(self.read_notes()),
-            ("PUT", ["api", "notes"]) => ok(self.write_notes(
-                body.get("markdown")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string(),
-            )),
-            ("GET", ["api", "auth", "status"]) => ok(self.auth_status()),
-            ("POST", ["api", "auth", "github", "device", "start"]) => {
-                ok(self.start_github_device())
-            }
-            ("POST", ["api", "auth", "github", "device", "poll"]) => ok(self.poll_github_device()),
-            ("POST", ["api", "auth", "logout"]) => ok(self.clear_auth_status()),
-            ("GET", ["api", "github", "repositories"]) => ok(self.github_repositories()),
-            ("GET", ["api", "projects"]) => ok(json!(self.list_projects())),
-            ("POST", ["api", "projects"]) => ok(self.create_project(body)?),
-            ("GET", ["api", "projects", "active"]) => self.active_project(),
-            ("GET", ["api", "projects", "capabilities"]) => ok(json!({
-                "canCreateLocalProject": true,
-                "canOpenLocalFolder": true,
-                "canUseLocalGit": true,
-                "canConnectGithub": true,
-                "canUseGithubApi": github_client_id().is_some(),
-                "requiresGithubLoginForVersioning": true
-            })),
-            ("GET", ["api", "projects", project_id, "tree"]) => {
-                ok(json!(self.project_tree(project_id)?))
-            }
-            ("GET", ["api", "projects", project_id, "versioning", "status"]) => {
-                ok(self.versioning_status(project_id))
-            }
-            ("GET", ["api", "projects", project_id, "file-sync-overview"]) => {
-                ok(self.file_sync_overview(project_id)?)
-            }
-            ("GET", ["api", "projects", project_id, "activity"]) => {
-                ok(self.project_activity(project_id))
-            }
-            ("POST", ["api", "projects", project_id, "activity"]) => {
-                ok(self.record_activity(project_id, body))
-            }
-            ("PUT", ["api", "projects", project_id, "active"]) => {
-                ok(self.set_active_project(project_id)?)
-            }
-            ("PUT", ["api", "projects", project_id]) => ok(self.update_project(project_id, body)?),
-            ("DELETE", ["api", "projects", project_id]) => {
-                ok(json!(self.delete_project(project_id)?))
-            }
-            ("POST", ["api", "projects", project_id, "folders"]) => {
-                ok(self.create_folder(project_id, body)?)
-            }
-            ("POST", ["api", "projects", project_id, "documents"]) => {
-                ok(self.create_document(project_id, body)?)
-            }
-            ("POST", ["api", "projects", project_id, "handwritten-notes"]) => {
-                ok(self.create_handwritten_note(project_id, body)?)
-            }
-            ("POST", ["api", "projects", project_id, "attachments"]) => {
-                ok(self.import_file(project_id, &query, files, false)?)
-            }
-            ("POST", ["api", "projects", project_id, "assets", "images"]) => {
-                ok(self.import_file(project_id, &query, files, true)?)
-            }
-            ("GET", ["api", "projects", project_id, "assets", asset_id]) => {
-                ok(self.asset_metadata(project_id, asset_id)?)
-            }
-            ("GET", ["api", "projects", project_id, "assets", asset_id, "usage"]) => {
-                ok(self.asset_usage(project_id, asset_id)?)
-            }
-            ("POST", ["api", "projects", project_id, "assets", "reindex-images"]) => {
-                ok(self.reindex_project_images(project_id)?)
-            }
-            (
-                "POST",
-                ["api", "projects", project_id, "documents", document_id, "image-reference"],
-            ) => ok(self.image_reference(project_id, document_id, body)?),
-            ("GET", ["api", "projects", project_id, "documents", document_id, "move-impact"]) => {
-                ok(self.document_move_impact(project_id, document_id)?)
-            }
-            ("PATCH", ["api", "projects", project_id, "nodes", node_id, "rename"]) => {
-                ok(self.rename_node(project_id, node_id, body)?)
-            }
-            ("PATCH", ["api", "projects", project_id, "nodes", node_id, "move"]) => {
-                ok(self.move_node(project_id, node_id, body)?)
-            }
-            ("DELETE", ["api", "projects", project_id, "nodes", node_id]) => {
-                ok(self.delete_node(project_id, node_id)?)
-            }
-            ("POST", ["api", "projects", project_id, "documents", document_id, "duplicate"]) => {
-                ok(self.duplicate_document(project_id, document_id)?)
-            }
-            ("GET", ["api", "documents", document_id]) => ok(self.get_document(document_id)?),
-            ("PUT", ["api", "documents", document_id]) => {
-                ok(self.save_document(document_id, body)?)
-            }
-            ("GET", ["api", "handwritten-notes", note_id]) => {
-                ok(self.get_handwritten_note(note_id)?)
-            }
-            ("PUT", ["api", "handwritten-notes", note_id]) => {
-                ok(self.save_handwritten_note(note_id, body)?)
-            }
-            ("PUT", ["api", "handwritten-notes", note_id, "draft"]) => {
-                ok(self.save_handwritten_note_draft(note_id, body)?)
-            }
-            ("DELETE", ["api", "handwritten-notes", note_id, "draft"]) => {
-                self.delete_draft(note_id);
-                no_content()
-            }
-            ("POST", ["api", "handwritten-notes", note_id, "export"]) => {
-                ok(self.export_handwritten_note(note_id, body)?)
-            }
-            ("GET", ["api", "handwritten-notes", note_id, "pages", page_id, "render"]) => {
-                ok(self.render_handwritten_note_page(note_id, page_id, &query)?)
-            }
-            (
-                "POST",
-                ["api", "handwritten-notes", note_id, "pages", page_id, "insert-markdown"],
-            ) => ok(self.insert_handwritten_page_markdown(note_id, page_id, body)?),
-            ("PUT", ["api", "documents", document_id, "draft"]) => {
-                ok(self.save_draft(document_id, body)?)
-            }
-            ("DELETE", ["api", "documents", document_id, "draft"]) => {
-                self.delete_draft(document_id);
-                no_content()
-            }
-            ("POST", ["api", "documents", document_id, "export"]) => {
-                ok(self.export_document(document_id, body)?)
-            }
-            ("POST", ["api", "documents", "sync-status"]) => ok(self.documents_sync_status(body)),
-            ("GET", ["api", "drafts", "orphans"]) => ok(self.orphan_drafts()),
-            ("POST", ["api", "drafts", draft_key, "restore"]) => {
-                ok(self.restore_orphan_draft(draft_key)?)
-            }
-            ("DELETE", ["api", "drafts", draft_key]) => {
-                self.discard_draft_key(draft_key);
-                no_content()
-            }
-            ("GET", ["api", "documents", document_id, "versions"]) => {
-                ok(json!(self.list_versions(document_id)))
-            }
-            ("POST", ["api", "projects", project_id, "versions"]) => {
-                ok(self.create_version(project_id, body)?)
-            }
-            ("GET", ["api", "documents", document_id, "versions", version_id, "content"]) => {
-                ok(self.version_content(document_id, version_id)?)
-            }
-            ("POST", ["api", "documents", document_id, "versions", version_id, "restore"]) => {
-                ok(self.restore_version(document_id, version_id)?)
-            }
-            ("GET", ["api", "projects", project_id, "sync", "status"]) => {
-                ok(self.sync_status(project_id))
-            }
-            ("POST", ["api", "projects", project_id, "sync", "pull"]) => {
-                ok(self.sync_operation(project_id, "pull"))
-            }
-            ("POST", ["api", "projects", project_id, "sync", "push"]) => {
-                ok(self.sync_operation(project_id, "push"))
-            }
-            ("POST", ["api", "projects", project_id, "sync", "scan"]) => {
-                ok(self.sync_status(project_id))
-            }
-            ("POST", ["api", "projects", project_id, "sync", "auto-run"]) => {
-                ok(self.sync_auto_run(project_id))
-            }
-            ("POST", ["api", "projects", project_id, "history", "enable"]) => {
-                ok(self.enable_project_history(project_id)?)
-            }
-            ("PUT", ["api", "projects", project_id, "sync-mode"]) => {
-                ok(self.change_project_sync_mode(project_id, body)?)
-            }
-            ("POST", ["api", "projects", project_id, "github", "connect"]) => {
-                ok(self.connect_project_github(project_id, body, false)?)
-            }
-            ("POST", ["api", "projects", project_id, "github", "verify-connection"]) => {
-                ok(self.sync_status(project_id))
-            }
-            ("POST", ["api", "projects", project_id, "github", "publish"]) => {
-                ok(self.connect_project_github(project_id, body, true)?)
-            }
-            (
-                "POST",
-                ["api", "projects", project_id, "sync", "conflicts", _conflict_id, "resolve"],
-            ) => ok(self.sync_status(project_id)),
-            ("GET", ["api", "projects", project_id, "external-changes"]) => {
-                ok(self.external_changes(project_id))
-            }
-            ("POST", ["api", "projects", project_id, "external-changes", "scan"]) => {
-                ok(self.external_changes(project_id))
-            }
-            ("POST", ["api", "projects", project_id, "external-changes", "import"]) => {
-                ok(self.import_external_changes(project_id, body)?)
-            }
-            ("POST", ["api", "projects", project_id, "previews"]) => {
-                ok(self.create_preview(project_id, body)?)
-            }
-            ("GET", ["api", "projects", project_id, "previews", preview_id]) => {
-                ok(self.get_preview(project_id, preview_id)?)
-            }
-            ("POST", ["api", "projects", project_id, "previews", preview_id, "refresh"]) => {
-                ok(self.get_preview(project_id, preview_id)?)
-            }
-            ("GET", ["api", "projects", project_id, "previews", preview_id, "text"]) => {
-                ok(self.preview_text(project_id, preview_id)?)
-            }
-            ("GET", ["api", "projects", project_id, "previews", preview_id, "sheets"]) => {
-                ok(self.preview_sheets(project_id, preview_id)?)
-            }
-            (
-                "GET",
-                ["api", "projects", project_id, "previews", preview_id, "sheets", sheet_id],
-            ) => ok(self.preview_sheet(project_id, preview_id, sheet_id)?),
-            ("POST", ["api", "projects", project_id, "previews", preview_id, "open-external"]) => {
-                ok(self.open_preview_external(project_id, preview_id)?)
-            }
-            ("GET", ["api", "projects", project_id, "ai", "context", "search"]) => {
-                ok(self.ai_context_search(project_id, &query))
-            }
-            ("GET", ["api", "projects", project_id, "ai", "context", "sources"]) => {
-                ok(self.ai_sources(project_id))
-            }
-            ("POST", ["api", "projects", project_id, "ai", "context", "project-documents"]) => {
-                ok(self.ai_source(
-                    project_id,
-                    body_id(&body, &["documentId"]).unwrap_or("document"),
-                    "project_document",
-                ))
-            }
-            ("POST", ["api", "projects", project_id, "ai", "context", "project-images"]) => {
-                ok(self.ai_source(
-                    project_id,
-                    body_id(&body, &["assetId", "documentId"]).unwrap_or("image"),
-                    "image",
-                ))
-            }
-            ("POST", ["api", "projects", project_id, "ai", "context", "project-attachments"]) => {
-                ok(self.ai_source(
-                    project_id,
-                    body_id(&body, &["attachmentId", "documentId"]).unwrap_or("attachment"),
-                    "external_file",
-                ))
-            }
-            ("POST", ["api", "projects", project_id, "ai", "context", "handwritten-notes"]) => {
-                ok(self.ai_source(
-                    project_id,
-                    body_id(&body, &["noteId", "documentId"]).unwrap_or("handwritten-note"),
-                    "handwritten_note",
-                ))
-            }
-            ("POST", ["api", "projects", project_id, "ai", "context", "files"]) => {
-                ok(self.ai_upload_sources(project_id, files))
-            }
-            ("POST", ["api", "projects", project_id, "ai", "context", "local-files"]) => {
-                self.ai_upload_local_sources(project_id, body)
-            }
-            ("DELETE", ["api", "projects", project_id, "ai", "context", "sources", source_id]) => {
-                ok(self.remove_ai_source(project_id, source_id))
-            }
-            (
-                "POST",
-                ["api", "projects", project_id, "ai", "context", "sources", source_id, "extend"],
-            ) => ok(self.ai_source(project_id, source_id, "external_file")),
-            (
-                "GET",
-                ["api", "projects", project_id, "ai", "context", "sources", source_id, "preview"],
-            ) => ok(self.ai_source_preview(project_id, source_id)),
-            (
-                "POST",
-                ["api", "projects", project_id, "ai", "context", "sources", source_id, "add-to-project"],
-            ) => ok(self.add_ai_source_to_project(project_id, source_id, body)?),
-            ("POST", ["api", "documents", document_id, "ai", "prompt"]) => {
-                let response = knownext_ai::prompt_response(
-                    body.get("prompt").and_then(Value::as_str).unwrap_or(""),
-                    body.get("markdown").and_then(Value::as_str).unwrap_or(""),
-                    Some(document_id),
-                    self.openai_key().as_deref(),
-                    self.ai_model().as_str(),
-                );
-                let project_id = document_id.split("::").next().unwrap_or("prompt");
-                self.record_ai_usage_records(project_id, "prompt", &response);
-                ok(response)
-            }
-            ("POST", ["api", "projects", _project_id, "ai", "prompt"]) => {
-                let response = knownext_ai::prompt_response(
-                    body.get("prompt").and_then(Value::as_str).unwrap_or(""),
-                    "",
-                    None,
-                    self.openai_key().as_deref(),
-                    self.ai_model().as_str(),
-                );
-                self.record_ai_usage_records(_project_id, "prompt", &response);
-                ok(response)
-            }
-            ("POST", ["api", "projects", project_id, "ai", "interactions"]) => {
-                ok(self.ai_interaction(project_id, body))
-            }
-            ("POST", ["api", "projects", project_id, "ai", "research", "brief"]) => {
-                ok(self.ai_research_brief(project_id, body))
-            }
-            ("GET", ["api", "projects", project_id, "ai", "research", "policy"]) => {
-                ok(self.ai_research_policy(project_id))
-            }
-            ("PUT", ["api", "projects", project_id, "ai", "research", "policy"]) => {
-                ok(self.save_ai_research_policy(project_id, body))
-            }
-            ("GET", ["api", "projects", project_id, "ai", "research", "jobs"]) => {
-                ok(self.ai_research_jobs_response(project_id))
-            }
-            ("POST", ["api", "projects", project_id, "ai", "research", "jobs"]) => {
-                ok(self.ai_research_start(project_id, body)?)
-            }
-            ("GET", ["api", "projects", project_id, "ai", "research", "jobs", job_id]) => {
-                ok(self.ai_research_job(project_id, job_id))
-            }
-            (
-                "GET",
-                ["api", "projects", project_id, "ai", "research", "jobs", job_id, "sources"],
-            ) => ok(self.ai_research_sources(project_id, job_id)),
-            (
-                "GET",
-                ["api", "projects", project_id, "ai", "research", "jobs", job_id, "quality"],
-            ) => ok(self.ai_research_quality(project_id, job_id)),
-            (
-                "GET",
-                ["api", "projects", project_id, "ai", "research", "jobs", job_id, "activity"],
-            ) => ok(self.ai_research_activity(project_id, job_id)),
-            (
-                "GET",
-                ["api", "projects", project_id, "ai", "research", "jobs", job_id, "coverage"],
-            ) => ok(self.ai_research_coverage(project_id, job_id)),
-            (
-                "POST",
-                ["api", "projects", project_id, "ai", "research", "jobs", job_id, "cancel"],
-            ) => ok(self.ai_research_cancel(project_id, job_id)),
-            (
-                "POST",
-                ["api", "projects", project_id, "ai", "research", "jobs", job_id, "retry"],
-            ) => ok(self.ai_research_retry(project_id, job_id)?),
-            (
-                "POST",
-                ["api", "projects", project_id, "ai", "research", "jobs", job_id, "refine"],
-            ) => ok(self.ai_research_refine(project_id, job_id, body)?),
-            (
-                "POST",
-                ["api", "projects", project_id, "ai", "research", "jobs", job_id, "update-sources"],
-            ) => ok(self.ai_research_update_sources(project_id, job_id)?),
-            (
-                "POST",
-                ["api", "projects", project_id, "ai", "research", "jobs", job_id, "accept"],
-            ) => ok(self.ai_research_accept(project_id, job_id)),
-            (
-                "POST",
-                ["api", "projects", project_id, "ai", "research", "jobs", job_id, "review"],
-            ) => ok(self.ai_research_review(project_id, job_id, body)),
-            (
-                "POST",
-                ["api", "projects", project_id, "ai", "research", "jobs", job_id, "export"],
-            ) => ok(self.ai_research_export(project_id, job_id, body)?),
-            ("GET", ["api", "projects", project_id, "ai", "conversation"]) => {
-                ok(self.ai_conversation(project_id))
-            }
-            ("DELETE", ["api", "projects", project_id, "ai", "conversation"]) => {
-                self.write_json(
-                    &self.conversation_path(project_id),
-                    &json!({ "events": [] }),
-                )?;
-                ok(json!({ "events": [] }))
-            }
-            ("GET", ["api", "projects", _project_id, "ai", "pending-intent"]) => ok(Value::Null),
-            ("POST", ["api", "projects", project_id, "ai", "confirm-delete"]) => {
-                ok(self.ai_interaction(project_id, body))
-            }
-            ("GET", ["api", "ai", "usage", "summary"]) => ok(self.ai_usage_summary(&query)),
-            ("GET", ["api", "credentials", "openai-key"]) => ok(self.openai_key_status()),
-            ("PUT", ["api", "credentials", "openai-key"]) => ok(self.save_openai_key(body)),
-            ("DELETE", ["api", "credentials", "openai-key"]) => {
-                self.delete_openai_key();
-                no_content()
-            }
-            ("GET", ["api", "projects", project_id, "ai", "index", "status"]) => {
-                ok(self.ai_index_status(project_id))
-            }
-            ("POST", ["api", "projects", project_id, "ai", "index", "rebuild"]) => {
-                ok(self.rebuild_ai_index(project_id))
-            }
-            ("DELETE", ["api", "projects", project_id, "ai", "index"]) => {
-                ok(self.delete_ai_index(project_id))
-            }
-            ("POST", ["api", "runtime", "select-folder"]) => {
-                ok(json!({ "folderPath": body.get("currentPath").and_then(Value::as_str) }))
-            }
-            ("GET", ["api", "runtime", "logging"]) => ok(self.runtime_logging_status()?),
-            ("GET", ["api", "runtime", "git"]) => ok(self.git_diagnostics()),
-            ("POST", ["api", "runtime", "logging"]) => ok(self.record_runtime_log(body)?),
-            ("POST", ["api", "runtime", "open-folder"]) => ok(self.open_runtime_folder(body)?),
-            _ => bad(
-                404,
-                &format!("Contrato local no implementado: {method} {path}"),
-            ),
-        }
-    }
-
-    pub fn content(&self, raw_path: &str, body: Value) -> Result<LocalApiContentResponse, String> {
-        let (path, _query) = split_path(raw_path);
-        let segment_strings = path
-            .trim_matches('/')
-            .split('/')
-            .map(knownext_core::percent_decode)
-            .collect::<Vec<_>>();
-        let segments = segment_strings
-            .iter()
-            .map(String::as_str)
-            .collect::<Vec<_>>();
-        match segments.as_slice() {
-            ["api", "documents", document_id, "export", "content"] => {
-                let document = self.get_document(document_id)?;
-                let format = body.get("format").and_then(Value::as_str).unwrap_or("pdf");
-                let markdown = body
-                    .get("markdown")
-                    .and_then(Value::as_str)
-                    .unwrap_or_else(|| document["markdown"].as_str().unwrap_or(""));
-                let name = document["name"].as_str().unwrap_or("document.md");
-                let diagram_assets =
-                    knownext_docs::diagram_assets_from_json(body.get("diagramAssets"));
-                let image_assets = self.export_image_assets(document_id, markdown);
-                let export_template = self.read_export_template();
-                let (content_type, filename, bytes) = export_bytes(
-                    name,
-                    markdown,
-                    format,
-                    &diagram_assets,
-                    &image_assets,
-                    &export_template,
-                );
-                Ok(binary(200, content_type, Some(filename), bytes))
-            }
-            ["api", "handwritten-notes", note_id, "export", "content"] => {
-                let (content_type, filename, bytes) =
-                    self.handwritten_export_bytes(note_id, body, None)?;
-                Ok(binary(200, content_type, Some(filename), bytes))
-            }
-            ["api", "projects", project_id, "assets", asset_id, "content"] => {
-                let path = self
-                    .resolve_document_path(asset_id)
-                    .or_else(|_| self.resolve_project_relative(project_id, asset_id))?;
-                let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
-                Ok(binary(
-                    200,
-                    mime_for_path(&path),
-                    path.file_name()
-                        .map(|value| value.to_string_lossy().to_string()),
-                    bytes,
-                ))
-            }
-            ["api", "projects", project_id, "previews", preview_id, "pdf"] => {
-                let preview = self.get_preview(project_id, preview_id)?;
-                let source_path = self
-                    .resolve_project_relative(project_id, preview["path"].as_str().unwrap_or(""))?;
-                let markdown = knownext_docs::extract_plain_text(&source_path);
-                let bytes = if source_path
-                    .extension()
-                    .and_then(|value| value.to_str())
-                    .unwrap_or("")
-                    .eq_ignore_ascii_case("pdf")
-                {
-                    std::fs::read(&source_path)
-                        .unwrap_or_else(|_| knownext_docs::minimal_pdf(preview_id, &markdown))
-                } else {
-                    knownext_docs::minimal_pdf(
-                        preview["name"].as_str().unwrap_or(preview_id),
-                        &markdown,
-                    )
-                };
-                Ok(binary(
-                    200,
-                    "application/pdf".to_string(),
-                    Some(format!("{preview_id}.pdf")),
-                    bytes,
-                ))
-            }
-            _ => Ok(binary(
-                404,
-                "application/json".to_string(),
-                None,
-                br#"{"detail":"Contenido local no implementado"}"#.to_vec(),
-            )),
-        }
-    }
-
-    fn registry_path(&self) -> PathBuf {
-        self.app_data_dir.join("projects.json")
-    }
-    fn config_path(&self) -> PathBuf {
-        self.app_data_dir.join("config.json")
-    }
-    fn notes_path(&self) -> PathBuf {
-        self.app_data_dir.join("notes.json")
-    }
-    fn export_template_path(&self) -> PathBuf {
-        self.app_data_dir.join("export-template.json")
-    }
-    fn auth_path(&self) -> PathBuf {
-        self.app_data_dir.join("auth.json")
-    }
-    fn github_device_path(&self) -> PathBuf {
-        self.app_data_dir.join("github-device.json")
-    }
-    fn credentials_path(&self) -> PathBuf {
-        self.app_data_dir.join("credentials.json")
-    }
-    fn logs_dir(&self) -> PathBuf {
-        self.app_data_dir.join("logs")
-    }
-    fn previews_dir(&self) -> PathBuf {
-        self.app_data_dir.join("previews")
-    }
-    fn versions_dir(&self) -> PathBuf {
-        self.app_data_dir.join("versions")
-    }
-    fn conversation_path(&self, project_id: &str) -> PathBuf {
-        self.app_data_dir
-            .join("ai")
-            .join(format!("{project_id}.json"))
-    }
-    fn ai_usage_path(&self) -> PathBuf {
-        self.app_data_dir.join("ai").join("usage.json")
-    }
-    fn context_sources_path(&self, project_id: &str) -> PathBuf {
-        self.app_data_dir
-            .join("ai-context")
-            .join(format!("{project_id}.json"))
-    }
-    fn ai_index_path(&self, project_id: &str) -> PathBuf {
-        self.app_data_dir
-            .join("ai-index")
-            .join(format!("{project_id}.json"))
-    }
-    fn research_jobs_path(&self, project_id: &str) -> PathBuf {
-        self.app_data_dir
-            .join("ai-research")
-            .join(format!("{project_id}.json"))
-    }
-    fn research_policy_path(&self, project_id: &str) -> PathBuf {
-        self.app_data_dir
-            .join("ai-research")
-            .join(format!("{project_id}.policy.json"))
-    }
-    fn image_index_path(&self, project_id: &str) -> PathBuf {
-        self.app_data_dir
-            .join("image-index")
-            .join(format!("{project_id}.json"))
-    }
-
-    fn read_json(&self, path: &Path, default: Value) -> Value {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .unwrap_or(default)
-    }
-
-    fn write_json(&self, path: &Path, value: &Value) -> Result<(), String> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        std::fs::write(
-            path,
-            serde_json::to_string_pretty(value).map_err(|error| error.to_string())?,
-        )
-        .map_err(|error| error.to_string())
-    }
-
-    fn write_json_atomic(&self, path: &Path, value: &Value) -> Result<(), String> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        let tmp_path = path.with_extension(format!(
-            "{}.tmp",
-            path.extension()
-                .and_then(|extension| extension.to_str())
-                .unwrap_or("json")
-        ));
-        std::fs::write(
-            &tmp_path,
-            serde_json::to_string_pretty(value).map_err(|error| error.to_string())?,
-        )
-        .map_err(|error| error.to_string())?;
-        if path.exists() {
-            let _ = std::fs::remove_file(path);
-        }
-        std::fs::rename(&tmp_path, path).map_err(|error| error.to_string())
-    }
-
-    fn runtime_logging_status(&self) -> Result<Value, String> {
-        let log_dir = self.logs_dir();
-        std::fs::create_dir_all(&log_dir).map_err(|error| error.to_string())?;
-        Ok(json!({
-            "enabled": true,
-            "folderPath": log_dir.to_string_lossy(),
-            "filePath": log_dir.join("knownext.log").to_string_lossy()
-        }))
-    }
-
-    fn record_runtime_log(&self, body: Value) -> Result<Value, String> {
-        let status = self.runtime_logging_status()?;
-        let file_path = self.logs_dir().join("knownext.log");
-        let level = body.get("level").and_then(Value::as_str).unwrap_or("error");
-        let source = body
-            .get("source")
-            .and_then(Value::as_str)
-            .unwrap_or("local-api");
-        let message = body.get("message").and_then(Value::as_str).unwrap_or("");
-        let detail = body.get("detail").and_then(Value::as_str).unwrap_or("");
-        let mut entry = format!(
-            "{} [{}] {}\nMessage: {}\n",
-            knownext_core::now_iso(),
-            level.to_ascii_uppercase(),
-            source,
-            message
-        );
-        if !detail.trim().is_empty() {
-            entry.push_str("Detail:\n");
-            entry.push_str(detail.trim_end());
-            entry.push('\n');
-        }
-        entry.push_str("---\n");
-        use std::io::Write;
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&file_path)
-            .map_err(|error| error.to_string())?;
-        file.write_all(entry.as_bytes())
-            .map_err(|error| error.to_string())?;
-        Ok(status)
-    }
-
-    fn open_runtime_folder(&self, body: Value) -> Result<Value, String> {
-        let folder_path = body.get("folderPath").and_then(Value::as_str).unwrap_or("");
-        if folder_path.trim().is_empty() {
-            return Ok(json!({ "opened": false, "message": "No se indicó carpeta local." }));
-        }
-        std::fs::create_dir_all(folder_path).map_err(|error| error.to_string())?;
-        Ok(json!({ "opened": true, "folderPath": folder_path }))
-    }
-
-    fn registry(&self) -> Value {
-        self.read_json(
-            &self.registry_path(),
-            json!({ "schemaVersion": 2, "activeProjectId": null, "projects": [] }),
-        )
-    }
-
-    fn write_registry(&self, registry: &Value) -> Result<(), String> {
-        self.write_json(&self.registry_path(), registry)
-    }
-
-    fn list_projects(&self) -> Vec<Value> {
-        self.registry()["projects"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .map(normalize_project_metadata)
-            .collect()
-    }
-
-    fn active_project(&self) -> ApiResult {
-        let registry = self.registry();
-        let active_id = registry["activeProjectId"].as_str().unwrap_or("");
-        self.list_projects()
-            .into_iter()
-            .find(|project| project["id"].as_str() == Some(active_id))
-            .map_or_else(|| bad(404, "No hay proyecto activo"), ok)
-    }
-
-    fn create_project(&self, payload: Value) -> Result<Value, String> {
-        let id = knownext_core::compact_id("project");
-        let root = payload
-            .get("folderPath")
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| self.app_data_dir.join("projects").join(&id));
-        std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
-        let payload_versioning_mode = payload
-            .get("versioningMode")
-            .and_then(Value::as_str)
-            .unwrap_or("local-git");
-        let versioning_mode = normalize_versioning_mode(payload_versioning_mode);
-        if versioning_mode != "none" {
-            let _ = ensure_git_repo(&root);
-        }
-        if is_github_sync_mode(
-            payload
-                .get("syncMode")
-                .and_then(Value::as_str)
-                .unwrap_or("none"),
-        ) {
-            if let Some((owner, repo, _branch)) =
-                github_repository_parts(payload.get("githubRepository").unwrap_or(&Value::Null))
-            {
-                let _ = ensure_github_remote(&root, &owner, &repo);
-            }
-        }
-        let project = json!({
-            "id": id,
-            "name": payload.get("name").and_then(Value::as_str).unwrap_or("Proyecto"),
-            "folderPath": root.to_string_lossy(),
-            "icon": payload.get("icon").and_then(Value::as_str).unwrap_or("folder"),
-            "iconColor": payload.get("iconColor").and_then(Value::as_str).unwrap_or("#F37021"),
-            "storageMode": if is_old_github_versioning_mode(Some(payload_versioning_mode)) { "local-files" } else { payload.get("storageMode").and_then(Value::as_str).unwrap_or("local-files") },
-            "versioningMode": versioning_mode,
-            "syncMode": payload.get("syncMode").and_then(Value::as_str).unwrap_or("none"),
-            "authRequired": payload.get("authRequired").and_then(Value::as_bool).unwrap_or(false),
-            "githubRepository": payload.get("githubRepository").cloned().unwrap_or(Value::Null),
-            "isGitRepository": root.join(".git").exists(),
-            "active": true
-        });
-        let mut registry = self.registry();
-        registry["activeProjectId"] = project["id"].clone();
-        let projects = registry["projects"]
-            .as_array_mut()
-            .ok_or("Registro de proyectos inválido")?;
-        for existing in projects.iter_mut() {
-            existing["active"] = Value::Bool(false);
-        }
-        projects.push(project.clone());
-        self.write_registry(&registry)?;
-        Ok(project)
-    }
-
-    fn update_project(&self, project_id: &str, payload: Value) -> Result<Value, String> {
-        let mut registry = self.registry();
-        let projects = registry["projects"]
-            .as_array_mut()
-            .ok_or("Registro de proyectos inválido")?;
-        let project = projects
-            .iter_mut()
-            .find(|project| project["id"].as_str() == Some(project_id))
-            .ok_or("Proyecto no encontrado")?;
-        normalize_project_metadata_in_place(project);
-        for key in [
-            "name",
-            "folderPath",
-            "icon",
-            "iconColor",
-            "storageMode",
-            "versioningMode",
-            "syncMode",
-            "githubRepository",
-        ] {
-            if let Some(value) = payload.get(key) {
-                project[key] = if key == "versioningMode" {
-                    Value::from(normalize_versioning_mode(
-                        value.as_str().unwrap_or("local-git"),
-                    ))
-                } else if key == "storageMode"
-                    && is_old_github_versioning_mode(
-                        payload.get("versioningMode").and_then(Value::as_str),
-                    )
-                {
-                    Value::from("local-files")
-                } else {
-                    value.clone()
-                };
-            }
-        }
-        let updated = project.clone();
-        self.write_registry(&registry)?;
-        Ok(updated)
-    }
-
-    fn enable_project_history(&self, project_id: &str) -> Result<Value, String> {
-        let root = self.project_root(project_id)?;
-        let _ = ensure_git_repo(&root);
-        self.update_project_fields(project_id, |project| {
-            project["versioningMode"] = Value::from("local-git");
-            if project["syncMode"].as_str().unwrap_or("none") == "none" {
-                project["syncMode"] = Value::from("manual-local");
-            }
-            project["isGitRepository"] = Value::Bool(root.join(".git").exists());
-        })?;
-        Ok(
-            json!({ "status": "enabled", "message": "Historial local preparado desde Rust/Tauri.", "projectId": project_id }),
-        )
-    }
-
-    fn change_project_sync_mode(&self, project_id: &str, body: Value) -> Result<Value, String> {
-        let sync_mode = body
-            .get("syncMode")
-            .and_then(Value::as_str)
-            .unwrap_or("manual-local");
-        self.update_project_fields(project_id, |project| {
-            project["syncMode"] = Value::from(sync_mode);
-            if sync_mode != "none" {
-                project["versioningMode"] = Value::from("local-git");
-                project["isGitRepository"] = Value::Bool(true);
-            }
-        })?;
-        Ok(self.sync_status(project_id))
-    }
-
-    fn connect_project_github(
-        &self,
-        project_id: &str,
-        body: Value,
-        publishing: bool,
-    ) -> Result<Value, String> {
-        let owner = body
-            .get("owner")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim();
-        let repo = body
-            .get("repo")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim();
-        if owner.is_empty() || repo.is_empty() {
-            return Err("Falta repositorio GitHub".to_string());
-        }
-        let sync_mode = body
-            .get("syncMode")
-            .and_then(Value::as_str)
-            .unwrap_or("manual-github");
-        let permissions = if publishing {
-            json!(["pull", "push"])
-        } else {
-            json!(["pull"])
-        };
-        let github_repository = json!({
-            "owner": owner,
-            "repo": repo,
-            "defaultRef": body.get("defaultRef").cloned().unwrap_or(Value::Null),
-            "rootPath": body.get("rootPath").and_then(Value::as_str).unwrap_or(""),
-            "permissions": permissions
-        });
-        let root = self.project_root(project_id)?;
-        let _ = ensure_git_repo(&root);
-        let _ = ensure_github_remote(&root, owner, repo);
-        self.update_project_fields(project_id, |project| {
-            project["versioningMode"] = Value::from("local-git");
-            project["syncMode"] = Value::from(sync_mode);
-            project["githubRepository"] = github_repository.clone();
-            project["isGitRepository"] = Value::Bool(root.join(".git").exists());
-            project["authRequired"] = Value::Bool(true);
-        })?;
-        Ok(self.sync_status(project_id))
-    }
-
-    fn update_project_fields<F>(&self, project_id: &str, mut update: F) -> Result<Value, String>
-    where
-        F: FnMut(&mut Value),
-    {
-        let mut registry = self.registry();
-        let projects = registry["projects"]
-            .as_array_mut()
-            .ok_or("Registro de proyectos inválido")?;
-        let project = projects
-            .iter_mut()
-            .find(|project| project["id"].as_str() == Some(project_id))
-            .ok_or("Proyecto no encontrado")?;
-        update(project);
-        let updated = project.clone();
-        self.write_registry(&registry)?;
-        Ok(updated)
-    }
-
-    fn delete_project(&self, project_id: &str) -> Result<Vec<Value>, String> {
-        let mut registry = self.registry();
-        let active_was_deleted = registry["activeProjectId"].as_str() == Some(project_id);
-        let remaining = {
-            let projects = registry["projects"]
-                .as_array_mut()
-                .ok_or("Registro de proyectos inválido")?;
-            projects.retain(|project| project["id"].as_str() != Some(project_id));
-            projects.clone()
-        };
-        if active_was_deleted {
-            registry["activeProjectId"] = remaining
-                .first()
-                .and_then(|project| project["id"].as_str())
-                .map(Value::from)
-                .unwrap_or(Value::Null);
-        }
-        self.write_registry(&registry)?;
-        Ok(remaining)
-    }
-
-    fn set_active_project(&self, project_id: &str) -> Result<Value, String> {
-        let mut registry = self.registry();
-        let mut selected = None;
-        for project in registry["projects"]
-            .as_array_mut()
-            .ok_or("Registro de proyectos inválido")?
-        {
-            let active = project["id"].as_str() == Some(project_id);
-            project["active"] = Value::Bool(active);
-            if active {
-                selected = Some(project.clone());
-            }
-        }
-        registry["activeProjectId"] = Value::from(project_id);
-        self.write_registry(&registry)?;
-        selected.ok_or_else(|| "Proyecto no encontrado".to_string())
-    }
-
-    fn project_root(&self, project_id: &str) -> Result<PathBuf, String> {
-        self.list_projects()
-            .into_iter()
-            .find(|project| project["id"].as_str() == Some(project_id))
-            .and_then(|project| project["folderPath"].as_str().map(PathBuf::from))
-            .ok_or_else(|| "Proyecto no encontrado".to_string())
-    }
-
-    fn project_tree(&self, project_id: &str) -> Result<Vec<Value>, String> {
-        let root = self.project_root(project_id)?;
-        read_tree(project_id, &root, &root)
-    }
-
-    fn resolve_project_relative(
-        &self,
-        project_id: &str,
-        relative: &str,
-    ) -> Result<PathBuf, String> {
-        let root = self.project_root(project_id)?;
-        let relative_path = PathBuf::from(relative.replace('/', std::path::MAIN_SEPARATOR_STR));
-        if relative_path.is_absolute()
-            || relative_path
-                .components()
-                .any(|component| matches!(component, std::path::Component::ParentDir))
-        {
-            return Err("Ruta fuera del proyecto".to_string());
-        }
-        Ok(root.join(relative_path))
-    }
-
-    fn resolve_document_path(&self, document_id: &str) -> Result<PathBuf, String> {
-        let (project_id, relative) = document_ref(document_id)?;
-        self.resolve_project_relative(&project_id, &relative)
-    }
-
-    fn create_folder(&self, project_id: &str, payload: Value) -> Result<Value, String> {
-        let parent =
-            self.node_relative(project_id, payload.get("parentId").and_then(Value::as_str))?;
-        let name = payload
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or("Carpeta");
-        let relative = join_relative(parent.as_deref(), name);
-        let path = self.resolve_project_relative(project_id, &relative)?;
-        std::fs::create_dir_all(path).map_err(|error| error.to_string())?;
-        self.file_result(project_id, Some(relative), vec![])
-    }
-
-    fn create_document(&self, project_id: &str, payload: Value) -> Result<Value, String> {
-        let parent =
-            self.node_relative(project_id, payload.get("parentId").and_then(Value::as_str))?;
-        let name = payload
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or("documento.md");
-        let relative = join_relative(parent.as_deref(), name);
-        let path = self.resolve_project_relative(project_id, &relative)?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        std::fs::write(
-            &path,
-            payload
-                .get("markdown")
-                .and_then(Value::as_str)
-                .unwrap_or(""),
-        )
-        .map_err(|error| error.to_string())?;
-        self.file_result(project_id, Some(relative), vec![])
-    }
-
-    fn create_handwritten_note(&self, project_id: &str, payload: Value) -> Result<Value, String> {
-        let parent =
-            self.node_relative(project_id, payload.get("parentId").and_then(Value::as_str))?;
-        let raw_name = payload
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or("nota-a-mano.knote");
-        let name = handwritten_file_name(raw_name);
-        let relative = join_relative(parent.as_deref(), &name);
-        let note_id = doc_id(project_id, &relative);
-        let path = self.resolve_project_relative(project_id, &relative)?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        let title = name.trim_end_matches(".knote");
-        let mut content = default_handwritten_note(&note_id, title);
-        let background = payload
-            .get("background")
-            .and_then(Value::as_str)
-            .filter(|value| matches!(*value, "blank" | "ruled" | "grid" | "dots" | "cornell"))
-            .unwrap_or("blank");
-        content["defaultPage"]["background"] = Value::from(background);
-        if let Some(first_page) = content["pages"]
-            .as_array_mut()
-            .and_then(|pages| pages.first_mut())
-        {
-            first_page["background"]["type"] = Value::from(background);
-        }
-        self.write_json_atomic(&path, &content)?;
-        self.file_result(project_id, Some(relative), vec![])
-    }
-
-    fn import_file(
-        &self,
-        project_id: &str,
-        query: &BTreeMap<String, String>,
-        files: Vec<LocalApiFile>,
-        image: bool,
-    ) -> Result<Value, String> {
-        let file = files
-            .into_iter()
-            .find(|file| file.field_name == "file")
-            .ok_or("Falta archivo")?;
-        let parent = self.node_relative(project_id, query.get("parentId").map(String::as_str))?;
-        let relative = join_relative(parent.as_deref(), &file.name);
-        let path = self.resolve_project_relative(project_id, &relative)?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(file.data_base64)
-            .map_err(|error| error.to_string())?;
-        std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
-        if image {
-            Ok(
-                json!({ "tree": self.project_tree(project_id)?, "asset": self.asset_metadata(project_id, &doc_id(project_id, &relative))? }),
-            )
-        } else {
-            self.file_result(project_id, Some(relative), vec![])
-        }
-    }
-
-    fn rename_node(
-        &self,
-        project_id: &str,
-        node_id: &str,
-        payload: Value,
-    ) -> Result<Value, String> {
-        let old_relative = document_ref_path(node_id)?;
-        let old_path = self.resolve_project_relative(project_id, &old_relative)?;
-        let new_name = payload
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or("renombrado.md");
-        let new_relative = old_relative
-            .rsplit_once('/')
-            .map(|(parent, _)| format!("{parent}/{new_name}"))
-            .unwrap_or_else(|| new_name.to_string());
-        let new_path = self.resolve_project_relative(project_id, &new_relative)?;
-        let moved_files = moved_file_mappings(
-            &self.project_root(project_id)?,
-            &old_path,
-            &old_relative,
-            &new_relative,
-        )?;
-        std::fs::rename(old_path, new_path).map_err(|error| error.to_string())?;
-        let mut affected = moved_markdown_affected_documents(project_id, &moved_files);
-        affected.extend(self.apply_reference_updates_after_move(project_id, &moved_files)?);
-        self.file_result(
-            project_id,
-            Some(new_relative.clone()),
-            dedupe_affected_documents(affected),
-        )
-    }
-
-    fn move_node(&self, project_id: &str, node_id: &str, payload: Value) -> Result<Value, String> {
-        let old_relative = document_ref_path(node_id)?;
-        let name = old_relative
-            .rsplit('/')
-            .next()
-            .unwrap_or(&old_relative)
-            .to_string();
-        let target = self.node_relative(
-            project_id,
-            payload.get("targetFolderId").and_then(Value::as_str),
-        )?;
-        let new_relative = join_relative(target.as_deref(), &name);
-        let old_path = self.resolve_project_relative(project_id, &old_relative)?;
-        let new_path = self.resolve_project_relative(project_id, &new_relative)?;
-        if let Some(parent) = new_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        let moved_files = moved_file_mappings(
-            &self.project_root(project_id)?,
-            &old_path,
-            &old_relative,
-            &new_relative,
-        )?;
-        std::fs::rename(old_path, new_path).map_err(|error| error.to_string())?;
-        let mut affected = moved_markdown_affected_documents(project_id, &moved_files);
-        affected.extend(self.apply_reference_updates_after_move(project_id, &moved_files)?);
-        self.file_result(
-            project_id,
-            Some(new_relative.clone()),
-            dedupe_affected_documents(affected),
-        )
-    }
-
-    fn delete_node(&self, project_id: &str, node_id: &str) -> Result<Value, String> {
-        let relative = document_ref_path(node_id)?;
-        let path = self.resolve_project_relative(project_id, &relative)?;
-        let affected = deleted_markdown_affected_documents(
-            project_id,
-            &self.project_root(project_id)?,
-            &path,
-        )?;
-        if path.is_dir() {
-            std::fs::remove_dir_all(path).map_err(|error| error.to_string())?;
-        } else {
-            std::fs::remove_file(path).map_err(|error| error.to_string())?;
-        }
-        self.file_result(project_id, None, affected)
-    }
-
-    fn duplicate_document(&self, project_id: &str, document_id: &str) -> Result<Value, String> {
-        let relative = document_ref_path(document_id)?;
-        let path = self.resolve_project_relative(project_id, &relative)?;
-        let stem = path
-            .file_stem()
-            .and_then(|value| value.to_str())
-            .unwrap_or("documento");
-        let ext = path
-            .extension()
-            .and_then(|value| value.to_str())
-            .map(|value| format!(".{value}"))
-            .unwrap_or_default();
-        let new_name = format!("{stem} copia{ext}");
-        let new_relative = relative
-            .rsplit_once('/')
-            .map(|(parent, _)| format!("{parent}/{new_name}"))
-            .unwrap_or(new_name);
-        let new_path = self.resolve_project_relative(project_id, &new_relative)?;
-        std::fs::copy(path, new_path).map_err(|error| error.to_string())?;
-        self.file_result(project_id, Some(new_relative), vec![])
-    }
-
-    fn node_relative(
-        &self,
-        _project_id: &str,
-        node_id: Option<&str>,
-    ) -> Result<Option<String>, String> {
-        match node_id.filter(|value| !value.is_empty()) {
-            Some(id) => Ok(Some(document_ref_path(id)?)),
-            None => Ok(None),
-        }
-    }
-
-    fn file_result(
-        &self,
-        project_id: &str,
-        selected_relative: Option<String>,
-        affected: Vec<Value>,
-    ) -> Result<Value, String> {
-        let node = selected_relative
-            .as_ref()
-            .and_then(|relative| self.node_for_relative(project_id, relative).ok());
-        Ok(
-            json!({ "tree": self.project_tree(project_id)?, "node": node, "affectedDocuments": affected }),
-        )
-    }
-
-    fn node_for_relative(&self, project_id: &str, relative: &str) -> Result<Value, String> {
-        let path = self.resolve_project_relative(project_id, relative)?;
-        Ok(tree_node(
-            project_id,
-            &self.project_root(project_id)?,
-            &path,
-            relative,
-        ))
-    }
-
-    fn get_document(&self, document_id: &str) -> Result<Value, String> {
-        let path = self.resolve_document_path(document_id)?;
-        let markdown = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
-        let (project_id, relative) = document_ref(document_id)?;
-        let disk_content_hash = markdown_content_hash(&markdown);
-        let draft = self.read_draft(document_id);
-        let draft_markdown = draft
-            .as_ref()
-            .and_then(|value| value["markdown"].as_str())
-            .unwrap_or(&markdown);
-        let draft_content_hash = draft
-            .as_ref()
-            .map(|_| markdown_content_hash(draft_markdown));
-        let has_draft = draft_content_hash
-            .as_ref()
-            .map(|hash| hash != &disk_content_hash)
-            .unwrap_or(false);
-        if draft.is_some() && !has_draft {
-            self.delete_draft(document_id);
-        }
-        let active_markdown = if has_draft { draft_markdown } else { &markdown };
-        let draft_updated_at = draft
-            .as_ref()
-            .and_then(|value| value["draftUpdatedAt"].as_str())
-            .map(Value::from)
-            .unwrap_or(Value::Null);
-        Ok(json!({
-            "id": document_id,
-            "name": path.file_name().and_then(|value| value.to_str()).unwrap_or("documento.md"),
-            "path": relative,
-            "projectId": project_id,
-            "markdown": active_markdown,
-            "diskMarkdown": markdown,
-            "wordCount": knownext_core::word_count(active_markdown),
-            "updatedAt": knownext_core::now_iso(),
-            "baseFingerprint": self.fingerprint(&path),
-            "diskContentHash": disk_content_hash,
-            "savedContentHash": disk_content_hash,
-            "draftContentHash": if has_draft { draft_content_hash.map(Value::from).unwrap_or(Value::Null) } else { Value::Null },
-            "hasDraft": has_draft,
-            "isDirty": has_draft,
-            "diskChanged": false,
-            "orphaned": false,
-            "conflictStatus": if has_draft { "draft" } else { "none" },
-            "draftUpdatedAt": if has_draft { draft_updated_at } else { Value::Null }
-        }))
-    }
-
-    fn save_document(&self, document_id: &str, payload: Value) -> Result<Value, String> {
-        let path = self.resolve_document_path(document_id)?;
-        let markdown = payload
-            .get("markdown")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        std::fs::write(path, markdown).map_err(|error| error.to_string())?;
-        self.delete_draft(document_id);
-        self.get_document(document_id)
-    }
-
-    fn get_handwritten_note(&self, note_id: &str) -> Result<Value, String> {
-        let path = self.resolve_document_path(note_id)?;
-        let disk_content = self.read_json(&path, Value::Null);
-        if disk_content.is_null() {
-            return Err("Nota a mano no disponible.".to_string());
-        }
-        let (project_id, relative) = document_ref(note_id)?;
-        let normalized_disk = normalize_handwritten_note(
-            disk_content,
-            note_id,
-            path.file_stem()
-                .and_then(|value| value.to_str())
-                .unwrap_or("Nota a mano"),
-        );
-        let disk_content_hash = handwritten_content_hash(&normalized_disk);
-        let draft = self.read_draft(note_id);
-        let draft_content = draft
-            .as_ref()
-            .and_then(|value| value.get("content").cloned())
-            .map(|content| {
-                normalize_handwritten_note(
-                    content,
-                    note_id,
-                    normalized_disk["title"].as_str().unwrap_or("Nota a mano"),
-                )
-            })
-            .unwrap_or_else(|| normalized_disk.clone());
-        let draft_content_hash = draft
-            .as_ref()
-            .map(|_| handwritten_content_hash(&draft_content));
-        let has_draft = draft_content_hash
-            .as_ref()
-            .map(|hash| hash != &disk_content_hash)
-            .unwrap_or(false);
-        if draft.is_some() && !has_draft {
-            self.delete_draft(note_id);
-        }
-        let active_content = if has_draft {
-            draft_content
-        } else {
-            normalized_disk.clone()
-        };
-        let page_count = active_content["pages"]
-            .as_array()
-            .map(Vec::len)
-            .unwrap_or(0);
-        let draft_updated_at = draft
-            .as_ref()
-            .and_then(|value| value["draftUpdatedAt"].as_str())
-            .map(Value::from)
-            .unwrap_or(Value::Null);
-        Ok(json!({
-            "id": note_id,
-            "name": path.file_name().and_then(|value| value.to_str()).unwrap_or("nota-a-mano.knote"),
-            "path": relative,
-            "projectId": project_id,
-            "content": active_content,
-            "diskContent": normalized_disk,
-            "pageCount": page_count,
-            "updatedAt": knownext_core::now_iso(),
-            "baseFingerprint": self.fingerprint(&path),
-            "diskContentHash": disk_content_hash,
-            "savedContentHash": disk_content_hash,
-            "draftContentHash": if has_draft { draft_content_hash.map(Value::from).unwrap_or(Value::Null) } else { Value::Null },
-            "hasDraft": has_draft,
-            "isDirty": has_draft,
-            "diskChanged": false,
-            "orphaned": false,
-            "conflictStatus": if has_draft { "draft" } else { "none" },
-            "draftUpdatedAt": if has_draft { draft_updated_at } else { Value::Null }
-        }))
-    }
-
-    fn save_handwritten_note(&self, note_id: &str, payload: Value) -> Result<Value, String> {
-        let path = self.resolve_document_path(note_id)?;
-        let title = path
-            .file_stem()
-            .and_then(|value| value.to_str())
-            .unwrap_or("Nota a mano");
-        let mut content = normalize_handwritten_note(
-            payload.get("content").cloned().unwrap_or(Value::Null),
-            note_id,
-            title,
-        );
-        content["updatedAt"] = Value::from(knownext_core::now_iso());
-        self.write_json_atomic(&path, &content)?;
-        self.delete_draft(note_id);
-        self.get_handwritten_note(note_id)
-    }
-
-    fn save_handwritten_note_draft(&self, note_id: &str, payload: Value) -> Result<Value, String> {
-        let note_path = self.resolve_document_path(note_id)?;
-        let title = note_path
-            .file_stem()
-            .and_then(|value| value.to_str())
-            .unwrap_or("Nota a mano");
-        let mut content = normalize_handwritten_note(
-            payload.get("content").cloned().unwrap_or(Value::Null),
-            note_id,
-            title,
-        );
-        content["updatedAt"] = Value::from(knownext_core::now_iso());
-        let draft_content_hash = handwritten_content_hash(&content);
-        let disk_content = self.read_json(&note_path, Value::Null);
-        let disk_content_hash = if disk_content.is_null() {
-            None
-        } else {
-            Some(handwritten_content_hash(&normalize_handwritten_note(
-                disk_content,
-                note_id,
-                title,
-            )))
-        };
-        if disk_content_hash
-            .as_ref()
-            .map(|hash| hash == &draft_content_hash)
-            .unwrap_or(false)
-        {
-            self.delete_draft(note_id);
-            return ok_value(json!({
-                "noteId": note_id,
-                "draftUpdatedAt": Value::Null,
-                "isDirty": false,
-                "hasDraft": false,
-                "diskContentHash": disk_content_hash,
-                "savedContentHash": disk_content_hash,
-                "draftContentHash": Value::Null
-            }));
-        }
-        let draft_updated_at = knownext_core::now_iso();
-        self.write_json_atomic(&self.draft_path(note_id), &json!({
-            "documentId": note_id,
-            "content": content,
-            "baseFingerprint": payload.get("baseFingerprint").cloned().unwrap_or(Value::Null),
-            "baseContentHash": payload.get("baseContentHash").cloned().unwrap_or_else(|| disk_content_hash.clone().map(Value::from).unwrap_or(Value::Null)),
-            "diskContentHash": disk_content_hash,
-            "savedContentHash": disk_content_hash,
-            "draftContentHash": draft_content_hash,
-            "draftUpdatedAt": draft_updated_at
-        }))?;
-        ok_value(json!({
-            "noteId": note_id,
-            "draftUpdatedAt": draft_updated_at,
-            "isDirty": true,
-            "hasDraft": true,
-            "diskContentHash": disk_content_hash,
-            "savedContentHash": disk_content_hash,
-            "draftContentHash": draft_content_hash
-        }))
-    }
-
-    fn save_draft(&self, document_id: &str, payload: Value) -> Result<Value, String> {
-        let document_path = self.resolve_document_path(document_id)?;
-        let markdown = payload
-            .get("markdown")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        let draft_content_hash = markdown_content_hash(markdown);
-        let disk_markdown = std::fs::read_to_string(&document_path).ok();
-        let disk_content_hash = disk_markdown.as_deref().map(markdown_content_hash);
-        if disk_content_hash
-            .as_ref()
-            .map(|hash| hash == &draft_content_hash)
-            .unwrap_or(false)
-        {
-            self.delete_draft(document_id);
-            return ok_value(json!({
-                "documentId": document_id,
-                "draftUpdatedAt": Value::Null,
-                "isDirty": false,
-                "hasDraft": false,
-                "diskContentHash": disk_content_hash,
-                "savedContentHash": disk_content_hash,
-                "draftContentHash": Value::Null
-            }));
-        }
-        let path = self.draft_path(document_id);
-        let draft_updated_at = knownext_core::now_iso();
-        self.write_json_atomic(&path, &json!({
-            "documentId": document_id,
-            "markdown": markdown,
-            "baseFingerprint": payload.get("baseFingerprint").cloned().unwrap_or(Value::Null),
-            "baseContentHash": payload.get("baseContentHash").cloned().unwrap_or_else(|| disk_content_hash.clone().map(Value::from).unwrap_or(Value::Null)),
-            "diskContentHash": disk_content_hash,
-            "savedContentHash": disk_content_hash,
-            "draftContentHash": draft_content_hash,
-            "draftUpdatedAt": draft_updated_at
-        }))?;
-        ok_value(json!({
-            "documentId": document_id,
-            "draftUpdatedAt": draft_updated_at,
-            "isDirty": true,
-            "hasDraft": true,
-            "diskContentHash": disk_content_hash,
-            "savedContentHash": disk_content_hash,
-            "draftContentHash": draft_content_hash
-        }))
-    }
-
-    fn delete_draft(&self, document_id: &str) {
-        let _ = std::fs::remove_file(self.draft_path(document_id));
-    }
-
-    fn draft_path(&self, document_id: &str) -> PathBuf {
-        self.app_data_dir
-            .join("drafts")
-            .join(safe_name(document_id))
-            .with_extension("json")
-    }
-
-    fn draft_key_path(&self, draft_key: &str) -> PathBuf {
-        self.app_data_dir
-            .join("drafts")
-            .join(safe_name(draft_key))
-            .with_extension("json")
-    }
-
-    fn read_draft(&self, document_id: &str) -> Option<Value> {
-        let path = self.draft_path(document_id);
-        if !path.exists() {
-            return None;
-        }
-        let draft = self.read_json(&path, Value::Null);
-        if draft.is_null() {
-            None
-        } else {
-            Some(draft)
-        }
-    }
-
-    fn read_draft_key(&self, draft_key: &str) -> Option<Value> {
-        let path = self.draft_key_path(draft_key);
-        if !path.exists() {
-            return None;
-        }
-        let draft = self.read_json(&path, Value::Null);
-        if draft.is_null() {
-            None
-        } else {
-            Some(draft)
-        }
-    }
-
-    fn discard_draft_key(&self, draft_key: &str) {
-        let _ = std::fs::remove_file(self.draft_key_path(draft_key));
-    }
-
-    fn orphan_drafts(&self) -> Value {
-        let drafts_dir = self.app_data_dir.join("drafts");
-        let mut drafts = Vec::new();
-        let Ok(entries) = std::fs::read_dir(drafts_dir) else {
-            return json!([]);
-        };
-
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|value| value.to_str()) != Some("json") {
-                continue;
-            }
-            let draft = self.read_json(&path, Value::Null);
-            let document_id = draft["documentId"].as_str().unwrap_or("");
-            let Ok((project_id, relative)) = document_ref(document_id) else {
-                continue;
-            };
-            let document_path = self.resolve_project_relative(&project_id, &relative);
-            let exists = document_path
-                .as_ref()
-                .map(|path| path.exists())
-                .unwrap_or(false);
-            if exists {
-                continue;
-            }
-            let draft_key = path
-                .file_stem()
-                .and_then(|value| value.to_str())
-                .unwrap_or("")
-                .to_string();
-            let recoverable = document_path.is_ok();
-            drafts.push(json!({
-                "draftKey": draft_key,
-                "documentId": document_id,
-                "projectId": project_id,
-                "path": relative,
-                "name": relative.rsplit('/').next().unwrap_or(&relative),
-                "wordCount": knownext_core::word_count(draft["markdown"].as_str().unwrap_or("")),
-                "createdAt": draft["draftUpdatedAt"].clone(),
-                "draftUpdatedAt": draft["draftUpdatedAt"].clone(),
-                "recoverable": recoverable,
-                "reason": if recoverable { Value::Null } else { Value::String("Proyecto no disponible".to_string()) }
-            }));
-        }
-
-        drafts.sort_by(|left, right| {
-            right["draftUpdatedAt"]
-                .as_str()
-                .unwrap_or("")
-                .cmp(left["draftUpdatedAt"].as_str().unwrap_or(""))
-        });
-        Value::Array(drafts)
-    }
-
-    fn restore_orphan_draft(&self, draft_key: &str) -> Result<Value, String> {
-        let draft = self
-            .read_draft_key(draft_key)
-            .ok_or("Draft no disponible")?;
-        let document_id = draft["documentId"].as_str().ok_or("Draft sin documentId")?;
-        let path = self.resolve_document_path(document_id)?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        std::fs::write(&path, draft["markdown"].as_str().unwrap_or(""))
-            .map_err(|error| error.to_string())?;
-        self.discard_draft_key(draft_key);
-        Ok(json!({ "document": self.get_document(document_id)? }))
-    }
-
-    fn export_document(&self, document_id: &str, payload: Value) -> Result<Value, String> {
-        let document = self.get_document(document_id)?;
-        let output = payload
-            .get("outputPath")
-            .and_then(Value::as_str)
-            .ok_or("Falta outputPath")?;
-        let format = payload
-            .get("format")
-            .and_then(Value::as_str)
-            .unwrap_or("md");
-        let markdown = payload
-            .get("markdown")
-            .and_then(Value::as_str)
-            .unwrap_or_else(|| document["markdown"].as_str().unwrap_or(""));
-        let diagram_assets = knownext_docs::diagram_assets_from_json(payload.get("diagramAssets"));
-        let image_assets = self.export_image_assets(document_id, markdown);
-        match format {
-            "md" => std::fs::write(output, markdown).map_err(|error| error.to_string())?,
-            "pdf" => std::fs::write(
-                output,
-                knownext_docs::minimal_pdf_with_assets_and_template(
-                    document["name"].as_str().unwrap_or("documento"),
-                    markdown,
-                    &diagram_assets,
-                    &image_assets,
-                    Some(&self.read_export_template()),
-                ),
-            )
-            .map_err(|error| error.to_string())?,
-            "docx" => knownext_docs::write_docx_with_assets_template_and_title(
-                Path::new(output),
-                markdown,
-                &diagram_assets,
-                &image_assets,
-                Some(&self.read_export_template()),
-                document["name"].as_str(),
-            )?,
-            _ => return Err("Formato no soportado".to_string()),
-        }
-        Ok(
-            json!({ "documentId": document_id, "format": format, "outputPath": output, "exportedAt": knownext_core::now_iso() }),
-        )
-    }
-
-    fn export_handwritten_note(&self, note_id: &str, payload: Value) -> Result<Value, String> {
-        let output = payload
-            .get("outputPath")
-            .and_then(Value::as_str)
-            .ok_or("Falta outputPath")?;
-        let (content_type, _filename, bytes) =
-            self.handwritten_export_bytes(note_id, payload.clone(), Some(output))?;
-        let _ = content_type;
-        std::fs::write(output, bytes).map_err(|error| error.to_string())?;
-        Ok(json!({
-            "noteId": note_id,
-            "format": payload.get("format").and_then(Value::as_str).unwrap_or("pdf"),
-            "outputPath": output,
-            "exportedAt": knownext_core::now_iso()
-        }))
-    }
-
-    fn handwritten_export_bytes(
-        &self,
-        note_id: &str,
-        payload: Value,
-        output_path: Option<&str>,
-    ) -> Result<(String, String, Vec<u8>), String> {
-        let record = self.get_handwritten_note(note_id)?;
-        let content = payload
-            .get("content")
-            .cloned()
-            .map(|content| {
-                normalize_handwritten_note(
-                    content,
-                    note_id,
-                    record["name"].as_str().unwrap_or("Nota a mano"),
-                )
-            })
-            .unwrap_or_else(|| record["content"].clone());
-        let format = payload
-            .get("format")
-            .and_then(Value::as_str)
-            .unwrap_or("pdf");
-        let page_id = payload.get("pageId").and_then(Value::as_str);
-        let base_name = output_path
-            .and_then(|path| Path::new(path).file_name())
-            .and_then(|value| value.to_str())
-            .map(str::to_string)
-            .unwrap_or_else(|| {
-                record["name"]
-                    .as_str()
-                    .unwrap_or("nota-a-mano.knote")
-                    .to_string()
-            });
-        match format {
-            "knote" => Ok((
-                "application/vnd.knownext.handwritten-note+json".to_string(),
-                with_extension(&base_name, "knote"),
-                serde_json::to_vec_pretty(&content).map_err(|error| error.to_string())?,
-            )),
-            "svg" => {
-                let (_page_id, svg) = knownext_docs::handwritten_note_svg(&content, page_id)?;
-                Ok((
-                    "image/svg+xml".to_string(),
-                    with_extension(&base_name, "svg"),
-                    svg.into_bytes(),
-                ))
-            }
-            "png" => {
-                let (_page_id, png) = knownext_docs::handwritten_note_png(&content, page_id, 1.5)?;
-                Ok((
-                    "image/png".to_string(),
-                    with_extension(&base_name, "png"),
-                    png,
-                ))
-            }
-            "pdf" => Ok((
-                "application/pdf".to_string(),
-                with_extension(&base_name, "pdf"),
-                knownext_docs::handwritten_note_pdf(&content)?,
-            )),
-            _ => Err("Formato de nota a mano no soportado.".to_string()),
-        }
-    }
-
-    fn render_handwritten_note_page(
-        &self,
-        note_id: &str,
-        page_id: &str,
-        query: &BTreeMap<String, String>,
-    ) -> Result<Value, String> {
-        let record = self.get_handwritten_note(note_id)?;
-        let content = record["content"].clone();
-        let format = query.get("format").map(String::as_str).unwrap_or("png");
-        let (content_type, data_base64) = if format == "svg" {
-            let (_page_id, svg) = knownext_docs::handwritten_note_svg(&content, Some(page_id))?;
-            (
-                "image/svg+xml",
-                base64::engine::general_purpose::STANDARD.encode(svg.as_bytes()),
-            )
-        } else {
-            let (_page_id, png) =
-                knownext_docs::handwritten_note_png(&content, Some(page_id), 0.5)?;
-            (
-                "image/png",
-                base64::engine::general_purpose::STANDARD.encode(png),
-            )
-        };
-        Ok(json!({
-            "noteId": note_id,
-            "pageId": page_id,
-            "format": if format == "svg" { "svg" } else { "png" },
-            "contentType": content_type,
-            "dataUrl": format!("data:{content_type};base64,{data_base64}"),
-            "renderedAt": knownext_core::now_iso()
-        }))
-    }
-
-    fn insert_handwritten_page_markdown(
-        &self,
-        note_id: &str,
-        page_id: &str,
-        payload: Value,
-    ) -> Result<Value, String> {
-        let document_id = payload
-            .get("documentId")
-            .and_then(Value::as_str)
-            .ok_or("Falta documentId")?;
-        let record = self.get_handwritten_note(note_id)?;
-        let content = payload
-            .get("content")
-            .cloned()
-            .map(|content| {
-                normalize_handwritten_note(
-                    content,
-                    note_id,
-                    record["name"].as_str().unwrap_or("Nota a mano"),
-                )
-            })
-            .unwrap_or_else(|| record["content"].clone());
-        let (project_id, document_relative) = document_ref(document_id)?;
-        let note_name = record["name"].as_str().unwrap_or("nota-a-mano.knote");
-        let asset_file_name = format!(
-            "{}-{}.png",
-            safe_name(note_name.trim_end_matches(".knote")),
-            safe_name(page_id)
-        );
-        let asset_relative = join_relative(Some("assets/handwritten"), &asset_file_name);
-        let asset_path = self.resolve_project_relative(&project_id, &asset_relative)?;
-        if let Some(parent) = asset_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        let (_rendered_page_id, png) =
-            knownext_docs::handwritten_note_png(&content, Some(page_id), 1.5)?;
-        std::fs::write(&asset_path, png).map_err(|error| error.to_string())?;
-        let alt_text = payload
-            .get("altText")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or("Nota manuscrita");
-        let target = relative_markdown_target(&document_relative, &asset_relative);
-        let markdown = format!(
-            "![{}]({} \"knownext-note:{}#{}\")",
-            markdown_alt_escape(alt_text),
-            target,
-            note_id,
-            page_id
-        );
-        let asset = self.asset_metadata(&project_id, &doc_id(&project_id, &asset_relative))?;
-        Ok(json!({ "markdown": markdown, "asset": asset, "noteId": note_id, "pageId": page_id }))
-    }
-
-    fn export_image_assets(
-        &self,
-        document_id: &str,
-        markdown: &str,
-    ) -> Vec<knownext_docs::ExportImageAsset> {
-        let Ok((project_id, document_path)) = document_ref(document_id) else {
-            return Vec::new();
-        };
-        let root = self.project_root(&project_id).ok();
-        let document_name = Path::new(&document_path)
-            .file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or("documento.md");
-        let references = markdown_image_references(
-            markdown,
-            &project_id,
-            document_id,
-            document_name,
-            &document_path,
-        );
-        let mut seen = BTreeSet::new();
-        let mut assets = Vec::new();
-        for reference in references {
-            let source = reference["rawTarget"].as_str().unwrap_or("").trim();
-            if source.is_empty() || !seen.insert(source.to_string()) {
-                continue;
-            }
-            if let Some((content_type, bytes)) = image_data_url_bytes(source) {
-                assets.push(knownext_docs::ExportImageAsset {
-                    source: source.to_string(),
-                    alt: reference["altText"].as_str().map(str::to_string),
-                    content_type,
-                    bytes,
-                });
-                continue;
-            }
-            let Some(resolved) = reference["resolvedAssetPath"].as_str() else {
-                continue;
-            };
-            let Some(root) = root.as_ref() else {
-                continue;
-            };
-            let path = root.join(resolved.replace('/', std::path::MAIN_SEPARATOR_STR));
-            if !path.exists() || !is_exportable_raster_image_path(&path) {
-                continue;
-            }
-            let Ok(bytes) = std::fs::read(&path) else {
-                continue;
-            };
-            assets.push(knownext_docs::ExportImageAsset {
-                source: source.to_string(),
-                alt: reference["altText"].as_str().map(str::to_string),
-                content_type: image_content_type(&path).to_string(),
-                bytes,
-            });
-        }
-        assets
-    }
-
-    fn documents_sync_status(&self, body: Value) -> Value {
-        let documents = body["documents"].as_array().cloned().unwrap_or_default().into_iter().map(|item| {
-            let id = item["documentId"].as_str().unwrap_or("");
-            let path = self.resolve_document_path(id).ok();
-            let exists = path.as_ref().map(|path| path.exists()).unwrap_or(false);
-            let current_fingerprint = path.as_ref().filter(|path| path.exists()).map(|path| self.fingerprint(path)).unwrap_or(Value::Null);
-            let base_fingerprint = item.get("baseFingerprint").cloned().unwrap_or(Value::Null);
-            let disk_markdown = path.as_ref().filter(|path| path.exists()).and_then(|path| std::fs::read_to_string(path).ok());
-            let disk_content_hash = disk_markdown.as_deref().map(markdown_content_hash);
-            let draft = self.read_draft(id);
-            let draft_markdown = draft.as_ref().and_then(|value| value["markdown"].as_str());
-            let draft_content_hash = draft_markdown.map(markdown_content_hash);
-            let has_draft = if exists {
-                draft_content_hash.as_ref().zip(disk_content_hash.as_ref()).map(|(draft_hash, disk_hash)| draft_hash != disk_hash).unwrap_or(false)
-            } else {
-                draft.is_some()
-            };
-            if exists && draft.is_some() && !has_draft {
-                self.delete_draft(id);
-            }
-            let orphaned = !exists && has_draft;
-            let disk_changed = exists && !base_fingerprint.is_null() && current_fingerprint != base_fingerprint;
-            let conflict_status = if orphaned {
-                "orphaned"
-            } else if has_draft {
-                "draft"
-            } else if disk_changed {
-                "disk-changed"
-            } else {
-                "none"
-            };
-            json!({ "documentId": id, "exists": exists, "currentFingerprint": current_fingerprint, "diskChanged": disk_changed, "hasDraft": has_draft, "orphaned": orphaned, "conflictStatus": conflict_status, "versionState": "ok", "localChanged": has_draft || disk_changed, "remoteChanged": false, "localVersionHash": null, "remoteVersionHash": null, "message": null, "diskContentHash": disk_content_hash, "savedContentHash": disk_content_hash, "draftContentHash": if has_draft { draft_content_hash.map(Value::from).unwrap_or(Value::Null) } else { Value::Null } })
-        }).collect::<Vec<_>>();
-        json!({ "documents": documents })
-    }
-
-    fn fingerprint(&self, path: &Path) -> Value {
-        let Ok(metadata) = std::fs::metadata(path) else {
-            return Value::Null;
-        };
-        let sha256 = std::fs::read(path).ok().map(|bytes| sha256_hex(&bytes));
-        json!({ "mtimeNs": null, "size": metadata.len(), "sha256": sha256 })
-    }
-
-    fn versions_path(&self, document_id: &str) -> PathBuf {
-        self.versions_dir()
-            .join(safe_name(document_id))
-            .with_extension("json")
-    }
-
-    fn list_versions(&self, document_id: &str) -> Vec<Value> {
-        self.read_json(&self.versions_path(document_id), json!([]))
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    fn create_version(&self, project_id: &str, body: Value) -> Result<Value, String> {
-        let document_id = body
-            .get("documentId")
-            .and_then(Value::as_str)
-            .ok_or("Falta documentId")?;
-        let document = self.get_document(document_id)?;
-        let id = knownext_core::compact_id("version");
-        let title = body
-            .get("title")
-            .and_then(Value::as_str)
-            .unwrap_or("Version local");
-        let root = self.project_root(project_id)?;
-        if root.join(".git").exists() {
-            let (_, relative) = document_ref(document_id)?;
-            git_commit_paths(&root, title, &[relative.as_str()])?;
-        }
-        let hash =
-            git_head_hash(&root)?.unwrap_or_else(|| id.chars().rev().take(8).collect::<String>());
-        let version = json!({ "id": id, "hash": hash, "title": title, "author": "KnowNext.ai", "authorInitials": "KN", "createdAt": knownext_core::now_iso(), "relativeTime": "ahora", "current": true, "markdown": document["markdown"], "projectId": project_id });
-        let mut versions = self.list_versions(document_id);
-        for item in versions.iter_mut() {
-            item["current"] = Value::Bool(false);
-        }
-        versions.push(version.clone());
-        self.write_json(&self.versions_path(document_id), &Value::Array(versions))?;
-        Ok(json!({ "version": public_version(&version) }))
-    }
-
-    fn version_content(&self, document_id: &str, version_id: &str) -> Result<Value, String> {
-        let version = self
-            .list_versions(document_id)
-            .into_iter()
-            .find(|item| item["id"].as_str() == Some(version_id))
-            .ok_or("Version no encontrada")?;
-        Ok(
-            json!({ "documentId": document_id, "versionId": version_id, "markdown": version["markdown"] }),
-        )
-    }
-
-    fn restore_version(&self, document_id: &str, version_id: &str) -> Result<Value, String> {
-        let content = self.version_content(document_id, version_id)?;
-        self.save_document(document_id, json!({ "markdown": content["markdown"] }))?;
-        let (project_id, relative) = document_ref(document_id)?;
-        let source_hash = self
-            .list_versions(document_id)
-            .into_iter()
-            .find(|item| item["id"].as_str() == Some(version_id))
-            .and_then(|item| item["hash"].as_str().map(str::to_string))
-            .unwrap_or_else(|| version_id.to_string());
-        let name = relative.rsplit('/').next().unwrap_or(&relative);
-        self.create_version(
-            &project_id,
-            json!({
-                "documentId": document_id,
-                "title": format!("Restaura {name} desde {source_hash}")
-            }),
-        )
-    }
-
-    fn read_config(&self) -> Value {
-        let mut config = self.read_json(&self.config_path(), default_config());
-        let original = config.clone();
-        normalize_config(&mut config);
-        if config != original {
-            let _ = self.write_json(&self.config_path(), &config);
-        }
-        config
-    }
-    fn update_config(&self, patch: Value) -> Value {
-        let mut config = self.read_config();
-        merge(&mut config, &patch);
-        normalize_config(&mut config);
-        config["updatedAt"] = Value::from(knownext_core::now_iso());
-        let _ = self.write_json(&self.config_path(), &config);
-        config
-    }
-    fn ai_config_status(&self) -> Value {
-        let mut ai = self.read_config()["ai"].clone();
-        let status = self.openai_key_status();
-        ai["openaiKeyConfigured"] = status["configured"].clone();
-        ai["openaiKeyPreview"] = status["preview"].clone();
-        ai
-    }
-    fn update_ai_config(&self, payload: Value) -> Value {
-        let mut config = self.read_config();
-        config["ai"] = payload;
-        normalize_config(&mut config);
-        config["updatedAt"] = Value::from(knownext_core::now_iso());
-        let _ = self.write_json(&self.config_path(), &config);
-        self.ai_config_status()
-    }
-    fn openai_key(&self) -> Option<String> {
-        self.credentials()
-            .get("openaiKey")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    }
-    fn github_access_token(&self) -> Option<String> {
-        let credentials = self.credentials();
-        credentials
-            .get("github")
-            .and_then(|github| github.get("accessToken"))
-            .or_else(|| credentials.get("accessToken"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    }
-    fn credentials(&self) -> Value {
-        self.read_json(&self.credentials_path(), json!({}))
-    }
-    fn update_credentials<F>(&self, mut update: F) -> Value
-    where
-        F: FnMut(&mut serde_json::Map<String, Value>),
-    {
-        let mut credentials = self.credentials();
-        if !credentials.is_object() {
-            credentials = json!({});
-        }
-        if let Some(object) = credentials.as_object_mut() {
-            update(object);
-        }
-        let _ = self.write_json(&self.credentials_path(), &credentials);
-        credentials
-    }
-    fn ai_model(&self) -> String {
-        self.read_config()["ai"]["model"]
-            .as_str()
-            .unwrap_or("gpt-5.4-mini")
-            .to_string()
-    }
-    fn transcribe_audio(&self, body: Value, files: Vec<LocalApiFile>) -> Value {
-        let Some(file) = files.into_iter().find(|file| file.field_name == "file") else {
-            return json!({ "status": "error", "error": "missing_audio", "transcript": "", "message": "No se recibió audio para transcribir." });
-        };
-        let bytes = match base64::engine::general_purpose::STANDARD.decode(file.data_base64) {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                return json!({ "status": "error", "error": "invalid_audio", "transcript": "", "message": error.to_string() })
-            }
-        };
-        let response = knownext_ai::transcribe_audio(
-            self.openai_key().as_deref(),
-            self.read_config()["ai"]["transcription"]["model"]
-                .as_str()
-                .unwrap_or("gpt-transcribe"),
-            body.get("language").and_then(Value::as_str),
-            bytes,
-        );
-        if response["status"].as_str() == Some("completed") {
-            self.record_ai_usage(json!({
-                "projectId": null,
-                "interactionId": knownext_core::compact_id("ai-audio"),
-                "capability": "audio",
-                "model": self.read_config()["ai"]["transcription"]["model"].as_str().unwrap_or("gpt-4o-mini-transcribe"),
-                "inputTokens": 0,
-                "cachedInputTokens": 0,
-                "outputTokens": 0,
-                "reasoningTokens": 0,
-                "embeddingTokens": 0,
-                "totalTokens": 0,
-                "estimatedCost": 0,
-                "usageSource": "unknown"
-            }));
-        }
-        response
-    }
-    fn read_export_template(&self) -> Value {
-        self.read_json(&self.export_template_path(), default_export_template())
-    }
-    fn update_export_template(&self, patch: Value) -> Value {
-        let mut template = self.read_export_template();
-        merge(&mut template, &patch);
-        template["updatedAt"] = Value::from(knownext_core::now_iso());
-        let _ = self.write_json(&self.export_template_path(), &template);
-        template
-    }
-    fn reset_export_template(&self) -> Value {
-        let template = default_export_template();
-        let _ = self.write_json(&self.export_template_path(), &template);
-        template
-    }
-    fn read_notes(&self) -> Value {
-        self.read_json(
-            &self.notes_path(),
-            json!({ "markdown": "", "updatedAt": knownext_core::now_iso() }),
-        )
-    }
-    fn write_notes(&self, markdown: String) -> Value {
-        let notes = json!({ "markdown": markdown, "updatedAt": knownext_core::now_iso() });
-        let _ = self.write_json(&self.notes_path(), &notes);
-        notes
-    }
-    fn auth_status(&self) -> Value {
-        let mut auth = self.read_json(&self.auth_path(), default_auth_status());
-        if is_mock_github_auth(&auth) {
-            let _ = std::fs::remove_file(self.auth_path());
-            return default_auth_status();
-        }
-        if is_github_auth_without_credentials(&auth, self.github_access_token().is_some()) {
-            let _ = std::fs::remove_file(self.auth_path());
-            return default_auth_status();
-        }
-        if remove_public_auth_secrets(&mut auth) {
-            let _ = self.write_json(&self.auth_path(), &auth);
-        }
-        auth
-    }
-
-    fn start_github_device(&self) -> Value {
-        let Some(client_id) = self.github_client_id() else {
-            let _ = std::fs::remove_file(self.github_device_path());
-            return github_unconfigured_device_response();
-        };
-
-        let client = github_http_client();
-        let response = client
-            .post("https://github.com/login/device/code")
-            .form(&[
-                ("client_id", client_id.as_str()),
-                ("scope", "repo read:user user:email"),
-            ])
-            .send();
-
-        let Ok(response) = response else {
-            return json!({
-                "deviceCode": "",
-                "userCode": "",
-                "verificationUri": "https://github.com/login/device",
-                "expiresIn": 0,
-                "interval": 5,
-                "mock": false,
-                "status": "error",
-                "error": "github_network_unavailable"
-            });
-        };
-
-        let body = response.json::<Value>().unwrap_or_else(|_| json!({}));
-        if let Some(error) = body.get("error").and_then(Value::as_str) {
-            return json!({
-                "deviceCode": "",
-                "userCode": "",
-                "verificationUri": "https://github.com/login/device",
-                "expiresIn": 0,
-                "interval": 5,
-                "mock": false,
-                "status": "error",
-                "error": error
-            });
-        }
-
-        let device_code = body
-            .get("device_code")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        let user_code = body.get("user_code").and_then(Value::as_str).unwrap_or("");
-        let verification_uri = body
-            .get("verification_uri")
-            .or_else(|| body.get("verification_uri_complete"))
-            .and_then(Value::as_str)
-            .unwrap_or("https://github.com/login/device");
-        let expires_in = body
-            .get("expires_in")
-            .and_then(Value::as_i64)
-            .unwrap_or(900)
-            .max(1);
-        let interval = body
-            .get("interval")
-            .and_then(Value::as_i64)
-            .unwrap_or(5)
-            .max(1);
-
-        if device_code.is_empty() || user_code.is_empty() {
-            return json!({
-                "deviceCode": "",
-                "userCode": "",
-                "verificationUri": "https://github.com/login/device",
-                "expiresIn": 0,
-                "interval": 5,
-                "mock": false,
-                "status": "error",
-                "error": "github_device_start_failed"
-            });
-        }
-
-        let pending = json!({
-            "deviceCode": device_code,
-            "expiresAtEpochSeconds": unix_now_seconds() + expires_in,
-            "interval": interval
-        });
-        let _ = self.write_json(&self.github_device_path(), &pending);
-
-        json!({
-            "deviceCode": device_code,
-            "userCode": user_code,
-            "verificationUri": verification_uri,
-            "expiresIn": expires_in,
-            "interval": interval,
-            "mock": false
-        })
-    }
-
-    fn poll_github_device(&self) -> Value {
-        let Some(client_id) = self.github_client_id() else {
-            return json!({
-                "status": "error",
-                "auth": self.auth_status(),
-                "interval": null,
-                "error": "github_remote_not_configured"
-            });
-        };
-
-        let pending = self.read_json(&self.github_device_path(), json!({}));
-        let device_code = pending
-            .get("deviceCode")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        let expires_at = pending
-            .get("expiresAtEpochSeconds")
-            .and_then(Value::as_i64)
-            .unwrap_or(0);
-        if device_code.is_empty() {
-            return json!({
-                "status": "error",
-                "auth": self.auth_status(),
-                "interval": null,
-                "error": "incorrect_device_code"
-            });
-        }
-        if expires_at <= unix_now_seconds() {
-            let _ = std::fs::remove_file(self.github_device_path());
-            return json!({
-                "status": "error",
-                "auth": self.auth_status(),
-                "interval": null,
-                "error": "expired_token"
-            });
-        }
-
-        let client = github_http_client();
-        let response = client
-            .post("https://github.com/login/oauth/access_token")
-            .form(&[
-                ("client_id", client_id.as_str()),
-                ("device_code", device_code),
-                ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
-            ])
-            .send();
-
-        let Ok(response) = response else {
-            return json!({
-                "status": "error",
-                "auth": self.auth_status(),
-                "interval": pending.get("interval").cloned().unwrap_or(Value::Null),
-                "error": "github_network_unavailable"
-            });
-        };
-
-        let token_body = response.json::<Value>().unwrap_or_else(|_| json!({}));
-        if let Some(error) = token_body.get("error").and_then(Value::as_str) {
-            if error == "authorization_pending" {
-                return json!({
-                    "status": "pending",
-                    "auth": self.auth_status(),
-                    "interval": pending.get("interval").cloned().unwrap_or(Value::Null),
-                    "error": null
-                });
-            }
-            return json!({
-                "status": "error",
-                "auth": self.auth_status(),
-                "interval": if error == "slow_down" {
-                    Some(pending.get("interval").and_then(Value::as_i64).unwrap_or(5) + 5)
-                } else {
-                    None
-                },
-                "error": error
-            });
-        }
-
-        let access_token = token_body
-            .get("access_token")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        if access_token.is_empty() {
-            return json!({
-                "status": "error",
-                "auth": self.auth_status(),
-                "interval": null,
-                "error": "github_token_missing"
-            });
-        }
-
-        let user = client
-            .get("https://api.github.com/user")
-            .bearer_auth(access_token)
-            .send()
-            .ok()
-            .and_then(|response| response.json::<Value>().ok())
-            .unwrap_or_else(|| json!({}));
-
-        let login = user.get("login").and_then(Value::as_str).unwrap_or("");
-        if login.is_empty() {
-            return json!({
-                "status": "error",
-                "auth": self.auth_status(),
-                "interval": null,
-                "error": "github_user_unavailable"
-            });
-        }
-
-        let scopes = parse_github_scopes(
-            token_body
-                .get("scope")
-                .and_then(Value::as_str)
-                .unwrap_or(""),
-        );
-        let auth = json!({
-            "isAuthenticated": true,
-            "provider": "github",
-            "user": {
-                "login": login,
-                "name": user.get("name").and_then(Value::as_str).unwrap_or(login),
-                "avatarUrl": user.get("avatar_url").and_then(Value::as_str)
-            },
-            "scopes": scopes.clone(),
-            "expiresAt": null,
-            "updatedAt": knownext_core::now_iso()
-        });
-        self.update_credentials(|credentials| {
-            credentials.insert(
-                "github".to_string(),
-                json!({
-                    "provider": "github",
-                    "accessToken": access_token,
-                    "scopes": scopes,
-                    "updatedAt": knownext_core::now_iso()
-                }),
-            );
-            credentials.remove("provider");
-            credentials.remove("accessToken");
-            credentials.remove("scopes");
-        });
-        let _ = self.write_json(&self.auth_path(), &auth);
-        let _ = std::fs::remove_file(self.github_device_path());
-
-        json!({
-            "status": "authenticated",
-            "auth": auth,
-            "interval": null,
-            "error": null
-        })
-    }
-
-    fn clear_auth_status(&self) -> Value {
-        let _ = std::fs::remove_file(self.auth_path());
-        self.update_credentials(|credentials| {
-            credentials.remove("github");
-            credentials.remove("provider");
-            credentials.remove("accessToken");
-            credentials.remove("scopes");
-        });
-        let _ = std::fs::remove_file(self.github_device_path());
-        default_auth_status()
-    }
-
-    fn github_repositories(&self) -> Value {
-        let Some(token) = self.github_access_token() else {
-            return json!([]);
-        };
-
-        let response = github_http_client()
-            .get("https://api.github.com/user/repos?per_page=100&sort=updated")
-            .bearer_auth(token)
-            .send();
-
-        let Ok(response) = response else {
-            return json!([]);
-        };
-        if !response.status().is_success() {
-            return json!([]);
-        }
-
-        let repos = response.json::<Value>().unwrap_or_else(|_| json!([]));
-        let list = repos
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|repo| {
-                let full_name = repo.get("full_name").and_then(Value::as_str).unwrap_or("");
-                let (owner, name) = full_name.split_once('/').unwrap_or(("", ""));
-                if owner.is_empty() || name.is_empty() {
-                    return None;
-                }
-                let permissions = repo
-                    .get("permissions")
-                    .cloned()
-                    .unwrap_or_else(|| json!({}));
-                let mut access = Vec::new();
-                if permissions
-                    .get("pull")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(true)
-                {
-                    access.push("pull");
-                }
-                if permissions
-                    .get("push")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
-                {
-                    access.push("push");
-                }
-                if permissions
-                    .get("admin")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
-                {
-                    access.push("admin");
-                }
-                Some(json!({
-                    "owner": owner,
-                    "repo": name,
-                    "defaultRef": repo.get("default_branch").and_then(Value::as_str),
-                    "rootPath": "",
-                    "permissions": access,
-                    "private": repo.get("private").and_then(Value::as_bool).unwrap_or(false),
-                    "updatedAt": repo.get("updated_at").and_then(Value::as_str)
-                }))
-            })
-            .collect::<Vec<_>>();
-
-        Value::Array(list)
-    }
-
-    fn github_client_id(&self) -> Option<String> {
-        if cfg!(test) || self.profile == "test" {
-            return None;
-        }
-        github_client_id()
-    }
-
-    fn project_activity(&self, project_id: &str) -> Value {
-        let path = self
-            .app_data_dir
-            .join("activity")
-            .join(format!("{}.json", safe_name(project_id)));
-        self.read_json(&path, json!({ "projectId": project_id, "events": [] }))
-    }
-    fn record_activity(&self, project_id: &str, body: Value) -> Value {
-        let event = json!({
-            "id": knownext_core::compact_id("activity"),
-            "projectId": project_id,
-            "type": body.get("type").and_then(Value::as_str).unwrap_or("activity"),
-            "scope": body.get("scope").and_then(Value::as_str).unwrap_or("project"),
-            "title": body.get("title").and_then(Value::as_str).unwrap_or("Actividad"),
-            "message": body.get("message").and_then(Value::as_str).unwrap_or(""),
-            "tone": body.get("tone").and_then(Value::as_str).unwrap_or("info"),
-            "createdAt": knownext_core::now_iso(),
-            "documentPath": body.get("documentPath").cloned().unwrap_or(Value::Null),
-            "repository": body.get("repository").cloned().unwrap_or(Value::Null)
-        });
-        let path = self
-            .app_data_dir
-            .join("activity")
-            .join(format!("{}.json", safe_name(project_id)));
-        let mut list = self.project_activity(project_id);
-        list["events"]
-            .as_array_mut()
-            .unwrap()
-            .insert(0, event.clone());
-        let _ = self.write_json(&path, &list);
-        event
-    }
-
-    fn versioning_status(&self, project_id: &str) -> Value {
-        let project = self
-            .list_projects()
-            .into_iter()
-            .find(|project| project["id"].as_str() == Some(project_id))
-            .unwrap_or_default();
-        let versioning_mode = project["versioningMode"].as_str().unwrap_or("none");
-        let root = project["folderPath"].as_str().map(PathBuf::from);
-        let git_available = root
-            .as_ref()
-            .map(|root| root.join(".git").exists())
-            .unwrap_or(false);
-        let enabled = versioning_mode != "none";
-        let available = enabled && git_available;
-        let local_changes = root
-            .as_ref()
-            .filter(|_| available)
-            .and_then(|root| git_status_items(root).ok())
-            .map(|items| !items.is_empty())
-            .unwrap_or(false);
-        let last_hash = root
-            .as_ref()
-            .filter(|_| available)
-            .and_then(|root| git_head_hash(root).ok())
-            .flatten();
-        let reason = if !enabled {
-            Value::from("Historial no disponible en proyectos de archivos locales")
-        } else if !available {
-            Value::from("Git local no está inicializado para este proyecto")
-        } else {
-            Value::Null
-        };
-        json!({
-            "enabled": enabled,
-            "available": available,
-            "reason": reason,
-            "storageMode": project["storageMode"],
-            "versioningMode": project["versioningMode"],
-            "syncMode": project["syncMode"],
-            "statusLabel": if available { "Historial local" } else { "Sin historial" },
-            "hasLocalChanges": local_changes,
-            "hasRemoteChanges": false,
-            "lastVersionHash": last_hash,
-            "lastVersionRelativeTime": if last_hash.is_some() { Value::from("reciente") } else { Value::Null }
-        })
-    }
-    fn sync_status(&self, project_id: &str) -> Value {
-        let project = self
-            .list_projects()
-            .into_iter()
-            .find(|project| project["id"].as_str() == Some(project_id))
-            .unwrap_or_default();
-        let sync_mode = project["syncMode"].as_str().unwrap_or("none");
-        let is_github = is_github_sync_mode(sync_mode);
-        let root = project["folderPath"].as_str().map(PathBuf::from);
-        let local_changes = root
-            .as_ref()
-            .filter(|root| root.join(".git").exists())
-            .and_then(|root| git_status_items(root).ok())
-            .map(|items| !items.is_empty())
-            .unwrap_or(false);
-        let local_hash = root
-            .as_ref()
-            .filter(|root| root.join(".git").exists())
-            .and_then(|root| git_head_hash(root).ok())
-            .flatten();
-        if is_github {
-            let mode = if sync_mode == "auto-github" {
-                "github-auto"
-            } else {
-                "github-manual"
-            };
-            let authenticated = self.auth_status()["isAuthenticated"]
-                .as_bool()
-                .unwrap_or(false);
-            if authenticated {
-                let Some(root) = root.as_ref() else {
-                    return github_remote_status(
-                        project_id,
-                        mode,
-                        "error",
-                        "Proyecto sin carpeta local",
-                        "La carpeta local del proyecto no está disponible.",
-                        "missing-local-folder",
-                        true,
-                        local_changes,
-                        local_hash.clone(),
-                        None,
-                        false,
-                        false,
-                    );
-                };
-                if !root.join(".git").exists() {
-                    return github_remote_status(
-                        project_id,
-                        mode,
-                        "local-history",
-                        "Git local no inicializado",
-                        "Inicializa el historial local antes de sincronizar con GitHub.",
-                        "missing-local-git",
-                        true,
-                        local_changes,
-                        local_hash.clone(),
-                        None,
-                        false,
-                        false,
-                    );
-                }
-                let Some((owner, repo, default_branch)) = github_repository_parts(
-                    project.get("githubRepository").unwrap_or(&Value::Null),
-                ) else {
-                    return github_remote_status(
-                        project_id,
-                        mode,
-                        "local-history",
-                        "Repositorio GitHub incompleto",
-                        "Configura owner/repo para activar la sincronización remota.",
-                        "missing-remote-config",
-                        true,
-                        local_changes,
-                        local_hash.clone(),
-                        None,
-                        local_hash.is_some(),
-                        false,
-                    );
-                };
-                let branch = default_branch.unwrap_or_else(|| {
-                    current_git_branch(root).unwrap_or_else(|| "main".to_string())
-                });
-                if git_remote_url(root, "origin").ok().flatten().is_none() {
-                    let _ = ensure_github_remote(root, &owner, &repo);
-                }
-                if git_remote_url(root, "origin").ok().flatten().is_none() {
-                    return github_remote_status(project_id, mode, "local-history", "GitHub sin remoto local", "El proyecto tiene GitHub configurado, pero el repositorio Git local no tiene origin.", "missing-origin", true, local_changes, local_hash.clone(), None, local_hash.is_some(), false);
-                }
-                let Some(token) = self.github_access_token() else {
-                    return github_remote_status(project_id, mode, "local-history", "GitHub pausado", "Sin credenciales GitHub activas. El historial local sigue disponible y la sincronización remota queda pausada.", "unauthenticated", true, local_changes, local_hash.clone(), None, local_hash.is_some() || local_changes, false);
-                };
-                let remote_hash = match git_remote_head_hash(root, &token, "origin", &branch) {
-                    Ok(hash) => hash,
-                    Err(message) => {
-                        let remote = classify_git_remote_error(&message);
-                        return github_remote_status(
-                            project_id,
-                            mode,
-                            remote.state,
-                            remote.label,
-                            &remote.detail,
-                            remote.access,
-                            true,
-                            local_changes,
-                            local_hash.clone(),
-                            None,
-                            local_hash.is_some() || local_changes,
-                            false,
-                        );
-                    }
-                };
-                let delta = match git_remote_delta(root, &token, &branch, remote_hash.is_some()) {
-                    Ok(delta) => delta,
-                    Err(message) => {
-                        let remote = classify_git_remote_error(&message);
-                        return github_remote_status(
-                            project_id,
-                            mode,
-                            remote.state,
-                            remote.label,
-                            &remote.detail,
-                            remote.access,
-                            true,
-                            local_changes,
-                            local_hash.clone(),
-                            remote_hash.clone(),
-                            local_hash.is_some() || local_changes,
-                            false,
-                        );
-                    }
-                };
-                let initial_remote_push = remote_hash.is_none() && local_hash.is_some();
-                let pending_push = delta.local_ahead_count > 0 || initial_remote_push;
-                let pending_pull = delta.remote_ahead_count > 0;
-                let diverged = delta.local_ahead_count > 0 && delta.remote_ahead_count > 0;
-                let state = if diverged {
-                    "conflict"
-                } else if local_changes || pending_push {
-                    "local-pending"
-                } else if pending_pull {
-                    "remote-available"
-                } else {
-                    "local-history"
-                };
-                let detail = if diverged {
-                    "El historial local y GitHub tienen versiones distintas. Revisa antes de sincronizar."
-                } else if local_changes {
-                    "Hay cambios locales sin guardar en historial. GitHub esperará."
-                } else if pending_push {
-                    "Hay versiones locales pendientes de subir a GitHub."
-                } else if pending_pull {
-                    "GitHub tiene versiones pendientes de revisar."
-                } else {
-                    "El historial local está activo y la sincronización remota está disponible."
-                };
-                return json!({
-                    "projectId": project_id,
-                    "mode": mode,
-                    "state": state,
-                    "label": "GitHub conectado",
-                    "detail": detail,
-                    "remoteAccess": "available",
-                    "remotePaused": false,
-                    "remoteReason": null,
-                    "remoteAction": if diverged { Value::from("review-conflicts") } else { Value::Null },
-                    "localState": if local_changes { "dirty" } else if pending_push { "pending-push" } else { "clean" },
-                    "pendingPush": pending_push,
-                    "pendingPull": pending_pull,
-                    "hasConflicts": diverged,
-                    "lastSyncAt": null,
-                    "lastLocalVersionHash": local_hash,
-                    "lastRemoteHash": remote_hash,
-                    "localAheadCount": if initial_remote_push && delta.local_ahead_count == 0 { 1 } else { delta.local_ahead_count },
-                    "remoteAheadCount": delta.remote_ahead_count,
-                    "localAheadPaths": delta.local_ahead_paths,
-                    "remoteAheadPaths": delta.remote_ahead_paths,
-                    "diverged": diverged,
-                    "conflicts": if diverged { json!([{
-                        "id": format!("{project_id}:history-diverged"),
-                        "projectId": project_id,
-                        "path": "",
-                        "type": "diverged_history",
-                        "status": "open",
-                        "localHash": local_hash,
-                        "remoteHash": remote_hash,
-                        "message": "El historial local y GitHub tienen versiones distintas.",
-                        "createdAt": knownext_core::now_iso(),
-                        "updatedAt": knownext_core::now_iso()
-                    }]) } else { json!([]) }
-                });
-            }
-            return json!({
-                "projectId": project_id,
-                "mode": mode,
-                "state": "local-history",
-                "label": "GitHub pausado",
-                "detail": "Sin cuenta GitHub. El historial local sigue disponible y la sincronización remota queda pausada.",
-                "remoteAccess": "unauthenticated",
-                "remotePaused": true,
-                "remoteReason": "Sin cuenta GitHub",
-                "remoteAction": "connect-github",
-                "localState": if local_changes { "dirty" } else { "clean" },
-                "pendingPush": local_hash.is_some() || local_changes,
-                "pendingPull": false,
-                "hasConflicts": false,
-                "lastSyncAt": null,
-                "lastLocalVersionHash": local_hash,
-                "lastRemoteHash": null,
-                "localAheadCount": if local_hash.is_some() { 1 } else { 0 },
-                "remoteAheadCount": 0,
-                "localAheadPaths": [],
-                "remoteAheadPaths": [],
-                "diverged": false,
-                "conflicts": []
-            });
-        }
-        json!({
-            "projectId": project_id,
-            "mode": "local-history",
-            "state": "local-history",
-            "label": "Local-first",
-            "detail": "Historial y sincronización se gestionan localmente desde Rust/Tauri.",
-            "remoteAccess": "not-configured",
-            "remotePaused": false,
-            "remoteReason": null,
-            "remoteAction": null,
-            "localState": if local_changes { "dirty" } else { "clean" },
-            "pendingPush": false,
-            "pendingPull": false,
-            "hasConflicts": false,
-            "lastSyncAt": null,
-            "lastLocalVersionHash": local_hash,
-            "lastRemoteHash": null,
-            "localAheadCount": 0,
-            "remoteAheadCount": 0,
-            "localAheadPaths": [],
-            "remoteAheadPaths": [],
-            "diverged": false,
-            "conflicts": []
-        })
-    }
-
-    fn sync_auto_run(&self, project_id: &str) -> Value {
-        let project = self
-            .list_projects()
-            .into_iter()
-            .find(|project| project["id"].as_str() == Some(project_id))
-            .unwrap_or_default();
-        if project["syncMode"].as_str() != Some("auto-github") {
-            return self.sync_status(project_id);
-        }
-
-        let status = self.sync_status(project_id);
-        if status["remotePaused"].as_bool().unwrap_or(false)
-            || status["hasConflicts"].as_bool().unwrap_or(false)
-            || status["pendingPull"].as_bool().unwrap_or(false)
-            || status["localState"].as_str() == Some("dirty")
-        {
-            return status;
-        }
-        if !status["pendingPush"].as_bool().unwrap_or(false) {
-            return status;
-        }
-
-        let pushed = self.sync_operation(project_id, "push");
-        if pushed["status"].as_str() == Some("synced") {
-            let mut next = self.sync_status(project_id);
-            next["lastSyncAt"] = Value::from(knownext_core::now_iso());
-            next["detail"] = Value::from("Versiones locales subidas a GitHub.");
-            next
-        } else {
-            self.sync_status(project_id)
-        }
-    }
-
-    fn file_sync_overview(&self, project_id: &str) -> Result<Value, String> {
-        let root = self.project_root(project_id)?;
-        let project = self
-            .list_projects()
-            .into_iter()
-            .find(|project| project["id"].as_str() == Some(project_id))
-            .unwrap_or_default();
-        let has_git = root.join(".git").exists();
-        let sync_status = self.sync_status(project_id);
-        let has_github = is_github_sync_mode(project["syncMode"].as_str().unwrap_or("none"))
-            || project
-                .get("githubRepository")
-                .is_some_and(|repository| !repository.is_null());
-        let local_ahead_paths = json_string_set(sync_status.get("localAheadPaths"));
-        let remote_ahead_paths = json_string_set(sync_status.get("remoteAheadPaths"));
-        let status_items = if has_git {
-            git_status_items(&root)?
-        } else {
-            Vec::new()
-        };
-        let mut status_by_path = BTreeMap::<String, Value>::new();
-        let mut paths = BTreeSet::<String>::new();
-
-        for path in collect_project_sync_entries(&root)? {
-            paths.insert(relative_from_root(&root, &path));
-        }
-        for item in status_items {
-            if let Some(path) = item["path"].as_str() {
-                paths.insert(path.to_string());
-                status_by_path.insert(path.to_string(), item);
-            }
-        }
-
-        let mut files = Vec::new();
-        for path in paths {
-            let full_path = root.join(path.replace('/', std::path::MAIN_SEPARATOR_STR));
-            let metadata = std::fs::metadata(&full_path).ok();
-            let status_item = status_by_path.get(&path);
-            let change_type = status_item.and_then(|item| item["changeType"].as_str());
-            let risk = status_item.and_then(|item| item["risk"].as_str());
-            let kind = status_item
-                .and_then(|item| item["kind"].as_str())
-                .map(str::to_string)
-                .unwrap_or_else(|| file_sync_kind(&full_path).to_string());
-            let name = path.rsplit('/').next().unwrap_or(&path).to_string();
-            let local_status = if change_type == Some("deleted") {
-                phase_status(
-                    "pending",
-                    "Eliminado en disco",
-                    Some("El archivo ya no existe en la carpeta local."),
-                )
-            } else {
-                phase_status(
-                    "ok",
-                    "Guardado local",
-                    Some("El archivo existe en la carpeta local."),
-                )
-            };
-            let history_status = if !has_git {
-                phase_status(
-                    "unavailable",
-                    "Sin historial",
-                    Some("Este proyecto no tiene historial Git local inicializado."),
-                )
-            } else if let Some(item) = status_item {
-                if risk == Some("blocked") {
-                    phase_status(
-                        "omitted",
-                        "Omitido",
-                        item["reason"]
-                            .as_str()
-                            .or(Some("Este archivo queda fuera del historial.")),
-                    )
-                } else if risk == Some("review") {
-                    phase_status(
-                        "pending",
-                        "Revisión",
-                        item["reason"]
-                            .as_str()
-                            .or(Some("Revisa si debe entrar en el historial local.")),
-                    )
-                } else {
-                    phase_status(
-                        "pending",
-                        "Pendiente",
-                        Some("Guárdalo en el historial local para crear una versión."),
-                    )
-                }
-            } else {
-                phase_status(
-                    "ok",
-                    "En historial",
-                    Some("No hay cambios locales pendientes."),
-                )
-            };
-            let conflict = sync_status["conflicts"].as_array().and_then(|conflicts| {
-                conflicts.iter().find(|conflict| {
-                    conflict["status"].as_str() == Some("open")
-                        && conflict["path"].as_str() == Some(path.as_str())
-                })
-            });
-            let github_status = if !has_github {
-                phase_status(
-                    "unavailable",
-                    "No conectado",
-                    Some("Este proyecto no usa GitHub."),
-                )
-            } else if sync_status["remotePaused"].as_bool().unwrap_or(false) {
-                phase_status(
-                    "waiting",
-                    "Pausado",
-                    sync_status["detail"]
-                        .as_str()
-                        .or(Some("GitHub está pausado.")),
-                )
-            } else if conflict.is_some()
-                || (sync_status["state"].as_str() == Some("conflict")
-                    && sync_status["conflicts"]
-                        .as_array()
-                        .map_or(true, Vec::is_empty))
-            {
-                phase_status(
-                    "conflict",
-                    "Conflicto",
-                    Some("Elige si conservar este equipo o la versión de GitHub."),
-                )
-            } else if status_item.is_some() && history_status["state"].as_str() == Some("pending") {
-                phase_status(
-                    "waiting",
-                    "Esperando historial",
-                    Some("Primero guarda el cambio en el historial local."),
-                )
-            } else if local_ahead_paths.contains(&path) {
-                phase_status(
-                    "pending",
-                    "Pendiente",
-                    Some("Este archivo está en una versión local pendiente de subir."),
-                )
-            } else if remote_ahead_paths.contains(&path) {
-                phase_status(
-                    "pending",
-                    "GitHub tiene cambios",
-                    Some("Este archivo está en una versión remota pendiente de revisar."),
-                )
-            } else {
-                phase_status("ok", "Sincronizado", Some("GitHub está al día."))
-            };
-
-            files.push(json!({
-                "id": doc_id(project_id, &path),
-                "projectId": project_id,
-                "path": path,
-                "name": name,
-                "kind": kind,
-                "modifiedAt": metadata.as_ref().and_then(|metadata| metadata.modified().ok()).and_then(system_time_iso),
-                "sizeBytes": metadata.map(|metadata| Value::from(metadata.len())).unwrap_or(Value::Null),
-                "localStatus": local_status,
-                "historyStatus": history_status,
-                "githubStatus": github_status,
-                "change": status_item.map(|item| json!({
-                    "itemId": item["id"],
-                    "changeType": item["changeType"],
-                    "risk": item["risk"],
-                    "decision": item["decision"]
-                })).unwrap_or(Value::Null),
-                "conflictId": conflict.map(|conflict| conflict["id"].clone()).unwrap_or(Value::Null)
-            }));
-        }
-
-        files.sort_by(|left, right| {
-            right["modifiedAt"]
-                .as_str()
-                .unwrap_or("")
-                .cmp(left["modifiedAt"].as_str().unwrap_or(""))
-                .then_with(|| {
-                    left["path"]
-                        .as_str()
-                        .unwrap_or("")
-                        .cmp(right["path"].as_str().unwrap_or(""))
-                })
-        });
-
-        let mut attention = 0;
-        let mut history_pending = 0;
-        let mut github_pending = 0;
-        let mut conflicts = 0;
-        let mut omitted = 0;
-        for file in &files {
-            let history_state = file["historyStatus"]["state"].as_str().unwrap_or("ok");
-            let github_state = file["githubStatus"]["state"].as_str().unwrap_or("ok");
-            let local_state = file["localStatus"]["state"].as_str().unwrap_or("ok");
-            if matches!(history_state, "pending" | "omitted" | "blocked")
-                || matches!(github_state, "pending" | "waiting" | "conflict" | "error")
-                || matches!(local_state, "pending" | "draft" | "conflict" | "error")
-            {
-                attention += 1;
-            }
-            if history_state == "pending" {
-                history_pending += 1;
-            }
-            if matches!(github_state, "pending" | "waiting") {
-                github_pending += 1;
-            }
-            if matches!(history_state, "conflict" | "error")
-                || matches!(github_state, "conflict" | "error")
-            {
-                conflicts += 1;
-            }
-            if history_state == "omitted" {
-                omitted += 1;
-            }
-        }
-
-        Ok(json!({
-            "projectId": project_id,
-            "generatedAt": knownext_core::now_iso(),
-            "summary": {
-                "total": files.len(),
-                "attention": attention,
-                "historyPending": history_pending,
-                "githubPending": github_pending,
-                "conflicts": conflicts,
-                "omitted": omitted
-            },
-            "files": files
-        }))
-    }
-
-    fn sync_operation(&self, project_id: &str, direction: &str) -> Value {
-        let status = self.sync_status(project_id);
-        let remote_paused = status["remotePaused"].as_bool().unwrap_or(false);
-        if remote_paused {
-            return json!({
-                "status": "paused",
-                "message": status["detail"].as_str().unwrap_or("La sincronización remota está pausada."),
-                "projectId": project_id,
-                "direction": direction,
-                "remoteAccess": status["remoteAccess"].clone(),
-                "remotePaused": true
-            });
-        }
-        let project = self
-            .list_projects()
-            .into_iter()
-            .find(|project| project["id"].as_str() == Some(project_id))
-            .unwrap_or_default();
-        let sync_mode = project["syncMode"].as_str().unwrap_or("none");
-        if is_github_sync_mode(sync_mode) {
-            let Some(token) = self.github_access_token() else {
-                return json!({ "status": "paused", "message": "Sin cuenta GitHub. El historial local sigue disponible.", "projectId": project_id, "direction": direction, "remoteAccess": "unauthenticated", "remotePaused": true });
-            };
-            let Some(root) = project["folderPath"].as_str().map(PathBuf::from) else {
-                return json!({ "status": "error", "message": "La carpeta local del proyecto no está disponible.", "projectId": project_id, "direction": direction, "remoteAccess": "missing-local-folder", "remotePaused": true });
-            };
-            if !root.join(".git").exists() {
-                return json!({ "status": "error", "message": "Git local no está inicializado para este proyecto.", "projectId": project_id, "direction": direction, "remoteAccess": "missing-local-git", "remotePaused": true });
-            }
-            if git_remote_url(&root, "origin").ok().flatten().is_none() {
-                if let Some((owner, repo, _branch)) =
-                    github_repository_parts(project.get("githubRepository").unwrap_or(&Value::Null))
-                {
-                    let _ = ensure_github_remote(&root, &owner, &repo);
-                }
-            }
-            let branch =
-                github_repository_parts(project.get("githubRepository").unwrap_or(&Value::Null))
-                    .and_then(|(_, _, branch)| branch)
-                    .or_else(|| current_git_branch(&root))
-                    .unwrap_or_else(|| "main".to_string());
-            if direction == "push" {
-                if status["hasConflicts"].as_bool().unwrap_or(false) {
-                    return json!({ "status": "conflict", "message": "El historial local y GitHub tienen versiones distintas. Revisa antes de subir.", "projectId": project_id, "direction": direction, "remoteAccess": "available", "remotePaused": false });
-                }
-                if status["pendingPull"].as_bool().unwrap_or(false)
-                    && !status["pendingPush"].as_bool().unwrap_or(false)
-                {
-                    return json!({ "status": "remote-available", "message": "GitHub tiene versiones pendientes de revisar antes de subir.", "projectId": project_id, "direction": direction, "remoteAccess": "available", "remotePaused": false });
-                }
-                if !git_status_items(&root).unwrap_or_default().is_empty() {
-                    return json!({ "status": "local-pending", "message": "Guarda primero los cambios en el historial local antes de subir a GitHub.", "projectId": project_id, "direction": direction, "remoteAccess": "available", "remotePaused": false });
-                }
-                if git_head_hash(&root).ok().flatten().is_none() {
-                    return json!({ "status": "local-pending", "message": "No hay ninguna versión local que subir a GitHub.", "projectId": project_id, "direction": direction, "remoteAccess": "available", "remotePaused": false });
-                }
-                return match git_push_origin(&root, &token, &branch) {
-                    Ok(()) => {
-                        json!({ "status": "synced", "message": "Historial local subido a GitHub.", "projectId": project_id, "direction": direction, "remoteAccess": "available", "remotePaused": false })
-                    }
-                    Err(message) => {
-                        let remote = classify_git_remote_error(&message);
-                        json!({ "status": "paused", "message": remote.detail, "projectId": project_id, "direction": direction, "remoteAccess": remote.access, "remotePaused": true })
-                    }
-                };
-            }
-            if direction == "pull" {
-                if !git_status_items(&root).unwrap_or_default().is_empty() {
-                    return json!({ "status": "local-pending", "message": "Guarda o descarta primero los cambios locales antes de traer cambios de GitHub.", "projectId": project_id, "direction": direction, "remoteAccess": "available", "remotePaused": false });
-                }
-                return match git_pull_ff_only(&root, &token, &branch) {
-                    Ok(()) => {
-                        json!({ "status": "synced", "message": "Proyecto actualizado desde GitHub.", "projectId": project_id, "direction": direction, "remoteAccess": "available", "remotePaused": false })
-                    }
-                    Err(message) => {
-                        let remote = classify_git_remote_error(&message);
-                        json!({ "status": "paused", "message": remote.detail, "projectId": project_id, "direction": direction, "remoteAccess": remote.access, "remotePaused": true })
-                    }
-                };
-            }
-        }
-        let message = match direction {
-            "pull" => "No hay cambios remotos pendientes. El proyecto local sigue disponible.",
-            "push" => "No hay cambios locales pendientes de envío. El historial local está al día.",
-            _ => "Sincronización local actualizada.",
-        };
-        json!({
-            "status": "synced",
-            "message": message,
-            "projectId": project_id,
-            "direction": direction,
-            "remoteAccess": status["remoteAccess"].clone(),
-            "remotePaused": false
-        })
-    }
-    fn external_changes(&self, project_id: &str) -> Value {
-        let Ok(root) = self.project_root(project_id) else {
-            return external_change_set(
-                project_id,
-                Vec::new(),
-                Some("Proyecto no encontrado".to_string()),
-            );
-        };
-        if !root.join(".git").exists() {
-            return external_change_set(
-                project_id,
-                Vec::new(),
-                Some("El historial Git local no está inicializado para este proyecto.".to_string()),
-            );
-        }
-        match git_status_items(&root) {
-            Ok(items) => external_change_set(project_id, items, None),
-            Err(message) => external_change_set(project_id, Vec::new(), Some(message)),
-        }
-    }
-    fn import_external_changes(&self, project_id: &str, body: Value) -> Result<Value, String> {
-        let root = self.project_root(project_id)?;
-        if !root.join(".git").exists() {
-            return Ok(
-                json!({ "status": "unsupported", "message": "El historial Git local no está inicializado.", "tree": self.project_tree(project_id)?, "versionTitle": null, "syncedAt": null, "pendingRemoteSync": false }),
-            );
-        }
-        let current_items = git_status_items(&root)?;
-        let decisions = body["decisions"].as_array().cloned().unwrap_or_default();
-        let mut decision_by_id = BTreeMap::new();
-        for decision in decisions {
-            if let (Some(item_id), Some(value)) =
-                (decision["itemId"].as_str(), decision["decision"].as_str())
-            {
-                decision_by_id.insert(item_id.to_string(), value.to_string());
-            }
-        }
-
-        let included = current_items
-            .into_iter()
-            .filter(|item| {
-                let id = item["id"].as_str().unwrap_or("");
-                let default_decision = item["decision"].as_str().unwrap_or("review");
-                let decision = decision_by_id
-                    .get(id)
-                    .map(String::as_str)
-                    .unwrap_or(default_decision);
-                decision == "include"
-            })
-            .collect::<Vec<_>>();
-
-        if included.is_empty() {
-            return Ok(
-                json!({ "status": "synced", "message": "No se incluyeron cambios externos en el historial.", "tree": self.project_tree(project_id)?, "versionTitle": null, "syncedAt": knownext_core::now_iso(), "pendingRemoteSync": false }),
-            );
-        }
-
-        let included_paths = included
-            .iter()
-            .filter_map(|item| item["path"].as_str())
-            .collect::<Vec<_>>();
-        let title = format!("Cambios externos importados ({})", included.len());
-        git_commit_paths(&root, &title, &included_paths)?;
-        let _ = self.record_activity(
-            project_id,
-            json!({
-                "type": "external-changes-imported",
-                "scope": "history",
-                "title": "Cambios externos importados",
-                "message": format!("{} cambio(s) añadidos al historial local.", included.len()),
-                "tone": "success"
-            }),
-        );
-        Ok(
-            json!({ "status": "synced", "message": "Cambios externos añadidos al historial local.", "tree": self.project_tree(project_id)?, "versionTitle": title, "syncedAt": knownext_core::now_iso(), "pendingRemoteSync": self.sync_status(project_id)["mode"].as_str().unwrap_or("") != "local-history" }),
-        )
-    }
-
-    fn asset_metadata(&self, project_id: &str, asset_id: &str) -> Result<Value, String> {
-        let path = self
-            .resolve_document_path(asset_id)
-            .or_else(|_| self.resolve_project_relative(project_id, asset_id))?;
-        let metadata = std::fs::metadata(&path).map_err(|error| error.to_string())?;
-        let relative = path
-            .strip_prefix(self.project_root(project_id)?)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .replace('\\', "/");
-        let usage_count = self.asset_references(project_id, Some(&relative))?.len();
-        let indexed = self.image_index_entry(project_id, &relative).is_some();
-        let is_image = is_image_path(&path);
-        Ok(json!({
-            "id": doc_id(project_id, &relative),
-            "projectId": project_id,
-            "name": path.file_name().and_then(|value| value.to_str()).unwrap_or("asset"),
-            "path": relative,
-            "mimeType": mime_for_path(&path),
-            "sizeBytes": metadata.len(),
-            "width": null,
-            "height": null,
-            "colorDepthBits": null,
-            "updatedAt": knownext_core::now_iso(),
-            "usageCount": usage_count,
-            "indexed": indexed,
-            "indexStatus": if is_image { if indexed { "indexed" } else { "not-indexed" } } else { "not-applicable" },
-            "visualDescription": null
-        }))
-    }
-    fn asset_usage(&self, project_id: &str, asset_id: &str) -> Result<Value, String> {
-        let asset = self.asset_metadata(project_id, asset_id)?;
-        let relative = asset["path"].as_str().unwrap_or("");
-        Ok(
-            json!({ "asset": asset, "references": self.asset_references(project_id, Some(relative))? }),
-        )
-    }
-    fn reindex_project_images(&self, project_id: &str) -> Result<Value, String> {
-        let root = self.project_root(project_id)?;
-        let mut images = Vec::new();
-        for path in collect_project_files(&root)? {
-            if !is_image_path(&path) {
-                continue;
-            }
-            let metadata = std::fs::metadata(&path).map_err(|error| error.to_string())?;
-            let relative = relative_from_root(&root, &path);
-            let usage_count = self.asset_references(project_id, Some(&relative))?.len();
-            images.push(json!({
-                "id": doc_id(project_id, &relative),
-                "path": relative,
-                "name": path.file_name().and_then(|value| value.to_str()).unwrap_or("image"),
-                "mimeType": mime_for_path(&path),
-                "sizeBytes": metadata.len(),
-                "usageCount": usage_count,
-                "indexedAt": knownext_core::now_iso(),
-                "status": "indexed"
-            }));
-        }
-        images.sort_by(|left, right| {
-            left["path"]
-                .as_str()
-                .unwrap_or("")
-                .cmp(right["path"].as_str().unwrap_or(""))
-        });
-        let indexed_at = knownext_core::now_iso();
-        let count = images.len();
-        self.write_json(
-            &self.image_index_path(project_id),
-            &json!({
-                "projectId": project_id,
-                "indexedAt": indexed_at,
-                "images": images
-            }),
-        )?;
-        Ok(json!({
-            "projectId": project_id,
-            "imageCount": count,
-            "indexedImageCount": count,
-            "status": "updated",
-            "indexedAt": indexed_at
-        }))
-    }
-    fn image_index_entry(&self, project_id: &str, relative: &str) -> Option<Value> {
-        let index = self.read_json(&self.image_index_path(project_id), json!({ "images": [] }));
-        index["images"]
-            .as_array()?
-            .iter()
-            .find(|image| image["path"].as_str() == Some(relative))
-            .cloned()
-    }
-    fn asset_references(
-        &self,
-        project_id: &str,
-        asset_relative: Option<&str>,
-    ) -> Result<Vec<Value>, String> {
-        let root = self.project_root(project_id)?;
-        let mut references = Vec::new();
-        for path in collect_project_files(&root)? {
-            if !is_markdown_path(&path) {
-                continue;
-            }
-            let document_path = relative_from_root(&root, &path);
-            let document_id = doc_id(project_id, &document_path);
-            let document_name = path
-                .file_name()
-                .and_then(|value| value.to_str())
-                .unwrap_or("documento.md")
-                .to_string();
-            let markdown = std::fs::read_to_string(&path).unwrap_or_default();
-            for reference in markdown_image_references(
-                &markdown,
-                project_id,
-                &document_id,
-                &document_name,
-                &document_path,
-            ) {
-                let resolved = reference["resolvedAssetPath"].as_str();
-                if asset_relative
-                    .map(|relative| resolved == Some(relative))
-                    .unwrap_or(true)
-                {
-                    references.push(reference);
-                }
-            }
-        }
-        references.sort_by(|left, right| {
-            (
-                left["documentPath"].as_str().unwrap_or(""),
-                left["line"].as_u64().unwrap_or(0),
-                left["column"].as_u64().unwrap_or(0),
-            )
-                .cmp(&(
-                    right["documentPath"].as_str().unwrap_or(""),
-                    right["line"].as_u64().unwrap_or(0),
-                    right["column"].as_u64().unwrap_or(0),
-                ))
-        });
-        Ok(references)
-    }
-    fn image_reference(
-        &self,
-        project_id: &str,
-        document_id: &str,
-        body: Value,
-    ) -> Result<Value, String> {
-        let asset_id = body.get("assetId").and_then(Value::as_str).unwrap_or("");
-        let asset = self.asset_metadata(project_id, asset_id)?;
-        let alt = body
-            .get("altText")
-            .and_then(Value::as_str)
-            .unwrap_or_else(|| asset["name"].as_str().unwrap_or("Imagen"));
-        let target = document_ref_path(document_id)
-            .ok()
-            .map(|document_path| {
-                relative_link_target(&document_path, asset["path"].as_str().unwrap_or(""))
-            })
-            .unwrap_or_else(|| asset["path"].as_str().unwrap_or("").to_string());
-        Ok(
-            json!({ "markdown": format!("![{}]({})", alt, target), "asset": asset, "documentId": document_id }),
-        )
-    }
-    fn document_move_impact(&self, project_id: &str, document_id: &str) -> Result<Value, String> {
-        let (_, relative) = document_ref(document_id)?;
-        let references = self
-            .asset_references(project_id, None)?
-            .into_iter()
-            .filter(|reference| reference["documentId"].as_str() == Some(document_id))
-            .collect::<Vec<_>>();
-        let mut shared_asset_paths = Vec::new();
-        for reference in &references {
-            let Some(asset_path) = reference["resolvedAssetPath"].as_str() else {
-                continue;
-            };
-            if shared_asset_paths
-                .iter()
-                .any(|path: &String| path == asset_path)
-            {
-                continue;
-            }
-            if self.asset_references(project_id, Some(asset_path))?.len() > 1 {
-                shared_asset_paths.push(asset_path.to_string());
-            }
-        }
-        let message = if references.is_empty() {
-            "Sin referencias de imagen que actualizar."
-        } else {
-            "El documento contiene referencias de imagen; al moverlo se deben revisar rutas relativas."
-        };
-        Ok(
-            json!({ "documentId": document_id, "documentPath": relative, "references": references, "sharedAssetPaths": shared_asset_paths, "message": message }),
-        )
-    }
-    fn apply_reference_updates_after_move(
-        &self,
-        project_id: &str,
-        moved_files: &[(String, String)],
-    ) -> Result<Vec<Value>, String> {
-        let root = self.project_root(project_id)?;
-        let image_mapping = moved_files
-            .iter()
-            .filter(|(old, new)| is_image_path(Path::new(old)) || is_image_path(Path::new(new)))
-            .cloned()
-            .collect::<BTreeMap<_, _>>();
-        let moved_doc_by_new = moved_files
-            .iter()
-            .filter(|(old, new)| {
-                is_markdown_path(Path::new(old)) || is_markdown_path(Path::new(new))
-            })
-            .map(|(old, new)| (new.clone(), old.clone()))
-            .collect::<BTreeMap<_, _>>();
-        if image_mapping.is_empty() && moved_doc_by_new.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let mut affected = Vec::new();
-        for path in collect_project_files(&root)? {
-            if !is_markdown_path(&path) {
-                continue;
-            }
-            let current_relative = relative_from_root(&root, &path);
-            let old_document_relative = moved_doc_by_new
-                .get(&current_relative)
-                .map(String::as_str)
-                .unwrap_or(&current_relative);
-            let markdown = std::fs::read_to_string(&path).unwrap_or_default();
-            let rewritten = rewrite_markdown_image_targets(
-                &markdown,
-                old_document_relative,
-                &current_relative,
-                &image_mapping,
-            );
-            if rewritten == markdown {
-                continue;
-            }
-            std::fs::write(&path, rewritten).map_err(|error| error.to_string())?;
-            affected.push(json!({
-                "oldId": doc_id(project_id, old_document_relative),
-                "newId": doc_id(project_id, &current_relative),
-                "name": path.file_name().and_then(|value| value.to_str()).unwrap_or("documento.md"),
-                "path": current_relative,
-                "referenceUpdated": true
-            }));
-        }
-        if !image_mapping.is_empty() {
-            let _ = self.reindex_project_images(project_id);
-        }
-        Ok(affected)
-    }
-
-    fn create_preview(&self, project_id: &str, body: Value) -> Result<Value, String> {
-        let relative = body
-            .get("path")
-            .and_then(Value::as_str)
-            .ok_or("Falta path")?;
-        let path = self.resolve_project_relative(project_id, relative)?;
-        if !path.exists() {
-            return Err("Documento no encontrado".to_string());
-        }
-        let preview_id = knownext_core::compact_id("preview");
-        let preview = preview_value(project_id, &preview_id, relative, &path);
-        self.write_json(
-            &self.previews_dir().join(format!("{preview_id}.json")),
-            &preview,
-        )?;
-        Ok(preview)
-    }
-    fn get_preview(&self, _project_id: &str, preview_id: &str) -> Result<Value, String> {
-        let preview = self.read_json(
-            &self.previews_dir().join(format!("{preview_id}.json")),
-            Value::Null,
-        );
-        if preview.is_null() {
-            Err("Vista no encontrada".to_string())
-        } else {
-            Ok(preview)
-        }
-    }
-    fn preview_text(&self, project_id: &str, preview_id: &str) -> Result<Value, String> {
-        let preview = self.get_preview(project_id, preview_id)?;
-        let path =
-            self.resolve_project_relative(project_id, preview["path"].as_str().unwrap_or(""))?;
-        Ok(
-            json!({ "previewId": preview_id, "text": knownext_docs::extract_plain_text(&path), "searchable": true, "warnings": [] }),
-        )
-    }
-    fn preview_sheets(&self, project_id: &str, preview_id: &str) -> Result<Value, String> {
-        let preview = self.get_preview(project_id, preview_id)?;
-        if preview["format"].as_str() != Some("xlsx") {
-            return Ok(json!({ "previewId": preview_id, "sheets": [] }));
-        }
-        let path =
-            self.resolve_project_relative(project_id, preview["path"].as_str().unwrap_or(""))?;
-        Ok(json!({ "previewId": preview_id, "sheets": knownext_docs::xlsx_sheet_summaries(&path) }))
-    }
-    fn preview_sheet(
-        &self,
-        project_id: &str,
-        preview_id: &str,
-        sheet_id: &str,
-    ) -> Result<Value, String> {
-        let preview = self.get_preview(project_id, preview_id)?;
-        if preview["format"].as_str() != Some("xlsx") {
-            return Err("La vista no es una hoja de cálculo".to_string());
-        }
-        let path =
-            self.resolve_project_relative(project_id, preview["path"].as_str().unwrap_or(""))?;
-        let mut sheet = knownext_docs::xlsx_sheet(&path, sheet_id)
-            .ok_or_else(|| "Hoja no encontrada".to_string())?;
-        sheet["previewId"] = Value::from(preview_id);
-        Ok(sheet)
-    }
-    fn open_preview_external(&self, project_id: &str, preview_id: &str) -> Result<Value, String> {
-        let preview = self.get_preview(project_id, preview_id)?;
-        let path =
-            self.resolve_project_relative(project_id, preview["path"].as_str().unwrap_or(""))?;
-        match open_path_external(&path) {
-            Ok(()) => Ok(
-                json!({ "opened": true, "filePath": path.to_string_lossy(), "message": "Documento abierto con la aplicación predeterminada del sistema." }),
-            ),
-            Err(message) => Ok(
-                json!({ "opened": false, "filePath": path.to_string_lossy(), "message": message }),
-            ),
-        }
-    }
-
-    fn ai_context_search(&self, project_id: &str, query: &BTreeMap<String, String>) -> Value {
-        let needle = query
-            .get("q")
-            .map(|value| value.to_ascii_lowercase())
-            .unwrap_or_default();
-        let mut matches = Vec::new();
-        if let (Ok(root), Ok(nodes)) =
-            (self.project_root(project_id), self.project_tree(project_id))
-        {
-            flatten_nodes(&nodes, &mut matches, &root, &needle);
-        }
-        Value::Array(matches)
-    }
-    fn ai_sources(&self, project_id: &str) -> Value {
-        let mut list = self.ai_sources_internal(project_id);
-        if let Some(sources) = list["sources"].as_array_mut() {
-            for source in sources {
-                if let Some(object) = source.as_object_mut() {
-                    object.remove("text");
-                }
-            }
-        }
-        list
-    }
-    fn ai_sources_internal(&self, project_id: &str) -> Value {
-        self.read_json(
-            &self.context_sources_path(project_id),
-            json!({ "sources": [], "expiredSourceIds": [] }),
-        )
-    }
-    fn ai_source(&self, project_id: &str, source_id: &str, kind: &str) -> Value {
-        let now = knownext_core::now_iso();
-        let source = self.build_ai_source(project_id, source_id, kind, &now);
-        let mut list = self.ai_sources_internal(project_id);
-        let sources = list["sources"].as_array_mut();
-        if let Some(sources) = sources {
-            sources.retain(|item| item["id"].as_str() != Some(source_id));
-            sources.push(source.clone());
-            let _ = self.write_json(&self.context_sources_path(project_id), &list);
-        }
-        without_internal_source_text(source)
-    }
-    fn ai_upload_sources(&self, project_id: &str, files: Vec<LocalApiFile>) -> Value {
-        let mut list = self.ai_sources_internal(project_id);
-        let now = knownext_core::now_iso();
-        let mut uploaded = Vec::new();
-        if let Some(sources) = list["sources"].as_array_mut() {
-            for file in files {
-                let id = format!(
-                    "upload_{}",
-                    knownext_core::compact_id(&safe_name(&file.name))
-                );
-                let bytes = base64::engine::general_purpose::STANDARD
-                    .decode(file.data_base64.as_bytes())
-                    .unwrap_or_default();
-                let text = if file.mime_type.as_deref().unwrap_or("").starts_with("text/")
-                    || file.name.ends_with(".md")
-                    || file.name.ends_with(".txt")
-                    || file.name.ends_with(".csv")
-                {
-                    String::from_utf8_lossy(&bytes)
-                        .chars()
-                        .take(20_000)
-                        .collect::<String>()
-                } else {
-                    String::new()
-                };
-                let name = file.name;
-                let mime_type = file.mime_type;
-                let source = json!({
-                    "id": id,
-                    "projectId": project_id,
-                    "kind": "external_file",
-                    "name": name,
-                    "path": null,
-                    "mimeType": mime_type,
-                    "sizeBytes": bytes.len(),
-                    "status": "ready",
-                    "weight": "medium",
-                    "warning": null,
-                    "error": null,
-                    "createdAt": now,
-                    "updatedAt": now,
-                    "lastUsedAt": null,
-                    "expiresAt": null,
-                    "text": text
-                });
-                sources.retain(|item| item["id"].as_str() != source["id"].as_str());
-                sources.push(source.clone());
-                uploaded.push(source);
-            }
-        }
-        let _ = self.write_json(&self.context_sources_path(project_id), &list);
-        self.ai_sources(project_id)
-    }
-    fn ai_upload_local_sources(&self, project_id: &str, body: Value) -> ApiResult {
-        const MAX_CONTEXT_FILE_BYTES: u64 = 25 * 1024 * 1024;
-        let Some(paths) = body.get("paths").and_then(Value::as_array) else {
-            return Ok(LocalApiResponse {
-                status: 400,
-                body: json!({ "error": "missing_paths", "message": "Selecciona al menos un archivo para añadirlo al contexto IA." }),
-            });
-        };
-
-        let mut files = Vec::new();
-        for raw_path in paths
-            .iter()
-            .filter_map(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-        {
-            let path = PathBuf::from(raw_path);
-            let metadata = match std::fs::metadata(&path) {
-                Ok(metadata) if metadata.is_file() => metadata,
-                Ok(_) => {
-                    return Ok(LocalApiResponse {
-                        status: 400,
-                        body: json!({ "error": "invalid_file", "message": format!("La ruta seleccionada no es un archivo: {raw_path}") }),
-                    });
-                }
-                Err(error) => {
-                    return Ok(LocalApiResponse {
-                        status: 400,
-                        body: json!({ "error": "file_unavailable", "message": format!("No se pudo leer el archivo seleccionado: {error}") }),
-                    });
-                }
-            };
-            if metadata.len() > MAX_CONTEXT_FILE_BYTES {
-                return Ok(LocalApiResponse {
-                    status: 413,
-                    body: json!({ "error": "file_too_large", "message": format!("El archivo supera el límite de 25 MB: {}", path.file_name().and_then(|value| value.to_str()).unwrap_or(raw_path)) }),
-                });
-            }
-
-            let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
-            files.push(LocalApiFile {
-                field_name: "files".to_string(),
-                name: path
-                    .file_name()
-                    .and_then(|value| value.to_str())
-                    .unwrap_or("archivo")
-                    .to_string(),
-                mime_type: Some(mime_for_path(&path).to_string()),
-                data_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
-            });
-        }
-
-        if files.is_empty() {
-            return Ok(LocalApiResponse {
-                status: 400,
-                body: json!({ "error": "missing_paths", "message": "Selecciona al menos un archivo para añadirlo al contexto IA." }),
-            });
-        }
-
-        Ok(LocalApiResponse {
-            status: 200,
-            body: self.ai_upload_sources(project_id, files),
-        })
-    }
-    fn build_ai_source(&self, project_id: &str, source_id: &str, kind: &str, now: &str) -> Value {
-        let path = document_ref_path(source_id).ok();
-        let resolved_path = path
-            .as_deref()
-            .and_then(|relative| self.resolve_project_relative(project_id, relative).ok());
-        let name = resolved_path
-            .as_ref()
-            .and_then(|path| path.file_name())
-            .and_then(|value| value.to_str())
-            .unwrap_or(source_id)
-            .to_string();
-        let size = resolved_path
-            .as_ref()
-            .and_then(|path| std::fs::metadata(path).ok())
-            .map(|metadata| metadata.len())
-            .unwrap_or(0);
-        let mime = resolved_path.as_ref().map(|path| mime_for_path(path));
-        let text = resolved_path
-            .as_ref()
-            .map(|path| {
-                if is_handwritten_note_path(path) {
-                    knownext_docs::handwritten_note_text(&self.read_json(path, Value::Null))
-                } else {
-                    knownext_docs::extract_plain_text(path)
-                }
-            })
-            .unwrap_or_default();
-        json!({
-            "id": source_id,
-            "projectId": project_id,
-            "kind": kind,
-            "name": name,
-            "path": path,
-            "mimeType": mime,
-            "sizeBytes": size,
-            "status": "ready",
-            "weight": if size > 500_000 { "high" } else { "medium" },
-            "warning": null,
-            "error": null,
-            "createdAt": now,
-            "updatedAt": now,
-            "lastUsedAt": null,
-            "expiresAt": null,
-            "text": text
-        })
-    }
-    fn remove_ai_source(&self, project_id: &str, source_id: &str) -> Value {
-        let mut list = self.ai_sources_internal(project_id);
-        if let Some(sources) = list["sources"].as_array_mut() {
-            sources.retain(|item| item["id"].as_str() != Some(source_id));
-        }
-        let _ = self.write_json(&self.context_sources_path(project_id), &list);
-        self.ai_sources(project_id)
-    }
-    fn ai_source_preview(&self, project_id: &str, source_id: &str) -> Value {
-        let sources = self.ai_sources_internal(project_id);
-        let source = sources["sources"]
-            .as_array()
-            .and_then(|sources| {
-                sources
-                    .iter()
-                    .find(|source| source["id"].as_str() == Some(source_id))
-                    .cloned()
-            })
-            .unwrap_or_else(|| {
-                self.build_ai_source(
-                    project_id,
-                    source_id,
-                    "external_file",
-                    &knownext_core::now_iso(),
-                )
-            });
-        let preview = source["text"]
-            .as_str()
-            .unwrap_or("")
-            .chars()
-            .take(4000)
-            .collect::<String>();
-        json!({ "source": without_internal_source_text(source), "previewText": preview, "metadata": {} })
-    }
-    fn add_ai_source_to_project(
-        &self,
-        project_id: &str,
-        source_id: &str,
-        body: Value,
-    ) -> Result<Value, String> {
-        let sources = self.ai_sources_internal(project_id);
-        let source = sources["sources"]
-            .as_array()
-            .and_then(|sources| {
-                sources
-                    .iter()
-                    .find(|source| source["id"].as_str() == Some(source_id))
-                    .cloned()
-            })
-            .unwrap_or_else(|| {
-                self.build_ai_source(
-                    project_id,
-                    source_id,
-                    "external_file",
-                    &knownext_core::now_iso(),
-                )
-            });
-
-        let parent =
-            self.node_relative(project_id, body.get("parentId").and_then(Value::as_str))?;
-        let requested_name = body
-            .get("name")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| source["name"].as_str().unwrap_or("contexto.md"));
-        let file_name = markdown_file_name(requested_name);
-        let relative = self.unique_project_relative(project_id, parent.as_deref(), &file_name)?;
-        let path = self.resolve_project_relative(project_id, &relative)?;
-        if let Some(parent_path) = path.parent() {
-            std::fs::create_dir_all(parent_path).map_err(|error| error.to_string())?;
-        }
-
-        let source_name = source["name"].as_str().unwrap_or("Fuente IA");
-        let source_path = source["path"].as_str();
-        let text = source["text"].as_str().unwrap_or("").trim();
-        let markdown = if text.is_empty() {
-            format!(
-                "# {source_name}\n\nFuente añadida desde el contexto IA.\n{}\n",
-                source_path
-                    .map(|path| format!("\nRuta original: `{path}`\n"))
-                    .unwrap_or_default()
-            )
-        } else {
-            format!(
-                "# {source_name}\n\n{}\n\n{}",
-                source_path
-                    .map(|path| format!("Fuente: `{path}`\n"))
-                    .unwrap_or_default(),
-                text
-            )
-        };
-        std::fs::write(&path, markdown).map_err(|error| error.to_string())?;
-        let document_id = doc_id(project_id, &relative);
-        Ok(json!({
-            "documentId": document_id,
-            "path": relative,
-            "tree": self.project_tree(project_id)?
-        }))
-    }
-    fn unique_project_relative(
-        &self,
-        project_id: &str,
-        parent: Option<&str>,
-        file_name: &str,
-    ) -> Result<String, String> {
-        let base_relative = join_relative(parent, file_name);
-        let base_path = self.resolve_project_relative(project_id, &base_relative)?;
-        if !base_path.exists() {
-            return Ok(base_relative);
-        }
-        let stem = file_name
-            .rsplit_once('.')
-            .map(|(stem, _)| stem)
-            .unwrap_or(file_name);
-        let ext = file_name
-            .rsplit_once('.')
-            .map(|(_, ext)| format!(".{ext}"))
-            .unwrap_or_default();
-        for index in 2..1000 {
-            let candidate = join_relative(parent, &format!("{stem} {index}{ext}"));
-            if !self
-                .resolve_project_relative(project_id, &candidate)?
-                .exists()
-            {
-                return Ok(candidate);
-            }
-        }
-        Err("No se pudo generar un nombre de documento libre".to_string())
-    }
-    fn ai_conversation(&self, project_id: &str) -> Value {
-        self.read_json(&self.conversation_path(project_id), json!({ "events": [] }))
-    }
-    fn append_ai_conversation_events(&self, project_id: &str, next_events: Vec<Value>) {
-        if next_events.is_empty() {
-            return;
-        }
-        let mut conversation = self.ai_conversation(project_id);
-        if let Some(events) = conversation["events"].as_array_mut() {
-            events.extend(next_events);
-            trim_ai_conversation_events(events);
-        }
-        let _ = self.write_json(&self.conversation_path(project_id), &conversation);
-    }
-    fn ai_interaction(&self, project_id: &str, body: Value) -> Value {
-        let user_event = self.ai_user_conversation_event(project_id, &body);
-        let context_sources = self.resolve_ai_context_sources(project_id, &body);
-        let mut runtime_body = body;
-        let config = self.read_config();
-        if let Some(object) = runtime_body.as_object_mut() {
-            object.insert(
-                "runtimePermissions".to_string(),
-                config["ai"]["permissions"].clone(),
-            );
-            object.insert("runtimeAi".to_string(), config["ai"].clone());
-        }
-        let mut response = knownext_ai::answer_interaction(
-            project_id,
-            &runtime_body,
-            context_sources,
-            self.openai_key().as_deref(),
-            self.ai_model().as_str(),
-        );
-        if let Err(error) =
-            self.apply_ai_document_creations(project_id, &runtime_body, &mut response)
-        {
-            self.mark_ai_response_error(
-                project_id,
-                runtime_body.get("documentId").and_then(Value::as_str),
-                &mut response,
-                &error,
-            );
-        }
-        if response["status"].as_str() == Some("completed") {
-            if let Err(error) =
-                self.apply_ai_image_generations(project_id, &runtime_body, &mut response)
-            {
-                self.mark_ai_response_error(
-                    project_id,
-                    runtime_body.get("documentId").and_then(Value::as_str),
-                    &mut response,
-                    &error,
-                );
-            }
-        }
-        if response["status"].as_str() == Some("completed") {
-            if let Err(error) =
-                self.apply_ai_handwritten_drawings(project_id, &runtime_body, &mut response)
-            {
-                self.mark_ai_response_error(
-                    project_id,
-                    runtime_body
-                        .get("handwrittenNoteId")
-                        .or_else(|| runtime_body.get("documentId"))
-                        .and_then(Value::as_str),
-                    &mut response,
-                    &error,
-                );
-            }
-        }
-        let mut response_events = Vec::new();
-        if let Some(event) = user_event {
-            response_events.push(event);
-        }
-        response_events.extend(
-            response["conversationEvents"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default(),
-        );
-        response["conversationEvents"] = Value::Array(response_events.clone());
-        self.append_ai_conversation_events(project_id, response_events);
-        self.record_ai_usage_records(
-            project_id,
-            response["interactionId"].as_str().unwrap_or("ai"),
-            &response,
-        );
-        response
-    }
-    fn ai_research_jobs(&self, project_id: &str) -> Value {
-        self.read_json(&self.research_jobs_path(project_id), json!({ "jobs": [] }))
-    }
-    fn ai_research_jobs_response(&self, project_id: &str) -> Value {
-        let mut store = self.ai_research_jobs(project_id);
-        if let Some(jobs) = store["jobs"].as_array_mut() {
-            jobs.sort_by(|a, b| {
-                b["createdAt"]
-                    .as_str()
-                    .unwrap_or("")
-                    .cmp(a["createdAt"].as_str().unwrap_or(""))
-            });
-            jobs.truncate(50);
-        }
-        store
-    }
-    fn write_ai_research_job(&self, project_id: &str, job: &Value) {
-        let mut normalized_job = job.clone();
-        refresh_research_runtime_fields(&mut normalized_job);
-        let mut store = self.ai_research_jobs(project_id);
-        if let Some(jobs) = store["jobs"].as_array_mut() {
-            let job_id = normalized_job["id"].as_str().unwrap_or("");
-            if let Some(existing) = jobs
-                .iter_mut()
-                .find(|item| item["id"].as_str() == Some(job_id))
-            {
-                *existing = normalized_job;
-            } else {
-                jobs.push(normalized_job);
-            }
-        }
-        let _ = self.write_json_atomic(&self.research_jobs_path(project_id), &store);
-    }
-    fn ai_research_policy(&self, project_id: &str) -> Value {
-        let now = knownext_core::now_iso();
-        let config = self.read_config();
-        let agentic = &config["ai"]["agentic"];
-        let default = json!({
-            "projectId": project_id,
-            "allowedSourceScopes": ["web_project", "web", "project"],
-            "blockedDomains": [],
-            "preferredLanguage": "es",
-            "defaultDepth": agentic["depth"].as_str().filter(|value| matches!(*value, "quick" | "standard" | "deep")).unwrap_or("deep"),
-            "maxEstimatedCostEur": agentic["maxEstimatedCostEur"].as_f64().unwrap_or(1.0),
-            "maxSources": agentic["maxSources"].as_u64().unwrap_or(6),
-            "confirmBeforeCreating": agentic["confirmBeforeApplying"].as_bool().unwrap_or(true),
-            "allowPrivateProjectDocuments": true,
-            "minimumSources": 2,
-            "requireCitations": true,
-            "updatedAt": now
-        });
-        let mut policy = self.read_json(&self.research_policy_path(project_id), default);
-        policy["projectId"] = Value::from(project_id);
-        policy
-    }
-    fn save_ai_research_policy(&self, project_id: &str, mut body: Value) -> Value {
-        body["projectId"] = Value::from(project_id);
-        body["updatedAt"] = Value::from(knownext_core::now_iso());
-        let _ = self.write_json_atomic(&self.research_policy_path(project_id), &body);
-        body
-    }
-    fn ai_research_brief(&self, project_id: &str, body: Value) -> Value {
-        if let Some(user_event) = self.ai_user_conversation_event(project_id, &body) {
-            self.append_ai_conversation_events(project_id, vec![user_event]);
-        }
-        let now = knownext_core::now_iso();
-        let config = self.read_config();
-        let agentic = &config["ai"]["agentic"];
-        let policy = self.ai_research_policy(project_id);
-        let prompt = body
-            .get("prompt")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim();
-        let topic = body
-            .pointer("/intent/research/topic")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or(prompt)
-            .trim();
-        let topic = if topic.is_empty() {
-            "Investigación sin título"
-        } else {
-            topic
-        };
-        let max_cost = body
-            .pointer("/intent/research/maxEstimatedCostEur")
-            .and_then(Value::as_f64)
-            .or_else(|| policy["maxEstimatedCostEur"].as_f64())
-            .or_else(|| agentic["maxEstimatedCostEur"].as_f64())
-            .unwrap_or(1.0)
-            .clamp(0.1, 25.0);
-        let web_enabled = config["ai"]["agentic"]["webResearchEnabled"]
-            .as_bool()
-            .unwrap_or(false);
-        let depth = "deep".to_string();
-        let template_id = "state_of_art".to_string();
-        let source_scope = "web_project".to_string();
-        let proposed_candidate_source_limit =
-            research_proposed_candidate_source_limit(topic, prompt, &body);
-        let proposed_report_length =
-            research_proposed_report_length(topic, prompt, proposed_candidate_source_limit);
-        let candidate_source_limit = body
-            .pointer("/intent/research/candidateSourceLimit")
-            .and_then(Value::as_u64)
-            .or_else(|| {
-                body.pointer("/intent/research/maxSources")
-                    .and_then(Value::as_u64)
-            })
-            .or_else(|| {
-                body.pointer("/intent/research/plan/candidateSourceLimit")
-                    .and_then(Value::as_u64)
-            })
-            .unwrap_or(proposed_candidate_source_limit)
-            .clamp(1, 500);
-        let report_length = body
-            .pointer("/intent/research/reportLength")
-            .and_then(Value::as_str)
-            .or_else(|| {
-                body.pointer("/intent/research/plan/reportLength")
-                    .and_then(Value::as_str)
-            })
-            .map(normalize_research_report_length)
-            .unwrap_or(proposed_report_length);
-        let diagrams_enabled = agentic["researchDiagramsEnabled"]
-            .as_bool()
-            .unwrap_or_else(|| legacy_research_visual_enabled(agentic, "diagramsEnabled", true));
-        let images_enabled = agentic["researchImagesEnabled"]
-            .as_bool()
-            .unwrap_or_else(|| legacy_research_visual_enabled(agentic, "imagesEnabled", true));
-        let strategy = knownext_research::strategy_for_mode_and_length(
-            "deep",
-            candidate_source_limit as usize,
-            report_length,
-        );
-        let duration_label = strategy["estimatedTimeRange"]
-            .as_str()
-            .unwrap_or("10-30 min")
-            .to_string();
-        let language = body
-            .pointer("/intent/research/language")
-            .and_then(Value::as_str)
-            .or_else(|| policy["preferredLanguage"].as_str())
-            .unwrap_or("es");
-        let tone = body
-            .pointer("/intent/research/tone")
-            .and_then(Value::as_str)
-            .unwrap_or("professional");
-        let primary_objective = research_objective_for_request(topic);
-        let secondary_objectives = research_secondary_objectives_for_request(topic);
-        let research_aspects = research_aspects_for_request(topic);
-        let recommended_report_style =
-            research_recommended_style_for_request(topic, report_length).to_string();
-        let constraints = if !web_enabled && matches!(source_scope.as_str(), "web" | "web_project")
-        {
-            "La investigación necesita búsqueda web activa y una API key configurada. Configura OpenAI para poder ejecutarla.".to_string()
-        } else {
-            "Usar web como fuente principal, añadir contexto del proyecto solo si el usuario lo aporta y marcar como no concluyente cualquier afirmación sin soporte suficiente.".to_string()
-        };
-        let planning_rationale = format!(
-            "Se proponen {} fuentes candidatas y extensión {} por el alcance y complejidad del objetivo.",
-            candidate_source_limit,
-            research_report_length_label(report_length)
-        );
-        let plan = json!({
-            "title": research_title_for_request(topic),
-            "objective": primary_objective,
-            "primaryObjective": primary_objective,
-            "secondaryObjectives": secondary_objectives,
-            "researchAspects": research_aspects,
-            "objectiveCoverage": research_objective_coverage(),
-            "recommendedReportStyle": recommended_report_style,
-            "proposedCandidateSourceLimit": proposed_candidate_source_limit,
-            "candidateSourceLimit": candidate_source_limit,
-            "proposedReportLength": proposed_report_length,
-            "reportLength": report_length,
-            "planningRationale": planning_rationale,
-            "outline": research_aspects,
-            "constraints": constraints,
-            "sourceScope": source_scope.clone(),
-            "reportSkillId": "knownext.research_report",
-            "auxiliarySkillIds": research_auxiliary_skill_ids(diagrams_enabled, images_enabled),
-            "outputSummary": "Web activa · contexto del proyecto si se aporta · tablas y citas siempre disponibles",
-            "visualPlan": research_visual_plan(diagrams_enabled, images_enabled),
-            "diagramsEnabled": diagrams_enabled,
-            "imagesEnabled": images_enabled,
-            "estimatedDurationLabel": duration_label.clone(),
-            "autoStartAfterSeconds": knownext_research::AUTO_START_AFTER_SECONDS,
-            "createdAt": now,
-            "updatedAt": now
-        });
-        json!({
-            "id": knownext_core::compact_id("research-brief"),
-            "projectId": project_id,
-            "topic": topic,
-            "objective": plan["objective"],
-            "questions": plan["outline"],
-            "depth": depth,
-            "sourceScope": source_scope,
-            "maxSources": candidate_source_limit,
-            "candidateSourceLimit": candidate_source_limit,
-            "maxEstimatedCostEur": max_cost,
-            "resultTarget": "new_document",
-            "confirmBeforeCreating": false,
-            "destinationFolderId": Value::Null,
-            "destinationFolderPath": Value::Null,
-            "templateId": template_id,
-            "reportLength": report_length,
-            "tone": tone,
-            "language": language,
-            "plan": plan,
-            "reportProfile": {
-                "diagramsEnabled": diagrams_enabled,
-                "imagesEnabled": images_enabled
-            },
-            "createdAt": now,
-            "updatedAt": now
-        })
-    }
-    fn ai_research_job(&self, project_id: &str, job_id: &str) -> Value {
-        self.ai_research_jobs(project_id)["jobs"]
-            .as_array()
-            .and_then(|jobs| {
-                jobs.iter()
-                    .find(|job| job["id"].as_str() == Some(job_id))
-                    .cloned()
-            })
-            .unwrap_or_else(|| {
-                let now = knownext_core::now_iso();
-                json!({
-                    "id": job_id,
-                    "projectId": project_id,
-                    "brief": Value::Null,
-                    "status": "failed",
-                    "phases": [],
-                    "currentPhase": "failed",
-                    "phase": "failed",
-                    "progress": 100,
-                    "progressMessage": "Investigación no encontrada.",
-                    "message": "Investigación no encontrada.",
-                    "sources": [],
-                    "evidence": [],
-                    "qualityReport": Value::Null,
-                    "reviewState": Value::Null,
-                    "metrics": Value::Null,
-                    "documentId": Value::Null,
-                    "createdDocumentId": Value::Null,
-                    "documentPath": Value::Null,
-                    "markdown": Value::Null,
-                    "researchFindings": [],
-                    "tree": Value::Null,
-                    "usedSkills": [],
-                    "skillApplications": [],
-                    "skillDiagnostics": [],
-                    "generatedImages": [],
-                    "error": { "code": "not_found", "message": "Investigación no encontrada.", "retryable": false },
-                    "retryOfJobId": Value::Null,
-                    "startedAt": Value::Null,
-                    "finishedAt": now,
-                    "createdAt": now,
-                    "updatedAt": now
-                })
-            })
-    }
-    fn ai_research_cancel(&self, project_id: &str, job_id: &str) -> Value {
-        let mut job = self.ai_research_job(project_id, job_id);
-        let now = knownext_core::now_iso();
-        job["status"] = Value::from("cancelled");
-        job["currentPhase"] = Value::from("cancelled");
-        job["phase"] = Value::from("cancelled");
-        job["progress"] = Value::from(100);
-        job["progressMessage"] = Value::from("Investigación cancelada.");
-        job["message"] = Value::from("Investigación cancelada.");
-        job["finishedAt"] = Value::from(now.clone());
-        job["updatedAt"] = Value::from(now);
-        self.write_ai_research_job(project_id, &job);
-        job
-    }
-    fn ai_research_start(&self, project_id: &str, body: Value) -> Result<Value, String> {
-        let brief = body
-            .get("brief")
-            .cloned()
-            .unwrap_or_else(|| self.ai_research_brief(project_id, body.clone()));
-        let now = knownext_core::now_iso();
-        let current_ai=self.read_config()["ai"].clone();
-        let ai_snapshot:serde_json::Map<String,Value>=["model","vision","imageGeneration","transcription","agentic","permissions","rag","diagrams"].into_iter().filter_map(|key| current_ai.get(key).map(|v|(key.to_string(),v.clone()))).collect();
-        let job = json!({
-            "aiConfigSnapshot": ai_snapshot,
-            "exchangeRateSnapshot": currency::read(&self.app_data_dir),
-            "id": knownext_core::compact_id("research"),
-            "projectId": project_id,
-            "brief": brief,
-            "status": "planning",
-            "phases": ["planning", "searching", "reading", "extracting", "contrasting", "drafting", "reviewing"],
-            "currentPhase": "planning",
-            "phase": "planning",
-            "progress": 5,
-            "progressMessage": "Preparando investigación.",
-            "message": "Preparando investigación.",
-            "heartbeatAt": now,
-            "lastActivityAt": now,
-            "sources": [],
-            "evidence": [],
-            "strategy": Value::Null,
-            "queryBatches": [],
-            "sourceCandidates": [],
-            "rankedSources": [],
-            "sourceReads": [],
-            "coverage": Value::Null,
-            "findings": [],
-            "draftMarkdown": Value::Null,
-            "activity": [knownext_research::activity_event("planning", "info", "Investigación creada.")],
-            "artifactCounts": {
-                "candidateSources": 0,
-                "rankedSources": 0,
-                "selectedSources": 0,
-                "readSources": 0,
-                "evidence": 0,
-                "findings": 0,
-                "citedSources": 0,
-                "tables": 0,
-                "diagrams": 0,
-                "images": 0
-            },
-            "usage": {
-                "providerCalls": 0,
-                "inputTokens": 0,
-                "cachedInputTokens": 0,
-                "outputTokens": 0,
-                "reasoningTokens": 0,
-                "totalTokens": 0,
-                "estimatedCostEur": Value::Null,
-                "currency": "EUR",
-                "updatedAt": Value::Null
-            },
-            "budget": Value::Null,
-            "qualityReport": Value::Null,
-            "reviewState": { "status": "draft_ai", "comments": Value::Null, "reviewedAt": Value::Null },
-            "metrics": { "durationMs": Value::Null, "estimatedCostEur": Value::Null, "sourceCount": 0, "evidenceCount": 0, "supportedClaimRatio": Value::Null },
-            "documentId": Value::Null,
-            "createdDocumentId": Value::Null,
-            "documentPath": Value::Null,
-            "markdown": Value::Null,
-            "researchFindings": [],
-            "tree": Value::Null,
-            "usedSkills": [],
-            "skillApplications": [],
-            "skillDiagnostics": [],
-            "generatedImages": [],
-            "error": Value::Null,
-            "retryOfJobId": body.get("retryOfJobId").cloned().unwrap_or(Value::Null),
-            "request": body,
-            "startedAt": Value::Null,
-            "finishedAt": Value::Null,
-            "createdAt": now,
-            "updatedAt": now
-        });
-        self.write_ai_research_job(project_id, &job);
-
-        let api = self.clone();
-        let project_id = project_id.to_string();
-        let job_id = job["id"].as_str().unwrap_or("").to_string();
-        thread::spawn(move || {
-            if let Err(error) = api.ai_research_execute_job(&project_id, &job_id) {
-                api.fail_ai_research_job_with_status(
-                    &project_id,
-                    &job_id,
-                    "failed_runtime",
-                    "research_runtime_error",
-                    &format!("La investigación se ha detenido por un error interno: {error}"),
-                    true,
-                );
-            }
-        });
-
-        Ok(job)
-    }
-
-    fn ai_research_execute_job(&self, project_id: &str, job_id: &str) -> Result<(), String> {
-        let started_at = knownext_core::now_iso();
-        self.update_ai_research_job(project_id, job_id, |job| {
-            job["startedAt"] = Value::from(started_at.clone());
-            job["status"] = Value::from("planning");
-            job["currentPhase"] = Value::from("planning");
-            job["phase"] = Value::from("planning");
-            job["progress"] = Value::from(10);
-            job["progressMessage"] = Value::from("Validando configuración y alcance.");
-            job["message"] = Value::from("Validando configuración y alcance.");
-        });
-
-        let job = self.ai_research_job(project_id, job_id);
-        if job["status"].as_str() == Some("cancelled") {
-            return Ok(());
-        }
-        let config = if job["aiConfigSnapshot"].is_object() {json!({"ai":job["aiConfigSnapshot"]})} else {self.read_config()};
-        let model=config["ai"]["model"].as_str().unwrap_or("gpt-6.1-sol");
-        if !config["ai"]["agentic"]["webResearchEnabled"]
-            .as_bool()
-            .unwrap_or(false)
-        {
-            self.fail_ai_research_job_with_status(
-                project_id,
-                job_id,
-                "failed_provider",
-                "web_research_disabled",
-                "Activa la investigación web en Ajustes > IA para ejecutar investigaciones con fuentes online.",
-                true,
-            );
-            return Ok(());
-        }
-        if self.openai_key().as_deref().unwrap_or("").trim().is_empty() {
-            self.fail_ai_research_job_with_status(
-                project_id,
-                job_id,
-                "failed_provider",
-                "openai_key_missing",
-                "Configura una API key de OpenAI en Ajustes > IA para ejecutar investigaciones.",
-                true,
-            );
-            return Ok(());
-        }
-
-        if !currency::valid(&currency::read(&self.app_data_dir)) {
-            self.fail_ai_research_job_with_status(project_id,job_id,"failed_runtime","exchange_rate_required","Se necesita una referencia EUR/USD del BCE de los últimos siete días antes de consumir el presupuesto en euros.",true);
-            return Ok(());
-        }
-        let job = self.ai_research_job(project_id, job_id);
-        let request = job.get("request").cloned().unwrap_or_else(|| json!({}));
-        let context_sources = self.resolve_ai_context_sources(project_id, &request);
-        let strategy = knownext_research::strategy_for_brief(&job["brief"]);
-        let max_cost = job["brief"]["maxEstimatedCostEur"].as_f64().unwrap_or(1.0);
-        let max_steps = config["ai"]["agentic"]["maxSteps"]
-            .as_u64()
-            .and_then(|value| usize::try_from(value).ok())
-            .unwrap_or(20);
-        let budget = knownext_research::budget_for_strategy(&strategy, max_cost, max_steps);
-        self.update_ai_research_job(project_id, job_id, |job| {
-            job["strategy"] = strategy.clone();
-            job["budget"] = budget.clone();
-        });
-
-        self.set_ai_research_phase(
-            project_id,
-            job_id,
-            "query_planning",
-            15,
-            "Preparando consultas de investigación.",
-        );
-        if self.is_ai_research_cancelled(project_id, job_id) {
-            return Ok(());
-        }
-        let query_batches = knownext_research::query_batches(&job["brief"]["plan"], &strategy);
-        self.update_ai_research_job(project_id, job_id, |job| {
-            job["queryBatches"] = json!(query_batches);
-            job["budget"] = knownext_research::increment_budget_step(&job["budget"], 1);
-        });
-
-        let job = self.ai_research_job(project_id, job_id);
-        self.set_ai_research_phase(project_id, job_id, "searching", 25, "Buscando fuentes.");
-        let candidate_limit = strategy["candidateSourceLimit"]
-            .as_u64()
-            .and_then(|value| usize::try_from(value).ok())
-            .unwrap_or(50)
-            .clamp(1, 500);
-        let mut source_candidates: Vec<Value> = Vec::new();
-        let query_batches = job["queryBatches"].as_array().cloned().unwrap_or_default();
-        let query_batch_total = query_batches.len().max(1);
-        for (batch_index, batch) in query_batches.into_iter().enumerate() {
-            if self.is_ai_research_cancelled(project_id, job_id) {
-                return Ok(());
-            }
-            let remaining = candidate_limit.saturating_sub(source_candidates.len());
-            if remaining == 0 {
-                break;
-            }
-            let aspect = batch["aspect"]
-                .as_str()
-                .unwrap_or("el objetivo definido")
-                .chars()
-                .take(90)
-                .collect::<String>();
-            self.set_ai_research_phase(
-                project_id,
-                job_id,
-                "searching",
-                25 + ((batch_index as u64 * 8) / query_batch_total as u64),
-                &format!(
-                    "Investigando {} de {}: {aspect}.",
-                    batch_index + 1,
-                    query_batch_total
-                ),
-            );
-            let step = knownext_ai::run_research_step(
-                self.openai_key().as_deref(),
-                model,
-                "search",
-                &json!({
-                    "brief": job["brief"],
-                    "plan": job["brief"]["plan"],
-                    "strategy": strategy,
-                    "queryBatch": batch,
-                    "contextSources": compact_research_context_sources(&context_sources)
-                }),
-                true,
-            );
-            if step["status"].as_str() != Some("ready") {
-                self.fail_ai_research_job_with_status(
-                    project_id,
-                    job_id,
-                    "failed_provider",
-                    "provider_error",
-                    step["message"]
-                        .as_str()
-                        .unwrap_or("No se pudieron buscar fuentes."),
-                    true,
-                );
-                return Ok(());
-            }
-            source_candidates.extend(knownext_research::normalize_source_candidates(
-                &step["body"],
-                &batch,
-                remaining,
-            ));
-            self.update_ai_research_job(project_id, job_id, |job| {
-                job["sourceCandidates"] = json!(source_candidates.clone());
-                job["budget"] = knownext_research::increment_budget_step(&job["budget"], 1);
-            });
-            let found = source_candidates.len();
-            self.set_ai_research_phase(
-                project_id,
-                job_id,
-                "searching",
-                30,
-                &format!("Fuentes candidatas encontradas: {found} de {candidate_limit}."),
-            );
-            self.record_ai_usage_records(project_id, job_id, &step);
-        }
-        if source_candidates.is_empty() {
-            self.fail_ai_research_job_with_status(
-                project_id,
-                job_id,
-                "failed_quality",
-                "no_sources",
-                "No se han encontrado fuentes web verificables para la investigación.",
-                true,
-            );
-            return Ok(());
-        }
-
-        self.set_ai_research_phase(
-            project_id,
-            job_id,
-            "ranking",
-            35,
-            "Seleccionando fuentes relevantes.",
-        );
-        let ranked_sources = knownext_research::rank_sources(&source_candidates, candidate_limit);
-        let read_budget = strategy["sourceReadBudget"]
-            .as_u64()
-            .and_then(|value| usize::try_from(value).ok())
-            .unwrap_or(12);
-        let selected_sources =
-            knownext_research::select_sources_for_reading(&ranked_sources, read_budget);
-        self.update_ai_research_job(project_id, job_id, |job| {
-            job["rankedSources"] = json!(ranked_sources.clone());
-            job["sources"] = json!(selected_sources.clone());
-            job["budget"] = knownext_research::increment_budget_step(&job["budget"], 1);
-        });
-
-        self.set_ai_research_phase(
-            project_id,
-            job_id,
-            "reading",
-            45,
-            &format!("Leyendo {} fuentes seleccionadas.", selected_sources.len()),
-        );
-        let mut source_reads = self.read_ai_research_sources(&selected_sources);
-        source_reads.extend(project_context_source_reads(&context_sources));
-        self.update_ai_research_job(project_id, job_id, |job| {
-            job["sourceReads"] = json!(source_reads.clone());
-            job["budget"] = knownext_research::increment_budget_step(&job["budget"], 1);
-        });
-        let read_count = self.ai_research_job(project_id, job_id)["sourceReads"]
-            .as_array()
-            .map(|items| {
-                items
-                    .iter()
-                    .filter(|item| item["status"].as_str() == Some("read"))
-                    .count()
-            })
-            .unwrap_or(0);
-        self.set_ai_research_phase(
-            project_id,
-            job_id,
-            "reading",
-            52,
-            &format!(
-                "Fuentes leídas: {read_count} de {}.",
-                selected_sources.len()
-            ),
-        );
-        if self.is_ai_research_cancelled(project_id, job_id) {
-            return Ok(());
-        }
-
-        self.set_ai_research_phase(
-            project_id,
-            job_id,
-            "extracting",
-            58,
-            "Extrayendo evidencias.",
-        );
-        let source_read_batches = research_source_read_batches(&source_reads);
-        let mut evidence: Vec<Value> = Vec::new();
-        let source_read_batch_total = source_read_batches.len().max(1);
-        for (batch_index, source_read_batch) in source_read_batches.into_iter().enumerate() {
-            if self.is_ai_research_cancelled(project_id, job_id) {
-                return Ok(());
-            }
-            self.set_ai_research_phase(
-                project_id,
-                job_id,
-                "extracting",
-                58 + ((batch_index as u64 * 4) / source_read_batch_total as u64),
-                &format!(
-                    "Extrayendo evidencias del lote {} de {}.",
-                    batch_index + 1,
-                    source_read_batch_total
-                ),
-            );
-            let evidence_step = knownext_ai::run_research_step(
-                self.openai_key().as_deref(),
-                model,
-                "evidence",
-                &json!({
-                    "brief": research_brief_for_worker(&job["brief"]),
-                    "plan": research_plan_for_worker(&job["brief"]["plan"]),
-                    "strategy": strategy,
-                    "sourceReads": source_read_batch
-                }),
-                false,
-            );
-            if evidence_step["status"].as_str() != Some("ready") {
-                self.fail_ai_research_job_with_status(
-                    project_id,
-                    job_id,
-                    "failed_provider",
-                    "provider_error",
-                    evidence_step["message"]
-                        .as_str()
-                        .unwrap_or("No se pudieron extraer evidencias."),
-                    true,
-                );
-                return Ok(());
-            }
-            evidence.extend(
-                evidence_step["body"]["evidence"]
-                    .as_array()
-                    .cloned()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|item| item["sourceId"].as_str().is_some()),
-            );
-            self.record_ai_usage_records(project_id, job_id, &evidence_step);
-        }
-        self.update_ai_research_job(project_id, job_id, |job| {
-            job["evidence"] = json!(evidence.clone());
-            job["budget"] = knownext_research::increment_budget_step(&job["budget"], 1);
-        });
-        let evidence_count = self.ai_research_job(project_id, job_id)["evidence"]
-            .as_array()
-            .map(Vec::len)
-            .unwrap_or(0);
-        self.set_ai_research_phase(
-            project_id,
-            job_id,
-            "extracting",
-            62,
-            &format!("Evidencias extraídas: {evidence_count}."),
-        );
-        self.set_ai_research_phase(project_id, job_id, "gap_analysis", 66, "Revisando lagunas.");
-        let coverage =
-            knownext_research::coverage_report(&job["brief"]["plan"], &evidence, &strategy);
-        self.update_ai_research_job(project_id, job_id, |job| {
-            job["coverage"] = coverage.clone();
-            job["budget"] = knownext_research::increment_budget_step(&job["budget"], 1);
-        });
-        if self.is_ai_research_cancelled(project_id, job_id) {
-            return Ok(());
-        }
-
-        self.set_ai_research_phase(
-            project_id,
-            job_id,
-            "synthesizing",
-            75,
-            "Contrastando hallazgos.",
-        );
-        let synthesize_step = knownext_ai::run_research_step(
-            self.openai_key().as_deref(),
-            model,
-            "synthesize",
-            &json!({
-                "brief": research_brief_for_worker(&job["brief"]),
-                "plan": research_plan_for_worker(&job["brief"]["plan"]),
-                "strategy": strategy,
-                "coverage": coverage,
-                "evidence": compact_research_evidence(&evidence, 90, 500)
-            }),
-            false,
-        );
-        if synthesize_step["status"].as_str() != Some("ready") {
-            self.fail_ai_research_job_with_status(
-                project_id,
-                job_id,
-                "failed_provider",
-                "provider_error",
-                synthesize_step["message"]
-                    .as_str()
-                    .unwrap_or("No se pudieron sintetizar hallazgos."),
-                true,
-            );
-            return Ok(());
-        }
-        let findings = synthesize_step["body"]["findings"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|item| {
-                item["evidenceIds"]
-                    .as_array()
-                    .map(|ids| !ids.is_empty())
-                    .unwrap_or(false)
-            })
-            .collect::<Vec<_>>();
-        self.update_ai_research_job(project_id, job_id, |job| {
-            job["findings"] = json!(findings.clone());
-            job["researchFindings"] = synthesize_step["body"]["researchFindings"].clone();
-            job["budget"] = knownext_research::increment_budget_step(&job["budget"], 1);
-        });
-        let finding_count = self.ai_research_job(project_id, job_id)["findings"]
-            .as_array()
-            .map(Vec::len)
-            .unwrap_or(0);
-        self.set_ai_research_phase(
-            project_id,
-            job_id,
-            "synthesizing",
-            79,
-            &format!("Hallazgos contrastados: {finding_count}."),
-        );
-        self.record_ai_usage_records(project_id, job_id, &synthesize_step);
-
-        self.set_ai_research_phase(project_id, job_id, "drafting", 84, "Redactando informe.");
-        let allowed_visuals = job["brief"]["reportProfile"].clone();
-        let write_step = knownext_ai::run_research_step(
-            self.openai_key().as_deref(),
-            model,
-            "write",
-            &json!({
-                "brief": research_brief_for_worker(&job["brief"]),
-                "plan": research_plan_for_worker(&job["brief"]["plan"]),
-                "strategy": strategy,
-                "findings": compact_research_findings(&findings, 60, 900),
-                "evidence": compact_research_evidence_for_findings(&evidence, &findings, 70, 500),
-                "allowedVisuals": allowed_visuals,
-                "recommendedReportStyle": job["brief"]["plan"]["recommendedReportStyle"]
-            }),
-            false,
-        );
-        if write_step["status"].as_str() != Some("ready") {
-            self.fail_ai_research_job_with_status(
-                project_id,
-                job_id,
-                "failed_provider",
-                "provider_error",
-                write_step["message"]
-                    .as_str()
-                    .unwrap_or("No se pudo redactar el informe."),
-                true,
-            );
-            return Ok(());
-        }
-        let draft_markdown = write_step["body"]["markdown"]
-            .as_str()
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        self.update_ai_research_job(project_id, job_id, |job| {
-            job["draftMarkdown"] = Value::from(draft_markdown.clone());
-            job["budget"] = knownext_research::increment_budget_step(&job["budget"], 1);
-        });
-        self.set_ai_research_phase(
-            project_id,
-            job_id,
-            "drafting",
-            89,
-            &format!(
-                "Informe redactado: {} palabras.",
-                draft_markdown.split_whitespace().count()
-            ),
-        );
-        self.record_ai_usage_records(project_id, job_id, &write_step);
-
-        self.set_ai_research_phase(
-            project_id,
-            job_id,
-            "verifying",
-            92,
-            "Verificando citas y cobertura.",
-        );
-        let mut job = self.ai_research_job(project_id, job_id);
-        let diagnostics =
-            validate_research_draft(&draft_markdown, &job["brief"], &job["sourceReads"]);
-        let quality_report = knownext_research::quality_report(
-            job["sources"].as_array().map(Vec::as_slice).unwrap_or(&[]),
-            job["evidence"].as_array().map(Vec::as_slice).unwrap_or(&[]),
-            &job["coverage"],
-            job["findings"].as_array().map(Vec::as_slice).unwrap_or(&[]),
-            &diagnostics,
-        );
-        let final_status = knownext_research::final_status_from_quality(&quality_report);
-        self.update_ai_research_job(project_id, job_id, |job| {
-            job["qualityReport"] = quality_report.clone();
-            job["skillDiagnostics"] = json!(diagnostics);
-        });
-        if final_status == "failed_quality" {
-            self.fail_ai_research_job_with_status(
-                project_id,
-                job_id,
-                "failed_quality",
-                "quality_failed",
-                "La investigación no alcanza la calidad mínima de fuentes, evidencias o citas. No se ha creado documento.",
-                true,
-            );
-            return Ok(());
-        }
-
-        self.set_ai_research_phase(
-            project_id,
-            job_id,
-            "publishing",
-            97,
-            "Preparando nombre del borrador.",
-        );
-        let mut markdown = draft_markdown;
-        let publish_result = (|| -> Result<(String, String, Vec<Value>, Vec<Value>), String> {
-            let generated_visuals = self.generate_ai_research_visual_assets(
-                project_id,
-                &job,
-                &write_step["body"],
-                &mut markdown,
-            )?;
-            self.set_ai_research_phase(
-                project_id,
-                job_id,
-                "publishing",
-                98,
-                "Guardando archivo Markdown.",
-            );
-            let topic = job["brief"]["topic"].as_str().unwrap_or("Investigación");
-            let file_name = safe_research_markdown_file_name(topic, job_id);
-            let parent = job["brief"]["destinationFolderId"].as_str();
-            let parent_relative = self.node_relative(project_id, parent)?;
-            let relative =
-                self.unique_project_relative(project_id, parent_relative.as_deref(), &file_name)?;
-            let path = self.resolve_project_relative(project_id, &relative)?;
-            if let Some(parent_path) = path.parent() {
-                std::fs::create_dir_all(parent_path).map_err(|error| error.to_string())?;
-            }
-            if self.ai_research_job(project_id, job_id)["status"].as_str() == Some("cancelled") {
-                return Err("Investigación cancelada.".to_string());
-            }
-            write_string_atomic(&path, &markdown)?;
-            self.set_ai_research_phase(
-                project_id,
-                job_id,
-                "publishing",
-                99,
-                "Actualizando árbol del proyecto.",
-            );
-            let tree = self.project_tree(project_id)?;
-            self.set_ai_research_phase(
-                project_id,
-                job_id,
-                "publishing",
-                99,
-                "Registrando borrador.",
-            );
-            let document_id = doc_id(project_id, &relative);
-            Ok((relative, document_id, generated_visuals, tree))
-        })();
-        let (relative, document_id, generated_visuals, tree) = match publish_result {
-            Ok(result) => result,
-            Err(_error)
-                if self.ai_research_job(project_id, job_id)["status"].as_str()
-                    == Some("cancelled") =>
-            {
-                return Ok(());
-            }
-            Err(error) => {
-                self.fail_ai_research_job_with_status(
-                    project_id,
-                    job_id,
-                    "failed_publish",
-                    "publish_failed",
-                    &format!(
-                        "La investigación terminó, pero no se pudo crear el borrador: {error}"
-                    ),
-                    true,
-                );
-                return Ok(());
-            }
-        };
-        let finished_at = knownext_core::now_iso();
-        let duration_ms = iso_duration_ms(
-            job["startedAt"].as_str().unwrap_or(started_at.as_str()),
-            &finished_at,
-        );
-
-        job["status"] = Value::from(final_status);
-        job["currentPhase"] = Value::from(final_status);
-        job["phase"] = Value::from(final_status);
-        job["progress"] = Value::from(100);
-        job["progressMessage"] = Value::from("Investigación completada.");
-        job["message"] =
-            Value::from("Investigación completada. Se ha creado un borrador revisable.");
-        job["qualityReport"] = quality_report;
-        job["reviewState"] =
-            json!({ "status": "draft_ai", "comments": Value::Null, "reviewedAt": Value::Null });
-        job["metrics"] = json!({
-            "durationMs": duration_ms,
-            "estimatedCostEur": Value::Null,
-            "sourceCount": job["sources"].as_array().map(|items| items.len()).unwrap_or(0),
-            "evidenceCount": job["evidence"].as_array().map(|items| items.len()).unwrap_or(0),
-            "supportedClaimRatio": supported_claim_ratio(&job["evidence"])
-        });
-        job["documentId"] = Value::from(document_id.clone());
-        job["createdDocumentId"] = Value::from(document_id.clone());
-        job["documentPath"] = Value::from(relative.clone());
-        job["markdown"] = Value::from(markdown);
-        if !generated_visuals.is_empty() {
-            job["generatedImages"] = Value::Array(generated_visuals);
-        }
-        job["tree"] = json!(tree);
-        job["usedSkills"] = json!(["knownext.research_report"]);
-        job["skillApplications"] = json!([]);
-        job["finishedAt"] = Value::from(finished_at.clone());
-        job["updatedAt"] = Value::from(finished_at);
-        append_research_activity(&mut job, final_status, "info", "Borrador creado.");
-        self.write_ai_research_job(project_id, &job);
-        self.append_ai_research_event(project_id, &job);
-        Ok(())
-    }
-
-    fn generate_ai_research_visual_assets(
-        &self,
-        project_id: &str,
-        job: &Value,
-        result: &Value,
-        markdown: &mut String,
-    ) -> Result<Vec<Value>, String> {
-        if !job["brief"]["reportProfile"]["imagesEnabled"]
-            .as_bool()
-            .unwrap_or(false)
-        {
-            return Ok(Vec::new());
-        }
-        let visual_requests = result["visualRequests"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
-        if visual_requests.is_empty() {
-            return Ok(Vec::new());
-        }
-        let config = self.read_config();
-        let ai = &config["ai"];
-        if !ai["imageGeneration"]["enabled"].as_bool().unwrap_or(false)
-            || !ai["permissions"]["generateImages"]
-                .as_bool()
-                .unwrap_or(false)
-            || !ai["permissions"]["createImageAssets"]
-                .as_bool()
-                .unwrap_or(false)
-        {
-            return Ok(vec![json!({
-                "status": "blocked",
-                "message": "El informe solicitó imágenes, pero la generación o creación de assets está desactivada."
-            })]);
-        }
-
-        let mut generated = Vec::new();
-        let image_config = &ai["imageGeneration"];
-        let parent = self.image_generation_parent(project_id, None, image_config);
-        for request in visual_requests.into_iter().take(3) {
-            if request["kind"].as_str() != Some("image") {
-                continue;
-            }
-            let prompt = request["prompt"].as_str().unwrap_or("").trim();
-            if prompt.is_empty() {
-                continue;
-            }
-            let image =
-                knownext_ai::generate_image(self.openai_key().as_deref(), image_config, prompt);
-            if image["status"].as_str() != Some("completed") {
-                generated.push(json!({
-                    "status": "error",
-                    "title": request["title"],
-                    "message": image["message"]
-                }));
-                continue;
-            }
-            let bytes = base64::engine::general_purpose::STANDARD
-                .decode(image["dataBase64"].as_str().unwrap_or("").as_bytes())
-                .map_err(|error| {
-                    format!("No se pudo decodificar la imagen de investigación: {error}")
-                })?;
-            if bytes.is_empty() {
-                continue;
-            }
-            let format = image["format"]
-                .as_str()
-                .unwrap_or_else(|| image_config["outputFormat"].as_str().unwrap_or("png"));
-            let title = request["title"].as_str().unwrap_or("imagen-investigacion");
-            let name = image_file_name(title, format);
-            let relative = self.unique_project_relative(project_id, parent.as_deref(), &name)?;
-            let path = self.resolve_project_relative(project_id, &relative)?;
-            if let Some(parent_path) = path.parent() {
-                std::fs::create_dir_all(parent_path).map_err(|error| error.to_string())?;
-            }
-            std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
-            let alt_text = request["altText"]
-                .as_str()
-                .unwrap_or("Imagen generada para el informe");
-            generated.push(json!({
-                "status": "completed",
-                "title": title,
-                "path": relative,
-                "altText": alt_text,
-                "prompt": prompt
-            }));
-        }
-
-        let completed = generated
-            .iter()
-            .filter(|item| item["status"].as_str() == Some("completed"))
-            .collect::<Vec<_>>();
-        if !completed.is_empty() {
-            markdown.push_str("\n\n## Recursos visuales generados\n\n");
-            for item in completed {
-                let path = item["path"].as_str().unwrap_or("");
-                let alt = item["altText"].as_str().unwrap_or("Imagen generada");
-                markdown.push_str(&format!("![{alt}]({path})\n\n"));
-            }
-        }
-        Ok(generated)
-    }
-
-    fn update_ai_research_job<F>(&self, project_id: &str, job_id: &str, update: F) -> Value
-    where
-        F: FnOnce(&mut Value),
-    {
-        let mut job = self.ai_research_job(project_id, job_id);
-        update(&mut job);
-        job["updatedAt"] = Value::from(knownext_core::now_iso());
-        self.write_ai_research_job(project_id, &job);
-        job
-    }
-    fn is_ai_research_cancelled(&self, project_id: &str, job_id: &str) -> bool {
-        self.ai_research_job(project_id, job_id)["status"].as_str() == Some("cancelled")
-    }
-    fn read_ai_research_sources(&self, sources: &[Value]) -> Vec<Value> {
-        let client = knownext_core::http_client_builder()
-            .timeout(Duration::from_secs(12))
-            .build()
-            .unwrap_or_else(|_| Client::new());
-        sources
-            .iter()
-            .map(|source| {
-                let source_id = source["id"].as_str().unwrap_or("").to_string();
-                let url = source["url"].as_str().unwrap_or("").trim().to_string();
-                let fallback = source["snapshotExcerpt"]
-                    .as_str()
-                    .filter(|value| !value.trim().is_empty())
-                    .or_else(|| {
-                        source["usedFragments"]
-                            .as_array()
-                            .and_then(|items| items.first())
-                            .and_then(Value::as_str)
-                    })
-                    .unwrap_or("")
-                    .to_string();
-                let (status, text) = if url.starts_with("http://") || url.starts_with("https://") {
-                    match client
-                        .get(&url)
-                        .header(USER_AGENT, "KnowNext.ai research reader")
-                        .header(ACCEPT, "text/html,text/plain,application/xhtml+xml")
-                        .send()
-                    {
-                        Ok(response) if response.status().is_success() => match response.text() {
-                            Ok(body) => ("read", clean_web_text(&body)),
-                            Err(_) if !fallback.is_empty() => ("read", fallback.clone()),
-                            Err(_) => ("unavailable", String::new()),
-                        },
-                        _ if !fallback.is_empty() => ("read", fallback.clone()),
-                        _ => ("unavailable", String::new()),
-                    }
-                } else if !fallback.is_empty() {
-                    ("read", fallback.clone())
-                } else {
-                    ("unavailable", String::new())
-                };
-                json!({
-                    "sourceId": source_id,
-                    "title": source["title"].clone(),
-                    "url": source["url"].clone(),
-                    "path": source["path"].clone(),
-                    "kind": source["kind"].clone(),
-                    "status": status,
-                    "readAt": knownext_core::now_iso(),
-                    "content": text.chars().take(8_000).collect::<String>(),
-                    "excerpt": fallback.chars().take(1_200).collect::<String>(),
-                    "objectiveIndex": source["objectiveIndex"].clone(),
-                    "aspectIndex": source["aspectIndex"].clone()
-                })
-            })
-            .collect()
-    }
-    fn set_ai_research_phase(
-        &self,
-        project_id: &str,
-        job_id: &str,
-        phase: &str,
-        progress: u64,
-        message: &str,
-    ) -> Value {
-        self.update_ai_research_job(project_id, job_id, |job| {
-            if job["status"].as_str() == Some("cancelled") {
-                return;
-            }
-            job["status"] = Value::from(phase);
-            job["currentPhase"] = Value::from(phase);
-            job["phase"] = Value::from(phase);
-            job["progress"] = Value::from(progress.min(99));
-            job["progressMessage"] = Value::from(message);
-            job["message"] = Value::from(message);
-            append_research_activity(job, phase, "info", message);
-        })
-    }
-    fn fail_ai_research_job_with_status(
-        &self,
-        project_id: &str,
-        job_id: &str,
-        status: &str,
-        code: &str,
-        message: &str,
-        retryable: bool,
-    ) -> Value {
-        self.update_ai_research_job(project_id, job_id, |job| {
-            if job["status"].as_str() == Some("cancelled") {
-                return;
-            }
-            let now = knownext_core::now_iso();
-            job["status"] = Value::from(status);
-            job["currentPhase"] = Value::from(status);
-            job["phase"] = Value::from(status);
-            job["progress"] = Value::from(100);
-            job["progressMessage"] = Value::from(message);
-            job["message"] = Value::from(message);
-            job["error"] = json!({ "code": code, "message": message, "retryable": retryable });
-            job["finishedAt"] = Value::from(now);
-            append_research_activity(job, status, "error", message);
-        })
-    }
-    fn ai_research_retry(&self, project_id: &str, job_id: &str) -> Result<Value, String> {
-        let job = self.ai_research_job(project_id, job_id);
-        let mut request = job.get("request").cloned().unwrap_or_else(|| {
-            json!({
-                "brief": job["brief"].clone(),
-                "activeMarkdown": "",
-                "contextSourceIds": []
-            })
-        });
-        if let Some(object) = request.as_object_mut() {
-            object.insert("brief".to_string(), job["brief"].clone());
-            object.insert("retryOfJobId".to_string(), Value::from(job_id));
-        }
-        self.ai_research_start(project_id, request)
-    }
-    fn ai_research_refine(
-        &self,
-        project_id: &str,
-        job_id: &str,
-        body: Value,
-    ) -> Result<Value, String> {
-        let job = self.ai_research_job(project_id, job_id);
-        let action = body
-            .get("action")
-            .and_then(Value::as_str)
-            .unwrap_or("expand");
-        let instruction = body
-            .get("instruction")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        let mut brief = job["brief"].clone();
-        let suffix = match action {
-            "reduce" => {
-                "Reducir y sintetizar el resultado anterior, manteniendo fuentes y limitaciones."
-            }
-            "technical_focus" => "Añadir mayor enfoque técnico y trazabilidad de decisiones.",
-            "add_recommendations" => "Ampliar recomendaciones accionables y riesgos.",
-            "update_sources" => "Actualizar fuentes y contrastar cambios recientes.",
-            "new_version" => "Crear una nueva versión revisada desde la investigación anterior.",
-            _ => "Ampliar la investigación con mayor profundidad.",
-        };
-        let current_objective = brief["objective"].as_str().unwrap_or("").trim();
-        brief["objective"] = Value::from(format!(
-            "{current_objective}\n\nRefinamiento: {suffix} {instruction}"
-        ));
-        brief["updatedAt"] = Value::from(knownext_core::now_iso());
-        let mut request = job.get("request").cloned().unwrap_or_else(|| json!({}));
-        if let Some(object) = request.as_object_mut() {
-            object.insert("brief".to_string(), brief);
-            object.insert("retryOfJobId".to_string(), Value::from(job_id));
-        }
-        self.ai_research_start(project_id, request)
-    }
-    fn ai_research_update_sources(&self, project_id: &str, job_id: &str) -> Result<Value, String> {
-        self.ai_research_refine(project_id, job_id, json!({ "action": "update_sources" }))
-    }
-    fn ai_research_sources(&self, project_id: &str, job_id: &str) -> Value {
-        let job = self.ai_research_job(project_id, job_id);
-        json!({
-            "sources": job["sources"].clone(),
-            "evidence": job["evidence"].clone(),
-            "sourceCandidates": job["sourceCandidates"].clone(),
-            "rankedSources": job["rankedSources"].clone(),
-            "sourceReads": job["sourceReads"].clone()
-        })
-    }
-    fn ai_research_quality(&self, project_id: &str, job_id: &str) -> Value {
-        let job = self.ai_research_job(project_id, job_id);
-        if job["qualityReport"].is_object() {
-            return job["qualityReport"].clone();
-        }
-        knownext_research::quality_report(
-            job["sources"].as_array().map(Vec::as_slice).unwrap_or(&[]),
-            job["evidence"].as_array().map(Vec::as_slice).unwrap_or(&[]),
-            &job["coverage"],
-            job["findings"].as_array().map(Vec::as_slice).unwrap_or(&[]),
-            job["skillDiagnostics"]
-                .as_array()
-                .map(Vec::as_slice)
-                .unwrap_or(&[]),
-        )
-    }
-    fn ai_research_activity(&self, project_id: &str, job_id: &str) -> Value {
-        let job = self.ai_research_job(project_id, job_id);
-        json!({
-            "jobId": job_id,
-            "activity": job["activity"].clone()
-        })
-    }
-    fn ai_research_coverage(&self, project_id: &str, job_id: &str) -> Value {
-        let job = self.ai_research_job(project_id, job_id);
-        json!({
-            "jobId": job_id,
-            "coverage": job["coverage"].clone()
-        })
-    }
-    fn ai_research_accept(&self, project_id: &str, job_id: &str) -> Value {
-        self.update_ai_research_job(project_id, job_id, |job| {
-            job["reviewState"] = json!({
-                "status": "accepted",
-                "comments": Value::Null,
-                "reviewedAt": knownext_core::now_iso()
-            });
-        })
-    }
-    fn ai_research_review(&self, project_id: &str, job_id: &str, body: Value) -> Value {
-        let comments = body
-            .get("comments")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim();
-        self.update_ai_research_job(project_id, job_id, |job| {
-            job["reviewState"] = json!({
-                "status": "revision_requested",
-                "comments": comments,
-                "reviewedAt": knownext_core::now_iso()
-            });
-        })
-    }
-    fn ai_research_export(
-        &self,
-        project_id: &str,
-        job_id: &str,
-        body: Value,
-    ) -> Result<Value, String> {
-        let job = self.ai_research_job(project_id, job_id);
-        let format = body
-            .get("format")
-            .and_then(Value::as_str)
-            .unwrap_or("markdown");
-        let markdown = job["markdown"].as_str().unwrap_or("").to_string();
-        if markdown.trim().is_empty() {
-            return Err("La investigación no tiene contenido exportable.".to_string());
-        }
-        let topic = job["brief"]["topic"].as_str().unwrap_or("investigacion");
-        let file_name = match format {
-            "pdf" => research_export_file_name(topic, "pdf"),
-            "docx" => research_export_file_name(topic, "docx"),
-            "package" => research_export_file_name(topic, "json"),
-            _ => research_export_file_name(topic, "md"),
-        };
-        let export = json!({
-            "format": format,
-            "filename": file_name,
-            "markdown": if format == "markdown" { Value::from(markdown) } else { Value::Null },
-            "path": Value::Null,
-            "message": if format == "markdown" {
-                "Exportación Markdown preparada."
-            } else {
-                "La exportación avanzada queda preparada en contrato; usa Markdown hasta activar conversión local."
-            }
-        });
-        let _ = project_id;
-        Ok(export)
-    }
-    fn append_ai_research_event(&self, project_id: &str, job: &Value) {
-        self.append_ai_conversation_events(
-            project_id,
-            vec![json!({
-                "id": knownext_core::compact_id("ai-event"),
-                "projectId": project_id,
-                "type": "document_created",
-                "role": "assistant",
-                "content": job["message"],
-                "createdAt": knownext_core::now_iso(),
-                "documentId": job["documentId"],
-                "path": job["documentPath"],
-                "paths": if job["documentPath"].is_string() { json!([job["documentPath"].clone()]) } else { json!([]) },
-                "summary": job["brief"]["topic"],
-                "sourcesUsed": job["sources"],
-                "usedSkills": job["usedSkills"],
-                "skillApplications": job["skillApplications"],
-                "skillDiagnostics": job["skillDiagnostics"]
-            })],
-        );
-    }
-    fn ai_user_conversation_event(&self, project_id: &str, body: &Value) -> Option<Value> {
-        let prompt = body.get("prompt").and_then(Value::as_str)?.trim();
-        if prompt.is_empty() {
-            return None;
-        }
-        Some(json!({
-            "id": body.get("clientMessageId").and_then(Value::as_str).filter(|value| !value.trim().is_empty()).map(str::to_string).unwrap_or_else(|| knownext_core::compact_id("client-message")),
-            "projectId": project_id,
-            "type": "user_message",
-            "role": "user",
-            "content": prompt,
-            "createdAt": knownext_core::now_iso(),
-            "documentId": body.get("documentId").and_then(Value::as_str),
-            "path": body.pointer("/clientContext/lastDocumentPath").and_then(Value::as_str),
-            "paths": [],
-            "summary": null,
-            "sourcesUsed": []
-        }))
-    }
-    fn apply_ai_document_creations(
-        &self,
-        project_id: &str,
-        runtime_body: &Value,
-        response: &mut Value,
-    ) -> Result<(), String> {
-        let Some(operations) = response["operations"].as_array_mut() else {
-            return Ok(());
-        };
-        let mut created: Vec<(String, String)> = Vec::new();
-        for operation in operations.iter_mut() {
-            if operation["type"].as_str() != Some("document_created")
-                || operation["documentId"].as_str().is_some()
-            {
-                continue;
-            }
-            let name = operation
-                .get("name")
-                .and_then(Value::as_str)
-                .unwrap_or("documento-ia.md");
-            let markdown = operation
-                .get("markdown")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            let parent = self.node_relative(
-                project_id,
-                runtime_body
-                    .pointer("/clientContext/targetParentId")
-                    .and_then(Value::as_str),
-            )?;
-            let relative = self.unique_project_relative(project_id, parent.as_deref(), name)?;
-            let path = self.resolve_project_relative(project_id, &relative)?;
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-            }
-            std::fs::write(&path, markdown).map_err(|error| error.to_string())?;
-            let document_id = doc_id(project_id, &relative);
-            operation["status"] = Value::from("completed");
-            operation["documentId"] = Value::from(document_id.clone());
-            operation["nodeId"] = Value::from(document_id.clone());
-            operation["path"] = Value::from(relative.clone());
-            operation["paths"] = json!([relative.clone()]);
-            created.push((document_id, relative));
-        }
-        if !created.is_empty() {
-            response["tree"] = Value::Array(self.project_tree(project_id)?);
-            if let Some(events) = response["conversationEvents"].as_array_mut() {
-                for event in events
-                    .iter_mut()
-                    .filter(|event| event["type"].as_str() == Some("document_created"))
-                {
-                    if event["documentId"].as_str().is_none() {
-                        let (document_id, relative) = &created[0];
-                        event["documentId"] = Value::from(document_id.clone());
-                        event["path"] = Value::from(relative.clone());
-                        event["paths"] = json!([relative]);
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-    fn apply_ai_image_generations(
-        &self,
-        project_id: &str,
-        runtime_body: &Value,
-        response: &mut Value,
-    ) -> Result<(), String> {
-        let config = self.read_config();
-        let ai = &config["ai"];
-        let image_config = &ai["imageGeneration"];
-        let mut generated_images = response["generatedImages"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
-        let mut updated_document = Value::Null;
-        let interaction_id = response["interactionId"]
-            .as_str()
-            .unwrap_or("ai-image")
-            .to_string();
-        let Some(operations) = response["operations"].as_array_mut() else {
-            return Ok(());
-        };
-        if !image_config["enabled"].as_bool().unwrap_or(false) {
-            for operation in operations.iter_mut().filter(|operation| {
-                operation["type"].as_str() == Some("image_generated")
-                    && operation["status"].as_str() == Some("ready")
-            }) {
-                operation["status"] = Value::from("blocked");
-                operation["message"] =
-                    Value::from("La generación de imágenes está desactivada en Ajustes > IA.");
-            }
-            return Ok(());
-        }
-        let mut generated_any = false;
-        for operation in operations.iter_mut().filter(|operation| {
-            operation["type"].as_str() == Some("image_generated")
-                && operation["status"].as_str() == Some("ready")
-        }) {
-            if !ai["permissions"]["generateImages"]
-                .as_bool()
-                .unwrap_or(false)
-                || !ai["permissions"]["createImageAssets"]
-                    .as_bool()
-                    .unwrap_or(false)
-            {
-                operation["status"] = Value::from("blocked");
-                operation["message"] = Value::from("La generación de imágenes o la creación de assets está desactivada en Ajustes > IA.");
-                continue;
-            }
-
-            let prompt = operation["prompt"]
-                .as_str()
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            if prompt.is_empty() {
-                operation["status"] = Value::from("error");
-                operation["message"] =
-                    Value::from("La operación de imagen no incluye un prompt validable.");
-                continue;
-            }
-
-            let generated =
-                knownext_ai::generate_image(self.openai_key().as_deref(), image_config, &prompt);
-            if generated["status"].as_str() != Some("completed") {
-                operation["status"] = Value::from("error");
-                operation["message"] = generated["message"].clone();
-                continue;
-            }
-
-            let data_base64 = generated["dataBase64"].as_str().unwrap_or("");
-            let bytes = base64::engine::general_purpose::STANDARD
-                .decode(data_base64.as_bytes())
-                .map_err(|error| format!("No se pudo decodificar la imagen generada: {error}"))?;
-            if bytes.is_empty() {
-                operation["status"] = Value::from("error");
-                operation["message"] = Value::from("OpenAI devolvió una imagen vacía.");
-                continue;
-            }
-
-            let format = generated["format"]
-                .as_str()
-                .unwrap_or_else(|| image_config["outputFormat"].as_str().unwrap_or("png"));
-            let requested_name = operation["name"].as_str().unwrap_or("imagen-ia.png");
-            let name = image_file_name(requested_name, format);
-            let parent = self.image_generation_parent(
-                project_id,
-                runtime_body.get("documentId").and_then(Value::as_str),
-                image_config,
-            );
-            let relative = self.unique_project_relative(project_id, parent.as_deref(), &name)?;
-            let path = self.resolve_project_relative(project_id, &relative)?;
-            if let Some(parent_path) = path.parent() {
-                std::fs::create_dir_all(parent_path).map_err(|error| error.to_string())?;
-            }
-            std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
-            let asset_id = doc_id(project_id, &relative);
-            let asset = self.asset_metadata(project_id, &asset_id)?;
-            let document_id = runtime_body.get("documentId").and_then(Value::as_str);
-            let alt_text = operation["altText"]
-                .as_str()
-                .unwrap_or("Imagen generada por IA")
-                .to_string();
-            let insert_requested = operation["insertIntoDocument"].as_bool().unwrap_or(false);
-            let can_insert = insert_requested
-                && ai["permissions"]["insertImagesIntoDocuments"]
-                    .as_bool()
-                    .unwrap_or(false)
-                && !image_config["confirmBeforeDocumentInsert"]
-                    .as_bool()
-                    .unwrap_or(false);
-            let markdown_reference = if can_insert {
-                document_id
-                    .and_then(|document_id| {
-                        self.image_reference(
-                            project_id,
-                            document_id,
-                            json!({ "assetId": asset_id, "altText": alt_text.clone() }),
-                        )
-                        .ok()
-                    })
-                    .and_then(|reference| reference["markdown"].as_str().map(str::to_string))
-            } else {
-                None
-            };
-
-            if let (Some(document_id), Some(markdown_reference)) =
-                (document_id, markdown_reference.as_deref())
-            {
-                let active_markdown = runtime_body
-                    .get("activeMarkdown")
-                    .and_then(Value::as_str)
-                    .filter(|value| !value.is_empty())
-                    .map(str::to_string)
-                    .or_else(|| {
-                        self.get_document(document_id)
-                            .ok()
-                            .and_then(|document| document["markdown"].as_str().map(str::to_string))
-                    })
-                    .unwrap_or_default();
-                let next_markdown = insert_markdown_reference_near_focus(
-                    &active_markdown,
-                    markdown_reference,
-                    operation.get("placement"),
-                    runtime_body.get("selectionFocus"),
-                );
-                updated_document = json!({
-                    "documentId": document_id,
-                    "markdown": next_markdown,
-                    "summary": "Imagen generada insertada en el documento activo."
-                });
-            }
-
-            operation["status"] = Value::from("completed");
-            operation["documentId"] = document_id.map(Value::from).unwrap_or(Value::Null);
-            operation["nodeId"] = Value::from(asset_id.clone());
-            operation["path"] = Value::from(relative.clone());
-            operation["paths"] = json!([relative.clone()]);
-            operation["assetId"] = Value::from(asset_id.clone());
-            operation["message"] = Value::from("Imagen generada y guardada como asset local.");
-
-            generated_images.push(json!({
-                "asset": asset,
-                "prompt": prompt,
-                "revisedPrompt": generated["revisedPrompt"].clone(),
-                "altText": alt_text,
-                "markdownReference": markdown_reference,
-                "insertedIntoDocumentId": if markdown_reference.is_some() { document_id.map(Value::from).unwrap_or(Value::Null) } else { Value::Null },
-                "sourceDocumentId": document_id,
-                "sourceSelection": runtime_body.get("selectionFocus").cloned().unwrap_or(Value::Null),
-                "model": generated["model"].as_str().unwrap_or_else(|| image_config["model"].as_str().unwrap_or("gpt-image-2")),
-                "size": generated["size"].as_str().unwrap_or_else(|| image_config["size"].as_str().unwrap_or("auto")),
-                "quality": generated["quality"].as_str().unwrap_or_else(|| image_config["quality"].as_str().unwrap_or("auto")),
-                "format": format
-            }));
-            self.record_ai_usage(json!({
-                "projectId": project_id,
-                "interactionId": interaction_id,
-                "capability": "image_generation",
-                "model": generated["model"].as_str().unwrap_or_else(|| image_config["model"].as_str().unwrap_or("gpt-image-2")),
-                "inputTokens": 0,
-                "cachedInputTokens": 0,
-                "outputTokens": 0,
-                "reasoningTokens": 0,
-                "embeddingTokens": 0,
-                "totalTokens": 0,
-                "providerUsage": generated["usage"],
-                "usageSource": "estimated"
-            }));
-            generated_any = true;
-        }
-
-        if generated_any {
-            let _ = self.reindex_project_images(project_id);
-            response["generatedImages"] = Value::Array(generated_images);
-            if !updated_document.is_null() {
-                response["updatedDocument"] = updated_document;
-            }
-            response["tree"] = Value::Array(self.project_tree(project_id)?);
-        }
-        Ok(())
-    }
-    fn image_generation_parent(
-        &self,
-        project_id: &str,
-        document_id: Option<&str>,
-        config: &Value,
-    ) -> Option<String> {
-        match config["defaultFolder"]
-            .as_str()
-            .unwrap_or("document_folder")
-        {
-            "generated_assets" => Some("assets/generated".to_string()),
-            "custom_folder" => config["customFolderPath"]
-                .as_str()
-                .and_then(normalize_project_relative)
-                .filter(|value| !value.is_empty()),
-            _ => document_id
-                .and_then(|document_id| document_ref_path(document_id).ok())
-                .and_then(|relative| {
-                    relative
-                        .rsplit_once('/')
-                        .map(|(parent, _)| parent.to_string())
-                })
-                .or_else(|| Some("assets/generated".to_string())),
-        }
-        .and_then(|relative| {
-            let root = self.project_root(project_id).ok()?;
-            let path = root.join(relative.replace('/', std::path::MAIN_SEPARATOR_STR));
-            let _ = std::fs::create_dir_all(path);
-            Some(relative)
-        })
-    }
-    fn apply_ai_handwritten_drawings(
-        &self,
-        _project_id: &str,
-        runtime_body: &Value,
-        response: &mut Value,
-    ) -> Result<(), String> {
-        let config = self.read_config();
-        let ai = &config["ai"];
-        let drawing_config = &ai["handwrittenDrawing"];
-        let Some(operations) = response["operations"].as_array_mut() else {
-            return Ok(());
-        };
-        let mut updated_note = Value::Null;
-        let mut response_status: Option<&'static str> = None;
-        let mut response_answer: Option<String> = None;
-        for operation in operations.iter_mut().filter(|operation| {
-            operation["type"].as_str() == Some("handwritten_drawing_generated")
-                && operation["status"].as_str() == Some("ready")
-        }) {
-            if !drawing_config["enabled"].as_bool().unwrap_or(true)
-                || !ai["permissions"]["editHandwrittenNotes"]
-                    .as_bool()
-                    .unwrap_or(false)
-                || !ai["permissions"]["drawHandwrittenNotes"]
-                    .as_bool()
-                    .unwrap_or(false)
-            {
-                let message = "El dibujo en notas a mano esta desactivado en Ajustes > IA.";
-                operation["status"] = Value::from("blocked");
-                operation["type"] = Value::from("handwritten_drawing_blocked");
-                operation["message"] = Value::from(message);
-                response_status = Some("blocked");
-                response_answer = Some(message.to_string());
-                continue;
-            }
-            let note_id = operation["noteId"]
-                .as_str()
-                .or_else(|| operation["documentId"].as_str())
-                .or_else(|| {
-                    runtime_body
-                        .get("handwrittenNoteId")
-                        .and_then(Value::as_str)
-                })
-                .ok_or_else(|| "La operacion de dibujo no incluye noteId.".to_string())?
-                .to_string();
-            let record = self.get_handwritten_note(&note_id)?;
-            let active_content = runtime_body
-                .get("activeHandwrittenContent")
-                .filter(|value| value.is_object())
-                .cloned()
-                .unwrap_or_else(|| record["content"].clone());
-            let replacement_policy = operation["replacementPolicy"]
-                .as_str()
-                .unwrap_or("append_only");
-            if !matches!(
-                replacement_policy,
-                "append_only" | "clean_existing" | "replace_page" | "cleanup_existing"
-            ) {
-                let message = if replacement_policy == "replace_selection" {
-                    "La IA no puede reemplazar una seleccion de la knote porque aun no hay seleccion/lasso activa en el contexto."
-                } else {
-                    "La politica de reemplazo solicitada para la knote no esta soportada por el runtime local."
-                };
-                operation["status"] = Value::from("blocked");
-                operation["type"] = Value::from("handwritten_drawing_blocked");
-                operation["message"] = Value::from(message);
-                response_status = Some("blocked");
-                response_answer = Some(message.to_string());
-                continue;
-            }
-            let mut request = operation.clone();
-            if let Some(object) = request.as_object_mut() {
-                object.insert("content".to_string(), active_content);
-                object.insert(
-                    "targetPageId".to_string(),
-                    operation
-                        .get("targetPageId")
-                        .cloned()
-                        .or_else(|| runtime_body.get("activeHandwrittenPageId").cloned())
-                        .unwrap_or(Value::Null),
-                );
-                object.insert(
-                    "prompt".to_string(),
-                    runtime_body.get("prompt").cloned().unwrap_or(Value::Null),
-                );
-            }
-            let applied = knownext_drawing::apply_handwritten_drawing(
-                &record["content"],
-                &request,
-                drawing_config,
-            )?;
-            let content = applied["content"].clone();
-            let draft_payload = json!({
-                "content": content.clone(),
-                "baseFingerprint": runtime_body.get("activeHandwrittenBaseFingerprint").cloned().unwrap_or(Value::Null)
-            });
-            let _draft = self.save_handwritten_note_draft(&note_id, draft_payload)?;
-            let summary = operation["summary"]
-                .as_str()
-                .unwrap_or("Dibujo IA anadido a la nota a mano.")
-                .to_string();
-            let clears_target_page = matches!(
-                replacement_policy,
-                "clean_existing" | "replace_page" | "cleanup_existing"
-            );
-            let scene_element_count = operation
-                .pointer("/sceneSpec/elements")
-                .and_then(Value::as_array)
-                .map(Vec::len)
-                .unwrap_or(0);
-            let applied_message = if clears_target_page && scene_element_count == 0 {
-                format!("He limpiado la pagina activa como borrador: {summary}")
-            } else if clears_target_page {
-                format!(
-                    "He limpiado la pagina activa y he aplicado el dibujo como borrador: {summary}"
-                )
-            } else {
-                format!("He aplicado el dibujo como borrador en la pagina activa: {summary}")
-            };
-            operation["status"] = Value::from("completed");
-            operation["type"] = Value::from("handwritten_modified");
-            operation["message"] = Value::from(applied_message.clone());
-            operation["documentId"] = Value::from(note_id.clone());
-            operation["noteId"] = Value::from(note_id.clone());
-            operation["nodeId"] = Value::from(note_id.clone());
-            operation["targetPageId"] = applied["pageId"].clone();
-            operation["qualityReport"] = applied["qualityReport"].clone();
-            updated_note = json!({
-                "noteId": note_id,
-                "content": content,
-                "summary": summary,
-                "pageId": applied["pageId"].clone(),
-                "route": applied["route"].clone(),
-                "sceneSpec": applied["sceneSpec"].clone(),
-                "vectorPlan": applied["vectorPlan"].clone(),
-                "qualityReport": applied["qualityReport"].clone()
-            });
-            response_status = Some("completed");
-            response_answer = Some(applied_message);
-        }
-        if let Some(status) = response_status {
-            response["status"] = Value::from(status);
-        }
-        if let Some(answer) = response_answer {
-            response["answer"] = Value::from(answer);
-        }
-        if !updated_note.is_null() {
-            response["updatedHandwrittenNote"] = updated_note;
-            response["drawingProposal"] = Value::Null;
-            let updated_summary = response["updatedHandwrittenNote"]["summary"].clone();
-            let updated_answer = response["answer"].clone();
-            if let Some(events) = response["conversationEvents"].as_array_mut() {
-                for event in events
-                    .iter_mut()
-                    .filter(|event| event["type"].as_str() == Some("handwritten_drawing_generated"))
-                {
-                    event["type"] = Value::from("handwritten_modified");
-                    event["content"] = updated_answer.clone();
-                    event["summary"] = updated_summary.clone();
-                }
-            }
-        }
-        Ok(())
-    }
-    fn mark_ai_response_error(
-        &self,
-        project_id: &str,
-        document_id: Option<&str>,
-        response: &mut Value,
-        error: &str,
-    ) {
-        let message = format!("No se pudo crear el documento solicitado por IA: {error}");
-        response["status"] = Value::from("error");
-        response["answer"] = Value::from(message.clone());
-        response["conversationEvents"] = json!([{
-            "id": knownext_core::compact_id("ai-event"),
-            "projectId": project_id,
-            "type": "provider_error",
-            "role": "assistant",
-            "content": message,
-            "createdAt": knownext_core::now_iso(),
-            "documentId": document_id,
-            "path": null,
-            "paths": [],
-            "summary": null,
-            "sourcesUsed": []
-        }]);
-        response["operations"] = json!([{
-            "type": "provider_error",
-            "status": "error",
-            "message": response["answer"],
-            "documentId": document_id,
-            "nodeId": null,
-            "path": null,
-            "paths": [],
-            "summary": response["answer"],
-            "task": null,
-            "confirmationId": null
-        }]);
-        response["updatedDocument"] = Value::Null;
-        response["tree"] = Value::Null;
-    }
-    fn resolve_ai_context_sources(&self, project_id: &str, body: &Value) -> Value {
-        let source_ids = body["contextSourceIds"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
-        let stored = self.ai_sources_internal(project_id);
-        let sources = stored["sources"].as_array().cloned().unwrap_or_default();
-        let mut resolved = Vec::new();
-        for id in source_ids.iter().filter_map(Value::as_str) {
-            if let Some(source) = sources
-                .iter()
-                .find(|source| source["id"].as_str() == Some(id))
-            {
-                resolved.push(source.clone());
-            }
-        }
-        resolved.extend(self.retrieve_ai_index_context(project_id, body, &resolved));
-        Value::Array(resolved)
-    }
-    fn rebuild_ai_index(&self, project_id: &str) -> Value {
-        match self.rebuild_ai_index_result(project_id) {
-            Ok(status) => status,
-            Err(error) => {
-                self.update_ai_rag_config(json!({
-                    "enabled": true,
-                    "status": "error",
-                    "error": error,
-                    "vectorStoreId": format!("local-rag:{project_id}"),
-                    "lastIndexedAt": null
-                }));
-                self.ai_index_status(project_id)
-            }
-        }
-    }
-    fn rebuild_ai_index_result(&self, project_id: &str) -> Result<Value, String> {
-        let root = self.project_root(project_id)?;
-        let indexed_at = knownext_core::now_iso();
-        let mut documents = Vec::new();
-        let mut chunks = Vec::new();
-        let mut failed = Vec::new();
-
-        for path in collect_project_files(&root)? {
-            if is_image_path(&path) {
-                continue;
-            }
-            let relative = relative_from_root(&root, &path);
-            let text = if is_handwritten_note_path(&path) {
-                knownext_docs::handwritten_note_text(&self.read_json(&path, Value::Null))
-            } else if is_markdown_path(&path) || is_text_context_path(&path) {
-                std::fs::read_to_string(&path).unwrap_or_default()
-            } else {
-                knownext_docs::extract_plain_text(&path)
-            };
-            let text = text.trim();
-            if text.is_empty() {
-                continue;
-            }
-            let document_id = doc_id(project_id, &relative);
-            let name = path
-                .file_name()
-                .and_then(|value| value.to_str())
-                .unwrap_or("documento")
-                .to_string();
-            let metadata = std::fs::metadata(&path).ok();
-            let file_chunks = chunk_text(text, 1400, 220);
-            if file_chunks.is_empty() {
-                failed.push(json!({
-                    "id": document_id,
-                    "path": relative,
-                    "name": name,
-                    "error": "No se pudo crear ningún chunk textual."
-                }));
-                continue;
-            }
-            let chunk_count = file_chunks.len();
-            for (index, chunk) in file_chunks.into_iter().enumerate() {
-                chunks.push(json!({
-                    "id": format!("{}#chunk-{}", document_id, index + 1),
-                    "documentId": document_id,
-                    "path": relative,
-                    "name": name,
-                    "chunkIndex": index,
-                    "text": chunk,
-                    "indexedAt": indexed_at
-                }));
-            }
-            documents.push(json!({
-                "id": document_id,
-                "path": relative,
-                "name": name,
-                "mimeType": mime_for_path(&path),
-                "sizeBytes": metadata.map(|metadata| metadata.len()).unwrap_or(0),
-                "chunkCount": chunk_count,
-                "indexedAt": indexed_at,
-                "status": "indexed"
-            }));
-        }
-
-        documents.sort_by(|left, right| {
-            left["path"]
-                .as_str()
-                .unwrap_or("")
-                .cmp(right["path"].as_str().unwrap_or(""))
-        });
-        let document_count = self
-            .project_tree(project_id)
-            .map(|nodes| count_documents(&nodes))
-            .unwrap_or(documents.len());
-        let indexed_document_count = documents.len();
-        let failed_document_count = failed.len();
-        let vector_store_id = format!("local-rag:{project_id}");
-        self.write_json(
-            &self.ai_index_path(project_id),
-            &json!({
-                "projectId": project_id,
-                "vectorStoreId": vector_store_id,
-                "indexedAt": indexed_at,
-                "documents": documents,
-                "chunks": chunks,
-                "failedDocuments": failed
-            }),
-        )?;
-        self.update_ai_rag_config(json!({
-            "enabled": true,
-            "vectorStoreId": vector_store_id,
-            "lastIndexedAt": indexed_at,
-            "status": "updated",
-            "error": null
-        }));
-        Ok(json!({
-            "projectId": project_id,
-            "enabled": true,
-            "status": "updated",
-            "vectorStoreId": format!("local-rag:{project_id}"),
-            "lastIndexedAt": indexed_at,
-            "error": null,
-            "documentCount": document_count,
-            "indexedDocumentCount": indexed_document_count,
-            "pendingDocumentCount": document_count.saturating_sub(indexed_document_count),
-            "failedDocumentCount": failed_document_count,
-            "deletedDocumentCount": 0,
-            "localExactReady": true
-        }))
-    }
-    fn delete_ai_index(&self, project_id: &str) -> Value {
-        let _ = std::fs::remove_file(self.ai_index_path(project_id));
-        self.update_ai_rag_config(json!({
-            "enabled": true,
-            "vectorStoreId": null,
-            "lastIndexedAt": null,
-            "status": "not-indexed",
-            "error": null
-        }));
-        self.ai_index_status(project_id)
-    }
-    fn update_ai_rag_config(&self, patch: Value) {
-        let mut config = self.read_config();
-        merge(&mut config["ai"]["rag"], &patch);
-        normalize_config(&mut config);
-        config["updatedAt"] = Value::from(knownext_core::now_iso());
-        let _ = self.write_json(&self.config_path(), &config);
-    }
-    fn retrieve_ai_index_context(
-        &self,
-        project_id: &str,
-        body: &Value,
-        explicit_sources: &[Value],
-    ) -> Vec<Value> {
-        let config = self.read_config();
-        if !config["ai"]["rag"]["enabled"].as_bool().unwrap_or(false) {
-            return Vec::new();
-        }
-        let index = self.read_json(&self.ai_index_path(project_id), Value::Null);
-        let Some(chunks) = index["chunks"].as_array() else {
-            return Vec::new();
-        };
-        let query = ai_index_query_text(body);
-        let query_tokens = tokenize_for_rag(&query);
-        if query_tokens.is_empty() {
-            return Vec::new();
-        }
-        let explicit_document_ids = explicit_sources
-            .iter()
-            .filter_map(|source| {
-                source["id"]
-                    .as_str()
-                    .or_else(|| source["documentId"].as_str())
-            })
-            .collect::<BTreeSet<_>>();
-        let mut scored = chunks
-            .iter()
-            .filter_map(|chunk| {
-                let document_id = chunk["documentId"].as_str()?;
-                if explicit_document_ids.contains(document_id) {
-                    return None;
-                }
-                let text = chunk["text"].as_str().unwrap_or("");
-                let score = rag_score(text, &query_tokens);
-                (score > 0).then_some((score, chunk.clone()))
-            })
-            .collect::<Vec<_>>();
-        scored.sort_by(|left, right| right.0.cmp(&left.0));
-        scored
-            .into_iter()
-            .take(6)
-            .map(|(_, chunk)| {
-                let now = knownext_core::now_iso();
-                json!({
-                    "id": format!("rag:{}", chunk["id"].as_str().unwrap_or("chunk")),
-                    "projectId": project_id,
-                    "kind": "project_document",
-                    "name": chunk["name"].as_str().unwrap_or("Documento indexado"),
-                    "path": chunk["path"].as_str(),
-                    "mimeType": "text/markdown",
-                    "sizeBytes": chunk["text"].as_str().unwrap_or("").len(),
-                    "status": "ready",
-                    "weight": "high",
-                    "warning": null,
-                    "error": null,
-                    "createdAt": chunk["indexedAt"].as_str().unwrap_or(&now),
-                    "updatedAt": chunk["indexedAt"].as_str().unwrap_or(&now),
-                    "lastUsedAt": now,
-                    "expiresAt": null,
-                    "documentId": chunk["documentId"].as_str(),
-                    "text": chunk["text"].as_str().unwrap_or("")
-                })
-            })
-            .collect()
-    }
-    fn record_ai_usage_records(&self, project_id: &str, interaction_id: &str, response: &Value) {
-        for record in response["usageRecords"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|record| record.is_object())
-        {
-            let mut entry = record.clone();
-            if let Some(object) = entry.as_object_mut() {
-                object.insert("projectId".to_string(), Value::from(project_id));
-                object.insert("interactionId".to_string(), Value::from(interaction_id));
-                if !object.contains_key("estimatedCost") {
-                    let model = object
-                        .get("model")
-                        .and_then(Value::as_str)
-                        .unwrap_or("gpt-5.4-mini");
-                    object.insert(
-                        "estimatedCost".to_string(),
-                        Value::from(text_estimated_cost(
-                            model,
-                            value_u64(object.get("inputTokens")),
-                            value_u64(object.get("cachedInputTokens")),
-                            value_u64(object.get("outputTokens")),
-                        )),
-                    );
-                }
-            }
-            let job=self.ai_research_job(project_id,interaction_id);
-            let rate=if job["exchangeRateSnapshot"].is_object() {job["exchangeRateSnapshot"].clone()} else {currency::read(&self.app_data_dir)};
-            currency::price_entry(&mut entry, &rate);
-            self.accumulate_ai_research_usage(project_id, interaction_id, &entry);
-            self.record_ai_usage(entry);
-        }
-    }
-
-    fn accumulate_ai_research_usage(&self, project_id: &str, job_id: &str, entry: &Value) {
-        let exists = self.ai_research_jobs(project_id)["jobs"]
-            .as_array()
-            .map(|jobs| jobs.iter().any(|job| job["id"].as_str() == Some(job_id)))
-            .unwrap_or(false);
-        if !exists {
-            return;
-        }
-        let now = knownext_core::now_iso();
-        self.update_ai_research_job(project_id, job_id, |job| {
-            let current = job["usage"].clone();
-            let provider_calls = current["providerCalls"].as_u64().unwrap_or(0) + 1;
-            let input_tokens =
-                current["inputTokens"].as_u64().unwrap_or(0) + value_u64(entry.get("inputTokens"));
-            let cached_input_tokens = current["cachedInputTokens"].as_u64().unwrap_or(0)
-                + value_u64(entry.get("cachedInputTokens"));
-            let output_tokens = current["outputTokens"].as_u64().unwrap_or(0)
-                + value_u64(entry.get("outputTokens"));
-            let reasoning_tokens = current["reasoningTokens"].as_u64().unwrap_or(0)
-                + value_u64(entry.get("reasoningTokens"));
-            let total_tokens =
-                current["totalTokens"].as_u64().unwrap_or(0) + value_u64(entry.get("totalTokens"));
-            let estimated_cost = current["estimatedCostEur"].as_f64().unwrap_or(0.0)
-                + entry["estimatedCost"].as_f64().unwrap_or(0.0);
-            job["usage"] = json!({
-                "providerCalls": provider_calls,
-                "inputTokens": input_tokens,
-                "cachedInputTokens": cached_input_tokens,
-                "outputTokens": output_tokens,
-                "reasoningTokens": reasoning_tokens,
-                "totalTokens": total_tokens,
-                "estimatedCostEur": round_cost(estimated_cost),
-                "currency": "EUR",
-                "updatedAt": now
-            });
-            job["budget"]["estimatedCostEur"] = Value::from(round_cost(estimated_cost));
-        });
-    }
-
-    fn record_ai_usage(&self, mut entry: Value) {
-        currency::price_entry(&mut entry, &currency::read(&self.app_data_dir));
-        let now = knownext_core::now_iso();
-        let month = entry
-            .get("createdAt")
-            .and_then(Value::as_str)
-            .and_then(month_from_iso)
-            .unwrap_or_else(|| now.chars().take(7).collect::<String>());
-        if let Some(object) = entry.as_object_mut() {
-            object.insert(
-                "id".to_string(),
-                Value::from(knownext_core::compact_id("ai-usage")),
-            );
-            object
-                .entry("createdAt".to_string())
-                .or_insert_with(|| Value::from(now));
-            object.insert("month".to_string(), Value::from(month));
-            object
-                .entry("currency".to_string())
-                .or_insert_with(|| Value::from("EUR"));
-            object
-                .entry("usageSource".to_string())
-                .or_insert_with(|| Value::from("estimated"));
-        }
-        let path = self.ai_usage_path();
-        let mut usage = self.read_json(&path, json!({ "entries": [] }));
-        if !usage["entries"].is_array() {
-            usage["entries"] = json!([]);
-        }
-        if let Some(entries) = usage["entries"].as_array_mut() {
-            entries.push(entry);
-            if entries.len() > 5000 {
-                let overflow = entries.len().saturating_sub(5000);
-                entries.drain(0..overflow);
-            }
-        }
-        let _ = self.write_json(&path, &usage);
-    }
-
-    fn ai_usage_summary(&self, query: &BTreeMap<String, String>) -> Value {
-        let month = query
-            .get("month")
-            .filter(|value| is_usage_month(value))
-            .cloned()
-            .unwrap_or_else(|| knownext_core::now_iso().chars().take(7).collect::<String>());
-        let usage = self.read_json(&self.ai_usage_path(), json!({ "entries": [] }));
-        let mut by_model: BTreeMap<String, AiUsageAccumulator> = BTreeMap::new();
-        let mut by_capability: BTreeMap<String, AiUsageAccumulator> = BTreeMap::new();
-
-        for entry in usage["entries"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|entry| entry["month"].as_str() == Some(month.as_str()))
-        {
-            let model = entry["model"].as_str().unwrap_or("unknown").to_string();
-            let capability =
-                normalize_usage_capability(entry["capability"].as_str().unwrap_or("document_ai"))
-                    .to_string();
-            accumulate_usage(by_model.entry(model).or_default(), entry);
-            accumulate_usage(by_capability.entry(capability).or_default(), entry);
-        }
-
-        let models = by_model
-            .into_iter()
-            .map(|(model, usage)| usage_model_summary(model, usage))
-            .collect::<Vec<_>>();
-        let capabilities = by_capability
-            .into_iter()
-            .map(|(capability, usage)| usage_capability_summary(capability, usage))
-            .collect::<Vec<_>>();
-        let total_estimated_cost = models
-            .iter()
-            .map(|model| model["estimatedCost"].as_f64().unwrap_or(0.0))
-            .sum::<f64>();
-
-        let entries: Vec<_> = usage["entries"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|e| e["month"].as_str() == Some(month.as_str()))
-            .collect();
-        let legacy = entries
-            .iter()
-            .filter(|e| e["costSchemaVersion"] != 2)
-            .count();
-        let unavailable = entries
-            .iter()
-            .filter(|e| e["costSchemaVersion"] == 2 && e["estimatedCostEur"].is_null())
-            .count();
-        let usd: f64 = entries
-            .iter()
-            .filter(|e| e["costSchemaVersion"] == 2)
-            .filter_map(|e| e["estimatedCostUsd"].as_f64())
-            .sum();
-        json!({
-            "legacyEntries": legacy,
-            "unpricedEntries": unavailable,
-            "totalEstimatedCostUsd": usd,
-            "exchangeRate": currency::read(&self.app_data_dir),
-            "costNote": "Estimaciones. Los registros heredados y sin conversión no se incluyen en el total EUR.",
-            "month": month,
-            "currency": "EUR",
-            "estimated": true,
-            "totalEstimatedCost": round_cost(total_estimated_cost),
-            "generatedAt": knownext_core::now_iso(),
-            "capabilities": capabilities,
-            "models": models
-        })
-    }
-    fn openai_key_status(&self) -> Value {
-        let value = self.credentials();
-        let key = value["openaiKey"].as_str().unwrap_or("");
-        json!({ "configured": !key.is_empty(), "preview": if key.len() > 8 { Value::from(format!("{}...{}", &key[..3], &key[key.len()-4..])) } else { Value::Null } })
-    }
-    fn save_openai_key(&self, body: Value) -> Value {
-        let key = body.get("apiKey").and_then(Value::as_str).unwrap_or("");
-        self.update_credentials(|credentials| {
-            credentials.insert("openaiKey".to_string(), Value::from(key));
-        });
-        self.openai_key_status()
-    }
-    fn delete_openai_key(&self) {
-        self.update_credentials(|credentials| {
-            credentials.remove("openaiKey");
-        });
-    }
-    fn ai_index_status(&self, project_id: &str) -> Value {
-        let docs = self
-            .project_tree(project_id)
-            .map(|nodes| count_documents(&nodes))
-            .unwrap_or(0);
-        let config = self.read_config();
-        let index = self.read_json(&self.ai_index_path(project_id), Value::Null);
-        if index.is_object() {
-            let indexed = index["documents"].as_array().map(Vec::len).unwrap_or(0);
-            let failed = index["failedDocuments"]
-                .as_array()
-                .map(Vec::len)
-                .unwrap_or(0);
-            return json!({
-                "projectId": project_id,
-                "enabled": config["ai"]["rag"]["enabled"].as_bool().unwrap_or(true),
-                "status": config["ai"]["rag"]["status"].as_str().unwrap_or("updated"),
-                "vectorStoreId": index["vectorStoreId"].as_str().map(Value::from).unwrap_or(Value::Null),
-                "lastIndexedAt": index["indexedAt"].as_str().map(Value::from).unwrap_or(Value::Null),
-                "error": config["ai"]["rag"]["error"].clone(),
-                "documentCount": docs,
-                "indexedDocumentCount": indexed,
-                "pendingDocumentCount": docs.saturating_sub(indexed),
-                "failedDocumentCount": failed,
-                "deletedDocumentCount": 0,
-                "localExactReady": true
-            });
-        }
-        json!({
-            "projectId": project_id,
-            "enabled": config["ai"]["rag"]["enabled"].as_bool().unwrap_or(true),
-            "status": "not-indexed",
-            "vectorStoreId": null,
-            "lastIndexedAt": null,
-            "error": null,
-            "documentCount": docs,
-            "indexedDocumentCount": 0,
-            "pendingDocumentCount": 0,
-            "failedDocumentCount": 0,
-            "deletedDocumentCount": 0,
-            "localExactReady": true
-        })
-    }
 }
 
 fn ok(body: Value) -> ApiResult {
@@ -6628,163 +350,11 @@ fn split_path(raw_path: &str) -> (String, BTreeMap<String, String>) {
     (path.to_string(), params)
 }
 
-fn accumulate_usage(accumulator: &mut AiUsageAccumulator, entry: &Value) {
-    accumulator.interactions += 1;
-    accumulator.input_tokens += value_u64(entry.get("inputTokens"));
-    accumulator.cached_input_tokens += value_u64(entry.get("cachedInputTokens"));
-    accumulator.output_tokens += value_u64(entry.get("outputTokens"));
-    accumulator.reasoning_tokens += value_u64(entry.get("reasoningTokens"));
-    accumulator.embedding_tokens += value_u64(entry.get("embeddingTokens"));
-    accumulator.total_tokens += value_u64(entry.get("totalTokens"));
-    if entry["costSchemaVersion"] == 2 {
-        accumulator.estimated_cost += entry["estimatedCostEur"].as_f64().unwrap_or(0.0);
-    }
-    accumulator.usage_sources.insert(
-        entry["usageSource"]
-            .as_str()
-            .unwrap_or("unknown")
-            .to_string(),
-    );
-}
-
-fn usage_model_summary(model: String, usage: AiUsageAccumulator) -> Value {
-    json!({
-        "model": model,
-        "interactions": usage.interactions,
-        "inputTokens": usage.input_tokens,
-        "cachedInputTokens": usage.cached_input_tokens,
-        "outputTokens": usage.output_tokens,
-        "reasoningTokens": usage.reasoning_tokens,
-        "embeddingTokens": usage.embedding_tokens,
-        "totalTokens": usage.total_tokens,
-        "estimatedCost": round_cost(usage.estimated_cost),
-        "currency": "EUR",
-        "usageSource": combined_usage_source(&usage.usage_sources)
-    })
-}
-
-fn usage_capability_summary(capability: String, usage: AiUsageAccumulator) -> Value {
-    json!({
-        "capability": capability,
-        "label": usage_capability_label(&capability),
-        "interactions": usage.interactions,
-        "inputTokens": usage.input_tokens,
-        "cachedInputTokens": usage.cached_input_tokens,
-        "outputTokens": usage.output_tokens,
-        "reasoningTokens": usage.reasoning_tokens,
-        "embeddingTokens": usage.embedding_tokens,
-        "totalTokens": usage.total_tokens,
-        "estimatedCost": round_cost(usage.estimated_cost),
-        "currency": "EUR",
-        "usageSource": combined_usage_source(&usage.usage_sources)
-    })
-}
-
-fn combined_usage_source(sources: &BTreeSet<String>) -> &'static str {
-    if sources.is_empty() {
-        return "unknown";
-    }
-    let normalized = sources
-        .iter()
-        .map(|value| value.as_str())
-        .filter(|value| matches!(*value, "provider" | "estimated" | "unknown"))
-        .collect::<BTreeSet<_>>();
-    if normalized.len() == 1 {
-        match normalized.iter().next().copied().unwrap_or("unknown") {
-            "provider" => "provider",
-            "estimated" => "estimated",
-            _ => "unknown",
-        }
-    } else {
-        "mixed"
-    }
-}
-
-fn usage_capability_label(capability: &str) -> &'static str {
-    match capability {
-        "image_generation" => "Imágenes",
-        "vision" => "Visión",
-        "audio" => "Audio",
-        "agentic_tasks" => "Investigación",
-        _ => "IA documental",
-    }
-}
-
-fn normalize_usage_capability(capability: &str) -> &'static str {
-    match capability {
-        "image_generation" => "image_generation",
-        "vision" => "vision",
-        "audio" => "audio",
-        "agentic_tasks" => "agentic_tasks",
-        _ => "document_ai",
-    }
-}
-
-fn value_u64(value: Option<&Value>) -> u64 {
-    value.and_then(Value::as_u64).unwrap_or(0)
-}
-
-fn text_estimated_cost(
-    model: &str,
-    input_tokens: u64,
-    cached_input_tokens: u64,
-    output_tokens: u64,
-) -> f64 {
-    knownext_core::model_catalog::text_usd(model, input_tokens, cached_input_tokens, output_tokens)
-        .unwrap_or(0.0)
-}
-
-fn round_cost(value: f64) -> f64 {
-    (value * 1_000_000.0).round() / 1_000_000.0
-}
-
-fn is_usage_month(value: &str) -> bool {
-    value.len() == 7
-        && value.as_bytes().get(4) == Some(&b'-')
-        && value[..4]
-            .chars()
-            .all(|character| character.is_ascii_digit())
-        && value[5..]
-            .chars()
-            .all(|character| character.is_ascii_digit())
-}
-
-fn month_from_iso(value: &str) -> Option<String> {
-    (value.len() >= 7 && is_usage_month(&value[..7])).then(|| value[..7].to_string())
-}
-
-fn read_tree(project_id: &str, root: &Path, current: &Path) -> Result<Vec<Value>, String> {
-    let mut nodes = Vec::new();
-    let entries = std::fs::read_dir(current).map_err(|error| error.to_string())?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') {
-            continue;
-        }
-        let relative = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .replace('\\', "/");
-        let mut node = tree_node(project_id, root, &path, &relative);
-        if path.is_dir() {
-            node["children"] = Value::Array(read_tree(project_id, root, &path)?);
-        }
-        nodes.push(node);
-    }
-    nodes.sort_by(|a, b| {
-        let at = a["type"].as_str().unwrap_or("");
-        let bt = b["type"].as_str().unwrap_or("");
-        (at != "folder", a["name"].as_str().unwrap_or(""))
-            .cmp(&(bt != "folder", b["name"].as_str().unwrap_or("")))
-    });
-    Ok(nodes)
-}
-
 fn tree_node(project_id: &str, _root: &Path, path: &Path, relative: &str) -> Value {
-    let metadata = std::fs::metadata(path).ok();
-    let kind = if path.is_dir() {
+    tree_node_from_metadata(project_id,path,relative,std::fs::metadata(path).ok())
+}
+fn tree_node_from_metadata(project_id:&str,path:&Path,relative:&str,metadata:Option<std::fs::Metadata>)->Value{
+    let kind = if metadata.as_ref().is_some_and(std::fs::Metadata::is_dir) {
         "folder"
     } else {
         match path
@@ -6833,6 +403,7 @@ fn collect_project_sync_entries_into(
     let entries_iter = std::fs::read_dir(current).map_err(|error| error.to_string())?;
     for entry in entries_iter.flatten() {
         let path = entry.path();
+        if batch::linked(&std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?) { continue; }
         let name = entry.file_name().to_string_lossy().to_string();
         if name.starts_with('.') || matches!(name.as_str(), "node_modules" | "target" | "dist") {
             continue;
@@ -6855,6 +426,7 @@ fn collect_project_files_into(
     let entries = std::fs::read_dir(current).map_err(|error| error.to_string())?;
     for entry in entries.flatten() {
         let path = entry.path();
+        if batch::linked(&std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?) { continue; }
         let name = entry.file_name().to_string_lossy().to_string();
         if name.starts_with('.') || matches!(name.as_str(), "node_modules" | "target" | "dist") {
             continue;
@@ -6991,8 +563,8 @@ fn dedupe_affected_documents(affected: Vec<Value>) -> Vec<Value> {
         by_identity
             .entry((old_id, new_id))
             .and_modify(|existing| {
-                if item["referenceUpdated"].as_bool().unwrap_or(false) {
-                    existing["referenceUpdated"] = Value::from(true);
+                if let (Some(target),Some(source))=(existing.as_object_mut(),item.as_object()) {
+                    target.extend(source.clone());
                 }
             })
             .or_insert(item);
@@ -7086,321 +658,14 @@ fn markdown_image_references(
     document_name: &str,
     document_path: &str,
 ) -> Vec<Value> {
-    let mut references = Vec::new();
-    for (line_index, line) in markdown.lines().enumerate() {
-        references.extend(markdown_image_references_in_line(
-            project_id,
-            document_id,
-            document_name,
-            document_path,
-            line,
-            line_index + 1,
-        ));
-        references.extend(html_image_references_in_line(
-            project_id,
-            document_id,
-            document_name,
-            document_path,
-            line,
-            line_index + 1,
-        ));
-    }
-    references
-}
-
-#[derive(Clone)]
-struct ImageTargetSpan {
-    start: usize,
-    end: usize,
-    raw: String,
-}
-
-fn rewrite_markdown_image_targets(
-    markdown: &str,
-    old_document_path: &str,
-    new_document_path: &str,
-    image_mapping: &BTreeMap<String, String>,
-) -> String {
-    let mut output = String::with_capacity(markdown.len());
-    for chunk in markdown.split_inclusive('\n') {
-        let (line, newline) = chunk
-            .strip_suffix('\n')
-            .map(|line| (line, "\n"))
-            .unwrap_or((chunk, ""));
-        let rewritten = rewrite_markdown_image_targets_in_line(
-            line,
-            old_document_path,
-            new_document_path,
-            image_mapping,
-        );
-        output.push_str(&rewritten);
-        output.push_str(newline);
-    }
-    if markdown.is_empty() {
-        String::new()
-    } else {
-        output
-    }
-}
-
-fn rewrite_markdown_image_targets_in_line(
-    line: &str,
-    old_document_path: &str,
-    new_document_path: &str,
-    image_mapping: &BTreeMap<String, String>,
-) -> String {
-    let mut spans = markdown_target_spans_in_line(line);
-    spans.extend(html_src_target_spans_in_line(line));
-    if spans.is_empty() {
-        return line.to_string();
-    }
-    spans.sort_by_key(|span| span.start);
-    let mut rewritten = line.to_string();
-    for span in spans.into_iter().rev() {
-        let Some(old_asset_path) = resolve_markdown_asset_target(old_document_path, &span.raw)
-        else {
-            continue;
-        };
-        let new_asset_path = image_mapping
-            .get(&old_asset_path)
-            .map(String::as_str)
-            .unwrap_or(&old_asset_path);
-        if old_document_path == new_document_path && old_asset_path == new_asset_path {
-            continue;
+    let (mut cursor, mut line, mut column) = (0, 1, 1);
+    knownext_docs::markdown_images(markdown).into_iter().map(|image| {
+        for character in markdown[cursor..image.range.start].chars() {
+            if character == '\n' { line += 1; column = 1; } else { column += 1; }
         }
-        let new_target = relative_link_target(new_document_path, new_asset_path);
-        rewritten.replace_range(span.start..span.end, &new_target);
-    }
-    rewritten
-}
-
-fn markdown_target_spans_in_line(line: &str) -> Vec<ImageTargetSpan> {
-    let mut spans = Vec::new();
-    let mut offset = 0usize;
-    while let Some(start) = line[offset..].find("![") {
-        let image_start = offset + start;
-        let alt_start = image_start + 2;
-        let Some(alt_end_relative) = line[alt_start..].find(']') else {
-            break;
-        };
-        let alt_end = alt_start + alt_end_relative;
-        let open_paren = alt_end + 1;
-        if !line[open_paren..].starts_with('(') {
-            offset = alt_end + 1;
-            continue;
-        }
-        let target_start = open_paren + 1;
-        let Some(target_end_relative) = find_markdown_link_close(&line[target_start..]) else {
-            break;
-        };
-        let target_end = target_start + target_end_relative;
-        if let Some((relative_start, relative_end, raw)) =
-            parse_markdown_link_destination_span(&line[target_start..target_end])
-        {
-            spans.push(ImageTargetSpan {
-                start: target_start + relative_start,
-                end: target_start + relative_end,
-                raw: raw.to_string(),
-            });
-        }
-        offset = target_end + 1;
-    }
-    spans
-}
-
-fn html_src_target_spans_in_line(line: &str) -> Vec<ImageTargetSpan> {
-    let mut spans = Vec::new();
-    let mut offset = 0usize;
-    let lower = line.to_ascii_lowercase();
-    while let Some(start) = lower[offset..].find("<img") {
-        let image_start = offset + start;
-        let tag_end = lower[image_start..]
-            .find('>')
-            .map(|value| image_start + value)
-            .unwrap_or(line.len());
-        let tag = &line[image_start..tag_end];
-        if let Some((relative_start, relative_end, raw)) = html_attr_value_span(tag, "src") {
-            spans.push(ImageTargetSpan {
-                start: image_start + relative_start,
-                end: image_start + relative_end,
-                raw: raw.to_string(),
-            });
-        }
-        offset = tag_end.saturating_add(1);
-        if offset >= line.len() {
-            break;
-        }
-    }
-    spans
-}
-
-fn markdown_image_references_in_line(
-    project_id: &str,
-    document_id: &str,
-    document_name: &str,
-    document_path: &str,
-    line: &str,
-    line_number: usize,
-) -> Vec<Value> {
-    let mut references = Vec::new();
-    let mut offset = 0usize;
-    while let Some(start) = line[offset..].find("![") {
-        let image_start = offset + start;
-        let alt_start = image_start + 2;
-        let Some(alt_end_relative) = line[alt_start..].find(']') else {
-            break;
-        };
-        let alt_end = alt_start + alt_end_relative;
-        let open_paren = alt_end + 1;
-        if !line[open_paren..].starts_with('(') {
-            offset = alt_end + 1;
-            continue;
-        }
-        let target_start = open_paren + 1;
-        let Some(target_end_relative) = find_markdown_link_close(&line[target_start..]) else {
-            break;
-        };
-        let target_end = target_start + target_end_relative;
-        let raw = parse_markdown_link_destination(&line[target_start..target_end]);
-        let alt_text = line[alt_start..alt_end].trim();
-        references.push(asset_reference_value(
-            project_id,
-            document_id,
-            document_name,
-            document_path,
-            raw,
-            "markdown-image",
-            Some(alt_text),
-            line_number,
-            line[..image_start].chars().count() + 1,
-        ));
-        offset = target_end + 1;
-    }
-    references
-}
-
-fn html_image_references_in_line(
-    project_id: &str,
-    document_id: &str,
-    document_name: &str,
-    document_path: &str,
-    line: &str,
-    line_number: usize,
-) -> Vec<Value> {
-    let mut references = Vec::new();
-    let mut offset = 0usize;
-    let lower = line.to_ascii_lowercase();
-    while let Some(start) = lower[offset..].find("<img") {
-        let image_start = offset + start;
-        let tag_end = lower[image_start..]
-            .find('>')
-            .map(|value| image_start + value)
-            .unwrap_or(line.len());
-        let tag = &line[image_start..tag_end];
-        if let Some(src) = html_attr_value(tag, "src") {
-            references.push(asset_reference_value(
-                project_id,
-                document_id,
-                document_name,
-                document_path,
-                src,
-                "html-image",
-                html_attr_value(tag, "alt"),
-                line_number,
-                line[..image_start].chars().count() + 1,
-            ));
-        }
-        offset = tag_end.saturating_add(1);
-        if offset >= line.len() {
-            break;
-        }
-    }
-    references
-}
-
-fn find_markdown_link_close(value: &str) -> Option<usize> {
-    let mut escaped = false;
-    for (index, ch) in value.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if ch == '\\' {
-            escaped = true;
-            continue;
-        }
-        if ch == ')' {
-            return Some(index);
-        }
-    }
-    None
-}
-
-fn parse_markdown_link_destination(value: &str) -> &str {
-    let trimmed = value.trim();
-    if let Some(rest) = trimmed.strip_prefix('<') {
-        return rest.split('>').next().unwrap_or("").trim();
-    }
-    trimmed.split_whitespace().next().unwrap_or("").trim()
-}
-
-fn parse_markdown_link_destination_span(value: &str) -> Option<(usize, usize, &str)> {
-    let leading = value.len().saturating_sub(value.trim_start().len());
-    let trimmed = value.trim_start();
-    if let Some(rest) = trimmed.strip_prefix('<') {
-        let end = rest.find('>')?;
-        let start = leading + 1;
-        return Some((start, start + end, &value[start..start + end]));
-    }
-    let raw = trimmed.split_whitespace().next().unwrap_or("");
-    if raw.is_empty() {
-        None
-    } else {
-        Some((
-            leading,
-            leading + raw.len(),
-            &value[leading..leading + raw.len()],
-        ))
-    }
-}
-
-fn html_attr_value<'a>(tag: &'a str, attr: &str) -> Option<&'a str> {
-    let lower = tag.to_ascii_lowercase();
-    let needle = format!("{attr}=");
-    let start = lower.find(&needle)? + needle.len();
-    let rest = &tag[start..];
-    let quote = rest.chars().next()?;
-    if quote == '"' || quote == '\'' {
-        let content = &rest[quote.len_utf8()..];
-        content.find(quote).map(|end| &content[..end])
-    } else {
-        Some(rest.split_whitespace().next().unwrap_or(""))
-    }
-}
-
-fn html_attr_value_span<'a>(tag: &'a str, attr: &str) -> Option<(usize, usize, &'a str)> {
-    let lower = tag.to_ascii_lowercase();
-    let needle = format!("{attr}=");
-    let start = lower.find(&needle)? + needle.len();
-    let rest = &tag[start..];
-    let quote = rest.chars().next()?;
-    if quote == '"' || quote == '\'' {
-        let content_start = start + quote.len_utf8();
-        let content = &tag[content_start..];
-        let end = content.find(quote)?;
-        Some((
-            content_start,
-            content_start + end,
-            &tag[content_start..content_start + end],
-        ))
-    } else {
-        let raw = rest.split_whitespace().next().unwrap_or("");
-        if raw.is_empty() {
-            None
-        } else {
-            Some((start, start + raw.len(), &tag[start..start + raw.len()]))
-        }
-    }
+        cursor = image.range.start;
+        asset_reference_value(project_id, document_id, document_name, document_path, &image.source, image.kind, Some(&image.alt), line, column)
+    }).collect()
 }
 
 fn asset_reference_value(
@@ -7580,59 +845,25 @@ fn relative_markdown_target(document_relative: &str, asset_relative: &str) -> St
     format!("{}{}", "../".repeat(parent_depth), asset_relative)
 }
 
-fn public_version(version: &Value) -> Value {
-    json!({ "id": version["id"], "hash": version["hash"], "title": version["title"], "author": version["author"], "authorInitials": version["authorInitials"], "createdAt": version["createdAt"], "relativeTime": version["relativeTime"], "current": version["current"] })
-}
-
 fn export_bytes(
-    name: &str,
-    markdown: &str,
-    format: &str,
+    name: &str, markdown: &str, format: &str,
     diagram_assets: &[knownext_docs::DiagramAsset],
-    image_assets: &[knownext_docs::ExportImageAsset],
-    export_template: &Value,
-) -> (String, String, Vec<u8>) {
-    match format {
-        "md" => (
-            "text/markdown;charset=utf-8".to_string(),
-            export_name(name, "md"),
-            markdown.as_bytes().to_vec(),
-        ),
-        "docx" => {
-            let mut path = std::env::temp_dir();
-            path.push(format!(
-                "{}.docx",
-                knownext_core::compact_id("knownext-export")
-            ));
-            let _ = knownext_docs::write_docx_with_assets_template_and_title(
-                &path,
-                markdown,
-                diagram_assets,
-                image_assets,
-                Some(export_template),
-                Some(name),
-            );
-            let bytes = std::fs::read(&path).unwrap_or_default();
-            let _ = std::fs::remove_file(path);
-            (
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    .to_string(),
-                export_name(name, "docx"),
-                bytes,
-            )
-        }
-        _ => (
-            "application/pdf".to_string(),
-            export_name(name, "pdf"),
-            knownext_docs::minimal_pdf_with_assets_and_template(
-                name,
-                markdown,
-                diagram_assets,
-                image_assets,
-                Some(export_template),
-            ),
-        ),
-    }
+    image_assets: &[knownext_docs::ExportImageAsset], export_template: &Value,
+) -> Result<(String,String,Vec<u8>),String> {
+    let (content_type,extension,bytes)=match format {
+        "md"=>("text/markdown;charset=utf-8","md",markdown.as_bytes().to_vec()),
+        "docx"=>{
+            let temporary=tempfile::tempdir().map_err(|error|format!("No se puede preparar la exportación Word: {error}"))?;
+            let path=temporary.path().join("document.docx");
+            knownext_docs::write_docx_with_assets_template_and_title(&path,markdown,diagram_assets,image_assets,Some(export_template),Some(name))?;
+            let bytes=std::fs::read(&path).map_err(|error|format!("No se puede leer la exportación Word: {error}"))?;
+            if bytes.is_empty(){return Err("La exportación Word no ha producido contenido".into());}
+            ("application/vnd.openxmlformats-officedocument.wordprocessingml.document","docx",bytes)
+        },
+        "pdf"=>("application/pdf","pdf",knownext_docs::export_pdf_with_assets_and_template(name,markdown,diagram_assets,image_assets,Some(export_template))?),
+        _=>return Err("Formato de exportación no soportado".into()),
+    };
+    Ok((content_type.into(),export_name(name,extension),bytes))
 }
 
 fn export_name(name: &str, ext: &str) -> String {
@@ -7857,7 +1088,7 @@ fn normalize_project_metadata_in_place(project: &mut Value) {
     let should_use_local_git = is_old_github_versioning_mode(Some(versioning_mode))
         || versioning_mode == "local-git"
         || is_github_sync_mode(sync_mode)
-        || has_github_repository;
+        || (has_github_repository && project.get("versioningMode").and_then(Value::as_str).is_none());
     project["versioningMode"] = Value::from(if should_use_local_git {
         "local-git"
     } else {
@@ -8472,6 +1703,7 @@ fn git_add_path(root: &Path, relative: &str) -> Result<(), String> {
 
 #[cfg(test)]
 fn git_commit_all(root: &Path, title: &str) -> Result<(), String> {
+    mixed_application_guard::ensure(root)?;
     let output = run_local_git(
         local_git_command()
             .arg("-C")
@@ -8503,6 +1735,7 @@ fn git_commit_all(root: &Path, title: &str) -> Result<(), String> {
 }
 
 fn git_commit_paths(root: &Path, title: &str, paths: &[&str]) -> Result<(), String> {
+    mixed_application_guard::ensure(root)?;
     if paths.is_empty() {
         return Ok(());
     }
@@ -8603,11 +1836,8 @@ fn count_documents(nodes: &[Value]) -> usize {
         .sum()
 }
 
-fn without_internal_source_text(mut source: Value) -> Value {
-    if let Some(object) = source.as_object_mut() {
-        object.remove("text");
-    }
-    source
+fn without_internal_source_text(source: Value) -> Value {
+    ai_context_origin::public(source)
 }
 
 fn mime_for_path(path: &Path) -> String {
@@ -8809,9 +2039,9 @@ fn normalize_handwritten_note(mut content: Value, note_id: &str, fallback_title:
         return default_handwritten_note(note_id, fallback_title);
     }
     content["schemaVersion"] = Value::from(1);
-    if content["id"].as_str().unwrap_or("").is_empty() {
-        content["id"] = Value::from(note_id.to_string());
-    }
+    // File location and the native command bind identity. A portable or renamed
+    // note may carry its origin ID on disk; reading rebinds RAM without rewriting it.
+    content["id"] = Value::from(note_id.to_string());
     if content["title"].as_str().unwrap_or("").trim().is_empty() {
         content["title"] = Value::from(if fallback_title.trim().is_empty() {
             "Nota a mano"
@@ -8941,7 +2171,24 @@ fn with_extension(file_name: &str, extension: &str) -> String {
 }
 
 fn markdown_alt_escape(value: &str) -> String {
-    value.replace('[', "(").replace(']', ")").replace('\n', " ")
+    let mut escaped = String::new();
+    for character in value.chars() {
+        if matches!(character, '\r' | '\n') { escaped.push(' '); }
+        else { if character.is_ascii_punctuation() { escaped.push('\\'); } escaped.push(character); }
+    }
+    escaped
+}
+
+fn markdown_image_destination_escape(value: &str) -> String {
+    let mut escaped = String::new();
+    for character in value.chars() {
+        match character {
+            ' ' => escaped.push_str("%20"), '\r' => escaped.push_str("%0D"), '\n' => escaped.push_str("%0A"),
+            '\\' | '(' | ')' | '<' | '>' | '&' => { escaped.push('\\'); escaped.push(character); },
+            _ => escaped.push(character),
+        }
+    }
+    escaped
 }
 
 fn research_title_for_request(topic: &str) -> String {
@@ -9653,25 +2900,7 @@ fn markdown_file_name(value: &str) -> String {
 }
 
 fn write_string_atomic(path: &Path, content: &str) -> Result<(), String> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| "La ruta de destino no tiene carpeta contenedora.".to_string())?;
-    let stem = path
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or("knownext-research");
-    let tmp_path = parent.join(format!(
-        ".{stem}.{}.tmp",
-        knownext_core::compact_id("write")
-    ));
-    std::fs::write(&tmp_path, content).map_err(|error| error.to_string())?;
-    match std::fs::rename(&tmp_path, path) {
-        Ok(_) => Ok(()),
-        Err(error) => {
-            let _ = std::fs::remove_file(&tmp_path);
-            Err(error.to_string())
-        }
-    }
+    atomic_io::write(path, content.as_bytes()).map_err(|error| error.to_string())
 }
 
 fn image_file_name(value: &str, default_format: &str) -> String {
@@ -9963,6 +3192,15 @@ fn sha256_hex(bytes: &[u8]) -> String {
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
+fn draft_base_is_verified(draft: &Value) -> bool {
+    let base = &draft["baseFingerprint"];
+    base["size"].as_u64().is_some() && base["sha256"].as_str().is_some_and(|hash|hash.len()==64 && hash.bytes().all(|byte|byte.is_ascii_hexdigit()))
+}
+
+fn fingerprint_bytes(bytes: &[u8]) -> Value {
+    json!({"mtimeNs":null,"size":bytes.len(),"sha256":sha256_hex(bytes)})
+}
+
 fn merge(target: &mut Value, patch: &Value) {
     match (target, patch) {
         (Value::Object(target), Value::Object(patch)) => {
@@ -9986,9 +3224,8 @@ fn normalize_config(config: &mut Value) {
     if let Some(tabs) = config["openUtilityTabs"].as_array_mut() {
         tabs.retain(|value| value.as_str() != Some("notes"));
     }
-    if config["activeUtilityTab"].is_null() {
-        config["activeUtilityTab"] = Value::from("notes");
-    }
+    // Explicit null means the document workspace is active. The default already
+    // supplies Notes for legacy configurations where the property is absent.
     normalize_handwritten_config(&mut config["handwritten"]);
     normalize_ai_config(&mut config["ai"]);
 }
@@ -10563,6 +3800,183 @@ mod tests {
     }
 
     #[test]
+    fn file_operations_reject_cross_project_identifiers_and_collisions() {
+        let api = api(); let (project, root) = create_project(&api);
+        let first = create_document(&api, &project, "first.md", "first");
+        let second = create_document(&api, &project, "second.md", "second");
+        assert!(api.rename_node(&project, &first, json!({"name":"second.md"})).is_err());
+        assert!(api.delete_node(&project, "other::second.md").is_err());
+        assert!(api.delete_node(&project, &format!("{project}::")).is_err());
+        assert!(api.create_document(&project, json!({"name":"second.md","markdown":"overwritten"})).is_err());
+        assert_eq!(std::fs::read_to_string(root.join("second.md")).unwrap(), "second");
+        assert_eq!(api.get_document(&second).unwrap()["markdown"], "second");
+        assert!(api.resolve_project_relative(&project, ".git/config").is_err());
+    }
+
+    #[test]
+    fn layout_preferences_round_trip_without_overwriting_other_settings() {
+        let api = api();
+        api.update_config(json!({"layout":{"navigationVisible":false,"contextPinned":true,"contextKind":"properties"}})).unwrap();
+        let config = api.read_config();
+        assert_eq!(config["layout"]["navigationVisible"], false);
+        assert_eq!(config["layout"]["contextPinned"], true);
+        assert_eq!(config["layout"]["contextKind"],"properties");
+        assert!(config["layout"]["sidebarWidth"].is_number());
+        assert!(config["ai"].is_object());
+    }
+    #[test]
+    fn active_document_selection_survives_config_reload_and_unrelated_updates() {
+        let api = api();
+        assert_eq!(api.read_config()["activeUtilityTab"], "notes");
+        api.update_config(json!({"activeUtilityTab":null})).unwrap();
+        assert!(api.read_config()["activeUtilityTab"].is_null());
+        api.update_config(json!({"layout":{"firstUseDismissed":true}})).unwrap();
+        let reopened = LocalApi::new(api.app_data_dir.clone(), api.version.clone(), api.profile.clone());
+        assert!(reopened.read_config()["activeUtilityTab"].is_null());
+        assert_eq!(reopened.read_config()["layout"]["firstUseDismissed"], true);
+        let mut legacy = json!({"appearance":{"language":"es"}});
+        normalize_config(&mut legacy);
+        assert_eq!(legacy["activeUtilityTab"], "notes");
+    }
+    #[test]
+    fn recovery_draft_identifiers_cannot_mix_distinct_documents() {
+        let api = api(); let (project, _) = create_project(&api);
+        let a = create_document(&api, &project, "a-b.md", "saved a");
+        let b = create_document(&api, &project, "a_b.md", "saved b");
+        api.save_draft(&a, json!({"markdown":"private draft a"})).unwrap();
+        assert!(api.save_draft(&a, json!({})).is_err());
+        assert_eq!(api.get_document(&b).unwrap()["markdown"], "saved b");
+        api.save_draft(&b, json!({"markdown":"private draft b"})).unwrap();
+        assert_eq!(api.get_document(&a).unwrap()["markdown"], "private draft a");
+        assert_eq!(api.get_document(&b).unwrap()["markdown"], "private draft b");
+        api.delete_draft(&a).unwrap();
+        assert_eq!(api.get_document(&b).unwrap()["markdown"], "private draft b");
+    }
+    #[test]
+    fn recovery_draft_reopen_preserves_the_original_base_after_external_change() {
+        let api = api(); let (project, root) = create_project(&api);
+        let id = create_document(&api, &project, "reopen.md", "original disk");
+        let original = api.get_document(&id).unwrap();
+        api.save_draft(&id, json!({"markdown":"local edits","baseFingerprint":original["baseFingerprint"],"baseContentHash":original["diskContentHash"]})).unwrap();
+        std::fs::write(root.join("reopen.md"), "external edits").unwrap();
+        let reopened = api.get_document(&id).unwrap();
+        assert_eq!(reopened["markdown"], "local edits");
+        assert_eq!(reopened["diskMarkdown"], "external edits");
+        assert_eq!(reopened["baseFingerprint"], original["baseFingerprint"]);
+        assert_eq!(reopened["diskChanged"], true);
+        assert_eq!(reopened["conflictStatus"], "disk-changed");
+        api.save_draft(&id, json!({"markdown":"local edits","baseFingerprint":api.fingerprint(&root.join("reopen.md")),"baseContentHash":reopened["diskContentHash"]})).unwrap();
+        let still_conflicted = api.get_document(&id).unwrap();
+        assert_eq!(still_conflicted["baseFingerprint"], original["baseFingerprint"]);
+        assert_eq!(still_conflicted["savedContentHash"], original["diskContentHash"]);
+        let response = api.handle("PUT", &format!("/api/documents/{}", child_id_for_path(&id)), json!({"markdown":"local edits","baseFingerprint":reopened["baseFingerprint"],"expectedDraftWriteRevision":api.draft_write_revision(&id).unwrap()}), vec![]).unwrap();
+        assert_eq!(response.status, 409);
+        assert_eq!(std::fs::read_to_string(root.join("reopen.md")).unwrap(), "external edits");
+    }
+    #[test]
+    fn recovery_legacy_draft_without_a_base_requires_an_explicit_choice() {
+        let api = api(); let (project, root) = create_project(&api);
+        let id = create_document(&api, &project, "legacy.md", "disk content");
+        let folder=api.app_data_dir.join("drafts");std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join(format!("{}.json",safe_name(&id))),serde_json::to_vec(&json!({"documentId":id,"markdown":"legacy edits"})).unwrap()).unwrap();
+        let loaded = api.get_document(&id).unwrap();assert_eq!(loaded["baseVerified"],false);
+        api.save_draft(&id,json!({"markdown":"new edits","baseFingerprint":loaded["baseFingerprint"]})).unwrap();
+        assert_eq!(api.get_document(&id).unwrap()["baseVerified"],false);
+        let route=format!("/api/documents/{}",child_id_for_path(&id));
+        let rejected=api.handle("PUT",&route,json!({"markdown":"new edits","baseFingerprint":loaded["baseFingerprint"],"expectedDraftWriteRevision":api.draft_write_revision(&id).unwrap()}),vec![]).unwrap();
+        assert_eq!(rejected.status,409);assert_eq!(std::fs::read_to_string(root.join("legacy.md")).unwrap(),"disk content");
+        let accepted=api.handle("PUT",&route,json!({"markdown":"new edits","force":true,"expectedDraftWriteRevision":api.draft_write_revision(&id).unwrap()}),vec![]).unwrap();
+        assert_eq!(accepted.status,200);assert_eq!(accepted.body["baseVerified"],true);
+    }
+    #[test]
+    fn recovery_restore_refuses_a_newly_occupied_destination_and_preserves_both_versions() {
+        let api=api();let(project,root)=create_project(&api);let id=create_document(&api,&project,"restore.md","original");
+        api.save_draft(&id,json!({"markdown":"local recovery"})).unwrap();std::fs::remove_file(root.join("restore.md")).unwrap();
+        let list=api.orphan_drafts();let key=list[0]["draftKey"].as_str().unwrap();
+        std::fs::write(root.join("restore.md"),"another program created this").unwrap();
+        assert!(api.restore_orphan_draft(key).is_err());
+        assert_eq!(std::fs::read_to_string(root.join("restore.md")).unwrap(),"another program created this");
+        assert!(api.read_draft_key(key).unwrap().is_some());
+        std::fs::remove_file(root.join("restore.md")).unwrap();
+        let restored=api.restore_orphan_draft(key).unwrap();assert_eq!(restored["document"]["markdown"],"local recovery");
+        assert!(api.read_draft_key(key).unwrap().is_none());
+    }
+    #[test]
+    fn recovery_handwritten_draft_recreates_valid_ink_instead_of_an_empty_markdown_file() {
+        let api=api();let(project,root)=create_project(&api);
+        let created=api.create_handwritten_note(&project,json!({"name":"sketch.knote"})).unwrap();let id=created["node"]["id"].as_str().unwrap();
+        let original=api.get_handwritten_note(id).unwrap();let mut content=original["content"].clone();content["title"]=json!("Recovered sketch");
+        api.save_handwritten_note_draft(id,json!({"content":content,"baseFingerprint":original["baseFingerprint"]})).unwrap();
+        assert!(api.save_handwritten_note_draft(id,json!({"content":{}})).is_err());
+        std::fs::remove_file(root.join("sketch.knote")).unwrap();let list=api.orphan_drafts();assert_eq!(list[0]["kind"],"handwritten-note");
+        let restored=api.restore_orphan_draft(list[0]["draftKey"].as_str().unwrap()).unwrap();
+        assert_eq!(restored["note"]["content"]["title"],"Recovered sketch");assert!(restored["document"].is_null());
+        let disk:Value=serde_json::from_slice(&std::fs::read(root.join("sketch.knote")).unwrap()).unwrap();assert!(disk["pages"].is_array());
+    }
+    #[test]
+    fn recovery_contracts_never_write_a_different_document_format() {
+        let api=api();let(project,root)=create_project(&api);let id=create_document(&api,&project,"document.md","original Markdown");
+        std::fs::write(root.join("picture.png"),"original image bytes").unwrap();let image=doc_id(&project,"picture.png");
+        assert!(api.save_document(&image,json!({"markdown":"replacement"})).is_err());
+        assert!(api.save_draft(&image,json!({"markdown":"replacement"})).is_err());
+        assert!(api.save_handwritten_note(&id,json!({"content":{"pages":[]}})).is_err());
+        assert_eq!(std::fs::read_to_string(root.join("picture.png")).unwrap(),"original image bytes");
+        assert_eq!(std::fs::read_to_string(root.join("document.md")).unwrap(),"original Markdown");
+    }
+    #[cfg(windows)]
+    #[test]
+    fn recovery_cleanup_failure_reports_committed_content_and_preserves_the_copy() {
+        let api=api();let(project,root)=create_project(&api);let id=create_document(&api,&project,"readonly.md","original");
+        api.save_draft(&id,json!({"markdown":"saved content"})).unwrap();let path=draft_store::path(&api.app_data_dir.join("drafts"),&id);
+        let mut permissions=std::fs::metadata(&path).unwrap().permissions();permissions.set_readonly(true);std::fs::set_permissions(&path,permissions.clone()).unwrap();
+        let saved=api.save_document(&id,json!({"markdown":"saved content"})).unwrap();
+        assert_eq!(saved["markdown"],"saved content");assert_eq!(saved["hasDraft"],false);assert!(saved["recoveryWarning"].is_string());assert!(path.exists());
+        assert_eq!(std::fs::read_to_string(root.join("readonly.md")).unwrap(),"saved content");
+        permissions.set_readonly(false);std::fs::set_permissions(&path,permissions).unwrap();
+    }
+    #[test]
+    fn configuration_write_failures_are_not_acknowledged_as_success() {
+        let api = api();
+        if api.config_path().is_file() { std::fs::remove_file(api.config_path()).unwrap(); }
+        std::fs::create_dir_all(api.config_path()).unwrap();
+        assert!(api.update_config(json!({"layout":{"navigationVisible":false}})).is_err());
+        assert!(api.update_ai_config(default_ai_config()).is_err());
+        std::fs::create_dir_all(api.export_template_path()).unwrap();
+        assert!(api.update_export_template(json!({})).is_err());
+        assert!(api.reset_export_template().is_err());
+    }
+
+    #[test]
+    fn save_rejects_changed_base_and_preserves_disk_and_draft() {
+        let api = api(); let (project, root) = create_project(&api);
+        let id = create_document(&api, &project, "guarded.md", "original");
+        let loaded = api.get_document(&id).unwrap();
+        api.save_draft(&id, json!({"markdown":"local draft", "baseFingerprint":loaded["baseFingerprint"]})).unwrap();
+        std::fs::write(root.join("guarded.md"), "external").unwrap();
+        let response = api.handle("PUT", &format!("/api/documents/{}", child_id_for_path(&id)), json!({"markdown":"local draft", "baseFingerprint":loaded["baseFingerprint"],"expectedDraftWriteRevision":api.draft_write_revision(&id).unwrap()}), vec![]).unwrap();
+        assert_eq!(response.status, 409);
+        assert_eq!(std::fs::read_to_string(root.join("guarded.md")).unwrap(), "external");
+        assert!(api.read_draft(&id).unwrap().is_some());
+    }
+    #[test]
+    fn save_uses_current_base_and_does_not_erase_on_missing_markdown() {
+        let api = api(); let (project, root) = create_project(&api);
+        let id = create_document(&api, &project, "guarded.md", "original");
+        let loaded = api.get_document(&id).unwrap();
+        assert!(api.save_document(&id, json!({})).is_err());
+        assert_eq!(std::fs::read_to_string(root.join("guarded.md")).unwrap(), "original");
+        let response = api.handle("PUT", &format!("/api/documents/{}", child_id_for_path(&id)), json!({"markdown":"saved", "baseFingerprint":loaded["baseFingerprint"]}), vec![]).unwrap();
+        assert_eq!(response.status, 200);
+        assert_eq!(std::fs::read_to_string(root.join("guarded.md")).unwrap(), "saved");
+    }
+    #[test]
+    fn personal_notes_do_not_report_success_when_persistence_fails() {
+        let api = api();
+        std::fs::create_dir_all(api.notes_path()).unwrap();
+        assert!(api.write_notes("unsaved notes".to_string()).is_err());
+    }
+
+    #[test]
     fn recording_documents_are_idempotent_and_never_replace_existing_files() {
         let api = api();
         let (project, root) = create_project(&api);
@@ -10613,6 +4027,109 @@ mod tests {
         (created.body["id"].as_str().unwrap().to_string(), root)
     }
 
+    #[test]
+    fn reviewed_batch_normalizes_descendants_protects_changes_and_never_replays() {
+        let api = api(); let (project, root) = create_project(&api);
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(root.join("docs/a.md"), "original").unwrap();
+        let payload = json!({"action":"trash","nodeIds":[doc_id(&project,"docs"),doc_id(&project,"docs/a.md")]});
+        let plan = api.prepare_batch(&project,payload.clone()).unwrap();
+        assert_eq!(plan["items"].as_array().unwrap().len(),1);
+        std::fs::write(root.join("docs/a.md"), "external change").unwrap();
+        assert!(api.execute_batch(&project,plan["id"].as_str().unwrap()).is_err());
+        assert!(root.join("docs/a.md").exists());
+        let plan = api.prepare_batch(&project,payload).unwrap();
+        let id = plan["id"].as_str().unwrap();
+        let done = api.execute_batch(&project,id).unwrap();
+        assert_eq!(done["state"],"completed");
+        let again = api.execute_batch(&project,id).unwrap();
+        assert_eq!(again,done);
+        assert_eq!(trash::list(&root,&project).unwrap().entries.len(),1);
+        let entry = &trash::list(&root,&project).unwrap().entries[0];
+        trash::restore(&root,&project,&entry.id).unwrap();
+        assert_eq!(std::fs::read_to_string(root.join("docs/a.md")).unwrap(),"external change");
+        assert!(api.prepare_batch(&project,json!({"action":"trash","nodeIds":["alien::a.md"]})).is_err());
+    }
+
+    #[test]
+    fn reviewed_move_rejects_collisions_and_reports_every_applied_item() {
+        let api = api(); let (project, root) = create_project(&api);
+        std::fs::create_dir_all(root.join("target")).unwrap();
+        let a = create_document(&api,&project,"a.md","a");
+        let b = create_document(&api,&project,"b.md","b");
+        let payload = json!({"action":"move","nodeIds":[a,b],"targetFolderId":doc_id(&project,"target")});
+        let plan = api.prepare_batch(&project,payload.clone()).unwrap();
+        std::fs::write(root.join("target/a.md"),"other").unwrap();
+        assert!(api.execute_batch(&project,plan["id"].as_str().unwrap()).is_err());
+        assert!(root.join("a.md").exists()); assert!(root.join("b.md").exists());
+        std::fs::remove_file(root.join("target/a.md")).unwrap();
+        let plan = api.prepare_batch(&project,payload).unwrap();
+        let result = api.execute_batch(&project,plan["id"].as_str().unwrap()).unwrap();
+        assert_eq!(result["state"],"completed");
+        assert!(result["items"].as_array().unwrap().iter().all(|item| item["result"]["tree"].is_array()));
+        assert_eq!(std::fs::read_to_string(root.join("target/b.md")).unwrap(),"b");
+        assert!(api.prepare_batch(&project,json!({"action":"move","nodeIds":[doc_id(&project,"target")],"targetFolderId":doc_id(&project,"target")})).is_err());
+    }
+
+    #[test]
+    fn reviewed_batch_moves_linked_documents_without_treating_its_reference_updates_as_external_changes() {
+        let api=api();let (project,root)=create_project(&api);
+        std::fs::create_dir(root.join("archive")).unwrap();
+        let a=create_document(&api,&project,"a.md","# A\n\n[B](b.md)\n");
+        let b=create_document(&api,&project,"b.md","# B\n\n[A](a.md)\n");
+        let plan=api.prepare_batch(&project,json!({"action":"move","nodeIds":[a,b],"targetFolderId":doc_id(&project,"archive")})).unwrap();
+        let done=api.execute_batch(&project,plan["id"].as_str().unwrap()).unwrap();
+        assert_eq!(done["state"],"completed");
+        assert_eq!(std::fs::read_to_string(root.join("archive/a.md")).unwrap(),"# A\n\n[B](b.md)\n");
+        assert_eq!(std::fs::read_to_string(root.join("archive/b.md")).unwrap(),"# B\n\n[A](a.md)\n");
+    }
+
+    #[test]
+    fn reviewed_batch_moves_an_image_and_its_referring_document_together() {
+        let api=api();let (project,root)=create_project(&api);
+        std::fs::create_dir(root.join("archive")).unwrap();
+        std::fs::write(root.join("a.png"),[1,2,3]).unwrap();
+        let document=create_document(&api,&project,"b.md","![x](a.png)\n");
+        let plan=api.prepare_batch(&project,json!({"action":"move","nodeIds":[doc_id(&project,"a.png"),document],"targetFolderId":doc_id(&project,"archive")})).unwrap();
+        let done=api.execute_batch(&project,plan["id"].as_str().unwrap()).unwrap();
+        assert_eq!(done["state"],"completed");
+        assert_eq!(std::fs::read_to_string(root.join("archive/b.md")).unwrap(),"![x](a.png)\n");
+        assert!(root.join("archive/a.png").exists());
+    }
+
+    #[test]
+    fn interrupted_batch_is_visible_after_restart_and_is_not_reexecuted() {
+        let api = api(); let (project, root) = create_project(&api);
+        let document = create_document(&api,&project,"a.md","original");
+        let mut plan = api.prepare_batch(&project,json!({"action":"trash","nodeIds":[document]})).unwrap();
+        let id = plan["id"].as_str().unwrap().to_owned();
+        plan["state"] = json!("running"); plan["items"][0]["state"] = json!("running");
+        atomic_io::write(&api.app_data_dir.join("file-batches").join(format!("{id}.json")),&serde_json::to_vec(&plan).unwrap()).unwrap();
+        let restarted = LocalApi::new(api.app_data_dir.clone(),"2.6.0".into(),"desktop".into());
+        let status = restarted.execute_batch(&project,&id).unwrap();
+        assert_eq!(status["state"],"running"); assert!(root.join("a.md").exists());
+        let snapshot = restarted.handle("GET",&format!("/api/projects/{project}/trash"),Value::Null,vec![]).unwrap();
+        assert_eq!(snapshot.body["batches"][0]["id"],id);
+        assert!(restarted.batch_status("alien",&id).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_junctions_are_not_traversed_by_tree_or_scanners() {
+        let api = api(); let (project, root) = create_project(&api);
+        let outside = api.app_data_dir.join("external-fixture");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("external.md"),"outside").unwrap();
+        let junction = root.join("linked");
+        let result = Command::new("cmd").args(["/C","mklink","/J"]).arg(&junction).arg(&outside).output().unwrap();
+        assert!(result.status.success(),"junction fixture could not be created");
+        assert!(api.resolve_project_relative(&project,"linked/external.md").is_err());
+        assert!(api.project_tree(&project).unwrap().is_empty());
+        assert!(collect_project_files(&root).unwrap().is_empty());
+        assert!(collect_project_sync_entries(&root).unwrap().is_empty());
+        std::fs::remove_dir(junction).unwrap();
+    }
+
     fn wait_for_research_status(
         api: &LocalApi,
         project_id: &str,
@@ -10620,7 +4137,7 @@ mod tests {
         status: &str,
     ) -> Value {
         for _ in 0..40 {
-            let job = api.ai_research_job(project_id, job_id);
+            let job = api.ai_research_job(project_id, job_id).unwrap();
             if job["status"].as_str() == Some(status)
                 && job["error"]["code"].as_str() != Some("not_found")
             {
@@ -10628,7 +4145,7 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(25));
         }
-        api.ai_research_job(project_id, job_id)
+        api.ai_research_job(project_id, job_id).unwrap()
     }
 
     #[test]
@@ -10804,7 +4321,20 @@ mod tests {
         assert_eq!(response.body["canUseLocalGit"], true);
         assert_eq!(response.body["canConnectGithub"], true);
         assert_eq!(response.body["canUseGithubApi"], true);
-        assert_eq!(response.body["requiresGithubLoginForVersioning"], true);
+        assert_eq!(response.body["requiresGithubLoginForVersioning"], false);
+        assert_eq!(response.body["localGitReason"], Value::Null);
+    }
+
+    #[test]
+    fn project_capabilities_do_not_confuse_an_invalid_git_folder_with_available_history() {
+        let api=api();let (project,root)=create_project(&api);
+        let status=api.versioning_status(&project);assert_eq!(status["available"],true);
+        // Preserve the valid repository as a fixture; replace only its directory entry.
+        std::fs::rename(root.join(".git"),root.join(".git-fixture-original")).unwrap();
+        std::fs::create_dir(root.join(".git")).unwrap();
+        let status=api.versioning_status(&project);
+        assert_eq!(status["enabled"],true);assert_eq!(status["available"],false);
+        assert!(status["reason"].as_str().unwrap().contains("conservan"));
     }
 
     #[test]
@@ -11515,6 +5045,276 @@ mod tests {
     }
 
     #[test]
+    fn document_references_use_saved_files_preserve_scope_and_report_missing_targets() {
+        let api=api();let (project,root)=create_project(&api);
+        let a=create_document(&api,&project,"a.md","[B](b.md#part) [Missing](missing.md) [External](https://example.test/x)\n");
+        create_document(&api,&project,"b.md","# B\n");
+        create_document(&api,&project,"c.md","[A](a.md?q=1#part)\n\n`[example](a.md)`\n");
+        api.save_draft(&a,json!({"markdown":"[Draft-only](private.md)"})).unwrap();
+        let response=api.handle("GET",&format!("/api/documents/{a}/links"),Value::Null,vec![]).unwrap();
+        let result=response.body;
+        assert_eq!(result["scope"],"saved-markdown");assert_eq!(result["complete"],true);
+        assert_eq!(result["outgoing"].as_array().unwrap().len(),2);
+        assert_eq!(result["outgoing"][0]["target"]["path"],"b.md");
+        assert_eq!(result["outgoing"][0]["target"]["status"],"available");
+        assert_eq!(result["outgoing"][1]["target"]["status"],"missing");
+        assert_eq!(result["incoming"].as_array().unwrap().len(),1);
+        assert_eq!(result["incoming"][0]["target"]["path"],"c.md");
+        assert_eq!(result["incoming"][0]["rawTarget"],"a.md?q=1#part");
+        std::fs::write(root.join("bad.md"),[0xff]).unwrap();
+        let partial=api.document_references(&a).unwrap();
+        assert_eq!(partial["complete"],false);assert!(!partial["warnings"].as_array().unwrap().is_empty());
+        assert!(LocalApi::is_independent_snapshot("GET",&format!("/api/documents/{a}/links")));
+        assert!(!LocalApi::is_independent_snapshot("PUT",&format!("/api/documents/{a}/links")));
+    }
+
+    #[test]
+    fn document_references_report_source_limits_and_keep_readable_incoming_links() {
+        let api=api();let (project,root)=create_project(&api);
+        let id=create_document(&api,&project,"large.md","# Large\n");
+        create_document(&api,&project,"mention.md","[Large](large.md)\n");
+        std::fs::write(root.join("large.md"),"x".repeat(2*1024*1024+1)).unwrap();
+        let result=api.document_references(&id).unwrap();
+        assert_eq!(result["sourceRead"],false);assert_eq!(result["complete"],false);
+        assert_eq!(result["incoming"][0]["target"]["path"],"mention.md");
+        assert!(!result["warnings"].as_array().unwrap().is_empty());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn document_references_resolve_actual_file_case_for_incoming_links() {
+        let api=api();let (project,_)=create_project(&api);
+        let id=create_document(&api,&project,"Plan.md","# Plan\n");
+        create_document(&api,&project,"mentions.md","[Plan](PLAN.MD)\n");
+        let result=api.document_references(&id).unwrap();
+        assert_eq!(result["incoming"][0]["target"]["path"],"mentions.md");
+    }
+
+    #[test]
+    fn moved_references_keep_partial_snapshots_when_a_later_file_cannot_be_rewritten() {
+        let api=api();let (project,root)=create_project(&api);
+        std::fs::create_dir(root.join("folder")).unwrap();
+        let source=create_document(&api,&project,"a.md","[Target](target.md)\n");
+        create_document(&api,&project,"target.md","# Target\n");
+        let broken=create_document(&api,&project,"z.md","[Source](a.md)\n");
+        std::fs::create_dir_all(api.app_data_dir.join("drafts")).unwrap();
+        std::fs::write(draft_store::path(&api.app_data_dir.join("drafts"),&broken),b"invalid JSON").unwrap();
+        let result=api.move_node(&project,&source,json!({"targetFolderId":format!("{project}::folder")})).unwrap();
+        assert_eq!(result["referencesPending"],true);
+        assert!(!result["warnings"].as_array().unwrap().is_empty());
+        assert!(root.join("folder/a.md").exists());
+        let affected=result["affectedDocuments"].as_array().unwrap().iter().find(|item|item["oldId"]==source).unwrap();
+        // The traversal's ordering may meet the unreadable file first; any applied rewrite must carry its snapshot.
+        if std::fs::read_to_string(root.join("folder/a.md")).unwrap().contains("../target.md") {
+            assert!(affected["document"]["markdown"].as_str().unwrap().contains("../target.md"));
+        }
+        assert_eq!(std::fs::read(draft_store::path(&api.app_data_dir.join("drafts"),&broken)).unwrap(),b"invalid JSON");
+        assert!(api.rename_node(&project,&format!("{project}::folder/a.md"),json!({"name":"a.txt"})).is_err());
+    }
+
+    #[test]
+    fn moved_references_update_disk_drafts_and_session_snapshots_without_advancing_stale_bases() {
+        let api=api();let (project,root)=create_project(&api);
+        std::fs::create_dir(root.join("folder")).unwrap();
+        create_document(&api,&project,"target.md","# Target\n");
+        let id=create_document(&api,&project,"source.md","[Target](target.md#part)\n");
+        let pending="[Target](target.md#part)\n\nPending work\n";
+        api.save_draft(&id,json!({"markdown":pending})).unwrap();
+        let other=create_document(&api,&project,"other.md","[Source](source.md?q=1#part)\n");
+        api.save_draft(&other,json!({"markdown":"[Source](source.md?q=1#part)\n\nMore work\n"})).unwrap();
+        let result=api.move_node(&project,&id,json!({"targetFolderId":format!("{project}::folder")})).unwrap();
+        assert_eq!(result["referencesPending"],false);
+        let new=format!("{project}::folder/source.md");
+        let record=api.get_document(&new).unwrap();
+        assert_eq!(record["diskMarkdown"],"[Target](../target.md#part)\n");
+        assert_eq!(record["markdown"],"[Target](../target.md#part)\n\nPending work\n");
+        assert_eq!(record["diskChanged"],false);assert_eq!(record["hasDraft"],true);
+        assert!(!api.save_base_changed(&new,&json!({"baseFingerprint":record["baseFingerprint"]})).unwrap());
+        let affected=result["affectedDocuments"].as_array().unwrap().iter().find(|item|item["oldId"]==id).unwrap();
+        assert_eq!(affected["previousMarkdown"],pending);assert_eq!(affected["document"]["markdown"],record["markdown"]);
+        let other_record=api.get_document(&other).unwrap();
+        assert!(other_record["markdown"].as_str().unwrap().contains("folder/source.md?q=1#part"));
+        assert_eq!(other_record["diskChanged"],false);
+        let stale=create_document(&api,&project,"stale.md","[Target](target.md)\n");
+        api.save_draft(&stale,json!({"markdown":"[Target](target.md)\n\nLocal\n"})).unwrap();
+        let original=api.read_draft(&stale).unwrap().unwrap()["baseFingerprint"].clone();
+        std::fs::write(root.join("stale.md"),"[Target](target.md)\n\nExternal\n").unwrap();
+        api.move_node(&project,&stale,json!({"targetFolderId":format!("{project}::folder")})).unwrap();
+        let stale_new=format!("{project}::folder/stale.md");
+        let record=api.get_document(&stale_new).unwrap();
+        assert_eq!(record["baseFingerprint"],original);assert_eq!(record["diskChanged"],true);
+        assert!(record["markdown"].as_str().unwrap().contains("../target.md"));
+    }
+
+    #[test]
+    fn moved_drafts_follow_markdown_and_keep_the_original_base() {
+        let api=api(); let (project,root)=create_project(&api);
+        std::fs::create_dir(root.join("target")).unwrap();
+        let old=create_document(&api,&project,"draft.md","# Saved\n");
+        let base=api.get_document(&old).unwrap()["baseFingerprint"].clone();
+        api.save_draft(&old,json!({"markdown":"# Pending\n","baseFingerprint":base})).unwrap();
+        api.move_node(&project,&old,json!({"targetFolderId":format!("{project}::target")})).unwrap();
+        let new=format!("{project}::target/draft.md");
+        let record=api.get_document(&new).unwrap();
+        assert_eq!(record["markdown"],"# Pending\n");
+        assert_eq!(record["diskMarkdown"],"# Saved\n");
+        assert_eq!(record["baseFingerprint"],base);
+        assert_eq!(record["diskChanged"],false);
+        assert!(api.read_draft(&old).unwrap().is_none());
+        assert_eq!(api.read_draft(&new).unwrap().unwrap()["documentId"],new);
+        assert!(!api.save_base_changed(&new,&json!({"baseFingerprint":base})).unwrap());
+    }
+
+    #[test]
+    fn moved_drafts_reject_recovery_collisions_before_any_batch_mutation() {
+        let api=api(); let (project,root)=create_project(&api);
+        std::fs::create_dir(root.join("target")).unwrap();
+        let a=create_document(&api,&project,"a.md","# A\n");
+        let b=create_document(&api,&project,"b.md","# B\n");
+        let occupied=format!("{project}::target/b.md");
+        api.save_draft(&occupied,json!({"markdown":"# Orphaned target\n"})).unwrap();
+        let plan=api.prepare_batch(&project,json!({"action":"move","nodeIds":[a,b],"targetFolderId":format!("{project}::target")})).unwrap();
+        assert!(api.execute_batch(&project,plan["id"].as_str().unwrap()).is_err());
+        assert!(root.join("a.md").exists() && root.join("b.md").exists());
+        assert!(!root.join("target/a.md").exists());
+        assert_eq!(api.read_draft(&occupied).unwrap().unwrap()["markdown"],"# Orphaned target\n");
+    }
+
+    #[test]
+    fn moved_drafts_preserve_stale_bases_and_handwritten_content() {
+        let api=api(); let (project,root)=create_project(&api);
+        let id=create_document(&api,&project,"stale.md","# Original\n");
+        let base=api.get_document(&id).unwrap()["baseFingerprint"].clone();
+        api.save_draft(&id,json!({"markdown":"# Local\n","baseFingerprint":base})).unwrap();
+        std::fs::write(root.join("stale.md"),"# External\n").unwrap();
+        api.rename_node(&project,&id,json!({"name":"renamed.md"})).unwrap();
+        let renamed=format!("{project}::renamed.md");
+        let record=api.get_document(&renamed).unwrap();
+        assert_eq!(record["baseFingerprint"],base);assert_eq!(record["diskChanged"],true);
+        assert_eq!(record["markdown"],"# Local\n");
+        let created=api.create_handwritten_note(&project,json!({"name":"Sketch.knote"})).unwrap();
+        let note=created["node"]["id"].as_str().unwrap();
+        let record=api.get_handwritten_note(note).unwrap();
+        let mut content=record["content"].clone();content["title"]=json!("Pending ink");
+        api.save_handwritten_note_draft(note,json!({"content":content,"baseFingerprint":record["baseFingerprint"]})).unwrap();
+        api.rename_node(&project,note,json!({"name":"Renamed.knote"})).unwrap();
+        let new=format!("{project}::Renamed.knote");
+        let record=api.get_handwritten_note(&new).unwrap();
+        assert_eq!(record["content"]["title"],"Pending ink");
+        assert_eq!(record["hasDraft"],true);assert_eq!(record["diskChanged"],false);
+        assert!(api.read_draft(note).unwrap().is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn moved_drafts_report_a_cleanup_failure_without_hiding_the_physical_move() {
+        let api=api();let (project,root)=create_project(&api);
+        let old=create_document(&api,&project,"before.md","# Saved\n");
+        api.save_draft(&old,json!({"markdown":"# Pending\n"})).unwrap();
+        let old_path=draft_store::path(&api.app_data_dir.join("drafts"),&old);
+        let mut permissions=std::fs::metadata(&old_path).unwrap().permissions();permissions.set_readonly(true);
+        std::fs::set_permissions(&old_path,permissions).unwrap();
+        let result=api.rename_node(&project,&old,json!({"name":"after.md"})).unwrap();
+        assert!(root.join("after.md").exists());assert!(!root.join("before.md").exists());
+        assert_eq!(result["recoveryPending"],true);assert!(!result["warnings"].as_array().unwrap().is_empty());
+        let new=format!("{project}::after.md");
+        assert_eq!(api.get_document(&new).unwrap()["markdown"],"# Pending\n");
+        assert!(api.read_draft(&old).unwrap().is_some());
+        let mut permissions=std::fs::metadata(&old_path).unwrap().permissions();permissions.set_readonly(false);
+        std::fs::set_permissions(&old_path,permissions).unwrap();
+    }
+
+    #[test]
+    fn version_history_never_includes_unsaved_drafts() {
+        let api = api();
+        let (project, _) = create_project(&api);
+        let id = create_document(&api, &project, "saved.md", "# Saved\n");
+        api.save_draft(&id, json!({"markdown":"# Not committed\n"})).unwrap();
+        let version = api.create_version(&project, json!({"documentId":id,"title":"Saved snapshot"})).unwrap();
+        let content = api.version_content(&id, version["version"]["id"].as_str().unwrap()).unwrap();
+        assert_eq!(content["markdown"], "# Saved\n");
+        assert_eq!(api.get_document(&id).unwrap()["markdown"], "# Not committed\n");
+    }
+
+    #[test]
+    fn version_history_does_not_mix_similar_file_names() {
+        let api = api();
+        let (project, _) = create_project(&api);
+        let a = create_document(&api, &project, "a-b.md", "# First\n");
+        let b = create_document(&api, &project, "a_b.md", "# Second\n");
+        let version = api.create_version(&project, json!({"documentId":a,"title":"First"})).unwrap();
+        assert!(api.version_content(&b, version["version"]["id"].as_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn version_history_uses_git_after_external_commits_and_renames() {
+        let api = api();
+        let (project, root) = create_project(&api);
+        let before = create_document(&api, &project, "before.md", "# Before\n");
+        let first = api.create_version(&project, json!({"documentId":before,"title":"First"})).unwrap();
+        std::fs::rename(root.join("before.md"), root.join("after.md")).unwrap();
+        git_commit_paths(&root,"Rename", &["before.md","after.md"]).unwrap();
+        std::fs::write(root.join("after.md"),"# After\n").unwrap();
+        git_commit_paths(&root,"External update", &["after.md"]).unwrap();
+        let after = format!("{project}::after.md");
+        let history = api.list_versions(&after).unwrap();
+        assert_eq!(history.len(),3);
+        assert_eq!(history[0]["title"],"External update");
+        assert_eq!(history[0]["current"],true);
+        assert_eq!(history[1]["current"],false);
+        assert_eq!(api.version_content(&after,first["version"]["id"].as_str().unwrap()).unwrap()["markdown"],"# Before\n");
+        let repeated=api.create_version(&project,json!({"documentId":after,"title":"No change"})).unwrap();
+        assert_eq!(repeated["version"]["id"],history[0]["id"]);
+        assert_eq!(api.list_versions(&after).unwrap().len(),3);
+    }
+
+    #[test]
+    fn version_history_rejects_a_document_from_another_project_before_committing() {
+        let api = api();
+        let (project, root) = create_project(&api);
+        let (other, _) = create_project(&api);
+        let id = create_document(&api,&project,"owned.md","# Owned\n");
+        assert!(api.create_version(&other,json!({"documentId":id})).is_err());
+        assert!(git_head_hash(&root).unwrap().is_none());
+    }
+
+    #[test]
+    fn version_history_commits_handwritten_notes_without_reading_them_as_markdown() {
+        let api=api();
+        let (project, root)=create_project(&api);
+        api.create_handwritten_note(&project,json!({"name":"Sketch.knote"})).unwrap();
+        let id=format!("{project}::Sketch.knote");
+        let created=api.create_version(&project,json!({"documentId":id,"title":"Sketch saved"})).unwrap();
+        assert_eq!(created["version"]["hash"],git_head_hash(&root).unwrap().unwrap());
+        assert!(git_status_items(&root).unwrap().is_empty());
+    }
+
+    #[test]
+    fn version_history_restore_rejects_external_changes_and_reports_a_committed_file_when_git_fails() {
+        let api=api();
+        let (project,root)=create_project(&api);
+        let id=create_document(&api,&project,"restore.md","# Historical\n");
+        let version=api.create_version(&project,json!({"documentId":id})).unwrap();
+        let version_id=version["version"]["id"].as_str().unwrap();
+        let base=api.fingerprint(&root.join("restore.md"));
+        std::fs::write(root.join("restore.md"),"# External\n").unwrap();
+        let route=format!("/api/documents/{id}/versions/{version_id}/restore");
+        let rejected=api.handle("POST",&route,json!({"baseFingerprint":base}),vec![]).unwrap();
+        assert_eq!(rejected.status,409);
+        assert_eq!(std::fs::read_to_string(root.join("restore.md")).unwrap(),"# External\n");
+        assert_eq!(api.handle("POST",&route,Value::Null,vec![]).unwrap().status,400);
+        let base=api.fingerprint(&root.join("restore.md"));
+        std::fs::write(root.join(".git/index.lock"),"QA lock").unwrap();
+        let restored=api.handle("POST",&route,json!({"baseFingerprint":base}),vec![]).unwrap();
+        assert_eq!(restored.status,200);
+        assert_eq!(restored.body["savedDocument"]["markdown"],"# Historical\n");
+        assert_eq!(restored.body["version"],Value::Null);
+        assert!(restored.body["historyWarning"].is_string());
+        assert_eq!(std::fs::read_to_string(root.join("restore.md")).unwrap(),"# Historical\n");
+        std::fs::remove_file(root.join(".git/index.lock")).unwrap();
+    }
+
+    #[test]
     fn creating_project_version_commits_document_changes_to_local_git() {
         let api = api();
         let (project_id, root) = create_project(&api);
@@ -11650,7 +5450,7 @@ mod tests {
                 &format!(
                     "/api/documents/{encoded_document_id}/versions/{first_version_id}/restore"
                 ),
-                Value::Null,
+                json!({"baseFingerprint":api.fingerprint(&root.join("plan.md"))}),
                 vec![],
             )
             .unwrap();
@@ -11837,7 +5637,7 @@ mod tests {
         std::fs::create_dir_all(api.app_data_dir.join("ai")).unwrap();
         api.write_json(&api.ai_usage_path(), &json!({"entries":[{"createdAt":"2026-06-08T10:00:00Z","model":"gpt-5.4-mini","capability":"document_ai","estimatedCost":99.0,"totalTokens":1500,"month":"2026-06"}]})).unwrap();
         let query = BTreeMap::from([("month".into(), "2026-06".into())]);
-        let result = api.ai_usage_summary(&query);
+        let result = api.ai_usage_summary(&query).unwrap();
         assert_eq!(result["legacyEntries"], 1);
         assert_eq!(result["totalEstimatedCost"], 0.0);
         let stored = api.read_json(&api.ai_usage_path(), Value::Null);
@@ -11850,7 +5650,7 @@ mod tests {
         let api = api();
         std::fs::write(
             api.app_data_dir.join("eur-usd.json"),
-            json!({"date":knownext_core::now_iso()[..10],"usdPerEur":1.25,"source":"fixture"})
+            json!({"date":knownext_core::now_iso()[..10],"usdPerEur":1.25,"source":"https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"})
                 .to_string(),
         )
         .unwrap();
@@ -12099,7 +5899,8 @@ mod tests {
                 "POST",
                 &format!("/api/projects/{project_id}/external-changes/import"),
                 json!({
-                    "decisions": [{ "itemId": external_id, "decision": "include" }],
+                    "decisions": changes.body["items"].as_array().unwrap().iter().map(|item| json!({"itemId":item["id"],"decision":if item["id"]==external_id{"include"}else{"omit"}})).collect::<Vec<_>>(),
+                    "revision": changes.body["revision"],
                     "syncRemote": false
                 }),
                 vec![],
@@ -12153,12 +5954,14 @@ mod tests {
             }),
         );
 
+        let before = std::fs::read(api.auth_path()).unwrap();
         let auth = api
             .handle("GET", "/api/auth/status", Value::Null, vec![])
             .unwrap();
 
         assert_eq!(auth.body["isAuthenticated"], false);
-        assert!(!api.auth_path().exists());
+        // GET is an observation: legacy bytes remain available for explicit recovery.
+        assert_eq!(std::fs::read(api.auth_path()).unwrap(), before);
     }
 
     #[test]
@@ -12192,16 +5995,17 @@ mod tests {
             }),
         );
 
+        let before = std::fs::read(api.auth_path()).unwrap();
         let auth = api
             .handle("GET", "/api/auth/status", Value::Null, vec![])
             .unwrap();
-        let persisted = api.read_json(&api.auth_path(), json!({}));
+
 
         assert_eq!(auth.body["isAuthenticated"], true);
         assert!(auth.body.get("accessToken").is_none());
         assert!(auth.body.get("token").is_none());
-        assert!(persisted.get("accessToken").is_none());
-        assert!(persisted.get("token").is_none());
+        // Secrets never enter the public projection; GET must not rewrite their source.
+        assert_eq!(std::fs::read(api.auth_path()).unwrap(), before);
     }
 
     #[test]
@@ -12222,17 +6026,20 @@ mod tests {
             }),
         );
 
+        let before = std::fs::read(api.auth_path()).unwrap();
         let auth = api
             .handle("GET", "/api/auth/status", Value::Null, vec![])
             .unwrap();
 
         assert_eq!(auth.body["isAuthenticated"], false);
-        assert!(!api.auth_path().exists());
+        // GET is an observation: legacy bytes remain available for explicit recovery.
+        assert_eq!(std::fs::read(api.auth_path()).unwrap(), before);
     }
 
     #[test]
     fn runtime_logging_and_folder_contracts_are_local_runtime_backed() {
         let api = api();
+        api.update_config(json!({"diagnostics":{"traceLoggingEnabled":true}})).unwrap();
 
         let status = api
             .handle("GET", "/api/runtime/logging", Value::Null, vec![])
@@ -12242,7 +6049,7 @@ mod tests {
         assert!(status.body["filePath"]
             .as_str()
             .unwrap()
-            .ends_with("knownext.log"));
+            .ends_with("diagnostics-v1.json"));
 
         let recorded = api
             .handle(
@@ -12258,7 +6065,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(recorded.status, 200);
-        assert!(api.logs_dir().join("knownext.log").exists());
+        assert!(api.logs_dir().join("diagnostics-v1.json").exists());
 
         let folder = api.app_data_dir.join("manual-open-folder");
         let opened = api
@@ -12299,7 +6106,7 @@ mod tests {
                 vec![],
             )
             .unwrap();
-        let credentials_after_key = api.read_json(&api.credentials_path(), json!({}));
+        let credentials_after_key = api.credentials();
 
         assert_eq!(saved_key.body["configured"], true);
         assert_eq!(credentials_after_key["openaiKey"], "sk-knownext-test-key");
@@ -12308,7 +6115,7 @@ mod tests {
         let _ = api
             .handle("POST", "/api/auth/logout", Value::Null, vec![])
             .unwrap();
-        let credentials_after_logout = api.read_json(&api.credentials_path(), json!({}));
+        let credentials_after_logout = api.credentials();
 
         assert_eq!(
             credentials_after_logout["openaiKey"],
@@ -12330,13 +6137,54 @@ mod tests {
         let _ = api
             .handle("DELETE", "/api/credentials/openai-key", Value::Null, vec![])
             .unwrap();
-        let credentials_after_openai_delete = api.read_json(&api.credentials_path(), json!({}));
+        let credentials_after_openai_delete = api.credentials();
 
         assert!(credentials_after_openai_delete.get("openaiKey").is_none());
         assert_eq!(
             credentials_after_openai_delete["github"]["accessToken"],
             "gho_secret"
         );
+    }
+
+    #[test]
+    fn credential_mutations_preserve_corrupt_or_readonly_stores_and_report_failure() {
+        let api=api();
+        std::fs::write(api.credentials_path(),b"broken store").unwrap();
+        assert!(api.save_openai_key(json!({"apiKey":"dummy-new-key"})).is_err());
+        assert!(api.delete_openai_key().is_err());assert!(api.clear_auth_status().is_err());
+        assert_eq!(std::fs::read(api.credentials_path()).unwrap(),b"broken store");
+        assert!(!api.openai_key_status()["storageError"].is_null());
+        std::fs::remove_file(api.credentials_path()).unwrap();
+        api.save_openai_key(json!({"apiKey":"dummy-original-key"})).unwrap();
+        let original=std::fs::read(api.credentials_path()).unwrap();
+        let mut permissions=std::fs::metadata(api.credentials_path()).unwrap().permissions();
+        permissions.set_readonly(true);std::fs::set_permissions(api.credentials_path(),permissions.clone()).unwrap();
+        assert!(api.save_openai_key(json!({"apiKey":"dummy-replacement"})).is_err());
+        assert_eq!(std::fs::read(api.credentials_path()).unwrap(),original);
+        assert_eq!(api.openai_key().as_deref(),Some("dummy-original-key"));
+        permissions.set_readonly(false);std::fs::set_permissions(api.credentials_path(),permissions).unwrap();
+    }
+
+    #[test]
+    fn credential_status_handles_unicode_without_exposing_the_key() {
+        let api=api();let key="áβ-dummy-key-último";
+        api.save_openai_key(json!({"apiKey":key})).unwrap();
+        let status=api.openai_key_status();
+        assert_eq!(status["configured"],true);assert!(!status.to_string().contains(key));
+        assert!(api.save_openai_key(json!({"apiKey":""})).is_err());
+        assert_eq!(api.openai_key().as_deref(),Some(key));
+    }
+
+    #[test]
+    fn unavailable_credential_store_does_not_erase_the_github_account_or_expose_legacy_secrets() {
+        let api=api();
+        let auth=json!({"isAuthenticated":true,"provider":"github","user":{"login":"fixture-user"},"scopes":[],"accessToken":"dummy-legacy-secret"});
+        api.write_json(&api.auth_path(),&auth).unwrap();
+        std::fs::write(api.credentials_path(),b"broken store").unwrap();
+        let public=api.auth_status();
+        assert_eq!(public["isAuthenticated"],false);assert!(!public["credentialStorageError"].is_null());
+        assert!(!public.to_string().contains("dummy-legacy-secret"));
+        assert_eq!(api.read_json(&api.auth_path(),Value::Null),auth);
     }
 
     #[test]
@@ -12507,7 +6355,8 @@ mod tests {
                 vec![],
             )
             .unwrap();
-        assert_eq!(rebuilt.body["documentCount"], 2);
+        // Enumeration also reports the exported PDF and inserted PNG; only two sources have text.
+        assert_eq!(rebuilt.body["documentCount"], 4);
         assert_eq!(rebuilt.body["indexedDocumentCount"], 2);
     }
 
@@ -12583,7 +6432,8 @@ mod tests {
             "activeHandwrittenBaseFingerprint": loaded.body["baseFingerprint"].clone()
         });
 
-        api.apply_ai_handwritten_drawings(&project_id, &runtime_body, &mut response)
+        let drawings=ai_interaction::drawing_results_for_test(&api,&project_id,&runtime_body,&response);
+        api.apply_ai_handwritten_drawings(&project_id, &runtime_body, &mut response, &drawings)
             .unwrap();
 
         assert_eq!(response["operations"][0]["type"], "handwritten_modified");
@@ -12665,7 +6515,7 @@ mod tests {
             .unwrap();
         let mut active_content = loaded.body["content"].clone();
         active_content["pages"][0]["strokes"] = json!([
-            { "id": "manual-stroke", "toolId": "pencil-1", "points": [{ "x": 20, "y": 20, "pressure": 0.5 }] }
+            { "id": "manual-stroke", "toolId": "pencil-1", "tool":"pencil", "color":"#111827", "width":2, "opacity":1.0, "points": [[20,20,0.5,0],[40,40,0.5,16]] }
         ]);
         let mut response = json!({
             "status": "completed",
@@ -12708,7 +6558,8 @@ mod tests {
             "activeHandwrittenBaseFingerprint": loaded.body["baseFingerprint"].clone()
         });
 
-        api.apply_ai_handwritten_drawings(&project_id, &runtime_body, &mut response)
+        let drawings=ai_interaction::drawing_results_for_test(&api,&project_id,&runtime_body,&response);
+        api.apply_ai_handwritten_drawings(&project_id, &runtime_body, &mut response, &drawings)
             .unwrap();
 
         assert_eq!(response["operations"][0]["type"], "handwritten_modified");
@@ -12894,7 +6745,7 @@ mod tests {
             .handle(
                 "POST",
                 &format!("/api/drafts/{draft_key}/restore"),
-                Value::Null,
+                json!({"documentId":document_id,"expectedFingerprint":orphans.body[0]["fingerprint"],"locationRevision":orphans.body[0]["locationRevision"]}),
                 vec![],
             )
             .unwrap();
@@ -12955,7 +6806,8 @@ mod tests {
                 &format!("/api/documents/{document_id}/draft"),
                 json!({
                     "markdown": "# Titulo\n\nTexto\n\n",
-                    "baseFingerprint": loaded.body["baseFingerprint"].clone()
+                    "baseFingerprint": loaded.body["baseFingerprint"].clone(),
+                    "expectedDraftWriteRevision": dirty_draft.body["draftWriteRevision"].clone()
                 }),
                 vec![],
             )
@@ -13155,8 +7007,23 @@ mod tests {
         assert_eq!(migrated.body["ai"]["imageGeneration"]["size"], "2048x2048");
         assert_eq!(migrated.body["ai"]["agentic"]["webResearchEnabled"], true);
         let persisted = api.read_json(&api.config_path(), json!({}));
+        // GET normalizes the response only; the legacy source is retained.
+        assert_eq!(persisted["schemaVersion"], 1);
+        api.handle("PUT", "/api/config", json!({"layout":{"sidebarWidth":340}}), vec![]).unwrap();
+        let persisted = api.read_json(&api.config_path(), json!({}));
         assert_eq!(persisted["schemaVersion"], 3);
         assert_eq!(persisted["ai"]["rag"]["enabled"], true);
+    }
+
+    #[test]
+    fn internal_background_publication_blocks_relocation_without_provider_calls(){
+        let api=api();let (project,_root)=create_project(&api);let other=tempfile::tempdir().unwrap();
+        let before=std::fs::read(api.registry_path()).unwrap();
+        let activity=api.background_work.enter();
+        let error=api.update_project(&project,json!({"folderPath":other.path().to_string_lossy(),"locationReview":{}})).unwrap_err();
+        assert!(error.contains("segundo plano"));assert_eq!(std::fs::read(api.registry_path()).unwrap(),before);
+        drop(activity);assert!(!api.has_background_work());
+        assert_eq!(api.update_project(&project,json!({"name":"Still available"})).unwrap()["name"],"Still available");
     }
 
     #[test]
@@ -13170,13 +7037,14 @@ mod tests {
             "# Release\nContenido local.",
         );
 
+        let loaded=api.get_document(&document_id).unwrap();
         let draft = api
             .handle(
                 "PUT",
                 &format!("/api/documents/{document_id}/draft"),
                 json!({
                     "markdown": "# Release\nBorrador local.",
-                    "baseFingerprint": null
+                    "baseFingerprint": loaded["baseFingerprint"]
                 }),
                 vec![],
             )
@@ -13189,11 +7057,14 @@ mod tests {
                 "PUT",
                 &format!("/api/documents/{document_id}"),
                 json!({
-                    "markdown": "# Release\nContenido final local."
+                    "markdown": "# Release\nContenido final local.",
+                    "baseFingerprint":loaded["baseFingerprint"],
+                    "expectedDraftWriteRevision":api.draft_write_revision(&document_id).unwrap()
                 }),
                 vec![],
             )
             .unwrap();
+        assert_eq!(saved.status,200,"{}",saved.body);
         assert_eq!(saved.body["markdown"], "# Release\nContenido final local.");
 
         let version = api
@@ -13252,8 +7123,11 @@ mod tests {
             field_name: "file".to_string(),
             name: "pixel.png".to_string(),
             mime_type: Some("image/png".to_string()),
-            data_base64: base64::engine::general_purpose::STANDARD
-                .encode([0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n']),
+            data_base64: {
+                let mut png=Vec::new();
+                image::ImageEncoder::write_image(image::codecs::png::PngEncoder::new(&mut png),&[0,0,0,255],1,1,image::ExtendedColorType::Rgba8).unwrap();
+                base64::engine::general_purpose::STANDARD.encode(png)
+            },
         };
         let imported = api
             .handle(
@@ -13299,8 +7173,15 @@ mod tests {
             "altText": "Pixel"
         }), vec![]).unwrap();
         assert_eq!(reference.body["markdown"], "![Pixel](../pixel.png)");
+        let literal_reference = api.handle("POST", &format!("/api/projects/{project_id}/documents/{nested_document_id_path}/image-reference"), json!({
+            "assetId": asset_id,
+            "altText": "Pixel [A] *literal* &amp;"
+        }), vec![]).unwrap();
+        assert_eq!(literal_reference.body["markdown"], r"![Pixel \[A\] \*literal\* \&amp\;](../pixel.png)");
         api.handle("PUT", &format!("/api/documents/{nested_document_id_path}"), json!({
-            "markdown": format!("# Visual\n\n{}\n", reference.body["markdown"].as_str().unwrap())
+            "markdown": format!("# Visual\n\n{}\n", reference.body["markdown"].as_str().unwrap()),
+            "baseFingerprint":api.get_document(&nested_document_id).unwrap()["baseFingerprint"],
+            "expectedDraftWriteRevision":api.draft_write_revision(&nested_document_id).unwrap()
         }), vec![]).unwrap();
         let usage = api
             .handle(
@@ -13524,7 +7405,7 @@ mod tests {
             base64::engine::general_purpose::STANDARD.encode(&png)
         );
 
-        let assets = api.export_image_assets(&document_id, &markdown);
+        let assets = api.export_image_assets_checked(&document_id, &markdown).unwrap();
 
         assert_eq!(assets.len(), 3);
         assert!(assets.iter().any(|asset| asset.source == "assets/pixel.png"
@@ -13775,6 +7656,7 @@ mod tests {
                 json!({
                     "prompt": "Propón un siguiente paso",
                     "documentId": document_id,
+                    "activeDocumentBaseFingerprint": api.fingerprint(&root.join("context.md")),
                     "clientMessageId": "client-test-message",
                     "contextSourceIds": [document_id]
                 }),
@@ -13861,7 +7743,7 @@ mod tests {
             .as_str()
             .unwrap()
             .starts_with("20"));
-        let index_file = api.read_json(&api.ai_index_path(&project_id), json!({}));
+        let index_file = api.read_ai_index(&project_id).unwrap().unwrap().value;
         assert!(index_file["chunks"]
             .as_array()
             .unwrap()
@@ -13877,7 +7759,7 @@ mod tests {
             .handle(
                 "DELETE",
                 &format!("/api/projects/{project_id}/ai/index"),
-                Value::Null,
+                json!({"revision":rebuilt.body["indexRevision"]}),
                 vec![],
             )
             .unwrap();
@@ -13890,6 +7772,9 @@ mod tests {
     fn ai_research_brief_and_failure_contracts_are_local_runtime_backed() {
         let api = api();
         let (project_id, _root) = create_project(&api);
+        // Reach the missing-key branch with a supported, explicit local configuration.
+        api.update_config(json!({"ai":{"agentic":{"webResearchEnabled":true}}})).unwrap();
+        api.research_state_preflight(&project_id).unwrap();
         let document_id = create_document(
             &api,
             &project_id,
@@ -13964,7 +7849,7 @@ mod tests {
         assert_eq!(missing_key_job.body["progress"], 5);
         let missing_key_job_id = missing_key_job.body["id"].as_str().unwrap();
         let failed_job = wait_for_research_status(&api, &project_id, missing_key_job_id, "failed");
-        assert_eq!(failed_job["error"]["code"], "openai_key_missing");
+        assert_eq!(failed_job["error"]["code"], "openai_key_missing", "{failed_job}");
 
         let list = api
             .handle(
@@ -14518,3 +8403,11 @@ mod tests {
     }
 }
 pub mod currency;
+mod api_routes;
+mod ai_usage;
+mod recovery_system;
+pub use recovery_system::FrozenRecoveryCopy;
+#[cfg(test)]
+use ai_usage::text_estimated_cost;
+
+pub fn is_recovery_lifecycle_work(method:&str,path:&str)->bool{let parts:Vec<_>=path.split('?').next().unwrap_or("").trim_matches('/').split('/').collect();matches!((method,parts.as_slice()),("POST",["api","recovery","families",_,_,"close"|"continue"]))}

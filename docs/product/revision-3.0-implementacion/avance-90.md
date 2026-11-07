@@ -1,0 +1,18 @@
+# Avance90 · recibos de restauración
+
+[Reporte visual](avance-90.html).
+
+### Bloque90 · consultar una restauración sin repetirla
+T02/T03/F04/F15/U09: restaurar exige además attemptId criptográfico conocido por la interfaz. Antes del movimiento, Rust conserva un recibo estricto formato1 y un marcador del intento activo dentro de la entrada de papelera. El acuse incluye mismo ID y revisión; ante incertidumbre se consulta una vez GET .../trash/{entry}/restores/{attempt}, sin otro POST. Admisión explícita not-started no consulta ni presenta un recibo inexistente. El diálogo permite Consultar después y muestra los intentos del catálogo al volver a abrir, sin necesitar el pedido RAM anterior.
+
+La consulta verifica identidad/proyecto/entrada, recibo y marcador activo, metadatos, propietario, ubicación, ausencia del payload y hash exacto del destino completo. applying puede confirmar postcondición tras un corte posterior al movimiento; nunca repara el diario ni reanuda la operación. Payload presente no confirma aunque el destino tenga texto igual. Un intento posterior invalida la atribución al anterior mediante el marcador: no se confirma el primero solo porque el segundo publicó los mismos bytes. Edición posterior del destino produce changed, no éxito actual. Sin CAS frente a escritores externos.
+
+Recibo máximo16KiB, marcador4KiB,32 intentos por entrada y128 elementos para revisar su carpeta; no se reciclan IDs ni se podan recibos para liberar capacidad. Catálogo comparte tiempo cooperativo2s y limita1000 recibos/16MiB, además de los límites del inventario89. Campos/versiones futuras, marcador ilegible y cuota se conservan con revisión parcial o rechazo. Archivar/compactar estas identidades sigue pendiente. La consulta devuelve árbol actual como vista separada; si falla, treeAvailable:false evita vaciar el árbol del espacio. No ejecuta el movimiento.
+
+UI exige identidad/revisión coincidentes, muestra consulta junto al intento y aplica los efectos de vista una vez por intento y sesión. Resultado no comprobado conserva bloqueo y datos; consulta explícita vuelve a leer el mismo recibo. Un callback visual fallido no convierte un resultado confirmado en otra mutación. Las fases del catálogo se presentan como fases del recibo, no como prueba del estado actual. El adaptador web conserva demostración centralizada; no constituye evidencia nativa.
+
+Contrastes: tres casos Rust nuevos (corte tras movimiento sin reparación, intento posterior que no confirma al anterior, futuros/capacidad sin poda), un contrato API nuevo con reapertura de LocalApi y tres anteriores afectados por el pedido obligatorio; tras revisar el marcador futuro se repitió solo ese caso. Nueve casos frontend únicos entre diálogo/SDK/admisión, TypeScript y diff. Fallo inicial de tipo String en el nuevo módulo corregido antes de los resultados. Tres warnings antiguos de Result sin usar en tests de uso IA permanecen. Sin suites completas, APK o proveedor.
+
+Pantallas374–377 inspeccionadas: diálogo/hook reales con API controlada y publicación avanzada solo por el fixture de runtime. Un POST, tres GET del mismo intento (automático y dos explícitos), desmontaje/montaje de UI y catálogo sin pedido previo; no es reinicio de proceso nativo. Dos acuses de vista, uno por montaje, sin repetir mutación.320px sin overflow/consola/red externa. Los cortes y conservación de archivos reales se contrastan en Rust con temporales propios.
+
+Pendiente: retención/cuotas globales y demás familias, cortes de proceso instalados y fallos compuestos, migración ampliada, grafo Git transaccional, portabilidad y restantes capacidades del programa. Sin cierre de los11 paquetes, candidata o publicación.

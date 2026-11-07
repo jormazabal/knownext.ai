@@ -1,0 +1,38 @@
+.reference-viewer { min-width:0; min-height:0; }
+.reference-toolbar { position:relative; z-index:10; display:flex; flex:none; align-items:center; gap:6px; min-width:0; min-height:44px; padding:5px 8px; border-bottom:1px solid rgb(var(--app-border)); background:rgb(var(--app-surface)); font-size:12px; }
+.reference-search { display:flex; flex:1 1 160px; align-items:center; gap:6px; min-width:0; max-width:260px; height:32px; padding:0 8px; border:1px solid rgb(var(--app-border)); border-radius:6px; color:rgb(var(--app-muted)); }
+.reference-search:focus-within { outline:2px solid rgb(var(--accent-ring)); outline-offset:1px; }
+.reference-search input { min-width:0; width:100%; background:transparent; color:inherit; outline:none; font-size:12px; }
+.reference-search input:focus-visible { outline:none; }
+.reference-search > svg { flex:none; }
+.reference-button { display:inline-flex; flex:none; align-items:center; justify-content:center; gap:5px; min-width:32px; height:32px; border-radius:5px; color:inherit; }
+.reference-button:hover:not(:disabled), .reference-button[aria-pressed=true] { background:rgb(var(--accent-soft)); color:rgb(var(--accent)); }
+.reference-button:disabled { opacity:.4; }
+.reference-toolbar :is(button,select):focus-visible { outline:2px solid rgb(var(--accent-ring)); outline-offset:1px; }
+.reference-actions { display:flex; flex:none; gap:2px; margin-left:auto; }
+.reference-pdf-tools, .reference-view-controls, .reference-pagination, .reference-zoom { display:flex; flex:none; align-items:center; gap:3px; }
+.reference-view-controls[hidden] { display:none; }
+.reference-zoom > span { min-width:42px; text-align:center; font-size:11px; }
+.reference-fit { padding:0 7px; }
+.reference-fit-label { display:none; }
+.reference-pagination > span { min-width:44px; text-align:center; font-size:11px; white-space:nowrap; }
+.reference-view-options { position:relative; }
+.reference-sheet { flex:1 1 180px; min-width:0; max-width:240px; }
+.reference-sheet select { width:100%; min-width:0; height:32px; border:1px solid rgb(var(--app-border)); border-radius:6px; background:rgb(var(--app-surface)); padding:0 6px; font-size:12px; text-overflow:ellipsis; }
+.reference-toolbar[data-compact=true] { flex-wrap:wrap; gap:6px; }
+.reference-toolbar[data-compact=true] .reference-actions { order:2; }
+.reference-toolbar[data-compact=true] .reference-search { height:44px; max-width:none; }
+.reference-toolbar[data-compact=true] .reference-search[data-workbook=true] { order:3; flex-basis:100%; }
+.reference-toolbar[data-compact=true] .reference-sheet { flex-basis:calc(100% - 104px); max-width:none; }
+.reference-toolbar[data-compact=true] .reference-sheet select { height:44px; }
+.reference-toolbar[data-compact=true] .reference-button { min-width:44px; height:44px; }
+.reference-toolbar[data-compact=true] .reference-pdf-tools { order:3; flex-basis:100%; justify-content:space-between; }
+.reference-toolbar[data-compact=true] .reference-pagination { order:1; }
+.reference-toolbar[data-compact=true] .reference-view-options { order:2; }
+.reference-view-toggle { padding:0 9px; }
+.reference-view-controls[data-popover=true] { position:absolute; right:0; top:calc(100% + 5px); z-index:30; width:244px; max-width:calc(100vw - 32px); flex-wrap:wrap; padding:8px; border:1px solid rgb(var(--app-border)); border-radius:8px; background:rgb(var(--app-surface)); box-shadow:0 8px 24px rgb(0 0 0 / .1); }
+.reference-view-controls[data-popover=true] .reference-zoom { flex-basis:100%; justify-content:space-between; }
+.reference-view-controls[data-popover=true] .reference-fit-label { display:inline; }
+.reference-view-controls[data-popover=true] .reference-fit { flex:1; }
+.reference-viewer-error button { min-height:44px; }
+@media(pointer:coarse) { .reference-toolbar .reference-button, .reference-toolbar .reference-sheet select, .reference-toolbar .reference-search { min-width:44px; min-height:44px; } }

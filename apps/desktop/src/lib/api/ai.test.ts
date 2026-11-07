@@ -8,6 +8,8 @@ import {
   promptAssistant,
   removeAiContextSource,
   uploadLocalAiContextFiles,
+  sendAiInteraction,
+  deleteAiIndex,
 } from "./ai";
 import { requestJson } from "./client";
 
@@ -32,6 +34,18 @@ describe("AI context API payloads", () => {
       createdAt: "",
       updatedAt: "",
     });
+  });
+
+  it("binds index cleanup to a native revision and encodes the project segment", async () => {
+    await deleteAiIndex("project/a", "a".repeat(64));
+    expect(requestJsonMock).toHaveBeenCalledWith("/api/projects/project%2Fa/ai/index", {method: "DELETE", body: JSON.stringify({revision: "a".repeat(64)})});
+  });
+
+  it("sends the saved base with dirty Markdown so a queued request cannot silently rebase",async()=>{
+    const base={mtimeNs:null,size:7,sha256:"a".repeat(64)};
+    const payload={projectId:"project",documentId:"project::a.md",prompt:"Edit",activeMarkdown:"Unsaved content",activeDocumentBaseFingerprint:base,activeDocumentDraftContentHash:"b".repeat(64),activeHandwrittenDraftContentHash:null,mode:"document" as const,clientMessageId:"client-qa"};
+    await sendAiInteraction(payload);
+    expect(requestJsonMock).toHaveBeenCalledWith("/api/projects/project/ai/interactions",expect.objectContaining({method:"POST",body:JSON.stringify(payload)}));
   });
 
   it("sends image and attachment ids using their runtime contract keys", async () => {

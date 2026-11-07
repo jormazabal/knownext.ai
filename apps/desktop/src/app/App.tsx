@@ -1,15 +1,83 @@
+import {createDeferredView} from "../components/ui/createDeferredView";
+import {sameTrackedVisit,trackedAuthorityIsCurrent,usesLiveEditor} from "./trackedAiWorkspace";
+import {AiChangeJournal} from "../lib/api/aiChangeJournal";
+import {AiChangeHistoryDialog} from "../features/ai/AiChangeHistoryDialog";
+import {ProjectReplaceDialog} from "../features/search/ProjectReplaceDialog";
+import {useWorkspaceExit} from "./useWorkspaceExit";
+import {protectUpdateInstallation,releaseUpdateInstallation} from "../lib/runtime/updateProtection";
+import {LocalOperationsNotice} from "../features/documents/LocalOperationsNotice";
+import {imageInsertionTargetIsCurrent,type ImageInsertionTarget} from "./imageInsertionTarget";
+import {useProjectWork} from "./useProjectWork";
+import {acknowledgeDraftWrite,isDraftWriteConflict} from "./draftWriteRevision";
+import {LocalEditProtection} from "./localEditProtection";
+import {refreshContextSource} from "../lib/api/contextOrigin";
+import type {RecoveryCopy} from "../types/recovery";
+import {flushSync} from "react-dom";
+import {fileBatchEffects} from "./fileBatchEffects";
+import {ModalFrame} from "../components/ui/ModalFrame";
+import {protectForCriticalTransition} from "./criticalStateTransition";
+import type {StateTransitionOutcome} from "../types/stateMigrations";
+import {useAiBudgetNotice} from "./useAiBudgetNotice";
+import type {HandwrittenPageFocus,WorkspaceNodeFocus} from "../types/localSearch";
+import {DocumentConflictDialog} from "../features/documents/DocumentConflictDialog";
+import {HandwrittenConflictDialog} from "../features/handwritten/HandwrittenConflictDialog";
+import {applyHandwrittenConflict,reviewHandwrittenConflict,reviewHandwrittenConflictAttempt} from "../lib/api/handwrittenConflicts";
+import {createConflictAttemptId} from "../lib/api/conflictAttempts";
+import {acknowledgeMergedNote,confirmHandwrittenMerge,noteConflictRevision,verifyHandwrittenMergeAttempt} from "./handwrittenMerge";
+import type {HandwrittenConflictReview,HandwrittenConflictApply} from "../types/handwrittenConflicts";
+import {applyDocumentConflict,reviewDocumentConflict,reviewHistoricalDraft,reviewRemoteDraft,reviewDocumentConflictAttempt} from "../lib/api/documentConflicts";
+import type {DocumentConflictReview,DocumentConflictApply} from "../types/documentConflicts";
+import {acknowledgeMergedDraft,acknowledgeMergedSyncStatus,confirmDocumentMerge,remoteSourceProof,verifyDocumentMergeAttempt} from "./documentMerge";
+import { StartupRecovery } from "../features/settings/StartupRecovery";
+import { useAiIndexMaintenance } from "./useAiIndexMaintenance";
+import { aiResponseContinuityIssue, bindAiProposalReview, buildAiReviewRecord, captureAiRequest, resolveAiProposalRecovery, type AiRequestSnapshot } from "./aiResponseContinuity";
+import { useAiResultReview } from "../features/assistant/useAiResultReview";
+import { AiResultReviewDialog } from "../features/assistant/AiResultReviewDialog";
+import { useAiProposalAutoApply } from "../features/assistant/useAiProposalAutoApply";
+import { AiProposalExecution, nextAiEditorOperationId } from "./aiProposalExecution";
+import { settingsSaveSummary, useSettingsPersistence, type SettingsDomain } from "./useSettingsPersistence";
+import { acceptsAiRefresh, aiSettingsPayload, mergeExportSettings, reconcileAiSettingsRefresh } from "./settingsValues";
+import { SettingsNavigation } from "../features/settings/SettingsNavigation";
+import { SettingsContext } from "../features/settings/SettingsContext";
+import { applyDocumentFileChanges, applyHandwrittenFileChanges } from "./fileSessionChanges";
+import { SessionWriteQueue } from "./sessionWriteQueue";
+import type { LocalReferenceTarget } from "../types/documentReferences";
+import { ProjectTrashDialog } from "../features/documents/ProjectTrashDialog";
+import {normalizeProjectTabs,resolveProjectTabs} from "./projectTabs";
+import { FileBatchDialog } from "../features/documents/FileBatchDialog";
+import type { FileBatchAction } from "../types/fileBatch";
 import {listen as listenRecordingEvent} from "@tauri-apps/api/event";
-import { Mic as RecordingIcon } from "lucide-react";
+import type {ResearchEvidenceReviewDialog as ResearchEvidenceReviewDialogView} from "../features/research/ResearchEvidenceReviewDialog";
+import type {AssetCatalogDialog as AssetCatalogDialogView} from "../features/assets/AssetCatalogDialog";
+import {getAssetCatalog,getAssetLinks} from "../lib/api/assetCatalog";
+import {useAssetMoveReview} from "./useAssetMoveReview";
+import {AssetMoveImpactDialog} from "../features/documents/AssetMoveImpactDialog";
+import type {MeetingMinutesDialog as MeetingMinutesDialogView} from "../features/meetings/MeetingMinutesDialog";
+import {applyHandwrittenOcr} from "../lib/api/handwrittenOcr";
+import type {HandwrittenOcrApplyRequest,HandwrittenOcrApply,HandwrittenOcrResult} from "../types/handwrittenOcr";
+import {mergeOcrText} from "./handwrittenOcrApplication";
 import { RecordingPanel } from "../features/recordings/RecordingPanel";
 import type {RecordingDestination} from "../types/recording";
-import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ComponentProps } from "react";
+import { captureProjectEditorSnapshots, captureWorkspaceEditorSnapshots, registerEditorSnapshot } from "./editorSnapshots";
+import {checkpointPendingEditorInput} from "../features/editor/pendingInputCheckpoints";
+import {useWorkspaceContinuity} from "./useWorkspaceContinuity";
+import type {ProtectionOutcome} from "./workspaceContinuity";
+import {protectNotesSnapshot} from "./notesProtection";
+import {WorkspaceContinuityNotice} from "../features/documents/WorkspaceContinuityNotice";
+import { RetiredProjectsDialog } from "../features/projects/RetiredProjectsDialog";
+import { retireProjectWithWorkspace } from "../features/projects/projectRetirement";
 import type { DocumentTreeAction } from "../features/documents/DocumentTree";
-import type { MarkdownEditorChangeSource, MarkdownEditorExternalOperation, MarkdownEditorSelection } from "../features/editor/editorTypes";
+import type { MarkdownEditorController, MarkdownEditorChangeSource, MarkdownEditorExternalOperation, MarkdownEditorSelection } from "../features/editor/editorTypes";
 import { prepareMermaidDiagramAssets } from "../features/editor/mermaidDiagrams";
 import type { AiPromptExecutionOptions } from "../features/assistant/AiPromptInput";
 import { AiDeleteConfirmationDialog } from "../features/assistant/AiDeleteConfirmationDialog";
 import { CreateDocumentDialog, type CreateDocumentRequest } from "../features/documents/CreateDocumentDialog";
+import { SaveDocumentTemplateDialog } from "../features/documents/SaveDocumentTemplateDialog";
+import { createDocumentFromTemplate } from "../lib/api/documentTemplates";
 import { MoveDocumentDialog } from "../features/documents/MoveDocumentDialog";
+import { RecoveryReviewSection } from "../features/documents/RecoveryReviewSection";
+import type { RestoreDraftResponse } from "../types/domain";
 import {
   CloseDirtyDocumentDialog,
   DocumentFooterActionDialog,
@@ -17,17 +85,24 @@ import {
   type DocumentFooterDialogAction,
 } from "../features/documents/DocumentProtectionDialogs";
 import { CreateProjectDialog } from "../features/projects/CreateProjectDialog";
+import type {ProjectTransferDialog as ProjectTransferDialogView} from "../features/projects/ProjectTransferDialog";
+import type {ProjectTemplateCatalogDialog as ProjectTemplateCatalogDialogView} from "../features/projects/ProjectTemplateCatalogDialog";
+import type { ProjectTransferMode } from "../types/projectTransfer";
 import { GithubLoginDialog, type GithubLoginState } from "../features/projects/GithubLoginDialog";
 import { UpdateAvailableDialog, type UpdateDialogState } from "../features/projects/UpdateAvailableDialog";
-import { AppSettingsDialog, type AppSettingsSaveState } from "../features/settings/AppSettingsDialog";
+import type {AppSettingsDialog as AppSettingsDialogView,AppSettingsSection} from "../features/settings/AppSettingsDialog";
 import { BrandMark } from "../components/brand/BrandMark";
 import { CountdownCloseButton } from "../components/ui/CountdownCloseButton";
 import { GlobalTooltip } from "../components/ui/GlobalTooltip";
 import { DesktopLayout } from "../layouts/DesktopLayout";
-import {
+import { acknowledgeDocumentSave,
+  acceptsDocumentSyncObservation,
+  sameDocumentRevision,
+  acknowledgeDocumentRestore,
+  beginDocumentLoad,
+  settleDocumentLoad,
   applyExternalMarkdownUpdate,
   applyLocalMarkdownEdit,
-  createEmptyDocumentSession,
   createLoadedDocumentSession,
   markdownMatchesSaved,
   shouldDiscardPersistedDraft,
@@ -35,9 +110,11 @@ import {
   updateSession,
   type DocumentSession,
 } from "./documentSessions";
-import {
+import { acknowledgeHandwrittenSave,
+  sameHandwrittenRevision,
+  beginHandwrittenLoad,
+  settleHandwrittenLoad,
   applyLocalHandwrittenNoteEdit,
-  createEmptyHandwrittenNoteSession,
   createLoadedHandwrittenNoteSession,
   handwrittenContentMatchesSaved,
   shouldDiscardPersistedHandwrittenDraft,
@@ -63,12 +140,11 @@ import {
   updateAppConfig,
   updateAiConfig,
   updateExportTemplate,
-  writeLocalAppPreferences,
+  cacheLocalAppPreferences,
 } from "../lib/api/config";
 import {
   clearAiConversation,
   confirmAiDelete,
-  deleteAiIndex,
   deleteOpenAiKey,
   addAiContextSourceToProject,
   addProjectAttachmentAiContextSource,
@@ -87,7 +163,6 @@ import {
   prepareAiResearchBrief,
   previewAiContextSource,
   removeAiContextSource,
-  rebuildAiIndex,
   retryAiResearchJob,
   saveOpenAiKey,
   searchAiContextDocuments,
@@ -110,8 +185,9 @@ import {
   exportDocument,
   exportDocumentContent,
   getDocument,
+  loadDocumentDiskVersion,
   getDocumentsSyncStatus,
-  listOrphanDrafts,
+  getOrphanDraftInventory,
   restoreOrphanDraft,
   saveDocument,
   saveDocumentDraft,
@@ -122,13 +198,15 @@ import {
   exportHandwrittenNote,
   exportHandwrittenNoteContent,
   getHandwrittenNote,
+  loadHandwrittenDiskVersion,
   insertHandwrittenPageIntoMarkdown,
   saveHandwrittenNote,
   saveHandwrittenNoteDraft,
 } from "../lib/api/handwrittenNotes";
 import { getUserNotes, saveUserNotes } from "../lib/api/notes";
 import { getExternalChanges, importExternalChanges, scanExternalChanges } from "../lib/api/externalChanges";
-import { autoRunProjectSync, changeProjectSyncMode, connectProjectGithub, enableProjectHistory, getProjectFileSyncOverview, getProjectSyncStatus, publishProjectGithub, resolveProjectSyncConflict, scanProjectSync, verifyProjectGithubConnection } from "../lib/api/sync";
+import { PROTON_WORKSPACE_CHANGED_EVENT } from "../lib/api/protonDirect";
+import { autoRunProjectSync, changeProjectSyncMode, connectProjectGithub, enableProjectHistory, getProjectFileSyncOverview, getProjectSyncStatus, publishProjectGithub, scanProjectSync, verifyProjectGithubConnection } from "../lib/api/sync";
 import { APP_VERSION } from "../lib/appVersion";
 import { RELEASE_NOTES_MARKDOWN } from "../lib/releaseNotes";
 import { getAuthStatus, logout as logoutGithub, pollGithubDeviceFlow, startGithubDeviceFlow } from "../lib/api/auth";
@@ -154,6 +232,12 @@ import {
 } from "../lib/runtime/exportDialogs";
 import { selectAiContextFilePaths } from "../lib/runtime/fileDialogs";
 import { isTauriMobileRuntime } from "../lib/runtime/platform";
+import { exportMarkdownToMobile, exportHandwrittenToMobile, openMobileExport } from "../lib/api/mobileExports";
+import { ExportStatus } from "../features/documents/ExportStatus";
+import {useProjectLocationReview} from "../features/projects/useProjectLocationReview";
+import {ProjectLocationReviewDialog} from "../features/projects/ProjectLocationReviewDialog";
+import {discardSessionForClose} from "./sessionClosure";
+import {replaceSessionFromDisk} from "./sessionDiskReplacement";
 import { getRuntimeServiceStatus, type RuntimeServicesStatus } from "../lib/runtime/services";
 import { applyAppearanceAttributes, useResolvedAppearanceTheme } from "../lib/theme/appearance";
 import { AlertCircle, Info, RefreshCw } from "lucide-react";
@@ -162,11 +246,8 @@ import {
   createProjectDocument,
   createProject,
   buildImageReference,
-  deleteProject,
   deleteTreeNode,
   duplicateProjectDocument,
-  getDocumentMoveImpact,
-  getProjectImageUsage,
   getProjectTree,
   getProjectCapabilities,
   getProjectVersioningStatus,
@@ -233,7 +314,7 @@ import type {
   ProjectVersioningStatus,
   GithubDeviceStartResponse,
   GithubRepositorySummary,
-  CreateVersionResponse,
+  RestoreVersionResponse,
   ExternalChangeDecision,
   ExternalChangeSet,
   ExternalChangeImportRequest,
@@ -260,12 +341,13 @@ import {
 import { applyAiEditOperationToMarkdown, type AiMarkdownOperationReviewReason } from "./aiEditProposalApplication";
 
 type AppNotice = {
+  treeProjectId?:string;
   title: string;
   message: string;
   tone: "error" | "info";
 };
 
-type DocumentFooterDialog = DocumentFooterDialogAction;
+type DocumentFooterDialog = {action:DocumentFooterDialogAction;documentId:string;projectId:string;revision:DocumentSession};
 type DocumentPostSaveSyncEntry = {
   state: DocumentPostSaveSyncState;
   sequence: number;
@@ -280,13 +362,30 @@ function isPermanentWorkspaceTabId(tabId: string) {
   return tabId === AI_CONVERSATION_TAB_ID || tabId === NOTES_WORKSPACE_TAB_ID;
 }
 
+
+// Optional workspace views are acquired when first requested; working data stays in App.
+const ResearchEvidenceReviewDialog=createDeferredView<ComponentProps<typeof ResearchEvidenceReviewDialogView>>(()=>import("../features/research/ResearchEvidenceReviewDialog").then(m=>({default:m.ResearchEvidenceReviewDialog})),"Preparando revisión de fuentes…","No se pudo cargar esta vista. El trabajo se conserva; puedes volver a intentarlo.");
+const AssetCatalogDialog=createDeferredView<ComponentProps<typeof AssetCatalogDialogView>>(()=>import("../features/assets/AssetCatalogDialog").then(m=>({default:m.AssetCatalogDialog})),"Preparando biblioteca de recursos…","No se pudo cargar esta vista. El trabajo se conserva; puedes volver a intentarlo.");
+const MeetingMinutesDialog=createDeferredView<ComponentProps<typeof MeetingMinutesDialogView>>(()=>import("../features/meetings/MeetingMinutesDialog").then(m=>({default:m.MeetingMinutesDialog})),"Preparando acta…","No se pudo cargar esta vista. El trabajo se conserva; puedes volver a intentarlo.");
+const ProjectTransferDialog=createDeferredView<ComponentProps<typeof ProjectTransferDialogView>>(()=>import("../features/projects/ProjectTransferDialog").then(m=>({default:m.ProjectTransferDialog})),"Preparando transferencia…","No se pudo cargar esta vista. El trabajo se conserva; puedes volver a intentarlo.");
+const ProjectTemplateCatalogDialog=createDeferredView<ComponentProps<typeof ProjectTemplateCatalogDialogView>>(()=>import("../features/projects/ProjectTemplateCatalogDialog").then(m=>({default:m.ProjectTemplateCatalogDialog})),"Preparando plantillas…","No se pudo cargar esta vista. El trabajo se conserva; puedes volver a intentarlo.");
+const AppSettingsDialog=createDeferredView<ComponentProps<typeof AppSettingsDialogView>>(()=>import("../features/settings/AppSettingsDialog").then(m=>({default:m.AppSettingsDialog})),"Preparando configuración…","No se pudo cargar la configuración. Los valores guardados se conservan.",props=>props.open);
+
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
+  const projectLocationReview=useProjectLocationReview(activeProject?.id??null);
   const [authStatus, setAuthStatus] = useState<AuthStatus>({ isAuthenticated: false, provider: null, user: null, scopes: [] });
   const [projectCapabilities, setProjectCapabilities] = useState<ProjectCapabilities | null>(null);
   const [versioningStatus, setVersioningStatus] = useState<ProjectVersioningStatus | null>(null);
   const [recordingPanel, setRecordingPanel] = useState(false);
+  const [researchEvidenceReview,setResearchEvidenceReview]=useState<{projectId:string;projectName:string;jobId:string}|null>(null);
+  useEffect(()=>setResearchEvidenceReview(null),[activeProject?.id]);
+  const [assetCatalogOpen,setAssetCatalogOpen]=useState(false);
+  const assetMoveReview=useAssetMoveReview(activeProject?.id??null);
+  const [meetingMinutes,setMeetingMinutes]=useState<{projectId:string;sessionId:string}|null>(null);
+  const ocrDraftWrites=useRef(new Set<string>());
+  const ocrPendingAcks=useRef(new Map<string,{attemptId:string;submitted:HandwrittenNoteSession;epoch:number}>());
   useEffect(()=>{
     const open=()=>setRecordingPanel(true);
     window.addEventListener("knownext-open-recordings",open);
@@ -296,23 +395,29 @@ export function App() {
   },[]);
 
   const [pendingRecordingDocument,setPendingRecordingDocument]=useState<{id:string;projectId:string}|null>(null);
-  useEffect(()=>{
-    if(pendingRecordingDocument && activeProject?.id===pendingRecordingDocument.projectId) {
-      handleOpenDocument(pendingRecordingDocument.id,pendingRecordingDocument.id.split("/").pop()??"Transcripción");
-      setPendingRecordingDocument(null);setRecordingPanel(false);
-    }
-  },[pendingRecordingDocument,activeProject?.id]);
   const [recordingNotice,setRecordingNotice]=useState<{id:string}|null>(null);
+  const exportInFlight=useRef(false);
+  const [exportProgress,setExportProgress]=useState<string|null>(null);
+  const [exportedFileNotice,setExportedFileNotice]=useState<{exportId:string;fileName:string}|null>(null);
+  const [exportOpening,setExportOpening]=useState(false);
+  const [templateCapture, setTemplateCapture] = useState<{ name: string; markdown: string;documentId:string } | null>(null);
   const [recordingDestination, setRecordingDestination] = useState<RecordingDestination | null>(null);
   const [tree, setTree] = useState<DocumentTreeNode[]>([]);
+  const [treeReadIssue,setTreeReadIssue]=useState<{projectId:string;message:string}|null>(null);
+  const [treeReadBusy,setTreeReadBusy]=useState(false);
+  const treeReadSequence=useRef(0);
+  const treeReadPending=useRef<{projectId:string;epoch:number;sequence:number}|null>(null);
   const [tabs, setTabs] = useState<OpenDocumentTab[]>(defaultProjectTabsConfig.openTabs);
   const [activeDocumentId, setActiveDocumentId] = useState(defaultProjectTabsConfig.activeDocumentId);
   const [handwrittenTabs, setHandwrittenTabs] = useState<OpenDocumentTab[]>(defaultProjectTabsConfig.openHandwrittenTabs ?? []);
+  const [handwrittenPageFocus,setHandwrittenPageFocus]=useState<HandwrittenPageFocus|null>(null);
+  const handwrittenPageFocusSequence=useRef(0);
   const [activeHandwrittenNoteId, setActiveHandwrittenNoteId] = useState(defaultProjectTabsConfig.activeHandwrittenNoteId ?? "");
   const [activeTreeNodeId, setActiveTreeNodeId] = useState(defaultProjectTabsConfig.activeDocumentId);
   const [imageTabs, setImageTabs] = useState<Array<{ id: string; name: string; path: string }>>([]);
   const [activeImageId, setActiveImageId] = useState("");
-  const [referenceDocumentTabs, setReferenceDocumentTabs] = useState<Array<{ id: string; name: string; path: string; format: "pdf" | "docx" | "xlsx" }>>([]);
+  const [referenceDocumentTabs, setReferenceDocumentTabs] = useState<Array<{ id: string; name: string; path: string; format: "pdf" | "docx" | "xlsx";pageFocus?:{pageNumber:number;requestId:number} }>>([]);
+  const referencePageFocusSequence=useRef(0);
   const [activeReferenceDocumentId, setActiveReferenceDocumentId] = useState("");
   const [workspaceTabOrder, setWorkspaceTabOrder] = useState<string[]>([]);
   const [documentSessions, setDocumentSessions] = useState<Record<string, DocumentSession>>({});
@@ -323,25 +428,62 @@ export function App() {
   const [createDocumentInitialKind, setCreateDocumentInitialKind] = useState<CreateDocumentRequest["kind"]>("document");
   const [moveNode, setMoveNode] = useState<DocumentTreeNode | null>(null);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
+  const [projectTransferMode, setProjectTransferMode] = useState<ProjectTransferMode | null>(null);
+  const [expectedBackupTransferId,setExpectedBackupTransferId]=useState<string|undefined>();
+  const [projectTemplateCatalog,setProjectTemplateCatalog]=useState(false);
   const [editProjectOpen, setEditProjectOpen] = useState(false);
+  const [retiredProjectsOpen,setRetiredProjectsOpen]=useState(false);
+  const retiredProjectsFocus=useRef<(()=>HTMLElement|null)|null>(null);
+  const aiChangeJournal=useRef(new AiChangeJournal());
+  const aiEditorJournalAcks=useRef(new Set<string>());
+  const aiTrackedOperationEpochs=useRef(new Map<string,{projectId:string;epoch:number}>());
+  const [aiChangeHistoryOpen,setAiChangeHistoryOpen]=useState(false);
+  const [projectReplaceOpen,setProjectReplaceOpen]=useState(false);
+  const liveEditorSnapshots=useRef(new Map<string,MarkdownEditorController>());
+  const registerLiveEditor=useCallback((id:string,controller:MarkdownEditorController|null,released?:MarkdownEditorController|null)=>{
+    registerEditorSnapshot(liveEditorSnapshots.current,id,controller,released);
+  },[]);
   const [layoutConfig, setLayoutConfig] = useState<LayoutConfig>(defaultLayoutConfig);
   const [appearanceConfig, setAppearanceConfig] = useState<AppearanceConfig>(defaultAppearanceConfig);
   const [diagnosticsConfig, setDiagnosticsConfig] = useState<DiagnosticsConfig>(defaultDiagnosticsConfig);
   const [handwrittenConfig, setHandwrittenConfig] = useState<HandwrittenConfig>(defaultHandwrittenConfig);
   const [exportTemplateConfig, setExportTemplateConfig] = useState<ExportTemplateConfig>(defaultExportTemplateConfig);
   const [exportTemplatePath, setExportTemplatePath] = useState("");
-  const exportTemplateSaveSequence = useRef(0);
+  const exportTemplateConfigRef = useRef(exportTemplateConfig);
+  useEffect(() => { exportTemplateConfigRef.current = exportTemplateConfig; }, [exportTemplateConfig]);
+  const [exportResetting, setExportResetting] = useState(false);
+  const exportResetPending = useRef(false);
   const [aiConfig, setAiConfig] = useState<AiConfigStatus>({ ...defaultAiConfig, openaiKeyConfigured: false, openaiKeyPreview: null });
-  const aiConfigSaveSequence = useRef(0);
+  const aiConfigRef = useRef(aiConfig);
+  const aiRefreshSequence = useRef(0);
+  const credentialRevision = useRef(0);
+  const activeAiProjectRef = useRef(activeProject?.id);
+  activeAiProjectRef.current = activeProject?.id;
+  const aiWorkspaceEpoch = useRef({ projectId: activeProject?.id, value: 0 });
+  if (aiWorkspaceEpoch.current.projectId !== activeProject?.id) aiWorkspaceEpoch.current = { projectId: activeProject?.id, value: aiWorkspaceEpoch.current.value + 1 };
+  const historicalCopyRenderEpoch=aiWorkspaceEpoch.current.value;
+  useEffect(() => { aiConfigRef.current = aiConfig; }, [aiConfig]);
   const [aiConversationEvents, setAiConversationEvents] = useState<AiConversationEvent[]>([]);
   const [aiContextSources, setAiContextSources] = useState<AiContextSource[]>([]);
   const [removingAiContextSourceIds, setRemovingAiContextSourceIds] = useState<Set<string>>(() => new Set());
   const [aiIndexStatus, setAiIndexStatus] = useState<AiIndexStatusResponse | null>(null);
+  const aiIndexMaintenance = useAiIndexMaintenance({
+    projectId: activeProject?.id,
+    projectEpoch: aiWorkspaceEpoch.current.value,
+    index: aiIndexStatus,
+    onResult: setAiIndexStatus,
+    refresh: refreshAiState,
+    onError: (cause, fallback) => showError(cause, fallback, {source: "app.aiIndex"}),
+  });
   const [aiUsageSummary, setAiUsageSummary] = useState<AiUsageSummaryResponse | null>(null);
   const [aiPendingDelete, setAiPendingDelete] = useState<AiPendingDelete | null>(null);
   const [aiPendingIntent, setAiPendingIntent] = useState<AiPendingIntent | null>(null);
   const [aiEditProposal, setAiEditProposal] = useState<AiEditProposal | null>(null);
   const [autoApplyingAiEditProposalId, setAutoApplyingAiEditProposalId] = useState<string | null>(null);
+  const [applyingAiEditProposalId, setApplyingAiEditProposalId] = useState<string | null>(null);
+  const aiProposalExecution = useRef(new AiProposalExecution());
+  const aiEditorOperationTimers = useRef(new Map<string, number>());
+  useEffect(() => () => { for (const timer of aiEditorOperationTimers.current.values()) window.clearTimeout(timer); }, []);
   const [blockedAiEditOperationReasons, setBlockedAiEditOperationReasons] = useState<Record<string, AiMarkdownOperationReviewReason>>({});
   const [appliedAiEditOperationIds, setAppliedAiEditOperationIds] = useState<string[]>([]);
   const [aiBubble, setAiBubble] = useState<{ id: string; answer: string; usedSkills?: string[]; skillApplications?: AiSkillApplication[]; skillDiagnostics?: AiSkillDiagnostic[] } | null>(null);
@@ -367,19 +509,32 @@ export function App() {
   const [lastRunAppVersion, setLastRunAppVersion] = useState<string | null>(null);
   const [lastSeenReleaseNotesVersion, setLastSeenReleaseNotesVersion] = useState<string | null>(null);
   const [configLoaded, setConfigLoaded] = useState(false);
+  const [criticalTransitionBusy,setCriticalTransitionBusy]=useState(false);
+  const [updateProtection,setUpdateProtection]=useState<"protecting"|"installer-open"|null>(null);
+  const updateRestartToken=useRef<string|null>(null);
+  const updateInstallBusy=useRef(false);
+  const [exitProtection,setExitProtection]=useState(false);
+  useEffect(()=>{if(configLoaded)setCriticalTransitionBusy(false);},[configLoaded]);
   const [configPersistenceAvailable, setConfigPersistenceAvailable] = useState(true);
-  const [appSettingsSaveState, setAppSettingsSaveState] = useState<AppSettingsSaveState>("idle");
-  const [appSettingsSaveMessage, setAppSettingsSaveMessage] = useState<string | null>(null);
-  const appSettingsSaveSequence = useRef(0);
+  const settingsPersistence = useSettingsPersistence();
+  const {save: saveSettings, stage: stageSettings} = settingsPersistence;
+  const {state: appSettingsSaveState, message: appSettingsSaveMessage} = settingsSaveSummary(settingsPersistence.states, appearanceConfig.language);
   const [notice, setNotice] = useState<AppNotice | null>(null);
+  useAiBudgetNotice(message=>setNotice({title:"Presupuesto de IA",message,tone:"info"}));
   const [startupRetrySequence, setStartupRetrySequence] = useState(0);
   const [localRuntimeRecoveryOpen, setLocalRuntimeRecoveryOpen] = useState(false);
   const [localRuntimeRecoveryError, setLocalRuntimeRecoveryError] = useState<string | null>(null);
   const [closeDocumentId, setCloseDocumentId] = useState<string | null>(null);
   const [pendingCloseDocumentIds, setPendingCloseDocumentIds] = useState<string[]>([]);
   const [orphanDrafts, setOrphanDrafts] = useState<OrphanDraft[]>([]);
+  const [orphanCoverage,setOrphanCoverage]=useState({limited:false,warnings:[] as string[]});
+  const orphanReviewSequence=useRef(0);
   const [recoverableDraftsOpen, setRecoverableDraftsOpen] = useState(false);
   const [appSettingsOpen, setAppSettingsOpen] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
+  const [fileBatch, setFileBatch] = useState<{ projectId: string; action: FileBatchAction; nodeIds: string[];initialTargetFolderId?:string|null;workspaceEpoch:number } | null>(null);
+  const fileBatchRef=useRef(fileBatch);fileBatchRef.current=fileBatch;
+  const [settingsInitialSection, setSettingsInitialSection] = useState<AppSettingsSection>("summary");
   const [traceLogStatus, setTraceLogStatus] = useState<TraceLogStatus | null>(null);
   const [runtimeServicesStatus, setRuntimeServicesStatus] = useState<RuntimeServicesStatus | null>(null);
   const [runtimeServicesRefreshing, setRuntimeServicesRefreshing] = useState(false);
@@ -399,7 +554,8 @@ export function App() {
   const [externalChangeSet, setExternalChangeSet] = useState<ExternalChangeSet | null>(null);
   const [externalChangeDecisions, setExternalChangeDecisions] = useState<Record<string, ExternalChangeDecision>>({});
   const [externalChangesOpen, setExternalChangesOpen] = useState(false);
-  const [externalChangesBusy, setExternalChangesBusy] = useState(false);
+  const projectWork = useProjectWork(activeProject?.id);
+  const externalChangesBusy = projectWork.isBusy(activeProject?.id);
   const [projectSyncState, setProjectSyncState] = useState<ProjectSyncState>("synced");
   const [projectSyncStatus, setProjectSyncStatus] = useState<ProjectSyncStatus | null>(null);
   const [projectActivity, setProjectActivity] = useState<ActivityEvent[]>([]);
@@ -407,20 +563,56 @@ export function App() {
   const [fileSyncOverview, setFileSyncOverview] = useState<ProjectFileSyncOverview | null>(null);
   const [fileSyncOverviewError, setFileSyncOverviewError] = useState<string | null>(null);
   const [acknowledgedExternalChangeSets, setAcknowledgedExternalChangeSets] = useState<Record<string, string[]>>(readAcknowledgedExternalChangeSets);
+  const [protectionProjectId,setProtectionProjectId]=useState(activeProject?.id);
+  if(protectionProjectId!==activeProject?.id){
+    // Clear a previous project's view before React commits children for the new project.
+    setProtectionProjectId(activeProject?.id);setSyncState("idle");setVersioningStatus(null);
+    setExternalChangeSet(null);setExternalChangeDecisions({});setExternalChangesOpen(false);
+    setProjectSyncState("synced");setProjectSyncStatus(null);setProjectActivity([]);
+    setExternalChangesMessage(null);setFileSyncOverview(null);setFileSyncOverviewError(null);
+  }
   const [documentSyncStatuses, setDocumentSyncStatuses] = useState<Record<string, DocumentSyncStatus>>({});
   const [documentPostSaveSyncStates, setDocumentPostSaveSyncStates] = useState<Record<string, DocumentPostSaveSyncEntry>>({});
   const [documentFooterDialog, setDocumentFooterDialog] = useState<DocumentFooterDialog | null>(null);
+  const [documentMerge,setDocumentMerge]=useState<{id:string;projectId:string;expected:DocumentSession;historyVersionId?:string;remote?:boolean;review:DocumentConflictReview|null;loading:boolean;busy:boolean;error:string;attemptPayload?:DocumentConflictApply&{attemptId:string};checkingAttempt?:boolean}|null>(null);
+  const documentMergeWork=useRef(false),documentMergeEpoch=useRef(0);
+  const [handwrittenMerge,setHandwrittenMerge]=useState<{id:string;projectId:string;expected:HandwrittenNoteSession;review:HandwrittenConflictReview|null;loading:boolean;busy:boolean;error:string;attemptPayload?:HandwrittenConflictApply&{attemptId:string};checkingAttempt?:boolean}|null>(null);
+  const handwrittenMergeWork=useRef(false),handwrittenMergeEpoch=useRef(0);
   const lastTraceLogRef = useRef<{ fingerprint: string; timestamp: number } | null>(null);
+  const githubAuthEpochRef=useRef(0);
   const githubLoginPollingRef = useRef(false);
   const lastDocumentContextRef = useRef<{ id: string | null; path: string | null }>({ id: null, path: null });
   const documentSessionsRef = useRef(documentSessions);
+  const imageInsertionWork=useRef(new Set<string>());
   const handwrittenSessionsRef = useRef(handwrittenSessions);
+  const notesMarkdownRef = useRef(notesMarkdown); notesMarkdownRef.current = notesMarkdown;
+  const notesSavedMarkdownRef=useRef(notesSavedMarkdown);notesSavedMarkdownRef.current=notesSavedMarkdown;
+  const notesLoadedRef=useRef(notesLoaded);notesLoadedRef.current=notesLoaded;
+  const workspaceEditRevision=useRef(0);
+  useEffect(()=>{
+    if(!pendingRecordingDocument||!configLoaded||criticalTransitionBusy)return;
+    if(activeProject?.id===pendingRecordingDocument.projectId){void handleOpenDocument(pendingRecordingDocument.id,pendingRecordingDocument.id.split("/").pop()??"Documento de reunión");setPendingRecordingDocument(null);setRecordingPanel(false);return;}
+    const target=projects.find(p=>p.id===pendingRecordingDocument.projectId);
+    if(target)void handleSelectProject(target);else{setPendingRecordingDocument(null);showError(new Error("El proyecto del documento ya no está disponible"),"No se pudo abrir el acta");}
+  },[pendingRecordingDocument,activeProject?.id,projects,configLoaded,criticalTransitionBusy]);
+
+  const aiResultReview = useAiResultReview(configLoaded);
+  const [aiResultReviewOpen, setAiResultReviewOpen] = useState(false);
+  const deferredAiResultIds = useRef(new Set<string>());
+  const aiProposalRequests = useRef(new Map<string, { request: AiRequestSnapshot; response: AiInteractionResponse }>());
+  const sessionLoadSequence = useRef(0);
+  const documentLoads = useRef(new Map<string, number>());
+  const handwrittenLoads = useRef(new Map<string, number>());
   const draftDiscardInFlightRef = useRef<Set<string>>(new Set());
   const handwrittenDraftDiscardInFlightRef = useRef<Set<string>>(new Set());
-  const autoAppliedAiEditProposalIdsRef = useRef<Set<string>>(new Set());
   const externalChangesLastCheckRef = useRef(0);
   const projectSyncLastCheckRef = useRef(0);
   const documentPostSaveSyncSequenceRef = useRef(0);
+  const pendingSaveIds = useRef(new Set<string>());
+  const sessionWrites = useRef(new SessionWriteQueue());
+  const localEditProtection = useRef(new LocalEditProtection());
+  const [draftReviewBusy,setDraftReviewBusy]=useState<string|null>(null);
+  const [lastProtectedCopy,setLastProtectedCopy]=useState<RecoveryCopy|null>(null);
   const resolvedTheme = useResolvedAppearanceTheme(appearanceConfig.themeMode);
 
   useEffect(() => {
@@ -449,12 +641,14 @@ export function App() {
         ]);
         const active = projectList.find((project) => project.active) ?? projectList[0];
         let projectTree: DocumentTreeNode[] = [];
+        let startupTreeIssue:string|null=null;
         let activeVersioningStatus: ProjectVersioningStatus | null = null;
         let activeSyncStatus: ProjectSyncStatus | null = null;
         if (active) {
           try {
             projectTree = await getProjectTree(active.id);
           } catch (error) {
+            startupTreeIssue=getApiErrorMessage(error,"No se pudo leer la estructura del proyecto.");
             void recordTraceLog({
               source: "app.startup.tree",
               message: "No se pudo cargar el árbol del proyecto activo durante el arranque.",
@@ -486,7 +680,7 @@ export function App() {
           });
         }
         const activeProjectTabs = active
-          ? resolveProjectTabs(appConfig.tabsByProject, active.id, projectTree)
+          ? resolveProjectTabs(appConfig.tabsByProject, active.id, projectTree,!startupTreeIssue)
           : { ...defaultProjectTabsConfig };
         const shouldOpenReleaseNotes = shouldOpenReleaseNotesAfterStartup(appConfig, APP_VERSION);
         const nextOpenUtilityTabs = shouldOpenReleaseNotes
@@ -500,6 +694,7 @@ export function App() {
         setProjectSyncStatus(activeSyncStatus);
         if (activeSyncStatus) setProjectSyncState(activeSyncStatus.state);
         setTree(projectTree);
+        setTreeReadIssue(active&&startupTreeIssue?{projectId:active.id,message:startupTreeIssue}:null);
         setLayoutConfig(appConfig.layout);
         setAppearanceConfig(appConfig.appearance ?? defaultAppearanceConfig);
         setDiagnosticsConfig(appConfig.diagnostics ?? defaultDiagnosticsConfig);
@@ -534,15 +729,10 @@ export function App() {
           message: startupMessage,
           detail: describeError(error),
         });
-        if (isTauriMobileRuntime()) {
-          setLocalRuntimeRecoveryOpen(true);
-          setLocalRuntimeRecoveryError(startupMessage);
-        }
-        setNotice({
-          title: "No se pudo iniciar KnowNext.ai",
-          message: startupMessage,
-          tone: "error",
-        });
+        setLocalRuntimeRecoveryOpen(true);
+        setLocalRuntimeRecoveryError(startupMessage);
+        // Recovery owns this error; a floating duplicate obscures its heading.
+        setNotice(null);
         setProjects([]);
         setActiveProject(null);
         setVersioningStatus(null);
@@ -577,73 +767,30 @@ export function App() {
 
   useEffect(() => {
     if (!configLoaded) return;
-
+    stageSettings("app");
     const timeout = window.setTimeout(() => {
-      writeLocalAppPreferences({
-        appearance: appearanceConfig,
-        diagnostics: diagnosticsConfig,
-        handwritten: handwrittenConfig,
-      });
-
+      const preferences = {appearance: appearanceConfig, diagnostics: diagnosticsConfig, handwritten: handwrittenConfig};
       if (!configPersistenceAvailable) {
-        setAppSettingsSaveState("local-only");
-        setAppSettingsSaveMessage("Preferencias guardadas localmente. El runtime no está disponible para persistencia completa.");
+        void saveSettings("app", "configuration", async () => {
+          if (!cacheLocalAppPreferences(preferences)) throw new Error("No se pudieron guardar las preferencias locales. Se mantienen los cambios en esta sesión.");
+        }, () => {});
         return;
       }
-
-      const saveSequence = appSettingsSaveSequence.current + 1;
-      appSettingsSaveSequence.current = saveSequence;
-      setAppSettingsSaveState("saving");
-      setAppSettingsSaveMessage(null);
-
-      void updateAppConfig({
-        layout: layoutConfig,
-        appearance: appearanceConfig,
-        diagnostics: diagnosticsConfig,
-        handwritten: handwrittenConfig,
-        tabsByProject,
-        treeOpenPathsByProject,
-        lastRunAppVersion,
-        lastSeenReleaseNotesVersion,
-        openUtilityTabs,
-        activeUtilityTab,
-      })
-        .then(() => {
-          if (appSettingsSaveSequence.current !== saveSequence) return;
-          setAppSettingsSaveState("saved");
-          setAppSettingsSaveMessage("Configuración guardada.");
-        })
-        .catch((error) => {
-          if (appSettingsSaveSequence.current === saveSequence) {
-            setAppSettingsSaveState("error");
-            setAppSettingsSaveMessage(getApiErrorMessage(error, "No se pudo guardar la configuración de la aplicación."));
-          }
-          showError(error, "No se pudo guardar la configuración de la aplicación.", {
-            source: "app.configPersistence",
-            suppressApiConnectionNotice: true,
-          });
-        });
+      cacheLocalAppPreferences(preferences);
+      void saveSettings("app", "configuration", () => updateAppConfig({
+        layout: layoutConfig, appearance: appearanceConfig, diagnostics: diagnosticsConfig,
+        handwritten: handwrittenConfig, tabsByProject, treeOpenPathsByProject,
+        lastRunAppVersion, lastSeenReleaseNotesVersion, openUtilityTabs, activeUtilityTab,
+      }), () => {});
     }, 350);
-
     return () => window.clearTimeout(timeout);
-  }, [
-    activeUtilityTab,
-    appearanceConfig,
-    configLoaded,
-    configPersistenceAvailable,
-    diagnosticsConfig,
-    handwrittenConfig,
-    lastRunAppVersion,
-    lastSeenReleaseNotesVersion,
-    layoutConfig,
-    openUtilityTabs,
-    tabsByProject,
-    treeOpenPathsByProject,
-  ]);
+  }, [activeUtilityTab, appearanceConfig, configLoaded, configPersistenceAvailable, diagnosticsConfig,
+    handwrittenConfig, lastRunAppVersion, lastSeenReleaseNotesVersion, layoutConfig, openUtilityTabs,
+    tabsByProject, treeOpenPathsByProject, saveSettings, stageSettings]);
 
   useEffect(() => {
     if (!configLoaded) return;
-    writeLocalAppPreferences({ ai: aiConfig });
+    cacheLocalAppPreferences({ ai: aiConfig });
   }, [aiConfig, configLoaded]);
 
   useEffect(() => {
@@ -725,19 +872,34 @@ export function App() {
       const now = Date.now();
       if (now - externalChangesLastCheckRef.current < 55_000) return;
       externalChangesLastCheckRef.current = now;
+      if (!activeProject.isGitRepository) {
+        void handleReloadProjectTree(activeProject.id);
+        return;
+      }
       void refreshExternalChangeSet(activeProject.id, { refreshTreeOnChanges: true, silent: true });
     };
     const startupTimeout = window.setTimeout(check, 1200);
     const interval = window.setInterval(() => {
       check();
     }, 60_000);
-    window.addEventListener("focus", check);
     return () => {
       window.clearTimeout(startupTimeout);
       window.clearInterval(interval);
-      window.removeEventListener("focus", check);
     };
-  }, [activeProject?.id, acknowledgedExternalChangeSets, configLoaded, externalChangesBusy]);
+  }, [activeProject?.id, activeProject?.isGitRepository, acknowledgedExternalChangeSets, configLoaded, externalChangesBusy]);
+
+  useEffect(() => {
+    if (!configLoaded || !activeProject) return;
+    const projectId=activeProject.id;
+    const changed=(event:Event)=>{
+      const detail=(event as CustomEvent<{projectId?:unknown}>).detail;
+      if(detail?.projectId!==projectId||activeAiProjectRef.current!==projectId)return;
+      void handleReloadProjectTree(projectId);
+      void checkOpenDocumentSync({silent:true});
+    };
+    window.addEventListener(PROTON_WORKSPACE_CHANGED_EVENT,changed);
+    return()=>window.removeEventListener(PROTON_WORKSPACE_CHANGED_EVENT,changed);
+  }, [activeProject?.id, configLoaded]);
 
   useEffect(() => {
     if (!configLoaded || !activeProject) {
@@ -820,6 +982,7 @@ export function App() {
     : activeUtilityTab === NOTES_UTILITY_TAB_ID
     ? NOTES_WORKSPACE_TAB_ID
     : activeReferenceDocumentId || activeImageId || activeHandwrittenNoteId || activeDocumentId || (activeProject ? AI_CONVERSATION_TAB_ID : NOTES_WORKSPACE_TAB_ID);
+  const activeWorkspaceTabIdRef = useRef(activeWorkspaceTabIdForConfig); activeWorkspaceTabIdRef.current = activeWorkspaceTabIdForConfig;
 
   useEffect(() => {
     if (!authStatus.isAuthenticated) {
@@ -840,30 +1003,8 @@ export function App() {
     return () => window.clearInterval(interval);
   }, [githubDevice, githubLoginOpen, githubLoginState]);
 
-  useEffect(() => {
-    function handlePageHide() {
-      if (!isRuntimeApiEnabled()) return;
-
-      for (const [documentId, session] of Object.entries(documentSessions)) {
-        if (!shouldPersistDraft(session)) continue;
-        void saveDocumentDraft(documentId, { markdown: session.markdown, baseFingerprint: session.baseFingerprint });
-      }
-      for (const [noteId, session] of Object.entries(handwrittenSessions)) {
-        if (!shouldPersistHandwrittenDraft(session) || !session.content) continue;
-        void saveHandwrittenNoteDraft(noteId, {
-          content: session.content,
-          baseFingerprint: session.baseFingerprint,
-          baseContentHash: session.savedContentHash ?? null,
-        });
-      }
-      if (notesLoaded && notesMarkdown !== notesSavedMarkdown) {
-        void saveUserNotes(notesMarkdown);
-      }
-    }
-
-    window.addEventListener("pagehide", handlePageHide);
-    return () => window.removeEventListener("pagehide", handlePageHide);
-  }, [documentSessions, handwrittenSessions, notesLoaded, notesMarkdown, notesSavedMarkdown]);
+  useWorkspaceExit({freeze:()=>{checkpointPendingEditorInput();flushSync(()=>setExitProtection(true));},unfreeze:()=>setExitProtection(false),hasPendingSettings:()=> (["app","ai","export"] as const).some(domain=>settingsPersistence.hasPending(domain)),protect:()=>checkpointOpenWork(),failed:error=>showError(error,"No se pudo proteger el trabajo antes de salir. La aplicación sigue abierta.")});
+  const workspaceContinuity=useWorkspaceContinuity(configLoaded&&!updateProtection&&!exitProtection,checkpointOpenWork,reconcileOpenWork,()=>workspaceEditRevision.current);
 
   useEffect(() => {
     if (!configLoaded || !activeProject) return;
@@ -987,11 +1128,9 @@ export function App() {
       void checkOpenDocumentSync();
     };
     const interval = window.setInterval(check, 12000);
-    window.addEventListener("focus", check);
 
     return () => {
       window.clearInterval(interval);
-      window.removeEventListener("focus", check);
     };
   }, [configLoaded, documentSessions]);
 
@@ -1066,8 +1205,8 @@ export function App() {
     [aiContextSources, removingAiContextSourceIds],
   );
   const staleAiEditOperationIds = useMemo(
-    () => getStaleAiEditOperationIds(aiEditProposal, documentSessions, notesMarkdown),
-    [aiEditProposal, documentSessions, notesMarkdown],
+    () => getStaleAiEditOperationIds(aiEditProposal, documentSessions, notesMarkdown).filter(id => !appliedAiEditOperationIds.includes(id)),
+    [aiEditProposal, documentSessions, notesMarkdown, appliedAiEditOperationIds],
   );
   const visibleAiEditProposal = useMemo(
     () => (
@@ -1075,16 +1214,29 @@ export function App() {
       && staleAiEditOperationIds.length === 0
       && Object.keys(blockedAiEditOperationReasons).length === 0
         ? null
-        : aiEditProposal
+        : resolveAiProposalRecovery(aiEditProposal, aiResultReview.entries, Boolean(aiEditProposal?.recovery?.resultId && aiResultReview.wasRemoved(aiEditProposal.recovery.resultId)))
     ),
-    [aiEditProposal, autoApplyingAiEditProposalId, blockedAiEditOperationReasons, staleAiEditOperationIds],
+    [aiEditProposal, autoApplyingAiEditProposalId, blockedAiEditOperationReasons, staleAiEditOperationIds, aiResultReview.entries, aiResultReview.wasRemoved],
   );
+  useAiProposalAutoApply(aiEditProposal, !aiConfig.agentic.confirmBeforeApplying, id => handleApplyAiEditProposal(id, undefined, true));
   useEffect(() => {
-    if (!aiEditProposal || aiEditProposal.status !== "proposed") return;
-    if (autoAppliedAiEditProposalIdsRef.current.has(aiEditProposal.id)) return;
-    autoAppliedAiEditProposalIdsRef.current.add(aiEditProposal.id);
-    void handleApplyAiEditProposal(aiEditProposal.id);
-  }, [aiEditProposal?.id, aiEditProposal?.status]);
+    if (!aiEditProposal || aiEditProposal.status !== "proposed" || Object.keys(blockedAiEditOperationReasons).length) return;
+    if (aiEditProposal.operations.every(operation => appliedAiEditOperationIds.includes(operation.id))
+      && !pendingEditorOperations.some(operation => operation.aiProposalId === aiEditProposal.id)) clearAiEditProposalState();
+  }, [aiEditProposal, appliedAiEditOperationIds, pendingEditorOperations, blockedAiEditOperationReasons]);
+  useEffect(() => {
+    const staleProposalIds = new Set<string>();
+    for (const [id, context] of aiProposalRequests.current) {
+      if (context.request.projectEpoch === aiWorkspaceEpoch.current.value) continue;
+      retainAiResponse(context.response, context.request, "Cambiaste de proyecto con un resultado pendiente de aplicar. Se conserva para revisión.");
+      staleProposalIds.add(id); aiProposalRequests.current.delete(id);
+      cancelAiProposalApplication(id);
+    }
+    if (staleProposalIds.size) {
+      setPendingEditorOperations(current => current.filter(operation => !operation.aiProposalId || !staleProposalIds.has(operation.aiProposalId)));
+      if (aiEditProposal && staleProposalIds.has(aiEditProposal.id)) clearAiEditProposalState();
+    }
+  }, [activeProject?.id]);
   useEffect(() => {
     if (!activeDocumentId || !activeSession?.document) return;
     lastDocumentContextRef.current = { id: activeDocumentId, path: activeSession.document.path };
@@ -1116,6 +1268,7 @@ export function App() {
       markdown: documentSessions[tab.id]?.markdown ?? "",
       editorKey: `${tab.id}-${documentSessions[tab.id]?.loadVersion ?? 0}`,
       isLoading: documentSessions[tab.id]?.isLoading ?? !documentSessions[tab.id],
+      loadError: documentSessions[tab.id]?.loadError,
     })),
     [documentSessions, tabs],
   );
@@ -1135,6 +1288,9 @@ export function App() {
     nextTree: DocumentTreeNode[],
     options: { currentTree?: DocumentTreeNode[]; additionalOpenPaths?: string[]; persist?: boolean } = {},
   ) {
+    ++treeReadSequence.current;
+    setNotice(current=>current?.treeProjectId===projectId?null:current);
+    setTreeReadIssue(current=>current?.projectId===projectId?null:current);
     setTree((currentTree) => {
       const restoredTree = applyTreeOpenState(nextTree, {
         currentTree: options.currentTree ?? currentTree,
@@ -1144,6 +1300,17 @@ export function App() {
       if (options.persist !== false) persistTreeOpenState(projectId, restoredTree);
       return restoredTree;
     });
+  }
+  function markProjectTreeIssue(projectId:string,message:string){++treeReadSequence.current;setTreeReadIssue({projectId,message});}
+  async function handleReloadProjectTree(projectId=activeProject?.id){
+    if(!projectId||activeAiProjectRef.current!==projectId)return;const epoch=aiWorkspaceEpoch.current.value;
+    const existing=treeReadPending.current;if(existing?.projectId===projectId&&existing.epoch===epoch&&existing.sequence===treeReadSequence.current)return;
+    const sequence=++treeReadSequence.current,request={projectId,epoch,sequence};treeReadPending.current=request;
+    const owned=()=>activeAiProjectRef.current===projectId&&aiWorkspaceEpoch.current.value===epoch&&treeReadSequence.current===sequence;
+    setTreeReadBusy(true);
+    try{const next=await getProjectTree(projectId);if(owned())setProjectTree(projectId,next);}
+    catch(error){if(owned())setTreeReadIssue({projectId,message:getApiErrorMessage(error,"No se pudo actualizar la estructura del proyecto.")});}
+    finally{if(treeReadPending.current===request){treeReadPending.current=null;setTreeReadBusy(false);}}
   }
 
   function updateCurrentProjectTree(updater: (currentTree: DocumentTreeNode[]) => DocumentTreeNode[]) {
@@ -1155,10 +1322,23 @@ export function App() {
   }
 
   function clearAiEditProposalState() {
+    if (aiEditProposal) { aiProposalRequests.current.delete(aiEditProposal.id); cancelAiProposalApplication(aiEditProposal.id); }
     setAiEditProposal(null);
     setAutoApplyingAiEditProposalId(null);
     setBlockedAiEditOperationReasons({});
     setAppliedAiEditOperationIds([]);
+  }
+
+  function releaseAiProposalApplication(id: string) {
+    if (!aiProposalExecution.current.isActive(id)) setApplyingAiEditProposalId(current => current === id ? null : current);
+  }
+  function cancelAiProposalApplication(id: string) {
+    for (const operation of aiProposalExecution.current.cancel(id)) {
+      aiChangeJournal.current.release(operation.id);aiTrackedOperationEpochs.current.delete(operation.id);
+      window.clearTimeout(aiEditorOperationTimers.current.get(operation.id)); aiEditorOperationTimers.current.delete(operation.id);
+    }
+    setPendingEditorOperations(current => current.filter(operation => operation.aiProposalId !== id));
+    releaseAiProposalApplication(id);
   }
 
   function revealTreeNode(nodeId: string) {
@@ -1178,7 +1358,19 @@ export function App() {
     handleOpenDocument(documentId,documentId.split("/").pop()??"Transcripción");
     setRecordingPanel(false);
   }
+  function handleOpenLocalReference(target: LocalReferenceTarget) {
+    if (!activeProject || target.projectId!==activeProject.id || target.status!=="available") return;
+    if (target.kind==="document") handleOpenDocument(target.id,target.name);
+    else if (target.kind==="handwritten-note") handleOpenHandwrittenNote(target.id,target.name);
+    else if (target.kind==="image") handleOpenImage(target.id,target.name,target.path);
+    else if (target.kind==="reference-document") handleOpenReferenceDocument(target.id,target.name,target.path);
+    else if (target.kind==="folder") {
+      revealTreeNode(target.id);
+    }
+  }
+
   function handleOpenDocument(documentId: string, name: string) {
+    if(aiChangeJournal.current.hasDocument(documentId)){setNotice({title:"Cambio IA pendiente",message:"El documento se está protegiendo. Espera su confirmación antes de abrirlo.",tone:"info"});return;}
     if (activeHandwrittenNoteId && handwrittenSessions[activeHandwrittenNoteId]) {
       void persistHandwrittenDraft(activeHandwrittenNoteId, handwrittenSessions[activeHandwrittenNoteId]);
     }
@@ -1212,17 +1404,21 @@ export function App() {
     setActiveUtilityTab(null);
   }
 
-  function handleSelectTreeNode(nodeId: string, type: DocumentTreeNode["type"], name: string) {
+  function handleSelectTreeNode(nodeId: string, type: DocumentTreeNode["type"], name: string, focus?:WorkspaceNodeFocus) {
     revealTreeNode(nodeId);
+    const knownPath=activeProject&&nodeId.startsWith(`${activeProject.id}::`)?nodeId.slice(activeProject.id.length+2):undefined;
     if (type === "document") handleOpenDocument(nodeId, name);
-    if (type === "handwritten-note") handleOpenHandwrittenNote(nodeId, name);
+    if (type === "handwritten-note") {
+      setHandwrittenPageFocus(focus?.kind==="handwritten-page"?{noteId:nodeId,pageId:focus.pageId,requestId:++handwrittenPageFocusSequence.current}:null);
+      handleOpenHandwrittenNote(nodeId, name);
+    }
     if (type === "image") {
       const imageNode = findNodeById(tree, nodeId);
-      if (imageNode?.path) handleOpenImage(nodeId, name, imageNode.path);
+      const path=imageNode?.path??knownPath;if(path)handleOpenImage(nodeId,name,path);
     }
     if (type === "attachment") {
       const referenceNode = findNodeById(tree, nodeId);
-      if (referenceNode?.path && isReferenceDocumentPath(referenceNode.path)) handleOpenReferenceDocument(nodeId, name, referenceNode.path);
+      const path=referenceNode?.path??knownPath;if(path&&isReferenceDocumentPath(path))handleOpenReferenceDocument(nodeId,name,path,focus?.kind==="pdf-page"?focus.pageNumber:undefined);
     }
   }
 
@@ -1249,17 +1445,18 @@ export function App() {
     }
   }
 
-  function handleOpenReferenceDocument(nodeId: string, name: string, path: string) {
+  function handleOpenReferenceDocument(nodeId: string, name: string, path: string,requestedPage?:number) {
     const format = referenceDocumentFormat(path);
     if (!format) {
       setActiveTreeNodeId(nodeId);
       setNotice({ title: "Vista no disponible", message: "Este archivo de apoyo no tiene visor integrado.", tone: "info" });
       return;
     }
+    const pageFocus=format==="pdf"&&typeof requestedPage==="number"&&Number.isSafeInteger(requestedPage)&&requestedPage>=1?{pageNumber:requestedPage,requestId:++referencePageFocusSequence.current}:undefined;
     setReferenceDocumentTabs((currentTabs) => (
       currentTabs.some((tab) => tab.id === nodeId)
-        ? currentTabs.map((tab) => (tab.id === nodeId ? { id: nodeId, name, path, format } : tab))
-        : [...currentTabs, { id: nodeId, name, path, format }]
+        ? currentTabs.map((tab) => (tab.id === nodeId ? { id: nodeId, name, path, format,pageFocus } : tab))
+        : [...currentTabs, { id: nodeId, name, path, format,pageFocus }]
     ));
     if (activeDocumentId && documentSessions[activeDocumentId]) {
       void persistDraft(activeDocumentId, documentSessions[activeDocumentId]);
@@ -1276,44 +1473,50 @@ export function App() {
   }
 
   async function refreshProjectCapabilityState(projectId = activeProject?.id) {
+    const owns=projectWork.read("capabilities",projectId);if(!owns)return;
     try {
       const [capabilities, status] = await Promise.all([
         getProjectCapabilities(),
         projectId ? getProjectVersioningStatus(projectId) : Promise.resolve(null),
       ]);
+      if(!owns())return;
       setProjectCapabilities(capabilities);
       setVersioningStatus(status);
       if (!status?.enabled) setHistoryOpen(false);
     } catch (error) {
-      showError(error, "No se pudo actualizar el estado de versionado del proyecto.");
+      if(owns())showError(error, "No se pudo actualizar el estado de versionado del proyecto.");
     }
   }
 
-  async function refreshExternalChangeSet(projectId = activeProject?.id, options: { refreshTreeOnChanges?: boolean; silent?: boolean } = {}) {
-    if (!projectId) return;
+  async function refreshExternalChangeSet(projectId = activeProject?.id, options: { refreshTreeOnChanges?: boolean; silent?: boolean;reportErrors?:boolean;currentOnly?:boolean } = {}) {
+    if (!projectId) return true;
+    const owned=projectWork.read("external-changes",projectId);if(!owned)return false;
     try {
       const changeSet = options.silent ? await getExternalChanges(projectId) : await scanExternalChanges(projectId);
+      if(!owned())return true;
       const acknowledged = isAcknowledgedExternalChangeSet(projectId, changeSet, acknowledgedExternalChangeSets);
       if (acknowledged) {
         setExternalChangeSet(changeSet);
         setExternalChangeDecisions(buildDefaultExternalChangeDecisions(changeSet));
         setExternalChangesMessage("Cambios omitidos aceptados.");
         if (projectSyncState !== "pending") setProjectSyncState("synced");
-        return;
+        return true;
       }
       setExternalChangeSet(changeSet);
       setExternalChangeDecisions(buildDefaultExternalChangeDecisions(changeSet));
       if (changeSet.summary.total > 0) {
         setProjectSyncState(changeSet.requiresReview ? "review-required" : "pending");
         if (options.refreshTreeOnChanges) {
-          setProjectTree(projectId, await getProjectTree(projectId));
+          await handleReloadProjectTree(projectId);if(!owned())return true;
         }
       } else if (projectSyncState !== "pending") {
         setProjectSyncState(changeSet.status === "none" && changeSet.message ? "unsupported" : "synced");
       }
       setExternalChangesMessage(changeSet.message ?? null);
+      return true;
     } catch (error) {
-      if (!options.silent) showError(error, "No se pudieron revisar los cambios externos.");
+      if (owned()&&!options.silent&&options.reportErrors!==false) showError(error, "No se pudieron revisar los cambios externos.");
+      return !owned();
     }
   }
 
@@ -1349,6 +1552,7 @@ export function App() {
 
   async function refreshProjectSyncStatus(projectId = activeProject?.id, options: { autoRun?: boolean; silent?: boolean } = {}) {
     if (!projectId) return null;
+    const owns=projectWork.read("sync-status",projectId);if(!owns)return null;
     try {
       const project = projects.find((candidate) => candidate.id === projectId) ?? (activeProject?.id === projectId ? activeProject : null);
       const payload = {
@@ -1358,12 +1562,13 @@ export function App() {
       const canAutoRun = Boolean(options.autoRun && shouldRunAutomaticSync(project, authStatus));
       const status = canAutoRun ? await autoRunProjectSync(projectId, payload) : await scanProjectSync(projectId, payload);
       const normalizedStatus = withDerivedRemoteSyncStatus(status, project, authStatus);
+      if(!owns())return null;
       setProjectSyncStatus(normalizedStatus);
       setProjectSyncState(normalizedStatus.state);
       setExternalChangesMessage(normalizedStatus.detail ?? normalizedStatus.label);
       return normalizedStatus;
     } catch (error) {
-      if (!options.silent) showError(error, "No se pudo comprobar la sincronización del proyecto.");
+      if (owns()&&!options.silent) showError(error, "No se pudo comprobar la sincronización del proyecto.");
       return null;
     }
   }
@@ -1403,30 +1608,51 @@ export function App() {
   }
 
   async function handleImportExternalChanges(options: { safeOnly?: boolean } = {}) {
-    if (!activeProject || !externalChangeSet) return;
+    if (!activeProject || !externalChangeSet || externalChangeSet.projectId!==activeProject.id) return;
     if (externalChangesBusy) return;
     const decisions = buildExternalImportDecisions(externalChangeSet, externalChangeDecisions, options.safeOnly);
-    setExternalChangesBusy(true);
-    setProjectSyncState("saving");
-    setExternalChangesMessage("Guardando versión local antes de sincronizar con GitHub.");
+    const operation=projectWork.begin(activeProject.id);if(!operation)return;
     try {
-      const payload: ExternalChangeImportRequest = { decisions, syncRemote: true };
+      if(!externalChangeSet.revision)throw new Error("Comprueba de nuevo para revisar los archivos antes de registrarlos.");
+      checkpointPendingEditorInput();
+      if(!await flushPendingDrafts(activeProject.id)||!operation.owns())return;
+      setProjectSyncState("saving");
+      setExternalChangesMessage("Registrando los archivos revisados en el historial local.");
+      const pendingIds=new Set(externalChangeSet.items.filter(item=>{
+        const id=`${activeProject.id}::${item.path}`,doc=documentSessionsRef.current[id],ink=handwrittenSessionsRef.current[id];
+        return doc&&(doc.isDirty||doc.hasRecoveredDraft||doc.draftUpdatedAt||doc.draftWriteConflict)||ink&&(ink.isDirty||ink.hasRecoveredDraft||ink.draftUpdatedAt||ink.draftWriteConflict);
+      }).map(item=>item.id));
+      const reviewedDecisions=decisions.map(item=>pendingIds.has(item.itemId)?{...item,decision:"omit" as const}:item);
+      if(!reviewedDecisions.some(item=>item.decision==="include"))throw new Error("Guarda o revisa los borradores antes de registrar sus archivos. El contenido abierto se conserva.");
+      const payload: ExternalChangeImportRequest = { revision:externalChangeSet.revision, decisions:reviewedDecisions, syncRemote: false };
       const result = await importExternalChanges(activeProject.id, payload);
-      setProjectTree(activeProject.id, result.tree);
+      if(!operation.owns())return;
+      if(result.treeAvailable!==false)setProjectTree(activeProject.id,result.tree);else markProjectTreeIssue(activeProject.id,result.treeWarning||"El historial se actualizó; no se pudo cargar su estructura. No repitas la operación.");
       setProjectSyncState(result.status);
       setExternalChangesMessage(result.message);
       await refreshProjectCapabilityState(activeProject.id);
+      if(!operation.owns())return;
       await refreshExternalChangeSet(activeProject.id, { silent: true });
+      if(!operation.owns())return;
       await refreshProjectActivity(activeProject.id);
+      if(!operation.owns())return;
       await refreshProjectFileSyncOverview(activeProject.id);
+      if(!operation.owns())return;
       setProjectSyncState(result.status);
       setExternalChangesMessage(result.message);
       if (!result.pendingRemoteSync) setExternalChangesOpen(false);
     } catch (error) {
-      setProjectSyncState("error");
+      if(!operation.owns())return;
+      // An uncertain acknowledgement never authorizes replay: refresh reads only.
+      await refreshExternalChangeSet(activeProject.id,{silent:true});
+      if(!operation.owns())return;
+      await refreshProjectFileSyncOverview(activeProject.id);
+      if(!operation.owns())return;
+      setProjectSyncState("review-required");
+      setExternalChangesMessage("No se confirmó la operación. Revisa el estado comprobado y vuelve a confirmar solo lo que siga pendiente.");
       showError(error, "No se pudieron guardar los cambios detectados.");
     } finally {
-      setExternalChangesBusy(false);
+      operation.release();
     }
   }
 
@@ -1688,31 +1914,25 @@ export function App() {
   }
 
   function handleMarkdownChange(documentId: string, nextMarkdown: string, source: MarkdownEditorChangeSource = "user") {
-    setDocumentSessions((currentSessions) => {
-      const session = currentSessions[documentId];
-      if (!session) return currentSessions;
-      return {
-        ...currentSessions,
-        [documentId]: applyLocalMarkdownEdit(session, nextMarkdown, source),
-      };
-    });
+    const session = documentSessionsRef.current[documentId];
+    if (!session) return;
+    if(session.markdown!==nextMarkdown)workspaceEditRevision.current++;
+    documentSessionsRef.current = { ...documentSessionsRef.current, [documentId]: applyLocalMarkdownEdit(session, nextMarkdown, source) };
+    setDocumentSessions(documentSessionsRef.current);
   }
 
   function handleHandwrittenChange(noteId: string, content: HandwrittenNoteContent) {
-    setHandwrittenSessions((currentSessions) => {
-      const session = currentSessions[noteId];
-      if (!session) return currentSessions;
-      return {
-        ...currentSessions,
-        [noteId]: applyLocalHandwrittenNoteEdit(session, content),
-      };
-    });
+    const session = handwrittenSessionsRef.current[noteId];
+    if (!session) return;
+    workspaceEditRevision.current++;
+    handwrittenSessionsRef.current = { ...handwrittenSessionsRef.current, [noteId]: applyLocalHandwrittenNoteEdit(session, content) };
+    setHandwrittenSessions(handwrittenSessionsRef.current);
   }
 
   function handleHandwrittenToolPresetsChange(toolPresets: HandwrittenToolPreset[]) {
     setHandwrittenConfig((currentConfig) => {
       const updatedConfig = { ...currentConfig, toolPresets };
-      writeLocalAppPreferences({ handwritten: updatedConfig });
+      cacheLocalAppPreferences({ handwritten: updatedConfig });
       return updatedConfig;
     });
   }
@@ -1720,46 +1940,62 @@ export function App() {
   function handleHandwrittenEraserConfigChange(eraser: HandwrittenEraserConfig) {
     setHandwrittenConfig((currentConfig) => {
       const updatedConfig = { ...currentConfig, eraser };
-      writeLocalAppPreferences({ handwritten: updatedConfig });
+      cacheLocalAppPreferences({ handwritten: updatedConfig });
       return updatedConfig;
     });
   }
 
   function handleNotesMarkdownChange(nextMarkdown: string) {
+    if(notesMarkdownRef.current!==nextMarkdown)workspaceEditRevision.current++;
+    notesMarkdownRef.current = nextMarkdown;
     setNotesMarkdown(nextMarkdown);
     setNotesSaveState("idle");
   }
 
-  function handleEditorOperationApplied(operationId: string) {
-    setPendingEditorOperations((currentOperations) => currentOperations.filter((operation) => operation.id !== operationId));
+  async function prepareTrackedEditorChange(operation:MarkdownEditorExternalOperation,interactionId:string,summary:string,originalEpoch:number){
+    const id=operation.documentId;const expected={projectId:id===NOTES_WORKSPACE_TAB_ID?(activeAiProjectRef.current??""):id.split("::")[0],epoch:originalEpoch};aiTrackedOperationEpochs.current.set(operation.id,expected);if(id===NOTES_WORKSPACE_TAB_ID)return;
+    await sessionWrites.current.run(id,async()=>{const session=documentSessionsRef.current[id];if(!session||session.markdown!==operation.expectedMarkdown)throw Error("El documento cambió antes de registrar la operación IA");const allowed=()=>sameTrackedVisit(documentSessionsRef.current[id],session)&&documentSessionsRef.current[id]?.markdown===session.markdown&&trackedAuthorityIsCurrent(expected,{projectId:activeAiProjectRef.current,epoch:aiWorkspaceEpoch.current.value,canEdit:aiConfigRef.current.permissions.editDocuments,proposalExists:!!operation.aiProposalId&&aiProposalRequests.current.has(operation.aiProposalId)});if(!allowed())throw Error("La propuesta ya no tiene el mismo ámbito");await aiChangeJournal.current.prepare(operation.id,id,{interactionId,operationId:operation.id,summary,beforeMarkdown:session.markdown,expectedDraftWriteRevision:session.draftWriteRevision??null,baseFingerprint:session.baseFingerprint},allowed);});
+  }
+  async function persistTrackedEditorChange(operation:MarkdownEditorExternalOperation,markdown:string){
+    return sessionWrites.current.run(operation.documentId,async()=>{const before=documentSessionsRef.current[operation.documentId];if(!before)throw Error("La operación perdió su documento; consulta el cambio conservado");const expected=aiTrackedOperationEpochs.current.get(operation.id);const allowed=()=>!!expected&&trackedAuthorityIsCurrent(expected,{projectId:activeAiProjectRef.current,epoch:aiWorkspaceEpoch.current.value,canEdit:aiConfigRef.current.permissions.editDocuments,proposalExists:!!operation.aiProposalId&&aiProposalRequests.current.has(operation.aiProposalId)});const draft=await aiChangeJournal.current.apply(operation.id,markdown,allowed);const current=acknowledgeDraftWrite(documentSessionsRef.current[operation.documentId],before,draft.draftWriteRevision);if(!sameTrackedVisit(current,before))throw Error("La aplicación quedó pendiente de revisión en su documento original");if(!current)throw Error("El documento ya no está abierto");const matches=current.markdown===markdown;const next={...current,...(matches?{lastDraftMarkdown:draft.isDirty?markdown:"",draftUpdatedAt:draft.draftUpdatedAt,hasRecoveredDraft:!!draft.hasDraft,draftContentHash:draft.draftContentHash??null}:{}),draftWriteRevision:draft.draftWriteRevision??null};documentSessionsRef.current={...documentSessionsRef.current,[operation.documentId]:next};setDocumentSessions(documentSessionsRef.current);});
+  }
+  async function handleEditorOperationApplied(operationId: string) {
+    if(aiEditorJournalAcks.current.has(operationId))return;aiEditorJournalAcks.current.add(operationId);
+    try{
+    const operation = aiProposalExecution.current.peek(operationId);
+    setPendingEditorOperations(current=>current.filter(candidate=>candidate.id!==operationId));
+    window.clearTimeout(aiEditorOperationTimers.current.get(operationId)); aiEditorOperationTimers.current.delete(operationId);
+    const context = operation?.aiProposalId ? aiProposalRequests.current.get(operation.aiProposalId) : null;
+    if(operation&&aiChangeJournal.current.hasOperation(operationId)){
+      try{const reader=liveEditorSnapshots.current.get(operation.documentId);if(!reader)throw Error("No se pudo capturar el resultado vivo del editor");const markdown=reader.getMarkdownSnapshot();handleMarkdownChange(operation.documentId,markdown,"user");await persistTrackedEditorChange(operation,markdown);}
+      catch(error){markDraftWriteBlocked(operation.documentId,false);aiChangeJournal.current.release(operationId);handleEditorOperationFailed({...operation,failureReason:"editor_apply_failed"});showError(error,"El cambio IA requiere consulta. Tu edición permanece protegida.");return;}
+      finally{aiChangeJournal.current.release(operationId);}
+    }
+    aiProposalExecution.current.settle(operationId);aiTrackedOperationEpochs.current.delete(operationId);
+    if (operation && context) {
+      setAiAppliedChange({ documentId: operation.documentId, summary: context.response.editProposal?.summary ?? "Cambio aplicado como borrador" });
+      setAppliedAiEditOperationIds(current => Array.from(new Set([...current, ...(operation.aiEditOperationIds ?? (operation.aiEditOperationId ? [operation.aiEditOperationId] : []))])));
+    }
+    if (operation?.aiProposalId) releaseAiProposalApplication(operation.aiProposalId);
+    setPendingEditorOperations(current => current.filter(operation => operation.id !== operationId));
+
+    }finally{aiEditorJournalAcks.current.delete(operationId);}
   }
 
   function handleEditorOperationFailed(operation: MarkdownEditorExternalOperation) {
-    setPendingEditorOperations((currentOperations) => currentOperations.filter((currentOperation) => currentOperation.id !== operation.id));
-    if (operation.aiEditOperationId) {
-      setAppliedAiEditOperationIds((currentIds) => currentIds.filter((operationId) => operationId !== operation.aiEditOperationId));
-      setBlockedAiEditOperationReasons((currentReasons) => ({
-        ...currentReasons,
-        [operation.aiEditOperationId as string]: "editor_apply_failed",
-      }));
-    }
-    if ((operation.kind ?? "replace_document") !== "replace_document") {
-      setAiBubble({ id: `local-${Date.now()}`, answer: "No se pudo aplicar la operación parcial de IA. Revisa el documento y vuelve a intentarlo." });
-      return;
-    }
-    if (operation.documentId === NOTES_WORKSPACE_TAB_ID) {
-      setNotesMarkdown(operation.markdown);
-      void persistNotes(operation.markdown);
-      return;
-    }
-    setDocumentSessions((currentSessions) => {
-      const session = currentSessions[operation.documentId];
-      if (!session) return currentSessions;
-      return {
-        ...currentSessions,
-        [operation.documentId]: applyExternalMarkdownUpdate(session, operation.markdown),
-      };
-    });
+    aiChangeJournal.current.release(operation.id);aiTrackedOperationEpochs.current.delete(operation.id);
+    setPendingEditorOperations(current => current.filter(candidate => candidate.id !== operation.id));
+    const queued = aiProposalExecution.current.settle(operation.id);
+    window.clearTimeout(aiEditorOperationTimers.current.get(operation.id)); aiEditorOperationTimers.current.delete(operation.id);
+    if (operation.aiProposalId) releaseAiProposalApplication(operation.aiProposalId);
+    if (operation.aiProposalId && !queued) return;
+    setAutoApplyingAiEditProposalId(null);
+    const ids = new Set(operation.aiEditOperationIds ?? (operation.aiEditOperationId ? [operation.aiEditOperationId] : []));
+    setAppliedAiEditOperationIds(current => current.filter(id => !ids.has(id)));
+    setBlockedAiEditOperationReasons(current => ({ ...current, ...Object.fromEntries(Array.from(ids, id => [id, operation.failureReason ?? "editor_apply_failed"])) }));
+    const context = operation.aiProposalId ? aiProposalRequests.current.get(operation.aiProposalId) : null;
+    if (context) retainAiResponse(context.response, context.request, "El editor contiene cambios nuevos o no pudo aplicar la operación. Tu contenido se conserva; revisa el resultado como copia.");
+    setAiBubble({ id: `local-${Date.now()}`, answer: "El cambio requiere revisión. Se conserva tu contenido actual." });
   }
 
   async function handleSendAiPrompt(prompt: string, selectionFocus?: AiSelectionFocus | null, options?: AiPromptExecutionOptions) {
@@ -1824,9 +2060,15 @@ export function App() {
         void getAiConversation(activeProject.id).then((conversation) => setAiConversationEvents(conversation.events)).catch(() => undefined);
         return;
       }
+      const requestSnapshot = captureAiRequest(activeProject, aiWorkspaceEpoch.current.value, interactionDocumentId ?? (hasHandwrittenContext ? activeHandwrittenNoteId : null), documentSessionsRef.current, handwrittenSessionsRef.current, notesMarkdownRef.current);
+      if (interactionDocumentId) requestSnapshot.markdown[interactionDocumentId] = interactionMarkdown;
+      if (hasHandwrittenContext && activeHandwrittenNoteId && handwrittenContent) requestSnapshot.handwritten[activeHandwrittenNoteId] = handwrittenContentJson;
       const response = await sendAiInteraction({
         projectId: activeProject.id,
         documentId: interactionDocumentId,
+        activeDocumentBaseFingerprint: hasDocumentContext ? activeSession?.baseFingerprint ?? null : null,
+        activeDocumentDraftContentHash: hasDocumentContext ? activeSession?.draftContentHash ?? null : null,
+        activeHandwrittenDraftContentHash: hasHandwrittenContext ? activeHandwrittenSession?.draftContentHash ?? null : null,
         prompt,
         activeMarkdown: interactionMarkdown,
         targetKind,
@@ -1852,7 +2094,7 @@ export function App() {
         clientMessageId: `client-${Date.now()}`,
         contextSourceIds: promptContextSourceIds,
       });
-      applyAiInteractionResponse(response);
+      applyAiInteractionResponse(response, requestSnapshot);
       void refreshAiUsageSummary();
     } catch (error) {
       showError(error, "No se pudo completar la interacción IA.", { source: "app.aiInteraction" });
@@ -1878,7 +2120,7 @@ export function App() {
 
   function handleResearchJobSettled(job: AiResearchJob) {
     if (!activeProject) return;
-    if (job.tree) setProjectTree(activeProject.id, job.tree);
+    if(job.tree&&job.treeAvailable!==false)setProjectTree(activeProject.id,job.tree);else if(job.treeDeferred)void handleReloadProjectTree();
     const documentId = job.documentId ?? job.createdDocumentId ?? null;
     if (isAiResearchReadyStatus(job.status) && documentId && !openedResearchDocumentIdsRef.current.has(documentId)) {
       openedResearchDocumentIdsRef.current.add(documentId);
@@ -2031,7 +2273,18 @@ export function App() {
 
   async function handlePreviewAiContextSource(sourceId: string): Promise<AiContextSourcePreviewResponse> {
     if (!activeProject) throw new Error("No hay proyecto activo.");
-    return previewAiContextSource(activeProject.id, sourceId);
+    const projectId=activeProject.id,epoch=aiWorkspaceEpoch.current.value;
+    const result=await previewAiContextSource(projectId,sourceId);
+    if(result.source.id!==sourceId||result.source.projectId!==projectId)throw new Error("La copia recibida no corresponde al proyecto y fuente revisados.");
+    if(activeAiProjectRef.current===projectId&&aiWorkspaceEpoch.current.value===epoch)setAiContextSources(current=>current.map(source=>source.id===sourceId?result.source:source));
+    return result;
+  }
+  async function handleRefreshAiContextSource(sourceId:string,review:import("../types/domain").AiContextOriginReview):Promise<AiContextSourcePreviewResponse>{
+    if(!activeProject)throw new Error("No hay proyecto activo.");
+    const projectId=activeProject.id,epoch=aiWorkspaceEpoch.current.value;
+    const result=await refreshContextSource(projectId,sourceId,review);
+    if(activeAiProjectRef.current===projectId&&aiWorkspaceEpoch.current.value===epoch)setAiContextSources(current=>current.map(source=>source.id===sourceId?result.source:source));
+    return result;
   }
 
   async function handleAddAiContextSourceToProject(sourceId: string) {
@@ -2042,7 +2295,7 @@ export function App() {
         name: source?.name ? `${source.name.replace(/\.[^.]+$/, "")}.md` : undefined,
         parentId: currentCreationParentId,
       });
-      if (result.tree && activeProject) setProjectTree(activeProject.id, result.tree);
+      if(result.tree&&result.treeAvailable!==false)setProjectTree(activeProject.id,result.tree);else if(result.treeAvailable===false)markProjectTreeIssue(activeProject.id,result.treeWarning||"Documento creado; no se pudo actualizar su vista. No repitas la creación.");
       if (result.documentId) handleOpenDocument(result.documentId, result.path.split("/").pop() || result.path);
       await refreshAiContextSources(activeProject.id);
     } catch (error) {
@@ -2054,12 +2307,18 @@ export function App() {
     if (!activeProject || !aiPendingIntent) return;
     const targetDocumentId = aiPendingIntent.targetDocumentId ?? lastDocumentContextRef.current.id;
     const targetSession = targetDocumentId ? documentSessions[targetDocumentId] : undefined;
+    const targetMarkdown = targetDocumentId === NOTES_WORKSPACE_TAB_ID ? notesMarkdownRef.current : targetSession?.markdown ?? "";
+    const requestSnapshot = captureAiRequest(activeProject, aiWorkspaceEpoch.current.value, targetDocumentId ?? null, documentSessionsRef.current, handwrittenSessionsRef.current, notesMarkdownRef.current);
+    if (targetDocumentId) requestSnapshot.markdown[targetDocumentId] = targetMarkdown;
     try {
       const response = await sendAiInteraction({
         projectId: activeProject.id,
         documentId: targetDocumentId ?? null,
+        activeDocumentBaseFingerprint: targetSession?.baseFingerprint ?? (targetDocumentId ? handwrittenSessions[targetDocumentId]?.baseFingerprint : null) ?? null,
+        activeDocumentDraftContentHash: targetSession?.draftContentHash ?? null,
+        activeHandwrittenDraftContentHash: targetDocumentId ? handwrittenSessions[targetDocumentId]?.draftContentHash ?? null : null,
         prompt: "",
-        activeMarkdown: targetSession?.markdown ?? "",
+        activeMarkdown: targetMarkdown,
         selectionFocus: null,
         clientContext: {
           lastDocumentId: lastDocumentContextRef.current.id,
@@ -2071,14 +2330,66 @@ export function App() {
         mode: targetDocumentId ? "document" : "project",
         clientMessageId: `client-intent-${Date.now()}`,
       });
-      applyAiInteractionResponse(response);
+      applyAiInteractionResponse(response, requestSnapshot);
       void refreshAiUsageSummary();
     } catch (error) {
       showError(error, "No se pudo aplicar la intención IA.", { source: "app.aiIntentAction" });
     }
   }
 
-  function applyAiInteractionResponse(response: AiInteractionResponse) {
+  function retainAiResponse(response: AiInteractionResponse, request: AiRequestSnapshot, reason: string) {
+    if (response.retainedResult) {
+      const { result, stored, error } = response.retainedResult;
+      aiResultReview.adopt(result, stored, error);
+      return;
+    }
+    const key = `${request.projectId}:${response.interactionId}`;
+    if (deferredAiResultIds.current.has(key)) return;
+    deferredAiResultIds.current.add(key);
+    void aiResultReview.retain(buildAiReviewRecord({ id: response.interactionId, receivedAt: new Date().toISOString(), reason, request, response }));
+  }
+
+  async function applyTrackedHandwrittenResponse(response:AiInteractionResponse,request:AiRequestSnapshot,updated:NonNullable<AiInteractionResponse["updatedHandwrittenNote"]>){
+    const id=updated.noteId,operationId=nextAiEditorOperationId("handwritten-"+response.interactionId);
+    try{await sessionWrites.current.run(id,async()=>{const submitted=handwrittenSessionsRef.current[id];if(!submitted?.content)throw Error("La nota ya no está disponible en el espacio actual");const before=stringifyHandwrittenContent(submitted.content);const allowed=()=>trackedAuthorityIsCurrent({projectId:request.projectId,epoch:request.projectEpoch},{projectId:activeAiProjectRef.current,epoch:aiWorkspaceEpoch.current.value,canEdit:aiConfigRef.current.permissions.editHandwrittenNotes,proposalExists:true})&&sameHandwrittenRevision(handwrittenSessionsRef.current[id],submitted);
+      if(!allowed())throw Error("La nota o su permiso cambiaron antes de registrar el cambio IA");
+      await aiChangeJournal.current.prepare(operationId,id,{interactionId:response.interactionId,operationId,summary:updated.summary,beforeMarkdown:before,expectedDraftWriteRevision:submitted.draftWriteRevision??null,baseFingerprint:submitted.baseFingerprint},allowed);
+      const result=await aiChangeJournal.current.apply(operationId,stringifyHandwrittenContent(updated.content),allowed);const live=handwrittenSessionsRef.current[id];
+      if(!live?.content||live.loadVersion!==submitted.loadVersion||live.savedContent!==submitted.savedContent||live.baseFingerprint?.sha256!==submitted.baseFingerprint?.sha256||request.projectEpoch!==aiWorkspaceEpoch.current.value||request.projectId!==activeAiProjectRef.current)throw Error("El acuse se conserva en el proyecto original; la vista actual cambió");
+      const acknowledged=acknowledgeDraftWrite(live,submitted,result.draftWriteRevision)!;const next=stringifyHandwrittenContent(live.content!)===before?markAiHandwrittenDraftApplied(applyLocalHandwrittenNoteEdit(acknowledged,updated.content),updated.content,new Date().toISOString(),result.draftWriteRevision):acknowledged;handwrittenSessionsRef.current={...handwrittenSessionsRef.current,[id]:next};setHandwrittenSessions(handwrittenSessionsRef.current);setAiAppliedChange({documentId:id,summary:updated.summary});});}
+    catch(error){if(handwrittenSessionsRef.current[id])markDraftWriteBlocked(id,true);retainAiResponse(response,request,"El cambio manuscrito requiere revisión; los trazos y el resultado se conservan.");showError(error,"No se confirmó el cambio manuscrito. Consulta su historial sin repetir.");}
+    finally{aiChangeJournal.current.release(operationId);}
+  }
+
+  function applyAiInteractionResponse(incoming: AiInteractionResponse, request: AiRequestSnapshot) {
+    if((incoming.conversationWarning||incoming.usageWarning)&&request.projectId===activeAiProjectRef.current&&request.projectEpoch===aiWorkspaceEpoch.current.value){
+      setNotice({title:"Resultado recibido; registro local sin confirmar",message:[incoming.conversationWarning,incoming.usageWarning].filter(Boolean).join(" "),tone:"info"});
+    }
+    if (incoming.retainedResult) {
+      const { result, stored, error } = incoming.retainedResult;
+      aiResultReview.adopt(result, stored, error);
+    }
+    const issue = aiResponseContinuityIssue(request, incoming, { projectId: activeAiProjectRef.current, projectEpoch: aiWorkspaceEpoch.current.value, documents: documentSessionsRef.current, handwritten: handwrittenSessionsRef.current, notes: notesMarkdownRef.current });
+    if (issue) {
+      retainAiResponse(incoming, request, issue);
+      if (request.projectId === activeAiProjectRef.current && request.projectEpoch === aiWorkspaceEpoch.current.value) {
+        setAiConversationEvents(current => mergeAiEvents(current, incoming.conversationEvents));
+        setAiBubble({ id: incoming.interactionId, answer: "Resultado conservado para revisión. Tu contenido actual no se ha sustituido." });
+      }
+      return;
+    }
+    const canActivate = request.targetId === activeWorkspaceTabIdRef.current;
+    let response = incoming;
+    if (incoming.updatedDocument) {
+      const updated = incoming.updatedDocument;
+      const now = new Date().toISOString();
+      response = { ...incoming, updatedDocument: null, editProposal: {
+        id: `client-${incoming.interactionId}`, projectId: request.projectId, interactionId: incoming.interactionId, status: "proposed", documentId: updated.documentId,
+        title: "Edición del documento", summary: updated.summary, scope: "document", createdAt: now, updatedAt: now,
+        operations: [...(incoming.editProposal?.operations ?? []), { id: `client-${incoming.interactionId}-document`, action: "replace_document", documentId: updated.documentId, summary: updated.summary, confidence: "high", markdown: updated.markdown }],
+      } };
+    }
+    response = bindAiProposalReview(response, request, aiConfigRef.current.agentic.confirmBeforeApplying);
     if (response.contextSources) {
       setAiContextSources(response.contextSources);
     } else if (response.expiredContextSourceIds?.length) {
@@ -2095,7 +2406,15 @@ export function App() {
       setAiPendingIntent(null);
     }
     if (response.editProposal && response.editProposal.status === "proposed") {
-      setAutoApplyingAiEditProposalId(response.editProposal.id);
+      for (const [id, context] of aiProposalRequests.current) {
+        if (id === response.editProposal.id) continue;
+        retainAiResponse(context.response, context.request, "Llegó otro resultado antes de terminar la revisión del anterior. Ambos se conservan por separado.");
+        aiProposalRequests.current.delete(id);
+        cancelAiProposalApplication(id);
+        setPendingEditorOperations(current => current.filter(operation => operation.aiProposalId !== id));
+      }
+      aiProposalRequests.current.set(response.editProposal.id, { request, response });
+      setAutoApplyingAiEditProposalId(response.editProposal.requiresConfirmation ? null : response.editProposal.id);
       setAiEditProposal(response.editProposal);
       setBlockedAiEditOperationReasons({});
       setAppliedAiEditOperationIds([]);
@@ -2103,14 +2422,12 @@ export function App() {
       clearAiEditProposalState();
     }
     const affectedDocuments = response.affectedDocuments ?? [];
-    if (response.tree && affectedDocuments.length > 0) {
-      applyFileOperationResult({ tree: response.tree, node: null, affectedDocuments });
-    } else if (response.tree && activeProject) {
-      setProjectTree(activeProject.id, response.tree);
-    }
+    if(affectedDocuments.length>0)applyFileOperationResult({tree:response.tree??[],treeAvailable:response.treeAvailable??!!response.tree,treeWarning:response.treeWarning,node:null,affectedDocuments});
+    else if(response.tree&&response.treeAvailable!==false&&activeProject)setProjectTree(activeProject.id,response.tree);
+    else if(response.treeAvailable===false&&activeProject)markProjectTreeIssue(activeProject.id,response.treeWarning||"Resultado IA conservado; no se pudo actualizar su vista.");
     const generatedImage = response.generatedImages?.[0];
     const generatedImageToOpen = generatedImage?.asset;
-    if (generatedImageToOpen) {
+    if (generatedImageToOpen && canActivate) {
       handleOpenImage(generatedImageToOpen.id, generatedImageToOpen.name, generatedImageToOpen.path, {
         activate: !generatedImage.insertedIntoDocumentId,
       });
@@ -2154,125 +2471,23 @@ export function App() {
 
     if (response.updatedHandwrittenNote) {
       const updated = response.updatedHandwrittenNote;
-      const targetNode = findNodeById(tree, updated.noteId);
-      const tabName = targetNode?.name ?? activeHandwrittenSession?.note?.name ?? "Nota a mano";
-      const now = new Date().toISOString();
-      const existingSession = handwrittenSessions[updated.noteId];
-      setHandwrittenTabs((currentTabs) => (
-        currentTabs.some((tab) => tab.id === updated.noteId)
-          ? currentTabs.map((tab) => (tab.id === updated.noteId ? { id: updated.noteId, name: tab.name || tabName } : tab))
-          : [...currentTabs, { id: updated.noteId, name: tabName }]
-      ));
-      setHandwrittenSessions((currentSessions) => {
-        const session = currentSessions[updated.noteId];
-        if (!session) return currentSessions;
-        return {
-          ...currentSessions,
-          [updated.noteId]: markAiHandwrittenDraftApplied(applyLocalHandwrittenNoteEdit(session, updated.content), updated.content, now),
-        };
-      });
-      if (!existingSession) {
-        void getHandwrittenNote(updated.noteId)
-          .then((record) => {
-            setHandwrittenSessions((currentSessions) => {
-              const baseSession = createLoadedHandwrittenNoteSession(record, currentSessions[updated.noteId]);
-              return {
-                ...currentSessions,
-                [updated.noteId]: markAiHandwrittenDraftApplied(applyLocalHandwrittenNoteEdit(baseSession, updated.content), updated.content, now),
-              };
-            });
-          })
-          .catch((error) => showError(error, "No se pudo abrir la nota a mano actualizada por IA.", { source: "app.aiUpdatedHandwrittenNote" }));
-      }
-      setActiveUtilityTab(null);
-      setActiveDocumentId("");
-      setActiveImageId("");
-      setActiveReferenceDocumentId("");
-      setActiveHandwrittenNoteId(updated.noteId);
-      setActiveTreeNodeId(updated.noteId);
-      setAiAppliedChange({
-        documentId: updated.noteId,
-        summary: updated.summary,
-      });
-    }
-
-    if (response.updatedDocument) {
-      const updated = response.updatedDocument;
-      if (updated.documentId === NOTES_WORKSPACE_TAB_ID) {
-        setNotesMarkdown(updated.markdown);
-        setAiAppliedChange({
-          documentId: NOTES_WORKSPACE_TAB_ID,
-          summary: updated.summary,
-        });
-        void persistNotes(updated.markdown);
-        setPendingEditorOperations((currentOperations) => [
-          ...currentOperations,
-          {
-            id: `ai-${response.interactionId}-${NOTES_WORKSPACE_TAB_ID}-${Date.now()}`,
-            documentId: NOTES_WORKSPACE_TAB_ID,
-            markdown: updated.markdown,
-            source: "ai",
-            addToHistory: true,
-          },
-        ]);
-      } else {
-      const existingSession = documentSessions[updated.documentId];
-      const targetNode = findNodeById(tree, updated.documentId);
-      if (!existingSession) {
-        setTabs((currentTabs) => (
-          currentTabs.some((tab) => tab.id === updated.documentId)
-            ? currentTabs
-            : [...currentTabs, { id: updated.documentId, name: targetNode?.name ?? updated.documentId }]
-        ));
-        setActiveUtilityTab(null);
-        setActiveDocumentId(updated.documentId);
-        setActiveTreeNodeId(updated.documentId);
-        void getDocument(updated.documentId)
-          .then((record) => {
-            setDocumentSessions((currentSessions) => ({
-              ...currentSessions,
-              [updated.documentId]: applyExternalMarkdownUpdate(createLoadedDocumentSession(record, currentSessions[updated.documentId]), updated.markdown),
-            }));
-            setAiAppliedChange({ documentId: updated.documentId, summary: updated.summary });
-          })
-          .catch((error) => showError(error, "No se pudo abrir el documento actualizado por IA.", { source: "app.aiUpdatedDocument" }));
-      } else {
-        const updatedSession = applyLocalMarkdownEdit(existingSession, updated.markdown);
-        setDocumentSessions((currentSessions) => {
-          const session = currentSessions[updated.documentId];
-          if (!session) return currentSessions;
-          return {
-            ...currentSessions,
-            [updated.documentId]: applyLocalMarkdownEdit(session, updated.markdown),
-          };
-        });
-        void persistDraft(updated.documentId, updatedSession);
-        setAiAppliedChange({
-          documentId: updated.documentId,
-          summary: updated.summary,
-        });
-        setPendingEditorOperations((currentOperations) => [
-          ...currentOperations,
-          {
-            id: `ai-${response.interactionId}-${updated.documentId}-${Date.now()}`,
-            documentId: updated.documentId,
-            markdown: updated.markdown,
-            source: "ai",
-            addToHistory: true,
-          },
-        ]);
-      }
+      const session = handwrittenSessionsRef.current[updated.noteId];
+      if(session&&updated.draftWriteRevision===undefined){void applyTrackedHandwrittenResponse(response,request,updated);}
+      else if (session) {
+        handwrittenSessionsRef.current = { ...handwrittenSessionsRef.current, [updated.noteId]: markAiHandwrittenDraftApplied(applyLocalHandwrittenNoteEdit(session, updated.content), updated.content, new Date().toISOString(),updated.draftWriteRevision) };
+        setHandwrittenSessions(handwrittenSessionsRef.current);
+        setAiAppliedChange({ documentId: updated.noteId, summary: updated.summary });
       }
     }
 
-    if (response.uiPlacement === "conversation_tab" || response.routeToAiTab) {
+    if (canActivate && (response.uiPlacement === "conversation_tab" || response.routeToAiTab)) {
       handleSelectTab(AI_CONVERSATION_TAB_ID);
     }
 
     const createdDocument = response.operations.find((operation) => (
       (operation.type === "document_created" || operation.type === "document_duplicated") && operation.documentId
     ));
-    if (createdDocument?.documentId) {
+    if (createdDocument?.documentId && canActivate) {
       handleOpenDocument(createdDocument.documentId, createdDocument.path?.split("/").pop() ?? "Documento IA");
     }
 
@@ -2287,8 +2502,27 @@ export function App() {
     }
   }
 
-  async function handleApplyAiEditProposal(proposalId: string, operationIds?: string[]) {
+  async function handleApplyAiEditProposal(proposalId: string, operationIds?: string[], automatic = false) {
+    if (!aiProposalExecution.current.begin(proposalId)) return;
+    setApplyingAiEditProposalId(proposalId);
+    try { await executeAiEditProposal(proposalId, operationIds, automatic); }
+    finally { aiProposalExecution.current.finishPreparation(proposalId); releaseAiProposalApplication(proposalId); }
+  }
+
+  async function executeAiEditProposal(proposalId: string, operationIds?: string[], automatic = false) {
     if (!aiEditProposal || aiEditProposal.id !== proposalId) return;
+    if (automatic && (aiEditProposal.requiresConfirmation !== false || aiConfigRef.current.agentic.confirmBeforeApplying)) { setAutoApplyingAiEditProposalId(null); return; }
+    const proposalContext = aiProposalRequests.current.get(proposalId);
+    if (!aiConfigRef.current.permissions.editDocuments) {
+      if (proposalContext) retainAiResponse(proposalContext.response, proposalContext.request, "El permiso de edición IA está desactivado. El contenido se conserva para revisión.");
+      setAutoApplyingAiEditProposalId(null);
+      setBlockedAiEditOperationReasons(current => ({ ...current, ...Object.fromEntries(aiEditProposal.operations.map(operation => [operation.id, "permission_revoked"])) }));
+      return;
+    }
+    if (proposalContext) {
+      const issue = aiResponseContinuityIssue(proposalContext.request, proposalContext.response, { projectId: activeAiProjectRef.current, projectEpoch: aiWorkspaceEpoch.current.value, documents: documentSessionsRef.current, handwritten: handwrittenSessionsRef.current, notes: notesMarkdownRef.current });
+      if (issue) { retainAiResponse(proposalContext.response, proposalContext.request, issue); setAutoApplyingAiEditProposalId(null); return; }
+    }
     const selectedOperationIds = new Set(operationIds ?? aiEditProposal.operations.map((operation) => operation.id));
     const staleOperationIds = new Set(getStaleAiEditOperationIds(aiEditProposal, documentSessions, notesMarkdown));
     const blockedOperationIds = new Set(Object.keys(blockedAiEditOperationReasons));
@@ -2304,8 +2538,10 @@ export function App() {
       setAiBubble({ id: `local-${Date.now()}`, answer: "La propuesta IA ya no coincide con el documento actual. Revisa los cambios o vuelve a pedir la edición." });
       return;
     }
-    const activeEditorTargetId = activeUtilityTab === NOTES_UTILITY_TAB_ID ? NOTES_WORKSPACE_TAB_ID : activeDocumentId;
+    const activeEditorTargetId = activeWorkspaceTabIdRef.current;
+    const preparationProjectEpoch = aiWorkspaceEpoch.current.value;
     const workingMarkdownByDocumentId = new Map<string, string>();
+    const initialMarkdownByDocumentId = new Map<string, string>();
     const loadedDocuments = new Map<string, DocumentRecord>();
     const directlyUpdatedDocumentIds = new Set<string>();
     const editorOperations: MarkdownEditorExternalOperation[] = [];
@@ -2316,29 +2552,35 @@ export function App() {
     async function getCurrentMarkdownForAiOperation(documentId: string) {
       if (workingMarkdownByDocumentId.has(documentId)) return workingMarkdownByDocumentId.get(documentId) ?? "";
       if (documentId === NOTES_WORKSPACE_TAB_ID) {
-        workingMarkdownByDocumentId.set(documentId, notesMarkdown);
-        return notesMarkdown;
+        workingMarkdownByDocumentId.set(documentId, notesMarkdownRef.current);
+        initialMarkdownByDocumentId.set(documentId, notesMarkdownRef.current);
+        return notesMarkdownRef.current;
       }
 
-      const existingSession = documentSessions[documentId];
+      const existingSession = documentSessionsRef.current[documentId];
       if (existingSession) {
         workingMarkdownByDocumentId.set(documentId, existingSession.markdown);
+        initialMarkdownByDocumentId.set(documentId, existingSession.markdown);
         return existingSession.markdown;
       }
 
       const record = await getDocument(documentId);
       loadedDocuments.set(documentId, record);
       workingMarkdownByDocumentId.set(documentId, record.markdown);
+      initialMarkdownByDocumentId.set(documentId, record.markdown);
       return record.markdown;
     }
 
     try {
       for (const operation of applicableAiOperations) {
         const currentMarkdown = await getCurrentMarkdownForAiOperation(operation.documentId);
+        if (typeof operation.expectedMarkdown === "string" && operation.expectedMarkdown !== initialMarkdownByDocumentId.get(operation.documentId)) {
+          skippedOperationIds.push(operation.id); skippedOperationReasons[operation.id] = "source_changed"; continue;
+        }
         const imageMarkdown = operation.action === "insert_image" && operation.imageAssetId && activeProject
           ? (await buildImageReference(activeProject.id, operation.documentId, operation.imageAssetId, operation.imageAltText ?? null)).markdown
           : null;
-        const application = applyAiEditOperationToMarkdown(operation, currentMarkdown, { imageMarkdown });
+        const application = applyAiEditOperationToMarkdown({ ...operation, expectedMarkdown: currentMarkdown }, currentMarkdown, { imageMarkdown });
         if (application.applied) {
           workingMarkdownByDocumentId.set(operation.documentId, application.markdown);
           directlyUpdatedDocumentIds.add(operation.documentId);
@@ -2348,7 +2590,7 @@ export function App() {
 
         const fallbackEditorOperation = buildActiveEditorAiOperation(aiEditProposal.interactionId, operation, activeEditorTargetId, imageMarkdown);
         if (fallbackEditorOperation) {
-          editorOperations.push(fallbackEditorOperation);
+          editorOperations.push({ ...fallbackEditorOperation, aiProposalId: proposalId, expectedMarkdown: initialMarkdownByDocumentId.get(operation.documentId) });
           appliedOperationIdsThisRun.push(operation.id);
           continue;
         }
@@ -2362,55 +2604,91 @@ export function App() {
       return;
     }
 
+    if (automatic && aiConfigRef.current.agentic.confirmBeforeApplying) {
+      setAutoApplyingAiEditProposalId(null);
+      setAiEditProposal(current => current?.id === proposalId ? { ...current, requiresConfirmation: true } : current);
+      return;
+    }
+    const changedDuringPreparation = preparationProjectEpoch !== aiWorkspaceEpoch.current.value || (proposalContext && !aiProposalRequests.current.has(proposalId)) || !aiConfigRef.current.permissions.editDocuments || Array.from(initialMarkdownByDocumentId).some(([id, initial]) => {
+      const current = id === NOTES_WORKSPACE_TAB_ID ? notesMarkdownRef.current : documentSessionsRef.current[id]?.markdown ?? loadedDocuments.get(id)?.markdown;
+      return current !== initial;
+    });
+    if (changedDuringPreparation) {
+      if (proposalContext) retainAiResponse(proposalContext.response, proposalContext.request, "El contenido, los permisos o el proyecto cambiaron al preparar la aplicación. Se conserva el resultado sin sustituir tus cambios nuevos.");
+      setAutoApplyingAiEditProposalId(null);
+      setBlockedAiEditOperationReasons(current => ({ ...current, ...Object.fromEntries(applicableAiOperations.map(operation => [operation.id, "source_changed"])) }));
+      return;
+    }
+
     const activeDirectEditorOperations = Array.from(directlyUpdatedDocumentIds)
-      .filter((documentId) => documentId === activeEditorTargetId)
+      .filter((documentId) => usesLiveEditor(documentId,liveEditorSnapshots.current)||!!documentSessionsRef.current[documentId]?.document)
       .flatMap((documentId) => {
         const markdown = workingMarkdownByDocumentId.get(documentId);
-        return markdown
+        return typeof markdown === "string"
           ? [{
-              id: `ai-${aiEditProposal.interactionId}-${documentId}-${Date.now()}`,
+              id: nextAiEditorOperationId(`ai-${aiEditProposal.interactionId}-${documentId}`),
               documentId,
               kind: "replace_document" as const,
+              aiProposalId: proposalId,
+              expectedMarkdown: initialMarkdownByDocumentId.get(documentId),
+              aiEditOperationIds: applicableAiOperations.filter(operation => operation.documentId === documentId && appliedOperationIdsThisRun.includes(operation.id)).map(operation => operation.id),
               markdown,
               source: "ai" as const,
               addToHistory: true,
             }]
           : [];
       });
-    const sessionUpdatedDocumentIds = Array.from(directlyUpdatedDocumentIds).filter((documentId) => documentId !== activeEditorTargetId);
+    const sessionUpdatedDocumentIds = Array.from(directlyUpdatedDocumentIds).filter((documentId) => !usesLiveEditor(documentId,liveEditorSnapshots.current)&&!documentSessionsRef.current[documentId]?.document);
+    const confirmedSessionDocumentIds:string[]=[];
     if (sessionUpdatedDocumentIds.length > 0) {
       if (sessionUpdatedDocumentIds.includes(NOTES_WORKSPACE_TAB_ID)) {
         const nextNotesMarkdown = workingMarkdownByDocumentId.get(NOTES_WORKSPACE_TAB_ID);
         if (typeof nextNotesMarkdown === "string") {
+          notesMarkdownRef.current = nextNotesMarkdown;
           setNotesMarkdown(nextNotesMarkdown);
           void persistNotes(nextNotesMarkdown);
+          confirmedSessionDocumentIds.push(NOTES_WORKSPACE_TAB_ID);
         }
       }
-      const projectDocumentIds = sessionUpdatedDocumentIds.filter((documentId) => documentId !== NOTES_WORKSPACE_TAB_ID);
-      if (projectDocumentIds.length > 0) {
-        setDocumentSessions((currentSessions) => {
-          let nextSessions = currentSessions;
-          for (const documentId of projectDocumentIds) {
-            const nextMarkdown = workingMarkdownByDocumentId.get(documentId);
-            if (typeof nextMarkdown !== "string") continue;
-            const baseSession = nextSessions[documentId] ?? (loadedDocuments.has(documentId) ? createLoadedDocumentSession(loadedDocuments.get(documentId) as DocumentRecord) : null);
-            if (!baseSession) continue;
-            nextSessions = {
-              ...nextSessions,
-              [documentId]: applyLocalMarkdownEdit(baseSession, nextMarkdown),
-            };
-          }
-          return nextSessions;
-        });
+      const projectDocumentIds = sessionUpdatedDocumentIds.filter(id=>id!==NOTES_WORKSPACE_TAB_ID);
+      for(const documentId of projectDocumentIds){
+        const nextMarkdown=workingMarkdownByDocumentId.get(documentId);const expectedMarkdown=initialMarkdownByDocumentId.get(documentId);
+        if(typeof nextMarkdown!=="string"||typeof expectedMarkdown!=="string")continue;
+        const journalId=nextAiEditorOperationId("tracked-"+aiEditProposal.interactionId);const expected={projectId:documentId.split("::")[0],epoch:preparationProjectEpoch};
+        try{await sessionWrites.current.run(documentId,async()=>{
+          const wasAbsent=!documentSessionsRef.current[documentId];const sequence=sessionLoadSequence.current;
+          const submitted=documentSessionsRef.current[documentId]??(loadedDocuments.has(documentId)?createLoadedDocumentSession(loadedDocuments.get(documentId) as DocumentRecord):null);
+          if(!submitted||submitted.markdown!==expectedMarkdown)throw Error("El documento cambió antes de aplicar IA");
+          const allowed=()=>trackedAuthorityIsCurrent(expected,{projectId:activeAiProjectRef.current,epoch:aiWorkspaceEpoch.current.value,canEdit:aiConfigRef.current.permissions.editDocuments,proposalExists:aiProposalRequests.current.has(proposalId)})&&!usesLiveEditor(documentId,liveEditorSnapshots.current)&&(wasAbsent?!documentSessionsRef.current[documentId]&&sequence===sessionLoadSequence.current:sameTrackedVisit(documentSessionsRef.current[documentId],submitted)&&documentSessionsRef.current[documentId]?.markdown===expectedMarkdown);
+          if(!allowed())throw Error("La propuesta cambió de ámbito");
+          await aiChangeJournal.current.prepare(journalId,documentId,{interactionId:aiEditProposal.interactionId,operationId:journalId,summary:aiEditProposal.summary,beforeMarkdown:submitted.markdown,expectedDraftWriteRevision:submitted.draftWriteRevision??null,baseFingerprint:submitted.baseFingerprint},allowed);
+          const result=await aiChangeJournal.current.apply(journalId,nextMarkdown,allowed);
+          if(expected.epoch!==aiWorkspaceEpoch.current.value||expected.projectId!==activeAiProjectRef.current)throw Error("El acuse pertenece al espacio anterior; consulta sus cambios");
+          const live=wasAbsent&&!documentSessionsRef.current[documentId]&&sequence===sessionLoadSequence.current?submitted:documentSessionsRef.current[documentId];
+          if(!sameTrackedVisit(live,submitted)||!live)throw Error("La sesión cambió durante la aplicación; se conserva");
+          const acknowledged=acknowledgeDraftWrite(live,submitted,result.draftWriteRevision)!;const edited=live.markdown===submitted.markdown?applyLocalMarkdownEdit(acknowledged,nextMarkdown):acknowledged;
+          const next={...edited,...(edited.markdown===nextMarkdown?{lastDraftMarkdown:result.isDirty?nextMarkdown:"",draftUpdatedAt:result.draftUpdatedAt,hasRecoveredDraft:!!result.hasDraft,draftContentHash:result.draftContentHash??null}:{})};documentSessionsRef.current={...documentSessionsRef.current,[documentId]:next};setDocumentSessions(documentSessionsRef.current);
+        });confirmedSessionDocumentIds.push(documentId);}
+        catch(error){if(documentSessionsRef.current[documentId])markDraftWriteBlocked(documentId,false);skippedOperationIds.push(...applicableAiOperations.filter(x=>x.documentId===documentId).map(x=>x.id));showError(error,"No se confirmó la aplicación IA. Consulta sus cambios; tu trabajo permanece.");}
+        finally{aiChangeJournal.current.release(journalId);}
       }
     }
 
-    const operations = [...editorOperations, ...activeDirectEditorOperations];
+    const operations: MarkdownEditorExternalOperation[] = [...editorOperations, ...activeDirectEditorOperations];
+    const queuedOperations:MarkdownEditorExternalOperation[]=[];
     if (operations.length > 0) {
-      setPendingEditorOperations((currentOperations) => [...currentOperations, ...operations]);
+      for (const operation of operations) {
+        try{await prepareTrackedEditorChange(operation,aiEditProposal.interactionId,aiEditProposal.summary,preparationProjectEpoch);}catch(error){aiTrackedOperationEpochs.current.delete(operation.id);skippedOperationIds.push(...(operation.aiEditOperationIds??(operation.aiEditOperationId?[operation.aiEditOperationId]:[])));showError(error,"No se pudo registrar el cambio antes de aplicarlo. Se conserva el documento.");continue;}
+        if (!aiProposalExecution.current.queue(operation)){aiChangeJournal.current.release(operation.id);aiTrackedOperationEpochs.current.delete(operation.id);continue;}
+        queuedOperations.push(operation);
+        aiEditorOperationTimers.current.set(operation.id, window.setTimeout(() => {
+          if (aiProposalExecution.current.mayApply(operation.id)) handleEditorOperationFailed({ ...operation, failureReason: "editor_apply_failed" });
+        }, 15_000));
+      }
+      setPendingEditorOperations((currentOperations) => [...currentOperations, ...queuedOperations]);
     }
 
-    const changedDocumentIds = Array.from(new Set([...sessionUpdatedDocumentIds, ...operations.map((operation) => operation.documentId)]));
+    const changedDocumentIds = Array.from(new Set([...confirmedSessionDocumentIds, ...queuedOperations.map((operation) => operation.documentId)]));
     const changedProjectDocumentIds = changedDocumentIds.filter((documentId) => documentId !== NOTES_WORKSPACE_TAB_ID);
     if (changedProjectDocumentIds.length > 0) {
       setTabs((currentTabs) => {
@@ -2424,19 +2702,6 @@ export function App() {
         }
         return nextTabs;
       });
-      const firstChangedDocumentId = changedProjectDocumentIds[0];
-      setActiveUtilityTab(null);
-      setActiveImageId("");
-      setActiveReferenceDocumentId("");
-      setActiveDocumentId(firstChangedDocumentId);
-      revealTreeNode(firstChangedDocumentId);
-    } else if (changedDocumentIds.includes(NOTES_WORKSPACE_TAB_ID)) {
-      setOpenUtilityTabs((currentTabs) => currentTabs.includes(NOTES_UTILITY_TAB_ID) ? currentTabs : [...currentTabs, NOTES_UTILITY_TAB_ID]);
-      setActiveUtilityTab(NOTES_UTILITY_TAB_ID);
-      setActiveImageId("");
-      setActiveReferenceDocumentId("");
-      setActiveDocumentId("");
-      setActiveTreeNodeId("");
     }
 
     if (changedDocumentIds.length === 0) {
@@ -2448,31 +2713,33 @@ export function App() {
       return;
     }
     if (appliedOperationIdsThisRun.length > 0) {
-      setAppliedAiEditOperationIds((currentIds) => Array.from(new Set([...currentIds, ...appliedOperationIdsThisRun])));
+      const awaitingAck = new Set(queuedOperations.flatMap(operation => operation.aiEditOperationIds ?? (operation.aiEditOperationId ? [operation.aiEditOperationId] : [])));
+      setAppliedAiEditOperationIds((currentIds) => Array.from(new Set([...currentIds, ...appliedOperationIdsThisRun.filter(id => !awaitingAck.has(id)&&!skippedOperationIds.includes(id))])));
     }
     if (skippedOperationIds.length > 0) {
       setAutoApplyingAiEditProposalId(null);
       setBlockedAiEditOperationReasons((currentReasons) => ({ ...currentReasons, ...skippedOperationReasons }));
     }
-    setAiAppliedChange({
-      documentId: changedDocumentIds[0],
+    if (confirmedSessionDocumentIds.length > 0) setAiAppliedChange({
+      documentId: confirmedSessionDocumentIds[0],
       summary: skippedOperationIds.length === 0 && applicableAiOperations.length === aiEditProposal.operations.length
         ? aiEditProposal.summary
-        : `${changedDocumentIds.length} documento(s) actualizados como borrador. ${skippedOperationIds.length > 0 ? `${skippedOperationIds.length} cambio(s) requieren revisión.` : ""}`.trim(),
+        : `${confirmedSessionDocumentIds.length} documento(s) actualizados como borrador. ${skippedOperationIds.length > 0 ? `${skippedOperationIds.length} cambio(s) requieren revisión.` : ""}`.trim(),
     });
     if (skippedOperationIds.length > 0) {
-      setAiBubble({ id: `local-${Date.now()}`, answer: `He aplicado los cambios seguros y he omitido ${skippedOperationIds.length} operación(es) porque el ancla no era única o ya no coincidía.` });
+      setAiBubble({ id: `local-${Date.now()}`, answer: `${confirmedSessionDocumentIds.length?"He aplicado los cambios confirmados":"Se han preparado los cambios pendientes"} y he omitido ${skippedOperationIds.length} operación(es) porque el ancla no era única o ya no coincidía.` });
     }
     const remainingReviewOperationIds = new Set([...Object.keys(blockedAiEditOperationReasons), ...skippedOperationIds, ...Array.from(staleOperationIds)]);
     const nextAppliedOperationIds = new Set([...appliedAiEditOperationIds, ...appliedOperationIdsThisRun]);
     const hasPendingOperations = aiEditProposal.operations.some((operation) => !nextAppliedOperationIds.has(operation.id) || remainingReviewOperationIds.has(operation.id));
-    if (skippedOperationIds.length === 0 && !hasPendingOperations) {
+    if (skippedOperationIds.length === 0 && !hasPendingOperations && operations.length === 0) {
       clearAiEditProposalState();
     }
   }
 
   function handleDiscardAiEditProposal(proposalId: string) {
     if (!aiEditProposal || aiEditProposal.id !== proposalId) return;
+    if (aiProposalExecution.current.isActive(proposalId)) return;
     clearAiEditProposalState();
     setAiBubble(null);
   }
@@ -2506,48 +2773,48 @@ export function App() {
 
   async function handleConfirmAiDelete() {
     if (!activeProject || !aiPendingDelete) return;
+    const requestSnapshot = captureAiRequest(activeProject, aiWorkspaceEpoch.current.value, activeDocumentId || null, documentSessionsRef.current, handwrittenSessionsRef.current, notesMarkdownRef.current);
     try {
       const response = await confirmAiDelete(activeProject.id, { confirmationId: aiPendingDelete.confirmationId });
-      setAiPendingDelete(null);
-      applyAiInteractionResponse(response);
+      if (requestSnapshot.projectId === activeAiProjectRef.current && requestSnapshot.projectEpoch === aiWorkspaceEpoch.current.value) setAiPendingDelete(null);
+      applyAiInteractionResponse(response, requestSnapshot);
     } catch (error) {
       showError(error, "No se pudo confirmar el borrado solicitado por IA.", { source: "app.aiConfirmDelete" });
     }
   }
 
   async function handleSave(documentId = activeDocumentId, force = false) {
-    const session = documentSessions[documentId];
-    if (!documentId || !session?.document) return false;
+    if(aiChangeJournal.current.hasDocument(documentId)){setNotice({title:"Cambio IA pendiente",message:"Espera la confirmación antes de guardar. Tu edición permanece abierta.",tone:"info"});return false;}
+    const session = documentSessionsRef.current[documentId];
+    if (!documentId || !session?.document || pendingSaveIds.current.has(documentId)) return false;
+    if(session.draftWriteConflict){await protectBlockedEdit(documentId,false);return false;}
+    pendingSaveIds.current.add(documentId);
     const postSaveSyncSequence = ++documentPostSaveSyncSequenceRef.current;
     setDocumentPostSaveSyncState(documentId, postSaveSyncSequence, "idle");
     setDocumentSessions((currentSessions) => updateSession(currentSessions, documentId, { saveState: "saving" }));
     try {
-      const saved = await saveDocument(documentId, {
+      const saved = await sessionWrites.current.run(documentId, async () => {
+        if(aiChangeJournal.current.hasDocument(documentId))throw Error("Espera la confirmación del cambio IA antes de guardar");
+        const saved=await saveDocument(documentId, {
         markdown: session.markdown,
         baseFingerprint: session.baseFingerprint,
+        expectedDraftWriteRevision: documentSessionsRef.current[documentId]?.draftWriteRevision ?? null,
         force,
       });
+      const latest = documentSessionsRef.current[documentId];
+      if (latest?.loadVersion === session.loadVersion) documentSessionsRef.current = {
+        ...documentSessionsRef.current, [documentId]: acknowledgeDocumentSave(latest, saved, session.markdown),
+      };
+      setDocumentSessions(currentSessions => {
+        const current = currentSessions[documentId];
+        if (!current || current.loadVersion !== session.loadVersion) return currentSessions;
+        return { ...currentSessions, [documentId]: acknowledgeDocumentSave(current, saved, session.markdown) };
+      });
+      return saved;
+      });
       if (force && session.orphaned && activeProject?.id === saved.projectId) {
-        setProjectTree(saved.projectId, await getProjectTree(saved.projectId));
+        await handleReloadProjectTree(saved.projectId);
       }
-      setDocumentSessions((currentSessions) => updateSession(currentSessions, documentId, {
-        document: saved,
-        markdown: saved.markdown,
-        savedMarkdown: saved.markdown,
-        isDirty: false,
-        saveState: "saved",
-        lastDraftMarkdown: "",
-        baseFingerprint: saved.baseFingerprint,
-        savedContentHash: saved.savedContentHash ?? saved.diskContentHash ?? null,
-        draftContentHash: null,
-        conflictStatus: "none",
-        diskChanged: false,
-        orphaned: false,
-        hasRecoveredDraft: false,
-        draftUpdatedAt: null,
-        pendingDraftDiscard: false,
-        pendingSaveReason: null,
-      }));
       window.setTimeout(() => {
         setDocumentSessions((currentSessions) => {
           const currentSession = currentSessions[documentId];
@@ -2599,10 +2866,12 @@ export function App() {
       if (!postSaveSyncFailed) {
         setDocumentPostSaveSyncState(documentId, postSaveSyncSequence, "idle");
       }
+      if (saved.recoveryWarning) setNotice({ title: "Documento guardado; copia conservada", message: saved.recoveryWarning, tone: "info" });
       return true;
     } catch (error) {
       setDocumentPostSaveSyncState(documentId, postSaveSyncSequence, "idle");
       setDocumentSessions((currentSessions) => updateSession(currentSessions, documentId, { saveState: "idle" }));
+      if(isDraftWriteConflict(error)){markDraftWriteBlocked(documentId,false);void protectBlockedEdit(documentId,false);return false;}
       if (error instanceof ApiError && error.status === 409) {
         setDocumentSessions((currentSessions) => updateSession(currentSessions, documentId, {
           diskChanged: true,
@@ -2617,35 +2886,75 @@ export function App() {
       }
       showError(error, "No se pudo guardar el documento.");
       return false;
+    } finally {
+      pendingSaveIds.current.delete(documentId);
+      const latest = documentSessionsRef.current[documentId];
+      if (latest) void persistDraft(documentId, latest);
     }
   }
 
-  async function handleSaveHandwrittenNote(noteId = activeHandwrittenNoteId) {
-    const session = handwrittenSessions[noteId];
-    if (!noteId || !session?.note || !session.content) return false;
+  async function beforeHandwrittenOcr(noteId:string){
+    const session=handwrittenSessionsRef.current[noteId],epoch=aiWorkspaceEpoch.current.value;
+    if(!session?.content||session.isLoading||ocrDraftWrites.current.has(noteId)||aiChangeJournal.current.hasDocument(noteId))throw Error("Espera la protección de la nota antes de reconocer su página");
+    if(!await checkpointOpenWork())throw Error("Protege los cambios pendientes antes de reconocer o aplicar texto");
+    const current=handwrittenSessionsRef.current[noteId];
+    if(epoch!==aiWorkspaceEpoch.current.value||!current?.content||current.loadVersion!==session.loadVersion||current.savedContent!==session.savedContent)throw Error("La vista de la nota cambió; vuelve a revisar su página");
+  }
+  async function applyReviewedHandwrittenOcr(request:HandwrittenOcrApplyRequest):Promise<HandwrittenOcrApply>{
+    await beforeHandwrittenOcr(request.noteId);const epoch=aiWorkspaceEpoch.current.value;
+    if(ocrDraftWrites.current.has(request.noteId))throw Error("Ya hay una aplicación OCR pendiente");
+    ocrDraftWrites.current.add(request.noteId);
+    try{return await sessionWrites.current.run(request.noteId,async()=>{
+      const submitted=handwrittenSessionsRef.current[request.noteId];if(!submitted?.content||epoch!==aiWorkspaceEpoch.current.value)throw Error("La nota cambió antes de aplicar el texto revisado");
+      ocrPendingAcks.current.set(request.noteId,{attemptId:request.attemptId,submitted,epoch});
+      const result=await applyHandwrittenOcr(request),live=handwrittenSessionsRef.current[request.noteId];
+      if(epoch!==aiWorkspaceEpoch.current.value||!live?.content||live.loadVersion!==submitted.loadVersion||live.savedContent!==submitted.savedContent||live.baseFingerprint?.sha256!==submitted.baseFingerprint?.sha256||result.previousDraftWriteRevision!==(submitted.draftWriteRevision??null))throw Error("El acuse OCR se conserva en la nota original; revisa el intento antes de guardar");
+      const content=mergeOcrText(submitted.content,live.content,result.content,result.pageId);
+      const acknowledged=acknowledgeDraftWrite(live,submitted,result.draftWriteRevision);if(!acknowledged)throw Error("El borrador cambió durante la confirmación OCR");
+      const edited=applyLocalHandwrittenNoteEdit(acknowledged,content);const next={...edited,lastDraftContentJson:stringifyHandwrittenContent(result.content),draftWriteRevision:result.draftWriteRevision,draftUpdatedAt:result.draftUpdatedAt,hasRecoveredDraft:!!result.hasDraft};
+      handwrittenSessionsRef.current={...handwrittenSessionsRef.current,[request.noteId]:next};setHandwrittenSessions(handwrittenSessionsRef.current);ocrPendingAcks.current.delete(request.noteId);return result;
+    });}catch(error){if(handwrittenSessionsRef.current[request.noteId])markDraftWriteBlocked(request.noteId,true);throw error;}finally{ocrDraftWrites.current.delete(request.noteId);}
+  }
+
+  async function observeHandwrittenOcr(receipt:HandwrittenOcrResult){
+    const pending=ocrPendingAcks.current.get(receipt.noteId);if(!pending||pending.attemptId!==receipt.attemptId||receipt.phase!=="applied")return;
+    if(pending.epoch!==aiWorkspaceEpoch.current.value)throw Error("La vista cambió desde el intento; la copia aplicada permanece en su nota original");
+    await sessionWrites.current.run(receipt.noteId,async()=>{
+      const record=await getHandwrittenNote(receipt.noteId),live=handwrittenSessionsRef.current[receipt.noteId];
+      if(!record.content||record.draftWriteRevision!==receipt.appliedDraftWriteRevision||!live?.content||live.loadVersion!==pending.submitted.loadVersion||live.savedContent!==pending.submitted.savedContent||live.baseFingerprint?.sha256!==pending.submitted.baseFingerprint?.sha256||record.baseFingerprint?.sha256!==pending.submitted.baseFingerprint?.sha256||pending.epoch!==aiWorkspaceEpoch.current.value)throw Error("El borrador o la vista cambiaron después del intento OCR; revisa las copias sin sobrescribir");
+      const content=mergeOcrText(pending.submitted.content!,live.content,record.content,receipt.pageId),acknowledged=acknowledgeDraftWrite(live,pending.submitted,record.draftWriteRevision);if(!acknowledged||acknowledged.draftWriteConflict)throw Error("El acuse no confirma la base viva del borrador OCR");
+      const next={...applyLocalHandwrittenNoteEdit(acknowledged,content),lastDraftContentJson:stringifyHandwrittenContent(record.content),draftUpdatedAt:record.draftUpdatedAt,hasRecoveredDraft:!!record.hasDraft};
+      handwrittenSessionsRef.current={...handwrittenSessionsRef.current,[receipt.noteId]:next};setHandwrittenSessions(handwrittenSessionsRef.current);ocrPendingAcks.current.delete(receipt.noteId);
+    });
+  }
+
+  async function handleSaveHandwrittenNote(noteId = activeHandwrittenNoteId, force = false) {
+    if(aiChangeJournal.current.hasDocument(noteId)||ocrDraftWrites.current.has(noteId)){setNotice({title:"Cambio IA pendiente",message:"Espera la confirmación del cambio IA antes de guardar la nota. Tus trazos permanecen abiertos.",tone:"info"});return false;}
+    const session = handwrittenSessionsRef.current[noteId];
+    if (!noteId || !session?.note || !session.content || pendingSaveIds.current.has(noteId)) return false;
+    if(session.draftWriteConflict){await protectBlockedEdit(noteId,true);return false;}
+    pendingSaveIds.current.add(noteId);
     setHandwrittenSessions((currentSessions) => updateHandwrittenNoteSession(currentSessions, noteId, { saveState: "saving" }));
     try {
-      const saved = await saveHandwrittenNote(noteId, {
-        content: session.content,
+      const saved = await sessionWrites.current.run(noteId, async () => {
+        if(aiChangeJournal.current.hasDocument(noteId)||ocrDraftWrites.current.has(noteId))throw Error("Espera la confirmación del cambio IA antes de guardar la nota");
+        const saved=await saveHandwrittenNote(noteId, {
+        content: session.content!,
         baseFingerprint: session.baseFingerprint,
+        expectedDraftWriteRevision: handwrittenSessionsRef.current[noteId]?.draftWriteRevision ?? null,
+        force,
       });
-      setHandwrittenSessions((currentSessions) => updateHandwrittenNoteSession(currentSessions, noteId, {
-        note: saved,
-        content: saved.content,
-        savedContent: saved.content,
-        isDirty: false,
-        saveState: "saved",
-        lastDraftContentJson: "",
-        baseFingerprint: saved.baseFingerprint,
-        savedContentHash: saved.savedContentHash ?? saved.diskContentHash ?? null,
-        draftContentHash: null,
-        conflictStatus: "none",
-        diskChanged: false,
-        orphaned: false,
-        hasRecoveredDraft: false,
-        draftUpdatedAt: null,
-        pendingDraftDiscard: false,
-      }));
+      const latest = handwrittenSessionsRef.current[noteId];
+      if (latest?.loadVersion === session.loadVersion) handwrittenSessionsRef.current = {
+        ...handwrittenSessionsRef.current, [noteId]: acknowledgeHandwrittenSave(latest, saved, session.content!),
+      };
+      setHandwrittenSessions(currentSessions => {
+        const current = currentSessions[noteId];
+        if (!current || current.loadVersion !== session.loadVersion) return currentSessions;
+        return { ...currentSessions, [noteId]: acknowledgeHandwrittenSave(current, saved, session.content!) };
+      });
+      return saved;
+      });
       window.setTimeout(() => {
         setHandwrittenSessions((currentSessions) => {
           const currentSession = currentSessions[noteId];
@@ -2670,11 +2979,22 @@ export function App() {
       const project = projects.find((candidate) => candidate.id === saved.projectId) ?? (activeProject?.id === saved.projectId ? activeProject : null);
       await refreshProjectSyncStatus(saved.projectId, { autoRun: isAutomaticSyncMode(project?.syncMode), silent: true });
       if (externalChangesOpen) await refreshProjectFileSyncOverview(saved.projectId);
+      if (saved.recoveryWarning) setNotice({ title: "Nota guardada; copia conservada", message: saved.recoveryWarning, tone: "info" });
       return true;
     } catch (error) {
       setHandwrittenSessions((currentSessions) => updateHandwrittenNoteSession(currentSessions, noteId, { saveState: "error" }));
+      if(isDraftWriteConflict(error)){markDraftWriteBlocked(noteId,true);void protectBlockedEdit(noteId,true);return false;}
+      if (error instanceof ApiError && error.status === 409) {
+        setHandwrittenSessions(current => updateHandwrittenNoteSession(current, noteId, { diskChanged: true, conflictStatus: "disk-changed" }));
+        setNotice({ title: "Revisa las versiones de la nota", message: "Se conservan tus trazos. Elige entre cargar el archivo del disco o mantener tu versión.", tone: "info" });
+        return false;
+      }
       showError(error, "No se pudo guardar la nota a mano.");
       return false;
+    } finally {
+      pendingSaveIds.current.delete(noteId);
+      const latest = handwrittenSessionsRef.current[noteId];
+      if (latest) void persistHandwrittenDraft(noteId, latest);
     }
   }
 
@@ -2696,20 +3016,21 @@ export function App() {
 
     try {
       const active = await persistActiveProject(project.id);
-      const nextTree = await getProjectTree(active.id);
+      let nextTree:DocumentTreeNode[]=[],nextTreeIssue:string|null=null;
+      try{nextTree=await getProjectTree(active.id);}catch(error){nextTreeIssue=getApiErrorMessage(error,"No se pudo leer la estructura del proyecto.");}
       const restoredTree = applyTreeOpenState(nextTree, {
         openPaths: treeOpenPathsByProject[active.id] ?? [],
       });
       const nextVersioningStatus = await getProjectVersioningStatus(active.id);
-      const nextProjectTabs = resolveProjectTabs(tabsByProject, active.id, restoredTree);
+      const nextProjectTabs = resolveProjectTabs(tabsByProject,active.id,restoredTree,!nextTreeIssue);
       setProjects((currentProjects) => currentProjects.map((currentProject) => ({
         ...currentProject,
         active: currentProject.id === active.id,
       })));
       setActiveProject(active);
       setVersioningStatus(nextVersioningStatus);
-      setTree(restoredTree);
-      persistTreeOpenState(active.id, restoredTree);
+      ++treeReadSequence.current;setTree(restoredTree);setTreeReadIssue(nextTreeIssue?{projectId:active.id,message:nextTreeIssue}:null);setTreeReadBusy(false);
+      if(!nextTreeIssue)persistTreeOpenState(active.id,restoredTree);
       setTabs(nextProjectTabs.openTabs);
       setActiveDocumentId(nextProjectTabs.activeDocumentId);
       setHandwrittenTabs(nextProjectTabs.openHandwrittenTabs ?? []);
@@ -2725,6 +3046,11 @@ export function App() {
       setExternalChangeDecisions({});
       setExternalChangesMessage(null);
       setProjectSyncState("synced");
+      if (aiEditProposal) {
+        const context = aiProposalRequests.current.get(aiEditProposal.id);
+        if (context) retainAiResponse(context.response, context.request, "Cambiaste de proyecto con un resultado pendiente de aplicar. Se conserva para revisión.");
+        setPendingEditorOperations(current => current.filter(operation => operation.aiProposalId !== aiEditProposal.id));
+      }
       clearAiEditProposalState();
       void refreshExternalChangeSet(active.id, { refreshTreeOnChanges: true, silent: true });
       if (!nextVersioningStatus.enabled) setHistoryOpen(false);
@@ -2737,7 +3063,7 @@ export function App() {
     if (!activeProject) return;
     try {
       const result = await createFolder(activeProject.id, parentId, getUniqueFolderName(tree));
-      setProjectTree(activeProject.id, markNodeEditing(result.tree, result.node?.id ?? null));
+      if(result.treeAvailable!==false)setProjectTree(activeProject.id,markNodeEditing(result.tree,result.node?.id??null));else applyFileOperationResult(result);
     } catch (error) {
       showError(error, "No se pudo crear la carpeta.");
     }
@@ -2752,20 +3078,23 @@ export function App() {
       return;
     }
 
+    const projectId=activeProject.id,epoch=aiWorkspaceEpoch.current.value;
+    const stillHere=()=>activeAiProjectRef.current===projectId&&aiWorkspaceEpoch.current.value===epoch;
+    if(!previousNode)return;
     try {
-      if (previousNode?.type === "image") {
-        const usage = await getProjectImageUsage(activeProject.id, previousNode.id);
-        if (usage.references.length > 0) {
-          const proceed = window.confirm(`La imagen "${previousNode.name}" esta enlazada en ${usage.references.length} documento(s).\n\nKnowNext.ai actualizara las referencias relativas para que sigan apuntando a la imagen renombrada.`);
-          if (!proceed) {
-            updateCurrentProjectTree((currentTree) => markNodeEditing(currentTree, null));
-            return;
-          }
-        }
+      if(!await flushPendingDrafts()||!stillHere())return;
+      const links=await getAssetLinks(projectId,nodeId);
+      if(!stillHere())return;
+      if(links.incoming.length||links.outgoing.length||!links.complete){
+        const accepted=await assetMoveReview.request({operation:"rename",nextName,name:previousNode.name,path:previousNode.path??previousNode.name,incoming:links.incoming.length,outgoing:links.outgoing.length,complete:links.complete,warnings:links.warnings});
+        if(!accepted){if(stillHere())updateCurrentProjectTree(current=>markNodeEditing(current,null));return;}
       }
-      const result = await renameTreeNode(activeProject.id, nodeId, nextName);
-      applyFileOperationResult(result, previousNode);
+      if(!stillHere())return;
+      const result=await renameTreeNode(projectId,nodeId,nextName);
+      if(!stillHere())return;
+      applyFileOperationResult(result,previousNode);
     } catch (error) {
+      if(!stillHere())return;
       showError(error, "No se pudo renombrar el elemento.");
       updateCurrentProjectTree((currentTree) => markNodeEditing(currentTree, null));
     }
@@ -2784,49 +3113,57 @@ export function App() {
   }
 
   async function handleCreateDocument(request: CreateDocumentRequest) {
-    if (!activeProject) return;
+    if (!activeProject) return false;
+    const projectId = activeProject.id;
+    const projectName = activeProject.name;
+    const epoch = aiWorkspaceEpoch.current.value;
     const documentName = request.name.trim();
     try {
+      let result: FileOperationResult;
       if (request.kind === "handwritten-note") {
-        const result = await createHandwrittenNote(activeProject.id, createDocumentParentId, documentName, request.background);
-        applyFileOperationResult(result);
-        if (result.node?.type === "handwritten-note") {
-          handleOpenHandwrittenNote(result.node.id, result.node.name);
-        }
-        setCreateDocumentOpen(false);
-        setCreateDocumentParentId(null);
-        return;
+        result = await createHandwrittenNote(projectId, createDocumentParentId, documentName, request.background);
+      } else {
+        const markdownName = documentName.toLowerCase().endsWith(".md") ? documentName : `${documentName}.md`;
+        if (!request.templateRevision) throw new Error("Vuelve a cargar la plantilla antes de crear el documento.");
+        result = await createDocumentFromTemplate(request.template, { projectId, parentId: createDocumentParentId, name: markdownName, revision: request.templateRevision, values: request.templateValues ?? {}, projectRootHash: request.templateProjectRootHash });
       }
-
-      const markdownName = documentName.endsWith(".md") ? documentName : `${documentName}.md`;
-      const markdownValue = getTemplateMarkdown(request.template, markdownName);
-      const result = await createProjectDocument(activeProject.id, createDocumentParentId, markdownName, markdownValue);
+      if (activeAiProjectRef.current !== projectId || aiWorkspaceEpoch.current.value !== epoch) {
+        setNotice({ title: "Documento creado", message: `«${result.node?.name ?? documentName}» se creó en «${projectName}». La vista actual se mantiene.`, tone: "info" });
+        return true;
+      }
       applyFileOperationResult(result);
       if (result.node?.type === "document") {
         openOrReplaceTab(result.node.id, result.node.name);
+      } else if (result.node?.type === "handwritten-note") {
+        handleOpenHandwrittenNote(result.node.id, result.node.name);
       }
       setCreateDocumentOpen(false);
       setCreateDocumentParentId(null);
+      return true;
     } catch (error) {
       showError(error, "No se pudo crear el documento.");
+      return false;
     }
   }
 
   async function handleCreateProject(project: ProjectPayload) {
+    let registeredProject: Project | null = null;
     try {
-      if (!await flushPendingDrafts()) return;
+      if (!await flushPendingDrafts()) return false;
       const nextProject = await createProject(project);
+      registeredProject = nextProject;
 
       setProjects((currentProjects) => [
         ...currentProjects.map((currentProject) => ({ ...currentProject, active: false })),
         nextProject,
       ]);
-      const nextTree = await getProjectTree(nextProject.id);
+      let nextTree:DocumentTreeNode[]=[],nextTreeIssue:string|null=null;
+      try{nextTree=await getProjectTree(nextProject.id);}catch(error){nextTreeIssue=getApiErrorMessage(error,"Proyecto creado; no se pudo consultar su estructura.");}
       const restoredTree = applyTreeOpenState(nextTree);
-      const nextProjectTabs = resolveProjectTabs({}, nextProject.id, restoredTree);
+      const nextProjectTabs = resolveProjectTabs({}, nextProject.id, restoredTree,!nextTreeIssue);
       setActiveProject(nextProject);
-      setTree(restoredTree);
-      persistTreeOpenState(nextProject.id, restoredTree);
+      ++treeReadSequence.current;setTree(restoredTree);setTreeReadIssue(nextTreeIssue?{projectId:nextProject.id,message:nextTreeIssue}:null);setTreeReadBusy(false);
+      if(!nextTreeIssue)persistTreeOpenState(nextProject.id, restoredTree);
       setTabs(nextProjectTabs.openTabs);
       setActiveDocumentId(nextProjectTabs.activeDocumentId);
       setHandwrittenTabs(nextProjectTabs.openHandwrittenTabs ?? []);
@@ -2845,17 +3182,33 @@ export function App() {
       setHistoryOpen(false);
       setCreateProjectOpen(false);
       await refreshProjectCapabilityState(nextProject.id);
+      return true;
     } catch (error) {
+      if (registeredProject) {
+        setCreateProjectOpen(false);
+        showError(error, "El proyecto se ha creado, pero no se pudo completar su apertura. Selecciónalo de nuevo en la lista de proyectos.");
+        return true;
+      }
       showError(error, "No se pudo crear el proyecto.");
+      return false;
     }
   }
 
   async function handleUpdateProject(projectId: string, project: ProjectPayload) {
+    let locationChanged=false;
+    let locationSubmitted=false;
     try {
+      if (!await flushPendingDrafts()) return false;
       const currentProject = projects.find((candidate) => candidate.id === projectId);
+      locationChanged=Boolean(currentProject&&currentProject.folderPath!==project.folderPath);
+      if(locationChanged&&currentProject){
+        const review=await projectLocationReview.request(projectId,project.folderPath);
+        if(!review||!projectLocationReview.owns(projectId)||!await flushPendingDrafts()||!projectLocationReview.owns(projectId))return false;
+        project={...project,locationReview:{registryRevision:review.registryRevision,folderStamp:review.folderStamp,candidatePath:review.candidatePath},syncMode:"none",versioningMode:"none",storageMode:currentProject.storageMode,githubRepository:currentProject.githubRepository,publishToGithub:null};
+      }
       const githubRepository = project.githubRepository;
       const githubSyncMode = project.syncMode === "auto-github" ? "auto-github" : "manual-github";
-      const isNewGithubConnection = Boolean(!currentProject?.githubRepository && githubRepository && project.syncMode !== "none");
+      const isNewGithubConnection = Boolean(!locationChanged&&!currentProject?.githubRepository && githubRepository && project.syncMode !== "none");
       const isGithubPublish = Boolean(isNewGithubConnection && project.publishToGithub && githubRepository);
       const isGithubConnect = Boolean(isNewGithubConnection && !project.publishToGithub && githubRepository);
       const identityPayload = isNewGithubConnection && currentProject
@@ -2868,8 +3221,9 @@ export function App() {
         }
         : project;
 
+      locationSubmitted=locationChanged;
       await updateProject(projectId, identityPayload);
-      if (currentProject?.versioningMode === "none" && project.versioningMode === "local-git" && !isNewGithubConnection) {
+      if (!locationChanged&&currentProject?.versioningMode === "none" && project.versioningMode === "local-git" && !isNewGithubConnection) {
         await enableProjectHistory(projectId);
       }
       if (isGithubPublish && githubRepository && project.publishToGithub) {
@@ -2888,29 +3242,32 @@ export function App() {
           rootPath: githubRepository.rootPath,
           syncMode: githubSyncMode,
         });
-      } else if (currentProject?.githubRepository && currentProject.syncMode !== project.syncMode) {
+      } else if (!locationChanged&&currentProject?.githubRepository && currentProject.syncMode !== project.syncMode) {
         await changeProjectSyncMode(projectId, project.syncMode);
       }
 
       const refreshedProjects = await listProjects();
       const updatedProject = refreshedProjects.find((candidate) => candidate.id === projectId) ?? currentProject ?? null;
       setProjects(refreshedProjects);
+      if(locationChanged&&!projectLocationReview.owns(projectId))return true;
       if (updatedProject) {
         setActiveProject((currentProject) => (
           currentProject?.id === projectId ? updatedProject : currentProject
         ));
       }
       if (activeProject?.id === projectId) {
-        const nextTree = await getProjectTree(projectId);
+        let nextTree:DocumentTreeNode[]=[],nextTreeIssue:string|null=null;
+        try{nextTree=await getProjectTree(projectId);}catch(error){nextTreeIssue=getApiErrorMessage(error,"Proyecto actualizado; no se pudo consultar su estructura.");}
         const restoredTree = applyTreeOpenState(nextTree, {
           currentTree: tree,
           openPaths: treeOpenPathsByProject[projectId] ?? [],
         });
         const nextVersioningStatus = await getProjectVersioningStatus(projectId);
-        setTree(restoredTree);
-        persistTreeOpenState(projectId, restoredTree);
+        if(locationChanged&&!projectLocationReview.owns(projectId))return true;
+        ++treeReadSequence.current;setTree(restoredTree);setTreeReadIssue(nextTreeIssue?{projectId,message:nextTreeIssue}:null);setTreeReadBusy(false);
+        if(!nextTreeIssue)persistTreeOpenState(projectId, restoredTree);
         setVersioningStatus(nextVersioningStatus);
-        const nextProjectTabs = resolveProjectTabs(tabsByProject, projectId, restoredTree);
+        const nextProjectTabs = resolveProjectTabs(tabsByProject, projectId, restoredTree,!nextTreeIssue);
         setTabs(nextProjectTabs.openTabs);
         setActiveDocumentId(nextProjectTabs.activeDocumentId);
         setHandwrittenTabs(nextProjectTabs.openHandwrittenTabs ?? []);
@@ -2927,26 +3284,26 @@ export function App() {
         await refreshProjectActivity(projectId);
       }
       setEditProjectOpen(false);
+      return true;
     } catch (error) {
-      showError(error, "No se pudo guardar el proyecto.");
+      if(locationSubmitted){
+        try{const latest=await listProjects();setProjects(latest);setActiveProject(current=>{const confirmed=latest.find(p=>p.id===projectId);return current?.id===projectId&&confirmed&&confirmed.folderPath!==current.folderPath?confirmed:current;});}catch{/* Reconcile by reading; never replay an association change. */}
+      }
+      showError(error, locationSubmitted?"No se pudo confirmar todo el cambio de ubicación. Revisa la asociación actual; los borradores se conservan.":"No se pudo guardar el proyecto.");
+      return false;
     }
   }
 
   async function handleDeleteProject(projectId: string) {
     try {
-      if (!await flushPendingDrafts()) return;
-      const nextProjects = await deleteProject(projectId);
+      if (!await flushPendingDrafts(projectId)) return false;
+      if(!configPersistenceAvailable)throw new Error("No se puede conservar el estado de trabajo. Revisa el almacenamiento local antes de retirar el proyecto.");
+      const preservedTabs={...tabsByProject,...(activeProject?.id===projectId?{[projectId]:normalizeProjectTabs({openTabs:tabs,activeDocumentId,openHandwrittenTabs:handwrittenTabs,activeHandwrittenNoteId,activeWorkspaceTabId:activeWorkspaceTabIdForConfig})}:{})};
+      const nextProjects=await retireProjectWithWorkspace(projectId,{layout:layoutConfig,appearance:appearanceConfig,diagnostics:diagnosticsConfig,handwritten:handwrittenConfig,tabsByProject:preservedTabs,treeOpenPathsByProject,lastRunAppVersion,lastSeenReleaseNotesVersion,openUtilityTabs,activeUtilityTab},write=>saveSettings("app","configuration",write,()=>{}));
+      setTabsByProject(preservedTabs);
       const nextActiveProject = nextProjects.find((project) => project.active) ?? nextProjects[0];
 
       setProjects(nextProjects);
-      setTabsByProject((currentTabsByProject) => {
-        const { [projectId]: _removedProjectTabs, ...nextTabsByProject } = currentTabsByProject;
-        return nextTabsByProject;
-      });
-      setTreeOpenPathsByProject((currentState) => {
-        const { [projectId]: _removedProjectTreeState, ...nextState } = currentState;
-        return nextState;
-      });
       setEditProjectOpen(false);
 
       if (!nextActiveProject) {
@@ -2969,19 +3326,20 @@ export function App() {
         setExternalChangeDecisions({});
         setExternalChangesMessage(null);
         setProjectSyncState("synced");
-        return;
+        return true;
       }
 
-      const nextTree = await getProjectTree(nextActiveProject.id);
+      let nextTree:DocumentTreeNode[]=[],nextTreeIssue:string|null=null;
+      try{nextTree=await getProjectTree(nextActiveProject.id);}catch(error){nextTreeIssue=getApiErrorMessage(error,"No se pudo consultar la estructura del siguiente proyecto.");}
       const restoredTree = applyTreeOpenState(nextTree, {
         openPaths: treeOpenPathsByProject[nextActiveProject.id] ?? [],
       });
       const nextVersioningStatus = await getProjectVersioningStatus(nextActiveProject.id);
-      const nextProjectTabs = resolveProjectTabs(tabsByProject, nextActiveProject.id, restoredTree);
+      const nextProjectTabs = resolveProjectTabs(tabsByProject, nextActiveProject.id, restoredTree,!nextTreeIssue);
       setActiveProject(nextActiveProject);
       setVersioningStatus(nextVersioningStatus);
-      setTree(restoredTree);
-      persistTreeOpenState(nextActiveProject.id, restoredTree);
+      ++treeReadSequence.current;setTree(restoredTree);setTreeReadIssue(nextTreeIssue?{projectId:nextActiveProject.id,message:nextTreeIssue}:null);setTreeReadBusy(false);
+      if(!nextTreeIssue)persistTreeOpenState(nextActiveProject.id, restoredTree);
       setTabs(nextProjectTabs.openTabs);
       setActiveDocumentId(nextProjectTabs.activeDocumentId);
       setHandwrittenTabs(nextProjectTabs.openHandwrittenTabs ?? []);
@@ -2994,8 +3352,10 @@ export function App() {
       setDocumentSessions({});
       setHandwrittenSessions({});
       if (!nextVersioningStatus.enabled) setHistoryOpen(false);
+      return true;
     } catch (error) {
-      showError(error, "No se pudo eliminar el proyecto.");
+      showError(error, "No se pudo confirmar la retirada. Los archivos se conservan; actualiza antes de reintentar.");
+      return false;
     }
   }
 
@@ -3007,11 +3367,13 @@ export function App() {
   }
 
   async function handleStartGithubLogin() {
+    const epoch=++githubAuthEpochRef.current;
     setGithubLoginState("starting");
     setGithubLoginError(null);
     setGithubDevice(null);
     try {
       const device = await startGithubDeviceFlow();
+      if(epoch!==githubAuthEpochRef.current)return;
       if (device.status === "error" && !device.mock) {
         setGithubDevice(null);
         setGithubLoginState("error");
@@ -3021,6 +3383,7 @@ export function App() {
       setGithubDevice(device);
       setGithubLoginState("waiting");
     } catch (error) {
+      if(epoch!==githubAuthEpochRef.current)return;
       setGithubLoginState("error");
       setGithubLoginError(getApiErrorMessage(error, "No se pudo iniciar el login con GitHub."));
     }
@@ -3029,11 +3392,13 @@ export function App() {
   async function handlePollGithubLogin() {
     if (!githubDevice || githubLoginPollingRef.current) return;
     if (githubDevice.mock && !import.meta.env.DEV) return;
+    const epoch=githubAuthEpochRef.current;
     githubLoginPollingRef.current = true;
     setGithubLoginPolling(true);
     setGithubLoginError(null);
     try {
       const response = await pollGithubDeviceFlow(githubDevice.deviceCode);
+      if(epoch!==githubAuthEpochRef.current)return;
       if (response.status === "authenticated") {
         setAuthStatus(response.auth);
         setGithubLoginState("authenticated");
@@ -3050,6 +3415,7 @@ export function App() {
       }
       setGithubLoginError(response.status === "error" ? getGithubDeviceFlowErrorMessage(response.error) : null);
     } catch (error) {
+      if(epoch!==githubAuthEpochRef.current)return;
       setGithubLoginState("error");
       setGithubLoginError(getApiErrorMessage(error, "No se pudo completar el login con GitHub."));
     } finally {
@@ -3077,6 +3443,7 @@ export function App() {
   }
 
   async function handleLogoutGithub() {
+    ++githubAuthEpochRef.current;
     try {
       const auth = await logoutGithub();
       setAuthStatus(auth);
@@ -3091,7 +3458,7 @@ export function App() {
   }
 
   async function handlePullProject() {
-    if (!activeProject || syncState !== "idle") return;
+    if (!activeProject || syncState !== "idle") return false;
     if (!canUseGithubRemote(activeProject, authStatus, projectSyncStatus)) {
       const status = withDerivedRemoteSyncStatus(projectSyncStatus ?? {
         projectId: activeProject.id,
@@ -3109,44 +3476,59 @@ export function App() {
       setExternalChangesMessage(status.detail ?? status.label);
       setNotice({ title: "GitHub pausado", message: "Conecta GitHub para traer cambios remotos. El proyecto local sigue editable.", tone: "info" });
       void refreshProjectFileSyncOverview(activeProject.id);
-      return;
+      return false;
     }
+    const operation=projectWork.begin(activeProject.id);if(!operation)return false;
     setSyncState("pulling");
-    setExternalChangesBusy(true);
     setExternalChangesMessage("Actualizando el proyecto desde GitHub.");
     try {
       const response = await pullProject(activeProject.id);
-      setProjectTree(activeProject.id, await getProjectTree(activeProject.id));
+      if(!operation.owns())return false;
+      if(response.status!=="synced")throw new Error(response.message);
+      await handleReloadProjectTree(activeProject.id);
+      if(!operation.owns())return false;
       await refreshProjectCapabilityState(activeProject.id);
+      if(!operation.owns())return false;
       await refreshExternalChangeSet(activeProject.id, { silent: true });
+      if(!operation.owns())return false;
       await refreshProjectSyncStatus(activeProject.id, { silent: true });
+      if(!operation.owns())return false;
       await refreshProjectActivity(activeProject.id);
+      if(!operation.owns())return false;
       await refreshProjectFileSyncOverview(activeProject.id);
+      if(!operation.owns())return false;
       setExternalChangesMessage(response.message);
+      return true;
     } catch (error) {
+      if(!operation.owns())return false;
       showError(error, "No se pudo traer cambios del proveedor remoto.");
+      return false;
     } finally {
-      setSyncState("idle");
-      setExternalChangesBusy(false);
+      if(operation.owns())setSyncState("idle");
+      operation.release();
     }
   }
 
   async function refreshProjectActivity(projectId = activeProject?.id) {
     if (!projectId) return;
+    const owns=projectWork.read("activity",projectId);if(!owns)return;
     try {
       const activity = await getProjectActivity(projectId);
-      setProjectActivity(activity.events);
+      if(owns())setProjectActivity(activity.events);
     } catch {
-      setProjectActivity([]);
+      if(owns())setProjectActivity([]);
     }
   }
 
   async function refreshProjectFileSyncOverview(projectId = activeProject?.id) {
     if (!projectId) return;
+    const owns=projectWork.read("file-overview",projectId);if(!owns)return;
     try {
       setFileSyncOverviewError(null);
-      setFileSyncOverview(await getProjectFileSyncOverview(projectId));
+      const overview=await getProjectFileSyncOverview(projectId);
+      if(owns())setFileSyncOverview(overview);
     } catch (error) {
+      if(!owns())return;
       setFileSyncOverview(null);
       setFileSyncOverviewError(getApiErrorMessage(error, "No se pudo cargar el estado de archivos."));
     }
@@ -3154,7 +3536,7 @@ export function App() {
 
   async function handleRefreshProtectionState(projectId = activeProject?.id) {
     if (!projectId) return;
-    setExternalChangesBusy(true);
+    const operation=projectWork.begin(projectId);if(!operation)return;
     try {
       await Promise.all([
         refreshExternalChangeSet(projectId, { refreshTreeOnChanges: true }),
@@ -3163,7 +3545,7 @@ export function App() {
         refreshProjectFileSyncOverview(projectId),
       ]);
     } finally {
-      setExternalChangesBusy(false);
+      operation.release();
     }
   }
 
@@ -3188,50 +3570,30 @@ export function App() {
       void refreshProjectFileSyncOverview(activeProject.id);
       return;
     }
+    const operation=projectWork.begin(activeProject.id);if(!operation)return;
     setSyncState("pushing");
-    setExternalChangesBusy(true);
     setExternalChangesMessage("Subiendo el historial local a GitHub.");
     try {
       const response = await pushProject(activeProject.id);
+      if(!operation.owns())return;
       await refreshProjectCapabilityState(activeProject.id);
+      if(!operation.owns())return;
       await refreshProjectSyncStatus(activeProject.id, { silent: true });
+      if(!operation.owns())return;
       await refreshExternalChangeSet(activeProject.id, { silent: true });
+      if(!operation.owns())return;
       await refreshProjectActivity(activeProject.id);
+      if(!operation.owns())return;
       await refreshProjectFileSyncOverview(activeProject.id);
+      if(!operation.owns())return;
       setExternalChangesMessage(response.message);
       if (response.status === "synced") setExternalChangesOpen(false);
     } catch (error) {
+      if(!operation.owns())return;
       showError(error, "No se pudieron enviar cambios al proveedor remoto.");
     } finally {
-      setSyncState("idle");
-      setExternalChangesBusy(false);
-    }
-  }
-
-  async function handleResolveProjectGithubConflict(resolution: "keep-local" | "take-remote") {
-    if (!activeProject || syncState !== "idle") return;
-    const conflict = projectSyncStatus?.conflicts.find((item) => item.status === "open");
-    if (!conflict) {
-      await handleRefreshProtectionState(activeProject.id);
-      return;
-    }
-    setSyncState(resolution === "keep-local" ? "pushing" : "pulling");
-    setExternalChangesBusy(true);
-    setExternalChangesMessage(resolution === "keep-local" ? "Sincronizando GitHub con este equipo." : "Actualizando este equipo desde GitHub.");
-    try {
-      await resolveProjectSyncConflict(activeProject.id, conflict.id, resolution);
-      setProjectTree(activeProject.id, await getProjectTree(activeProject.id));
-      await refreshProjectCapabilityState(activeProject.id);
-      await refreshProjectSyncStatus(activeProject.id, { silent: true });
-      await refreshExternalChangeSet(activeProject.id, { silent: true });
-      await refreshProjectActivity(activeProject.id);
-      await refreshProjectFileSyncOverview(activeProject.id);
-      setExternalChangesMessage(resolution === "keep-local" ? "GitHub queda sincronizado con este equipo." : "Este equipo queda sincronizado con GitHub.");
-    } catch (error) {
-      showError(error, resolution === "keep-local" ? "No se pudo sincronizar GitHub con este equipo." : "No se pudo actualizar este equipo desde GitHub.");
-    } finally {
-      setSyncState("idle");
-      setExternalChangesBusy(false);
+      if(operation.owns())setSyncState("idle");
+      operation.release();
     }
   }
 
@@ -3242,13 +3604,13 @@ export function App() {
   }
 
   async function handleSynchronizeActiveDocument(options: { preserveDraft?: boolean } = {}) {
-    if (!activeProject || !activeDocumentId || !versioningStatus?.enabled) return;
+    if (!activeProject || !activeDocumentId || !versioningStatus?.enabled) return false;
     const session = documentSessions[activeDocumentId];
     const documentName = session?.document?.name ?? "documento";
 
     if (session?.isDirty && !options.preserveDraft) {
       const saved = await handleSave(activeDocumentId);
-      if (!saved) return;
+      if (!saved) return false;
     }
 
     const manualSyncSequence = ++documentPostSaveSyncSequenceRef.current;
@@ -3274,29 +3636,31 @@ export function App() {
           await refreshProjectSyncStatus(activeProject.id, { silent: true });
           await checkOpenDocumentSync();
           setExternalChangesMessage("Documento guardado localmente. GitHub queda pendiente hasta recuperar acceso.");
-          return;
+          return false;
         }
         const response = await pushProject(activeProject.id);
+        if(response.status!=="synced")throw new Error(response.message);
         await refreshProjectCapabilityState(activeProject.id);
         await refreshProjectSyncStatus(activeProject.id, { silent: true });
         await checkOpenDocumentSync();
         setExternalChangesMessage(response.message);
-        return;
+        return true;
       }
 
       await refreshProjectSyncStatus(activeProject.id, { silent: true });
       await checkOpenDocumentSync();
+      return true;
     } catch (error) {
       setProjectSyncState("error");
       showError(error, "No se pudo sincronizar el documento.");
+      return false;
     }
   }
 
   async function handleDiscardActiveDocumentDraft(documentId = activeDocumentId) {
     if (!documentId) return false;
     try {
-      await discardDocumentDraft(documentId);
-      await loadDocumentSession(documentId, true);
+      if (!await handleLoadDiskVersion(documentId)) return false;
       await checkOpenDocumentSync();
       if (activeProject && externalChangesOpen) await refreshProjectFileSyncOverview(activeProject.id);
       setNotice({ title: "Cambios descartados", message: "Se ha restaurado la última versión guardada del documento.", tone: "info" });
@@ -3307,46 +3671,114 @@ export function App() {
     }
   }
 
-  async function handleApplyIncomingDocumentVersion(options: { discardDraft: boolean }) {
-    if (!activeProject || !activeDocumentId) return;
+  async function handleApplyIncomingDocumentVersion() {
+    if (!activeProject || !activeDocumentId) return false;
+    const documentId=activeDocumentId,projectId=activeProject.id,expected=documentSessionsRef.current[documentId];
+    const stillCurrent=()=>activeWorkspaceTabIdRef.current===documentId&&activeAiProjectRef.current===projectId&&!!expected&&sameDocumentRevision(documentSessionsRef.current[documentId],expected);
     try {
-      if (options.discardDraft) {
-        await discardDocumentDraft(activeDocumentId);
-      }
-
       const incomingForActiveDocument = activeDocumentSyncStatus?.versionState === "remote-ahead" || activeDocumentSyncStatus?.versionState === "diverged";
       if (incomingForActiveDocument && isGithubSyncMode(activeProject.syncMode)) {
-        await handlePullProject();
-        await loadDocumentSession(activeDocumentId, true);
-        await refreshProjectSyncStatus(activeProject.id, { silent: true });
+        if(!await handlePullProject())return false;
+        if(!stillCurrent())throw new Error("El contenido ha cambiado mientras llegaba la versión remota. El borrador se conserva; revisa de nuevo la actualización.");
+        if(!await handleLoadDiskVersion(documentId))return false;
+        await refreshProjectSyncStatus(projectId, { silent: true });
         await checkOpenDocumentSync();
-        return;
+        return true;
       }
-
       if (activeDocumentSyncStatus?.diskChanged || activeDocumentSyncStatus?.conflictStatus === "disk-changed") {
-        await handleLoadDiskVersion();
+        if(!stillCurrent()||!await handleLoadDiskVersion(documentId))return false;
         await checkOpenDocumentSync();
-        return;
+        return true;
       }
-
-      await refreshProjectSyncStatus(activeProject.id, { autoRun: isAutomaticSyncMode(activeProject.syncMode), silent: true });
+      await refreshProjectSyncStatus(projectId, { autoRun: false, silent: true });
       await checkOpenDocumentSync();
+      throw new Error("La versión disponible ha cambiado. Se conserva el contenido abierto; cancela y revisa el estado actualizado.");
     } catch (error) {
       showError(error, "No se pudo actualizar el documento con la última versión disponible.");
+      return false;
     }
   }
 
   function requestDiscardActiveDocumentDraft() {
-    setDocumentFooterDialog("discard-draft");
+    requestDocumentFooterAction("discard-draft");
+  }
+
+  async function requestDocumentMerge(historyVersionId?:string,remote=false){
+    if(documentMergeWork.current||!activeProject||!activeDocumentId)return;
+    const id=activeDocumentId,projectId=activeProject.id;documentMergeWork.current=true;
+    try{
+      if(!await flushPendingDrafts(projectId))return;
+      const expected=documentSessionsRef.current[id];if(!expected?.document||activeWorkspaceTabIdRef.current!==id||activeAiProjectRef.current!==projectId)return;
+      const epoch=++documentMergeEpoch.current;
+      setDocumentMerge({id,projectId,expected,historyVersionId,remote,review:null,loading:true,busy:false,error:""});
+      try{const review=remote?await reviewRemoteDraft(id):historyVersionId?await reviewHistoricalDraft(id,historyVersionId):await reviewDocumentConflict(id);if(documentMergeEpoch.current===epoch)setDocumentMerge(current=>current?.id===id?{...current,review,loading:false}:current);}
+      catch(cause){if(documentMergeEpoch.current===epoch)setDocumentMerge(current=>current?.id===id?{...current,loading:false,error:getApiErrorMessage(cause,"No se pudo revisar la fuente. Se conserva el documento abierto.")}:current);}
+    }finally{documentMergeWork.current=false;}
+  }
+
+  async function applyMergedDocument(markdown:string,checkOnly=false){
+    const chosen=documentMerge;
+    if(!chosen?.review||chosen.loading||chosen.busy||documentMergeWork.current||pendingSaveIds.current.has(chosen.id))return;
+    if(checkOnly&&!chosen.attemptPayload)return;
+    const id=chosen.id,review=chosen.review;documentMergeWork.current=true;pendingSaveIds.current.add(id);setDocumentMerge(current=>current===chosen?{...current,busy:true,error:"",checkingAttempt:checkOnly}:current);
+    let protectLatest=false;
+    try{
+      const result=await sessionWrites.current.run(id,async()=>{
+        if(!sameDocumentRevision(documentSessionsRef.current[id],chosen.expected))throw new Error("La edición ha cambiado. Vuelve a revisar antes de combinar.");
+        const payload=checkOnly?chosen.attemptPayload!:{attemptId:createConflictAttemptId(),locationRevision:review.locationRevision,diskFingerprint:review.diskFingerprint,draftRevision:review.draftRevision,localMarkdown:chosen.expected.markdown,mergedMarkdown:markdown,remoteSource:review.remoteSource?remoteSourceProof(review.remoteSource):undefined,historySource:review.historySource?{versionId:review.historySource.versionId,markdownSha256:review.historySource.markdownSha256}:undefined};
+        if(!checkOnly)setDocumentMerge(current=>current?.id===id?{...current,attemptPayload:payload}:current);
+        const attempt={id:payload.attemptId,verify:async()=>{const observed=await reviewDocumentConflictAttempt(id,payload.attemptId,payload);return observed.status==="confirmed"?observed.result:null;}};
+        return checkOnly?verifyDocumentMergeAttempt({review,markdown:payload.mergedMarkdown,attempt}):confirmDocumentMerge({review,markdown,submit:()=>applyDocumentConflict(id,payload),attempt});
+      });
+      const latest=documentSessionsRef.current[id];if(!latest?.document)throw new Error("La vista se ha cerrado. El resultado y sus copias permanecen en recuperación.");
+      if(latest.savedMarkdown!==chosen.expected.savedMarkdown||latest.baseFingerprint?.sha256!==chosen.expected.baseFingerprint?.sha256)throw new Error("La base de la sesión ha cambiado. Se conserva el resultado; revisa las versiones actuales.");
+      const merged=acknowledgeMergedDraft(latest,result.document,chosen.expected);
+      documentSessionsRef.current={...documentSessionsRef.current,[id]:merged};setDocumentSessions(current=>({...current,[id]:merged}));protectLatest=merged.markdown!==result.document.markdown;
+      setDocumentSyncStatuses(current=>{const status=acknowledgeMergedSyncStatus(current[id],merged);return status?{...current,[id]:status}:current;});
+      ++documentMergeEpoch.current;setDocumentMerge(null);
+      if(activeAiProjectRef.current===chosen.projectId)setNotice({title:protectLatest?"Edición posterior conservada":chosen.remote?"Borrador remoto combinado":chosen.historyVersionId?"Restauración parcial preparada":"Combinación preparada",message:protectLatest?"Se conserva tu edición más reciente. Las versiones revisadas y la propuesta combinada están disponibles en Apartadas.":chosen.remote?"Revisa el borrador antes de guardar. El archivo local se conserva; la sincronización del proyecto sigue pendiente. Las copias están en Apartadas.":result.reconciled?"La lectura confirma el borrador combinado. Revisa su contenido antes de guardar.":"Las versiones y la propuesta se conservan en Apartadas. Revisa el borrador combinado y guarda cuando esté listo; el archivo en disco no se ha sustituido.",tone:"info"});
+      void refreshOrphanDrafts();void checkOpenDocumentSync();
+    }catch(cause){setDocumentMerge(current=>current?.id===id?{...current,busy:false,checkingAttempt:false,attemptPayload:cause instanceof ApiError&&cause.operationOutcome==="not-started"?undefined:current.attemptPayload,error:getApiErrorMessage(cause,"No se confirmó la combinación. Revisa el estado antes de otra acción.")}:current);}
+    finally{
+      pendingSaveIds.current.delete(id);documentMergeWork.current=false;
+      if(protectLatest){const latest=documentSessionsRef.current[id];if(latest)void persistDraft(id,latest,true);}
+    }
   }
 
   function requestIncomingDocumentVersion() {
-    setDocumentFooterDialog((activeSession?.isDirty ?? false) ? "update-remote-discard-draft" : "update-remote");
+    requestDocumentFooterAction((activeSession?.isDirty ?? false) ? "update-remote-discard-draft" : "update-remote");
+  }
+
+  async function requestHandwrittenMerge(){
+    if(!activeHandwrittenNoteId||!activeProject||handwrittenMergeWork.current||handwrittenMerge?.busy)return;
+    const id=activeHandwrittenNoteId,projectId=activeProject.id;handwrittenMergeWork.current=true;
+    try{if(!await flushPendingDrafts(projectId))return;const expected=handwrittenSessionsRef.current[id];if(!expected?.note||!expected.content||activeWorkspaceTabIdRef.current!==id||activeAiProjectRef.current!==projectId)return;
+      const epoch=++handwrittenMergeEpoch.current;setHandwrittenMerge({id,projectId,expected,review:null,loading:true,busy:false,error:""});
+      try{const review=await reviewHandwrittenConflict(id);if(handwrittenMergeEpoch.current===epoch)setHandwrittenMerge(current=>current?.id===id?{...current,review,loading:false}:current);}catch(cause){if(handwrittenMergeEpoch.current===epoch)setHandwrittenMerge(current=>current?.id===id?{...current,loading:false,error:getApiErrorMessage(cause,"No se pudo revisar la nota. Los trazos abiertos se conservan.")}:current);}
+    }finally{handwrittenMergeWork.current=false;}
+  }
+  async function applyMergedHandwritten(content:HandwrittenNoteContent,checkOnly=false){
+    const chosen=handwrittenMerge;if(!chosen?.review||!chosen.expected.content||chosen.loading||chosen.busy||handwrittenMergeWork.current||pendingSaveIds.current.has(chosen.id))return;
+    if(checkOnly&&!chosen.attemptPayload)return;
+    const id=chosen.id,review=chosen.review;handwrittenMergeWork.current=true;pendingSaveIds.current.add(id);setHandwrittenMerge(current=>current===chosen?{...current,busy:true,error:"",checkingAttempt:checkOnly}:current);let protectLatest=false;
+    try{const result=await sessionWrites.current.run(id,async()=>{
+      if(!sameHandwrittenRevision(handwrittenSessionsRef.current[id],chosen.expected))throw new Error("Los trazos han cambiado. Revisa de nuevo antes de combinar.");
+      const payload=checkOnly?chosen.attemptPayload!:{attemptId:createConflictAttemptId(),locationRevision:review.locationRevision,diskFingerprint:review.diskFingerprint,draftRevision:review.draftRevision,localContent:chosen.expected.content!,mergedContent:content};
+      if(!checkOnly)setHandwrittenMerge(current=>current?.id===id?{...current,attemptPayload:payload}:current);
+      const attempt={id:payload.attemptId,verify:async()=>{const observed=await reviewHandwrittenConflictAttempt(id,payload.attemptId,payload);return observed.status==="confirmed"?observed.result:null;}};
+      return checkOnly?verifyHandwrittenMergeAttempt({review,content:payload.mergedContent,attempt}):confirmHandwrittenMerge({review,content,submit:()=>applyHandwrittenConflict(id,payload),attempt});
+    });
+      const latest=handwrittenSessionsRef.current[id];if(!latest?.note||!latest.content)throw new Error("La nota se ha cerrado. El resultado permanece en recuperación.");
+      if(latest.savedContent!==chosen.expected.savedContent||latest.baseFingerprint?.sha256!==chosen.expected.baseFingerprint?.sha256)throw new Error("La base de la nota ha cambiado. Se conservan las copias; revisa las versiones actuales.");
+      const merged=acknowledgeMergedNote(latest,result.note,chosen.expected);protectLatest=!!merged.content&&noteConflictRevision(merged.content)!==noteConflictRevision(result.note.content);handwrittenSessionsRef.current={...handwrittenSessionsRef.current,[id]:merged};setHandwrittenSessions(current=>({...current,[id]:merged}));++handwrittenMergeEpoch.current;setHandwrittenMerge(null);void refreshOrphanDrafts();
+      if(activeAiProjectRef.current===chosen.projectId)setNotice({title:protectLatest?"Trazos posteriores conservados":"Combinación de páginas preparada",message:protectLatest?"Se mantienen tus trazos más recientes. Las versiones y la propuesta están en Apartadas.":"Revisa el borrador combinado. Las tres versiones se conservan en Apartadas y el archivo del disco no cambia hasta Guardar.",tone:"info"});
+    }catch(cause){setHandwrittenMerge(current=>current?.id===id?{...current,busy:false,checkingAttempt:false,attemptPayload:cause instanceof ApiError&&cause.operationOutcome==="not-started"?undefined:current.attemptPayload,error:getApiErrorMessage(cause,"No se confirmó el borrador combinado. Revisa antes de otra acción.")}:current);}
+    finally{pendingSaveIds.current.delete(id);handwrittenMergeWork.current=false;if(protectLatest){const latest=handwrittenSessionsRef.current[id];if(latest)void persistHandwrittenDraft(id,latest,true);}}
   }
 
   function requestSynchronizeActiveDocument() {
     if (activeSession?.isDirty) {
-      setDocumentFooterDialog("sync-saved-while-draft");
+      requestDocumentFooterAction("sync-saved-while-draft");
       return;
     }
     void handleSynchronizeActiveDocument();
@@ -3354,31 +3786,50 @@ export function App() {
 
   async function confirmDocumentFooterDialog() {
     const dialog = documentFooterDialog;
-    setDocumentFooterDialog(null);
-    if (dialog === "discard-draft") {
-      await handleDiscardActiveDocumentDraft();
-      return;
-    }
-    if (dialog === "update-remote" || dialog === "update-remote-discard-draft") {
-      await handleApplyIncomingDocumentVersion({ discardDraft: dialog === "update-remote-discard-draft" });
-      return;
-    }
-    if (dialog === "sync-saved-while-draft") {
-      await handleSynchronizeActiveDocument({ preserveDraft: true });
-    }
+    if(!dialog||activeWorkspaceTabIdRef.current!==dialog.documentId||activeAiProjectRef.current!==dialog.projectId||!sameDocumentRevision(documentSessionsRef.current[dialog.documentId],dialog.revision))throw new Error("El documento o su contenido han cambiado. Cancela y revisa de nuevo la acción.");
+    const confirmed=dialog.action==="discard-draft"
+      ?await handleDiscardActiveDocumentDraft(dialog.documentId)
+      :dialog.action==="sync-saved-while-draft"
+        ?await handleSynchronizeActiveDocument({preserveDraft:true})
+        :await handleApplyIncomingDocumentVersion();
+    if(confirmed)setDocumentFooterDialog(current=>current===dialog?null:current);
+    return confirmed;
   }
 
-  async function handleRestoreActiveVersion(versionId: string): Promise<CreateVersionResponse | null> {
+  function requestDocumentFooterAction(action:DocumentFooterDialogAction){
+    const revision=documentSessionsRef.current[activeDocumentId];
+    if(!activeProject||!revision?.document)return;
+    setDocumentFooterDialog({action,documentId:activeDocumentId,projectId:activeProject.id,revision});
+  }
+
+  async function handleRestoreActiveVersion(versionId: string): Promise<RestoreVersionResponse | null> {
     if (!activeProject || !activeDocumentId) return null;
+    const id = activeDocumentId;
+    const expected = documentSessionsRef.current[id];
+    if (!expected?.document || pendingSaveIds.current.has(id)) return null;
+    pendingSaveIds.current.add(id);
+    let restored: RestoreVersionResponse | null = null;
     try {
-      const response = await restoreVersion(activeDocumentId, versionId);
-      await loadDocumentSession(activeDocumentId, true);
+      const response = await sessionWrites.current.run(id, async () => {
+        if (!sameDocumentRevision(documentSessionsRef.current[id], expected)) throw new Error("Hay cambios nuevos. Revisa de nuevo la versión antes de restaurarla.");
+        const response=await restoreVersion(id, versionId, expected.baseFingerprint ?? null,documentSessionsRef.current[id]?.draftWriteRevision??null);
+        const latest=documentSessionsRef.current[id];
+        if(latest){const next=acknowledgeDocumentRestore(latest,response.savedDocument,expected);documentSessionsRef.current={...documentSessionsRef.current,[id]:next};setDocumentSessions(all=>({...all,[id]:next}));}
+        return response;
+      });
+      restored = response;
+      if (response.historyWarning || response.recoveryWarning) setNotice({ title: "Contenido restaurado; revisión pendiente", message: response.historyWarning ?? response.recoveryWarning!, tone: "info" });
       await refreshProjectCapabilityState(activeProject.id);
       await refreshProjectSyncStatus(activeProject.id, { autoRun: isAutomaticSyncMode(activeProject.syncMode), silent: true });
       return response;
     } catch (error) {
-      showError(error, "No se pudo restaurar la versión seleccionada.");
-      return null;
+      if(isDraftWriteConflict(error)){markDraftWriteBlocked(id,false);void protectBlockedEdit(id,false);}
+      showError(error, restored ? "El contenido se ha restaurado, pero no se pudo actualizar todo su estado." : "No se pudo restaurar la versión seleccionada. Se conserva el contenido abierto.");
+      return restored;
+    } finally {
+      pendingSaveIds.current.delete(id);
+      const latest = documentSessionsRef.current[id];
+      if (latest) void persistDraft(id, latest);
     }
   }
 
@@ -3438,9 +3889,11 @@ export function App() {
   }
 
   async function handleInstallUpdate() {
-    if (!availableUpdate || updateState === "downloading" || updateState === "installing") return;
+    if (updateInstallBusy.current || !availableUpdate || updateState === "downloading" || updateState === "installing") return;
+    updateInstallBusy.current=true;
+    try {
 
-    if (!await flushPendingDrafts()) {
+    if (!await checkpointOpenWork()) {
       setNotice({
         title: "No se pudo preparar la actualización",
         message: "Hay borradores pendientes que no se pudieron guardar. Revisa el aviso activo antes de actualizar.",
@@ -3456,8 +3909,18 @@ export function App() {
       await installUpdate((progress) => {
         setUpdateProgress(progress);
         if (progress.percent === 100) setUpdateState("installing");
+      },async()=>{
+        checkpointPendingEditorInput();
+        updateRestartToken.current=await protectUpdateInstallation({
+          freeze:()=>flushSync(()=>setUpdateProtection("protecting")),unfreeze:()=>setUpdateProtection(null),
+          hasPendingSettings:()=> (["app","ai","export"] as const).some(domain=>settingsPersistence.hasPending(domain)),
+          protect:()=>checkpointOpenWork(),
+        });
       });
+      setUpdateProtection("installer-open");
     } catch (error) {
+      if(updateRestartToken.current){try{await releaseUpdateInstallation(updateRestartToken.current);updateRestartToken.current=null;setUpdateProtection(null);}catch{setUpdateProtection("installer-open");}}
+
       const message = error instanceof Error ? error.message : "No se pudo instalar la actualización.";
       setUpdateState("error");
       setUpdateError(message);
@@ -3467,6 +3930,13 @@ export function App() {
         tone: "error",
       });
     }
+    } finally {updateInstallBusy.current=false;}
+  }
+
+  async function returnFromUpdatePreparation(){
+    const token=updateRestartToken.current;if(!token)return;
+    try{await releaseUpdateInstallation(token);updateRestartToken.current=null;setUpdateProtection(null);setUpdateState("available");}
+    catch(error){showError(error,"No se pudo devolver el espacio de trabajo. La preparación se conserva.");}
   }
 
   function showError(
@@ -3481,16 +3951,14 @@ export function App() {
 
     if (options.suppressApiConnectionNotice && isConnectionError) return;
 
-    recordDiagnosticError(options.source ?? "app.showError", message, detail);
-
-    setNotice({
-      title: "No se pudo completar la operación",
-      message,
-      tone: "error",
+    const errorNotice = { title: "No se pudo completar la operación", message, tone: "error" as const };
+    setNotice(errorNotice);
+    void recordDiagnosticError(options.source ?? "app.showError", message, detail).then(eventId=>{
+      if(eventId)setNotice(current=>current===errorNotice?{...current,message:`${current.message}\nReferencia técnica: ${eventId}`}:current);
     });
   }
 
-  function recordDiagnosticError(source: string, message: string, detail: string) {
+  async function recordDiagnosticError(source: string, message: string, detail: string) {
     const fingerprint = `${source}:${message}:${detail.slice(0, 400)}`;
     const now = Date.now();
     if (lastTraceLogRef.current?.fingerprint === fingerprint && now - lastTraceLogRef.current.timestamp < 10_000) {
@@ -3498,7 +3966,31 @@ export function App() {
     }
 
     lastTraceLogRef.current = { fingerprint, timestamp: now };
-    void recordTraceLog({ source, message, detail });
+    return recordTraceLog({ source, message, detail });
+  }
+
+  async function beforeCriticalStateChange(){
+    await protectForCriticalTransition({
+      hasPendingSettings:()=> (["app","ai","export"] as const).some(domain=>settingsPersistence.hasPending(domain)),
+      protectDocuments:()=>checkpointOpenWork(),
+      pause:()=>flushSync(()=>{
+        setCriticalTransitionBusy(true);setConfigLoaded(false);
+        // Even an unchanged project ID may resolve to a different restored root.
+        // Discard only acknowledged in-memory snapshots, never their local drafts.
+        aiWorkspaceEpoch.current.value++;
+        documentLoads.current.clear();handwrittenLoads.current.clear();sessionLoadSequence.current++;
+        documentPostSaveSyncSequenceRef.current++;
+        documentSessionsRef.current={};handwrittenSessionsRef.current={};
+        setDocumentSessions({});setHandwrittenSessions({});
+        setImageTabs([]);setActiveImageId("");setReferenceDocumentTabs([]);setActiveReferenceDocumentId("");
+        setExternalChangeSet(null);setExternalChangeDecisions({});setExternalChangesMessage(null);setHistoryOpen(false);
+      }),
+    });
+  }
+  function afterCriticalStateChange(outcome:StateTransitionOutcome){
+    setAppSettingsOpen(false);setRecoverableDraftsOpen(false);
+    setNotice({title:outcome.confirmed?"Estado revisado":"Cambio de estado sin confirmar",message:outcome.message+" La vista se actualiza desde el almacenamiento local.",tone:"info"});
+    handleRetryLocalRuntimeRecovery();
   }
 
   function handleRetryLocalRuntimeRecovery() {
@@ -3514,7 +4006,7 @@ export function App() {
   function handleAppearanceConfigChange(nextAppearanceConfig: Partial<AppearanceConfig>) {
     setAppearanceConfig((currentAppearanceConfig) => {
       const updatedAppearanceConfig = { ...currentAppearanceConfig, ...nextAppearanceConfig };
-      writeLocalAppPreferences({ appearance: updatedAppearanceConfig });
+      cacheLocalAppPreferences({ appearance: updatedAppearanceConfig });
       return updatedAppearanceConfig;
     });
   }
@@ -3522,71 +4014,42 @@ export function App() {
   function handleDiagnosticsConfigChange(nextDiagnosticsConfig: Partial<DiagnosticsConfig>) {
     setDiagnosticsConfig((currentDiagnosticsConfig) => {
       const updatedDiagnosticsConfig = { ...currentDiagnosticsConfig, ...nextDiagnosticsConfig };
-      writeLocalAppPreferences({ diagnostics: updatedDiagnosticsConfig });
+      cacheLocalAppPreferences({ diagnostics: updatedDiagnosticsConfig });
       return updatedDiagnosticsConfig;
     });
   }
 
-  function handleExportTemplateChange(nextExportTemplate: ExportTemplateUpdate) {
-    const saveSequence = exportTemplateSaveSequence.current + 1;
-    exportTemplateSaveSequence.current = saveSequence;
-    setAppSettingsSaveState("saving");
-    setAppSettingsSaveMessage(null);
-    setExportTemplateConfig((currentTemplate) => {
-      const updatedTemplate: ExportTemplateConfig = {
-        ...currentTemplate,
-        ...nextExportTemplate,
-        page: nextExportTemplate.page ?? currentTemplate.page,
-        normal: nextExportTemplate.normal ?? currentTemplate.normal,
-        headings: nextExportTemplate.headings
-          ? { ...currentTemplate.headings, ...nextExportTemplate.headings }
-          : currentTemplate.headings,
-        code: nextExportTemplate.code ?? currentTemplate.code,
-        paragraph: nextExportTemplate.paragraph ?? currentTemplate.paragraph,
-        document: nextExportTemplate.document ?? currentTemplate.document,
-        headingFontFamily: nextExportTemplate.headingFontFamily ?? currentTemplate.headingFontFamily,
-      };
-      void updateExportTemplate(nextExportTemplate)
-        .then((savedTemplate) => {
-          if (exportTemplateSaveSequence.current !== saveSequence) return;
-          setExportTemplateConfig(savedTemplate);
-          setAppSettingsSaveState("saved");
-          setAppSettingsSaveMessage("Configuración de exportación guardada.");
-        })
-        .catch((error) => {
-          if (exportTemplateSaveSequence.current === saveSequence) {
-            setAppSettingsSaveState("error");
-            setAppSettingsSaveMessage(getApiErrorMessage(error, "No se pudo guardar la plantilla de exportación."));
-          }
-          showError(error, "No se pudo guardar la plantilla de exportación.", { source: "app.exportTemplate" });
-        });
-      return updatedTemplate;
+  function handleExportTemplateChange(patch: ExportTemplateUpdate) {
+    if (exportResetPending.current) return;
+    const next = mergeExportSettings(exportTemplateConfigRef.current, patch);
+    exportTemplateConfigRef.current = next;
+    setExportTemplateConfig(next);
+    void saveSettings("export", "export-template", () => updateExportTemplate(next), saved => {
+      exportTemplateConfigRef.current = saved;
+      setExportTemplateConfig(saved);
     });
   }
 
   async function handleResetExportTemplate() {
-    const saveSequence = exportTemplateSaveSequence.current + 1;
-    exportTemplateSaveSequence.current = saveSequence;
-    setAppSettingsSaveState("saving");
-    setAppSettingsSaveMessage(null);
+    if (exportResetPending.current) return;
+    exportResetPending.current = true; setExportResetting(true);
     try {
-      const resetTemplate = await resetExportTemplate();
-      const resetTemplatePath = await getExportTemplatePath();
-      if (exportTemplateSaveSequence.current !== saveSequence) return;
-      setExportTemplateConfig(resetTemplate);
-      setExportTemplatePath(resetTemplatePath);
-      setAppSettingsSaveState("saved");
-      setAppSettingsSaveMessage("Plantilla de exportación restablecida.");
-    } catch (error) {
-      if (exportTemplateSaveSequence.current === saveSequence) {
-        setAppSettingsSaveState("error");
-        setAppSettingsSaveMessage(getApiErrorMessage(error, "No se pudo restablecer la plantilla de exportación."));
-      }
-      showError(error, "No se pudo restablecer la plantilla de exportación.", { source: "app.exportTemplate.reset" });
-    }
+      await saveSettings("export", "export-template", async () => {
+        exportResetPending.current = true; setExportResetting(true);
+        try { return await resetExportTemplate(); }
+        finally { exportResetPending.current = false; setExportResetting(false); }
+      }, saved => {
+        exportTemplateConfigRef.current = saved; setExportTemplateConfig(saved);
+        void getExportTemplatePath().then(setExportTemplatePath).catch(() => undefined);
+      });
+    } finally { exportResetPending.current = false; setExportResetting(false); }
   }
 
   async function refreshAiState(projectId = activeProject?.id) {
+    const request = ++aiRefreshSequence.current;
+    const projectAtStart = activeAiProjectRef.current;
+    const preferenceRevision = settingsPersistence.getRevision("ai");
+    const credentialsAtStart = credentialRevision.current;
     try {
       const nextAiConfig = await getAiConfig();
       const [conversation, indexStatus, usageSummary, pendingIntent, contextSources] = await Promise.all([
@@ -3596,7 +4059,11 @@ export function App() {
         projectId ? getAiPendingIntent(projectId) : Promise.resolve(null),
         projectId ? getAiContextSources(projectId) : Promise.resolve({ sources: [], expiredSourceIds: [] }),
       ]);
-      setAiConfig(nextAiConfig);
+      if (!acceptsAiRefresh({request, latest: aiRefreshSequence.current, projectAtStart, currentProject: activeAiProjectRef.current, requestedProject: projectId})) return;
+      const refreshed = reconcileAiSettingsRefresh(aiConfigRef.current, nextAiConfig,
+        settingsPersistence.hasPending("ai") || settingsPersistence.getRevision("ai") !== preferenceRevision,
+        credentialRevision.current !== credentialsAtStart);
+      aiConfigRef.current = refreshed; setAiConfig(refreshed);
       setAiConversationEvents(conversation.events);
       setAiIndexStatus(indexStatus);
       setAiUsageSummary(usageSummary);
@@ -3634,42 +4101,17 @@ export function App() {
     }
   }
 
-  function handleAiConfigChange(nextAiConfig: AiConfigStatus) {
-    const previousAiConfig = aiConfig;
-    const saveSequence = aiConfigSaveSequence.current + 1;
-    aiConfigSaveSequence.current = saveSequence;
-    setAiConfig(nextAiConfig);
-    writeLocalAppPreferences({ ai: nextAiConfig });
-    setAppSettingsSaveState("saving");
-    setAppSettingsSaveMessage(null);
-    void updateAiConfig({
-      provider: nextAiConfig.provider,
-      model: nextAiConfig.model,
-      permissions: nextAiConfig.permissions,
-      rag: nextAiConfig.rag,
-      vision: nextAiConfig.vision,
-      imageGeneration: nextAiConfig.imageGeneration,
-      agentic: nextAiConfig.agentic,
-      transcription: nextAiConfig.transcription,
-      diagrams: nextAiConfig.diagrams,
-      handwrittenDrawing: nextAiConfig.handwrittenDrawing,
-    })
-      .then((savedAiConfig) => {
-        if (aiConfigSaveSequence.current !== saveSequence) return;
-        setAiConfig(savedAiConfig);
-        writeLocalAppPreferences({ ai: savedAiConfig });
-        setAppSettingsSaveState("saved");
-        setAppSettingsSaveMessage("Configuración de IA guardada.");
-      })
-      .catch((error) => {
-        if (aiConfigSaveSequence.current === saveSequence) {
-          setAiConfig(previousAiConfig);
-          writeLocalAppPreferences({ ai: previousAiConfig });
-          setAppSettingsSaveState("error");
-          setAppSettingsSaveMessage(getApiErrorMessage(error, "No se pudo guardar la configuración de IA."));
-        }
-        showError(error, "No se pudo guardar la configuración de IA.", { source: "app.aiConfig" });
-      });
+  function handleAiConfigChange(next: AiConfigStatus) {
+    aiConfigRef.current = next;
+    setAiConfig(next);
+    const payload = aiSettingsPayload(next);
+    cacheLocalAppPreferences({ai: payload});
+    void saveSettings("ai", "configuration", () => updateAiConfig(payload), saved => {
+      const acknowledged = {...aiConfigRef.current, ...aiSettingsPayload(saved)};
+      aiConfigRef.current = acknowledged;
+      setAiConfig(acknowledged);
+      cacheLocalAppPreferences({ai: aiSettingsPayload(acknowledged)});
+    });
   }
 
   function handleAiTranscriptionChange(transcription: Partial<AiConfigStatus["transcription"]>) {
@@ -3683,30 +4125,25 @@ export function App() {
   }
 
   async function handleSaveOpenAiKey(apiKey: string) {
+    credentialRevision.current += 1;
+    const status = await saveOpenAiKey(apiKey);
+    const configured = {...aiConfigRef.current, openaiKeyConfigured:status.configured, openaiKeyPreview:status.preview, credentialStorageError:status.storageError, credentialProtection:status.protection};
+    aiConfigRef.current = configured;
+    setAiConfig(configured);
     try {
-      await saveOpenAiKey(apiKey);
       await refreshAiState();
     } catch (error) {
-      showError(error, "No se pudo guardar la clave de OpenAI.", { source: "app.openAiKey" });
+      showError(error, "La clave se ha guardado, pero no se pudo actualizar todo el estado de IA.", { source: "app.openAiKey" });
     }
   }
 
   async function handleDeleteOpenAiKey() {
+    credentialRevision.current += 1;
     try {
       await deleteOpenAiKey();
       await refreshAiState();
     } catch (error) {
       showError(error, "No se pudo eliminar la clave de OpenAI.", { source: "app.openAiKey" });
-    }
-  }
-
-  async function handleRebuildAiIndex() {
-    if (!activeProject) return;
-    try {
-      setAiIndexStatus(await rebuildAiIndex(activeProject.id));
-      await refreshAiState(activeProject.id);
-    } catch (error) {
-      showError(error, "No se pudo reindexar la documentación para IA.", { source: "app.aiIndex" });
     }
   }
 
@@ -3722,16 +4159,6 @@ export function App() {
       });
     } catch (error) {
       showError(error, "No se pudo reindexar las imágenes para IA.", { source: "app.aiImageIndex" });
-    }
-  }
-
-  async function handleDeleteAiIndex() {
-    if (!activeProject) return;
-    try {
-      setAiIndexStatus(await deleteAiIndex(activeProject.id));
-      await refreshAiState(activeProject.id);
-    } catch (error) {
-      showError(error, "No se pudo eliminar el índice de IA.", { source: "app.aiIndex" });
     }
   }
 
@@ -3775,9 +4202,10 @@ export function App() {
   useEffect(() => {
     if (!isTauriRuntime()) return;
     let alive=true;const unlisteners:Array<()=>void>=[];
-    void listenRecordingEvent<{id:string}>("recording-document-created",event=>{setRecordingNotice({id:event.payload.id});if(activeProject)void getProjectTree(activeProject.id).then(nodes=>{if(alive)setTree(nodes);});}).then(unlisten=>{if(alive)unlisteners.push(unlisten);else unlisten();});
+    void listenRecordingEvent<{id:string}>("recording-document-created",event=>{setRecordingNotice({id:event.payload.id});if(alive&&activeProject)void handleReloadProjectTree(activeProject.id);}).then(unlisten=>{if(alive)unlisteners.push(unlisten);else unlisten();});
+    void listenRecordingEvent<{view:string;sessionId?:string;projectId?:string}>("recording-open-workspace",event=>{if(!alive)return;if(event.payload.view === "settings") setAppSettingsOpen(true); else if(event.payload.view==="minutes"&&event.payload.sessionId&&event.payload.projectId){setRecordingPanel(false);setMeetingMinutes({projectId:event.payload.projectId,sessionId:event.payload.sessionId});}else setRecordingPanel(true);}).then(unlisten=>{if(alive)unlisteners.push(unlisten);else unlisten();});
     void listenRecordingEvent("recording-create-project",()=>{setRecordingPanel(false);setCreateProjectOpen(true);}).then(unlisten=>{if(alive)unlisteners.push(unlisten);else unlisten();});
-    void listenRecordingEvent("recording-changed",()=>{if(activeProject)void getProjectTree(activeProject.id).then(nodes=>{if(alive)setTree(nodes);});}).then(unlisten=>{if(alive)unlisteners.push(unlisten);else unlisten();});
+    void listenRecordingEvent("recording-changed",()=>{if(alive&&activeProject)void handleReloadProjectTree(activeProject.id);}).then(unlisten=>{if(alive)unlisteners.push(unlisten);else unlisten();});
     void listenRecordingEvent<{id:string}>("recording-open-document",event=>{void openRecordingDocument(event.payload.id);}).then(unlisten=>{if(alive)unlisteners.push(unlisten);else unlisten();});
     return()=>{alive=false;unlisteners.forEach(f=>f());};
   },[activeProject?.id]);
@@ -3900,15 +4328,29 @@ export function App() {
     }
   }
 
-  async function handleExportDocument(documentId: string, format: ExportFormat) {
+  function handleCaptureDocumentTemplate(documentId: string, snapshot: () => string) {
+    try {
+      const name = documentSessionsRef.current[documentId]?.document?.name ?? findNodeById(tree, documentId)?.name ?? "Documento";
+      setTemplateCapture({ name, markdown: snapshot(),documentId });
+    } catch (error) { showError(error, "No se pudo capturar el documento para la plantilla.", { source: "app.templateCapture" }); }
+  }
+
+  async function handleExportDocument(documentId: string, format: ExportFormat, snapshot?: () => string) {
     const session = documentSessions[documentId];
     const documentName = session?.document?.name ?? findNodeById(tree, documentId)?.name ?? "documento.md";
+    if(exportInFlight.current)return;
+    exportInFlight.current=true;setExportedFileNotice(null);setExportProgress(documentName);
 
     try {
-      const exportMarkdown = await resolveExportMarkdown(documentId, session);
+      const exportMarkdown = snapshot ? snapshot() : await resolveExportMarkdown(documentId, session);
       const diagramAssets = format === "pdf" || format === "docx"
         ? await prepareMermaidDiagramAssets(exportMarkdown, exportTemplateConfig.document.diagramResolution)
         : [];
+      if(isTauriMobileRuntime()) {
+        const result=await exportMarkdownToMobile(documentId,{format,markdown:exportMarkdown,diagramAssets});
+        if(result.status==="saved")setExportedFileNotice({exportId:result.exportId,fileName:result.fileName});
+        return;
+      }
       if (!isTauriRuntime()) {
         const exportTarget = await selectBrowserExportTarget(documentName, format);
         if (!exportTarget) return;
@@ -3942,15 +4384,22 @@ export function App() {
       });
     } catch (error) {
       showError(error, "No se pudo exportar el documento.", { source: "app.documentExport" });
-    }
+    } finally {exportInFlight.current=false;setExportProgress(null);}
   }
 
   async function handleExportHandwrittenNote(noteId: string, format: HandwrittenExportFormat, pageId?: string) {
     const session = handwrittenSessions[noteId];
     const noteName = session?.note?.name ?? findNodeById(tree, noteId)?.name ?? "nota-a-mano.knote";
     const content = session?.content ?? null;
+    if(exportInFlight.current)return;
+    exportInFlight.current=true;setExportedFileNotice(null);setExportProgress(noteName);
 
     try {
+      if(isTauriMobileRuntime()) {
+        const result=await exportHandwrittenToMobile(noteId,{format,pageId:format==="png"||format==="svg"?pageId??content?.pages[0]?.id??null:null,content});
+        if(result.status==="saved")setExportedFileNotice({exportId:result.exportId,fileName:result.fileName});
+        return;
+      }
       if (!isTauriRuntime()) {
         const exportTarget = await selectBrowserHandwrittenExportTarget(noteName, format);
         if (!exportTarget) return;
@@ -3975,7 +4424,7 @@ export function App() {
       setNotice({ title: "Nota exportada", message: response.outputPath, tone: "info" });
     } catch (error) {
       showError(error, "No se pudo exportar la nota a mano.", { source: "app.handwrittenExport" });
-    }
+    } finally {exportInFlight.current=false;setExportProgress(null);}
   }
 
   async function resolveExportMarkdown(documentId: string, session: DocumentSession | undefined) {
@@ -3985,34 +4434,18 @@ export function App() {
   }
 
   async function handleDeleteNode(node: DocumentTreeNode) {
-    if (!activeProject) return;
-    let message = node.type === "folder"
-      ? `Se eliminará la carpeta "${node.name}" y su contenido del disco. Esta acción no se puede deshacer.`
-      : node.type === "image"
-        ? `Se eliminará la imagen "${node.name}" del disco. Esta acción no se puede deshacer.`
-        : node.type === "handwritten-note"
-          ? `Se eliminará la nota a mano "${node.name}" del disco. Esta acción no se puede deshacer.`
-        : node.type === "attachment"
-          ? `Se eliminará el archivo "${node.name}" del disco. Esta acción no se puede deshacer.`
-          : `Se eliminará el documento "${node.name}" del disco. Esta acción no se puede deshacer.`;
-    if (node.type === "image") {
-      try {
-        const usage = await getProjectImageUsage(activeProject.id, node.id);
-        if (usage.references.length > 0) {
-          message = `${message}\n\nEsta imagen esta enlazada en ${usage.references.length} documento(s). Si la eliminas, esas referencias quedaran rotas.`;
-        }
-      } catch {
-        message = `${message}\n\nNo se pudo comprobar si otros documentos la enlazan.`;
-      }
-    }
-    if (!window.confirm(message)) return;
-
+    if(!activeProject)return;
+    const projectId=activeProject.id,epoch=aiWorkspaceEpoch.current.value;
+    const stillHere=()=>activeAiProjectRef.current===projectId&&aiWorkspaceEpoch.current.value===epoch;
     try {
-      const result = await deleteTreeNode(activeProject.id, node.id);
-      applyFileOperationResult(result, node);
-    } catch (error) {
-      showError(error, "No se pudo eliminar el elemento.");
-    }
+      if(!await flushPendingDrafts()||!stillHere())return;
+      const links=await getAssetLinks(projectId,node.id);
+      if(!stillHere())return;
+      const accepted=await assetMoveReview.request({operation:"delete",name:node.name,path:node.path??node.name,incoming:links.incoming.length,outgoing:links.outgoing.length,complete:links.complete,warnings:links.warnings});
+      if(!accepted||!stillHere())return;
+      const result=await deleteTreeNode(projectId,node.id);
+      if(stillHere())applyFileOperationResult(result,node);
+    }catch(error){if(stillHere())showError(error,"No se pudo enviar el elemento a la papelera.");}
   }
 
   async function handleDuplicateDocument(node: DocumentTreeNode) {
@@ -4031,6 +4464,18 @@ export function App() {
     }
   }
 
+  async function beforeFileBatchExecute(){
+    const batch=fileBatchRef.current;if(!batch||!await flushPendingDrafts())return false;
+    const stillHere=()=>fileBatchRef.current===batch&&activeAiProjectRef.current===batch.projectId&&aiWorkspaceEpoch.current.value===batch.workspaceEpoch;
+    if(!stillHere())return false;if(batch.action!=="move"&&batch.action!=="trash"&&batch.action!=="rename")return true;
+    const catalog=await getAssetCatalog(batch.projectId);if(!stillHere())return false;
+    const paths=batch.nodeIds.map(id=>id.slice(batch.projectId.length+2));
+    const selected=catalog.items.filter(item=>paths.some(path=>item.target.path===path||item.target.path.startsWith(path+"/")));
+    const incoming=selected.reduce((n,item)=>n+item.incomingCount,0),outgoing=selected.reduce((n,item)=>n+item.outgoingCount,0);
+    if(incoming||outgoing||!catalog.complete){const accepted=await assetMoveReview.request({operation:batch.action==="trash"?"delete":batch.action,name:"Selección",path:batch.nodeIds.length+" elementos seleccionados",incoming,outgoing,complete:catalog.complete,warnings:catalog.warnings});if(!accepted)return false;}
+    return stillHere();
+  }
+
   async function handleMoveNode(targetFolderId: string | null) {
     if (!activeProject || !moveNode) return;
     const moved = await moveTreeNodeToFolder(moveNode, targetFolderId);
@@ -4043,33 +4488,28 @@ export function App() {
 
   async function moveTreeNodeToFolder(node: DocumentTreeNode, targetFolderId: string | null) {
     if (!activeProject) return false;
+    const projectId=activeProject.id,epoch=aiWorkspaceEpoch.current.value;
+    const stillHere=()=>activeAiProjectRef.current===projectId&&aiWorkspaceEpoch.current.value===epoch;
     try {
-      if (node.type === "document") {
-        const impact = await getDocumentMoveImpact(activeProject.id, node.id);
-        if (impact.references.length > 0) {
-          const shared = impact.sharedAssetPaths.length > 0 ? ` ${impact.sharedAssetPaths.length} imagen(es) tambien se usan en otros documentos.` : "";
-          const proceed = window.confirm(`${impact.message}${shared}\n\nKnowNext.ai actualizará las referencias relativas para mantener las imágenes enlazadas.`);
-          if (!proceed) return false;
-        }
+      if(!await flushPendingDrafts()||!stillHere())return false;
+      const links=await getAssetLinks(projectId,node.id);
+      if(!stillHere())return false;
+      if(links.incoming.length||links.outgoing.length||!links.complete){
+        if(!await assetMoveReview.request({name:node.name,path:node.path??node.name,incoming:links.incoming.length,outgoing:links.outgoing.length,complete:links.complete,warnings:links.warnings}))return false;
       }
-      if (node.type === "image") {
-        const usage = await getProjectImageUsage(activeProject.id, node.id);
-        if (usage.references.length > 0) {
-          const proceed = window.confirm(`La imagen "${node.name}" esta enlazada en ${usage.references.length} documento(s).\n\nKnowNext.ai actualizara esas referencias para que sigan apuntando a la imagen movida.`);
-          if (!proceed) return false;
-        }
-      }
-      const result = await moveTreeNode(activeProject.id, node.id, targetFolderId);
+      if(!stillHere())return false;
+      const result = await moveTreeNode(projectId, node.id, targetFolderId);
+      if(!stillHere())return false;
       applyFileOperationResult(result, node);
-      const targetFolder = targetFolderId ? findNodeById(result.tree, targetFolderId) : null;
+      const targetFolder = targetFolderId ? findNodeById(result.treeAvailable===false?tree:result.tree,targetFolderId) : null;
       setNotice({
         title: "Elemento movido",
-        message: targetFolder ? `"${node.name}" se movió a "${targetFolder.name}".` : `"${node.name}" se movió a la raíz del proyecto.`,
+        message: targetFolderId ? targetFolder ? `"${node.name}" se movió a "${targetFolder.name}".` : `"${node.name}" se movió a la carpeta elegida.` : `"${node.name}" se movió a la raíz del proyecto.`,
         tone: "info",
       });
       return true;
     } catch (error) {
-      showError(error, "No se pudo mover el elemento.");
+      if(stillHere())showError(error, "No se pudo mover el elemento.");
       return false;
     }
   }
@@ -4100,15 +4540,21 @@ export function App() {
   }
 
   async function promptImportImage(parentId: string | null) {
+    if (!activeProject) return;
+    const project=activeProject; const epoch=aiWorkspaceEpoch.current.value;
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "image/png,image/jpeg,image/webp,image/gif";
     input.onchange = async () => {
       const file = input.files?.[0];
-      if (!file || !activeProject) return;
+      if (!file) return;
+      if(activeAiProjectRef.current!==project.id || aiWorkspaceEpoch.current.value!==epoch){
+        setNotice({title:"Destino de importación cambiado",message:"El proyecto cambió mientras elegías el archivo. Vuelve a importar desde el proyecto de destino.",tone:"info"});return;
+      }
       try {
-        const result = await importProjectImage(activeProject.id, parentId, file);
-        setProjectTree(activeProject.id, result.tree);
+        const result = await importProjectImage(project.id, parentId, file);
+        if (!acceptImportResult(result,project,epoch)) return;
+        if(result.importReceipt?.treeAvailable!==false)setProjectTree(project.id, result.tree);
         handleOpenImage(result.asset.id, result.asset.name, result.asset.path);
       } catch (error) {
         showError(error, "No se pudo importar la imagen.");
@@ -4118,22 +4564,29 @@ export function App() {
   }
 
   async function promptImportProjectFile(parentId: string | null = null) {
+    if (!activeProject) return;
+    const project=activeProject; const epoch=aiWorkspaceEpoch.current.value;
     const input = document.createElement("input");
     input.type = "file";
     input.onchange = async () => {
       const file = input.files?.[0];
-      if (!file || !activeProject) return;
+      if (!file) return;
+      if(activeAiProjectRef.current!==project.id || aiWorkspaceEpoch.current.value!==epoch){
+        setNotice({title:"Destino de importación cambiado",message:"El proyecto cambió mientras elegías el archivo. Vuelve a importar desde el proyecto de destino.",tone:"info"});return;
+      }
       const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
 
       try {
         if (["png", "jpg", "jpeg", "webp", "gif"].includes(extension)) {
-          const result = await importProjectImage(activeProject.id, parentId, file);
-          setProjectTree(activeProject.id, result.tree);
+          const result = await importProjectImage(project.id, parentId, file);
+          if (!acceptImportResult(result,project,epoch)) return;
+          if(result.importReceipt?.treeAvailable!==false)setProjectTree(project.id, result.tree);
           handleOpenImage(result.asset.id, result.asset.name, result.asset.path);
           return;
         }
 
-        const result = await importProjectAttachment(activeProject.id, parentId, file);
+        const result = await importProjectAttachment(project.id, parentId, file);
+        if (!acceptImportResult(result,project,epoch)) return;
         applyFileOperationResult(result);
         if (result.node?.type === "document") {
           openOrReplaceTab(result.node.id, result.node.name);
@@ -4144,7 +4597,7 @@ export function App() {
           const importedPath = result.node.path ?? result.node.name;
           if (isReferenceDocumentPath(importedPath)) {
             handleOpenReferenceDocument(result.node.id, result.node.name, importedPath);
-          } else {
+          } else if(!result.warnings?.length) {
             setNotice({
               title: "Archivo importado",
               message: "Se gestionará en el proyecto sin abrir un visualizador interno.",
@@ -4161,73 +4614,113 @@ export function App() {
 
   async function handleImportProjectImage(parentId: string | null, file: File): Promise<AssetImportResponse> {
     if (!activeProject) throw new Error("No active project");
-    const result = await importProjectImage(activeProject.id, parentId, file);
-    setProjectTree(activeProject.id, result.tree);
+    const project=activeProject;const epoch=aiWorkspaceEpoch.current.value;
+    const result = await importProjectImage(project.id, parentId, file);
+    if(activeAiProjectRef.current===project.id&&aiWorkspaceEpoch.current.value===epoch){if(result.importReceipt?.treeAvailable!==false)setProjectTree(project.id,result.tree);else markProjectTreeIssue(project.id,"Imagen importada; no se pudo actualizar su estructura. Consulta la vista sin repetir la importación.");}
     return result;
   }
 
+  function acceptImportResult(result:AssetImportResponse|FileOperationResult,project:Project,epoch:number) {
+    if(activeAiProjectRef.current!==project.id||aiWorkspaceEpoch.current.value!==epoch){
+      setNotice({title:"Archivo importado",message:`Se ha guardado en ${project.name}: ${result.importReceipt?.path ?? "biblioteca del proyecto"}. Puedes consultarlo al volver a ese proyecto.`,tone:"info"});
+      return false;
+    }
+    if(result.importReceipt?.treeAvailable===false)markProjectTreeIssue(project.id,"Archivo importado; no se pudo actualizar su estructura. Consulta la vista sin repetir la importación.");
+    if(result.warnings?.length)setNotice({title:"Archivo importado",message:result.warnings.join("\n"),tone:"info"});
+    return true;
+  }
+
+  function captureImageInsertionInput(documentId:string){
+    const reader=liveEditorSnapshots.current.get(documentId),session=documentSessionsRef.current[documentId];
+    if(reader&&session?.document&&!reader.matchesMarkdown(session.markdown)){
+      const markdown=reader.getMarkdownSnapshot();if(markdown!==session.markdown)handleMarkdownChange(documentId,markdown);
+    }
+  }
+
+  function captureImageInsertion(documentId:string):ImageInsertionTarget {
+    if(activeAiProjectRef.current!==activeProject?.id||activeWorkspaceTabIdRef.current!==documentId)throw new Error("Abre el documento donde quieres insertar la imagen.");
+    captureImageInsertionInput(documentId);
+    const session=documentSessionsRef.current[documentId];
+    if(!activeProject||!session)throw new Error("Abre el documento donde quieres insertar la imagen.");
+    const target={projectId:activeProject.id,projectEpoch:aiWorkspaceEpoch.current.value,documentId,session:{...session}};
+    currentImageInsertionSession(target);return target;
+  }
+
+  function currentImageInsertionSession(target:ImageInsertionTarget):DocumentSession {
+    if(activeAiProjectRef.current===target.projectId&&aiWorkspaceEpoch.current.value===target.projectEpoch&&activeWorkspaceTabIdRef.current===target.documentId)captureImageInsertionInput(target.documentId);
+    if(!imageInsertionTargetIsCurrent(target,{projectId:activeAiProjectRef.current,projectEpoch:aiWorkspaceEpoch.current.value,activeDocumentId:activeWorkspaceTabIdRef.current,sessions:documentSessionsRef.current}))
+      throw new Error("El documento o la sesión ha cambiado. Se conserva la edición actual; revisa la imagen y vuelve a insertarla en el documento que quieras.");
+    return documentSessionsRef.current[target.documentId];
+  }
+
   async function handleBuildImageReference(documentId: string, assetId: string, altText?: string | null): Promise<InsertImageReferenceResponse> {
-    if (!activeProject) throw new Error("No active project");
-    return buildImageReference(activeProject.id, documentId, assetId, altText);
+    const target=captureImageInsertion(documentId);
+    const response=await buildImageReference(target.projectId,documentId,assetId,altText);
+    currentImageInsertionSession(target);return response;
   }
 
   async function handleBuildHandwrittenImageReference(documentId: string, noteId: string, altText?: string | null): Promise<HandwrittenNoteInsertMarkdownResponse> {
-    if (!activeProject) throw new Error("No active project");
-    const session = handwrittenSessions[noteId];
-    const loadedNote = session?.content ? null : await getHandwrittenNote(noteId);
-    const content = session?.content ?? loadedNote?.content ?? null;
-    const name = session?.note?.name ?? loadedNote?.name ?? findNodeById(tree, noteId)?.name ?? "Nota manuscrita.knote";
-    const pageId = content?.pages[0]?.id ?? "page-1";
-    const response = await insertHandwrittenPageIntoMarkdown(noteId, {
-      documentId,
-      pageId,
-      altText: altText || name.replace(/\.knote$/i, "") || "Nota manuscrita",
-      content: session?.content ?? null,
-    });
-    setProjectTree(activeProject.id, await getProjectTree(activeProject.id));
-    return response;
+    const target=captureImageInsertion(documentId);
+    const session=handwrittenSessionsRef.current[noteId];
+    const loadedNote=session?.content?null:await getHandwrittenNote(noteId);
+    currentImageInsertionSession(target);
+    const content=session?.content??loadedNote?.content??null;
+    const name=session?.note?.name??loadedNote?.name??findNodeById(tree,noteId)?.name??"Nota manuscrita.knote";
+    const response=await insertHandwrittenPageIntoMarkdown(noteId,{documentId,pageId:content?.pages[0]?.id??"page-1",altText:altText||name.replace(/\.knote$/i,"")||"Nota manuscrita",content:session?.content??null});
+    currentImageInsertionSession(target);
+    await handleReloadProjectTree(target.projectId);
+    currentImageInsertionSession(target);return response;
+  }
+
+  function applyImageInsertion(target:ImageInsertionTarget,markdown:string){
+    currentImageInsertionSession(target);
+    const controller=liveEditorSnapshots.current.get(target.documentId);
+    if(!controller||!controller.appendMarkdown||!controller.appendMarkdown(markdown,{addToHistory:true}))throw new Error("No se pudo insertar la imagen en el editor. El texto y los recursos se conservan; vuelve a intentarlo cuando termine la edición.");
+    let current:string;try{current=controller.getMarkdownSnapshot();}catch{throw new Error("La imagen está en el editor, pero no se pudo confirmar su texto. Revisa el documento antes de volver a insertarla.");}
+    handleMarkdownChange(target.documentId,current);
   }
 
   async function insertImageIntoActiveDocument(assetId: string) {
-    if (!activeProject || !activeDocumentId) return;
+    if(!activeProject||!activeDocumentId)return;
+    const projectId=activeProject.id,epoch=aiWorkspaceEpoch.current.value,documentId=activeDocumentId;
+    if(imageInsertionWork.current.has(documentId))return;imageInsertionWork.current.add(documentId);
     try {
-      const reference = await buildImageReference(activeProject.id, activeDocumentId, assetId, null);
-      const session = documentSessions[activeDocumentId];
-      if (!session) return;
-      const nextMarkdown = `${session.markdown.trimEnd()}\n\n${reference.markdown}\n`;
-      handleMarkdownChange(activeDocumentId, nextMarkdown);
-      setNotice({ title: "Imagen insertada", message: reference.asset.name, tone: "info" });
-    } catch (error) {
-      showError(error, "No se pudo insertar la imagen.");
-    }
+      const target=captureImageInsertion(documentId);
+      const reference=await handleBuildImageReference(documentId,assetId,null);
+      applyImageInsertion(target,reference.markdown);
+      setNotice({title:"Imagen insertada",message:reference.asset.name,tone:"info"});
+    }catch(error){if(activeAiProjectRef.current===projectId&&aiWorkspaceEpoch.current.value===epoch)showError(error,"No se pudo insertar la imagen.");}
+    finally{imageInsertionWork.current.delete(documentId);}
   }
 
   async function insertHandwrittenNoteIntoActiveDocument(note: DocumentTreeNode) {
-    if (!activeProject || !activeDocumentId) {
-      setNotice({ title: "Abre un documento", message: "Necesitas un documento Markdown activo para insertar la nota manuscrita.", tone: "info" });
-      return;
-    }
+    if(!activeProject||!activeDocumentId){setNotice({title:"Abre un documento",message:"Necesitas un documento Markdown activo para insertar la nota manuscrita.",tone:"info"});return;}
+    const projectId=activeProject.id,epoch=aiWorkspaceEpoch.current.value,documentId=activeDocumentId;
+    if(imageInsertionWork.current.has(documentId))return;imageInsertionWork.current.add(documentId);
     try {
-      const response = await handleBuildHandwrittenImageReference(activeDocumentId, note.id, note.name.replace(/\.knote$/i, ""));
-      const documentSession = documentSessions[activeDocumentId];
-      if (!documentSession) return;
-      const nextMarkdown = `${documentSession.markdown.trimEnd()}\n\n${response.markdown}\n`;
-      handleMarkdownChange(activeDocumentId, nextMarkdown);
-      setNotice({ title: "Imagen insertada", message: response.asset.name, tone: "info" });
-    } catch (error) {
-      showError(error, "No se pudo insertar la nota manuscrita.");
-    }
+      const target=captureImageInsertion(documentId);
+      const response=await handleBuildHandwrittenImageReference(documentId,note.id,note.name.replace(/\.knote$/i,""));
+      applyImageInsertion(target,response.markdown);
+      setNotice({title:"Imagen insertada",message:response.asset.name,tone:"info"});
+    }catch(error){if(activeAiProjectRef.current===projectId&&aiWorkspaceEpoch.current.value===epoch)showError(error,"No se pudo insertar la nota manuscrita.");}
+    finally{imageInsertionWork.current.delete(documentId);}
   }
 
-  function applyFileOperationResult(result: FileOperationResult, sourceNode?: DocumentTreeNode | null) {
-    if (activeProject) {
+  function applyFileOperationResult(result: FileOperationResult, sourceNode?: DocumentTreeNode | null, additionalOpenPaths: string[] = []) {
+    if((result.treeAvailable===false||result.importReceipt?.treeAvailable===false)&&activeProject)markProjectTreeIssue(activeProject.id,result.treeWarning||"Los cambios están aplicados; no se pudo cargar su estructura. Actualiza la vista sin repetir la operación.");
+    if (result.warnings?.length) setNotice({treeProjectId:result.treeAvailable===false&&result.treeWarning&&result.warnings.every(message=>message===result.treeWarning)?activeProject?.id:undefined,title:result.treeAvailable===false?"Operación completada; vista pendiente":result.importReceipt?"Archivo importado; revisa el resultado":"Archivos trasladados; revisión pendiente",message:result.warnings.join("\n"),tone:"info"});
+    for (const affected of result.affectedDocuments) {
+      documentLoads.current.delete(affected.oldId);
+      handwrittenLoads.current.delete(affected.oldId);
+    }
+    if (activeProject && result.treeAvailable!==false && result.importReceipt?.treeAvailable!==false) {
       setProjectTree(activeProject.id, result.tree, {
         additionalOpenPaths: sourceNode?.type === "folder" && sourceNode.open && result.node?.type === "folder" && result.node.path
           ? [result.node.path]
-          : [],
+          : additionalOpenPaths,
       });
       void refreshProjectSyncStatus(activeProject.id, { autoRun: isAutomaticSyncMode(activeProject.syncMode), silent: true });
-    } else {
+    } else if(!activeProject && result.treeAvailable!==false && result.importReceipt?.treeAvailable!==false) {
       setTree(result.tree);
     }
 
@@ -4349,57 +4842,10 @@ export function App() {
       return nextTabs;
     });
 
-    setDocumentSessions((currentSessions) => {
-      let nextSessions = { ...currentSessions };
-      for (const affectedDocument of result.affectedDocuments) {
-        const currentSession = nextSessions[affectedDocument.oldId];
-        if (!currentSession) continue;
-
-        delete nextSessions[affectedDocument.oldId];
-        if (affectedDocument.newId) {
-          nextSessions[affectedDocument.newId] = {
-            ...currentSession,
-            document: currentSession.document
-              ? {
-                ...currentSession.document,
-                id: affectedDocument.newId,
-                name: affectedDocument.name ?? currentSession.document.name,
-                path: affectedDocument.path ?? currentSession.document.path,
-              }
-              : currentSession.document,
-            loadVersion: currentSession.loadVersion + 1,
-          };
-        }
-      }
-      return nextSessions;
-    });
-
-    setHandwrittenSessions((currentSessions) => {
-      let nextSessions = { ...currentSessions };
-      for (const affectedDocument of result.affectedDocuments) {
-        const currentSession = nextSessions[affectedDocument.oldId];
-        if (!currentSession) continue;
-
-        delete nextSessions[affectedDocument.oldId];
-        if (affectedDocument.newId) {
-          nextSessions[affectedDocument.newId] = {
-            ...currentSession,
-            note: currentSession.note
-              ? {
-                ...currentSession.note,
-                id: affectedDocument.newId,
-                name: affectedDocument.name ?? currentSession.note.name,
-                path: affectedDocument.path ?? currentSession.note.path,
-              }
-              : currentSession.note,
-            content: currentSession.content ? { ...currentSession.content, id: affectedDocument.newId } : currentSession.content,
-            savedContent: currentSession.savedContent ? { ...currentSession.savedContent, id: affectedDocument.newId } : currentSession.savedContent,
-            loadVersion: currentSession.loadVersion + 1,
-          };
-        }
-      }
-      return nextSessions;
-    });
+    documentSessionsRef.current = applyDocumentFileChanges(documentSessionsRef.current,result.affectedDocuments);
+    handwrittenSessionsRef.current = applyHandwrittenFileChanges(handwrittenSessionsRef.current,result.affectedDocuments);
+    setDocumentSessions(current=>applyDocumentFileChanges(current,result.affectedDocuments));
+    setHandwrittenSessions(current=>applyHandwrittenFileChanges(current,result.affectedDocuments));
 
     const activeChange = result.affectedDocuments.find((affectedDocument) => affectedDocument.oldId === activeDocumentId);
     if (activeChange?.newId) {
@@ -4432,9 +4878,78 @@ export function App() {
 
   const historyEnabled = Boolean(activeProject && versioningStatus?.enabled);
 
+  const settingsSurface = (<AppSettingsDialog
+        privacyProject={activeProject?{id:activeProject.id,name:activeProject.name}:null}
+        onBeforeProjectBackup={async projectId=>{
+          const epoch=aiWorkspaceEpoch.current.value;
+          if(activeAiProjectRef.current!==projectId||!await checkpointOpenWork())throw Error("Protege los cambios pendientes antes de preparar la copia.");
+          if(activeAiProjectRef.current!==projectId||aiWorkspaceEpoch.current.value!==epoch)throw Error("El espacio de trabajo ha cambiado. Revisa el proyecto antes de preparar la copia.");
+        }}
+        onProjectBackupRestorePrepared={(projectId,transferId)=>{
+          if(activeAiProjectRef.current!==projectId)return;
+          setAppSettingsOpen(false);
+          setExpectedBackupTransferId(transferId);
+          setProjectTransferMode({kind:"import"});
+        }}
+        onSecurityChanged={async()=>{credentialRevision.current++;githubAuthEpochRef.current++;setGithubDevice(null);setGithubLoginState("idle");setAuthStatus(await getAuthStatus());await refreshAiState();}}
+        onBeforeChange={beforeCriticalStateChange}
+        onSettled={afterCriticalStateChange}
+        presentation="workspace"
+        section={settingsInitialSection}
+        onSectionChange={setSettingsInitialSection}
+        initialSection={settingsInitialSection}
+        navigationWidth={layoutConfig.sidebarWidth}
+        onOpenRecordings={() => {setRecordingDestination(null);setRecordingPanel(true);}}
+        open={appSettingsOpen}
+        appearance={appearanceConfig}
+        diagnostics={diagnosticsConfig}
+        exportTemplate={exportTemplateConfig}
+        exportTemplatePath={exportTemplatePath}
+        ai={aiConfig}
+        aiIndexStatus={aiIndexStatus}
+        traceLogStatus={traceLogStatus}
+        runtimeServicesStatus={runtimeServicesStatus}
+        runtimeServicesRefreshing={runtimeServicesRefreshing}
+        exportResetting={exportResetting}
+        saveFailures={Object.entries(settingsPersistence.states).flatMap(([id, state]) => state.phase === "error" ? [{id: id as SettingsDomain, label: ({app: appearanceConfig.language === "en" ? "Application preferences" : "Preferencias de la aplicación", ai: appearanceConfig.language === "en" ? "AI preferences" : "Preferencias de IA", export: appearanceConfig.language === "en" ? "Export styles" : "Estilos de exportación"})[id as SettingsDomain], message: state.message ?? "No se pudieron guardar estos ajustes."}] : [])}
+        onRetrySave={domain => void settingsPersistence.retry(domain)}
+        saveState={appSettingsSaveState}
+        saveMessage={appSettingsSaveMessage}
+        configPersistenceAvailable={configPersistenceAvailable}
+        onClose={() => setAppSettingsOpen(false)}
+        onAppearanceChange={handleAppearanceConfigChange}
+        onDiagnosticsChange={handleDiagnosticsConfigChange}
+        onExportTemplateChange={handleExportTemplateChange}
+        onResetExportTemplate={() => void handleResetExportTemplate()}
+        onAiChange={handleAiConfigChange}
+        onSaveOpenAiKey={handleSaveOpenAiKey}
+        onDeleteOpenAiKey={() => void handleDeleteOpenAiKey()}
+        aiIndexBusy={aiIndexMaintenance.busy}
+        aiIndexError={aiIndexMaintenance.error}
+        onRefreshAiIndex={() => void aiIndexMaintenance.refresh()}
+        onRebuildAiIndex={() => void aiIndexMaintenance.rebuild()}
+        onReindexImages={() => void handleReindexProjectImages()}
+        onDeleteAiIndex={() => void aiIndexMaintenance.clear()}
+        onOpenTraceLogFolder={() => void handleOpenTraceLogFolder()}
+        onRefreshRuntimeServices={() => void refreshRuntimeServiceStatus()}
+      />);
+
   return (
     <>
       <DesktopLayout
+        continuityNotice={<><WorkspaceContinuityNotice state={workspaceContinuity.state} onRetry={workspaceContinuity.retry}/><LocalOperationsNotice/></>}
+        applyingAiEditProposalId={applyingAiEditProposalId}
+        canApplyEditorOperation={operation => !operation.aiProposalId || (aiProposalExecution.current.mayApply(operation.id) && aiProposalRequests.current.has(operation.aiProposalId) && aiConfigRef.current.permissions.editDocuments && aiTrackedOperationEpochs.current.get(operation.id)?.epoch===aiWorkspaceEpoch.current.value && aiTrackedOperationEpochs.current.get(operation.id)?.projectId===activeAiProjectRef.current)}
+        aiResultReview={{ count: aiResultReview.entries.length, hasError: Boolean(aiResultReview.error || aiResultReview.warnings.length || aiResultReview.entries.some(entry => entry.error)), onOpen: () => setAiResultReviewOpen(true) }}
+        settingsWorkspace={{
+          open: appSettingsOpen,
+          content: settingsSurface,
+          navigation: actions => <SettingsNavigation language={appearanceConfig.language} section={settingsInitialSection} onSelectSection={setSettingsInitialSection} {...actions}/>,
+          context: <SettingsContext section={settingsInitialSection} language={appearanceConfig.language} projectName={activeProject?.name}/>,
+          onClose: () => setAppSettingsOpen(false),
+        }}
+        onOpenTrash={() => setTrashOpen(true)}
+        appearance={appearanceConfig}
         appVersion={APP_VERSION}
         appLanguage={appearanceConfig.language}
         markdownExtendedUnderlineEnabled={appearanceConfig.markdownExtendedUnderlineEnabled}
@@ -4458,6 +4973,9 @@ export function App() {
         aiResearchJobs={aiResearchJobs}
         aiContextSources={visibleAiContextSources}
         tree={tree}
+        treeReadIssue={treeReadIssue?.projectId===activeProject?.id?treeReadIssue?.message:null}
+        treeReadBusy={treeReadBusy}
+        onReloadProjectTree={()=>void handleReloadProjectTree()}
         tabs={workspaceTabs}
         activeTabId={activeTabId}
         activeDocumentId={activeDocumentId}
@@ -4465,11 +4983,16 @@ export function App() {
         activeImageId={activeImageId}
         activeHandwrittenNoteId={activeHandwrittenNoteId}
         editorSessions={editorSessions}
+        onOpenRecordings={()=>{setRecordingDestination(null);setRecordingPanel(true);}}
+        onRetryDocumentLoad={id=>{void loadDocumentSession(id, true);}}
+        onRetryHandwrittenLoad={id=>{void(async()=>{if(await flushPendingDrafts())await loadHandwrittenNoteSession(id,true);})();}}
+        activeHandwrittenLoadError={activeHandwrittenSession?.loadError}
         notesMarkdown={notesMarkdown}
         notesUpdatedAt={notesUpdatedAt}
         notesEditorKey={`${NOTES_WORKSPACE_TAB_ID}-${notesLoadVersion}`}
         notesLoaded={notesLoaded}
         notesSaveState={notesSaveState}
+        notesDirty={notesMarkdown!==notesSavedMarkdown}
         releaseNotesMarkdown={RELEASE_NOTES_MARKDOWN}
         activeDocument={activeSession?.document ?? null}
         activeMarkdown={activeSession?.markdown ?? ""}
@@ -4478,14 +5001,27 @@ export function App() {
         handwrittenToolPresets={handwrittenConfig.toolPresets}
         handwrittenEraserConfig={handwrittenConfig.eraser}
         activeHandwrittenDirty={activeHandwrittenSession?.isDirty ?? false}
+        activeHandwrittenLoading={!activeHandwrittenSession||activeHandwrittenSession.isLoading}
         activeHandwrittenSaveState={activeHandwrittenSession?.saveState ?? "idle"}
+        activeHandwrittenConflictStatus={activeHandwrittenSession?.conflictStatus}
+        activeHandwrittenDiskChanged={activeHandwrittenSession?.diskChanged}
+        onKeepHandwrittenVersion={()=>void handleSaveHandwrittenNote(activeHandwrittenNoteId, true)}
+        onLoadHandwrittenDiskVersion={()=>void handleLoadHandwrittenDiskVersion()}
+        onMergeHandwrittenDiskVersion={()=>void requestHandwrittenMerge()}
+        onRecoverHandwrittenCopy={()=>{void(async()=>{if(!await flushPendingDrafts())return;const session=handwrittenSessionsRef.current[activeHandwrittenNoteId];if(session&&await persistHandwrittenDraft(activeHandwrittenNoteId,session,true)&&await flushPendingDrafts()){setRecoverableDraftsOpen(true);void refreshOrphanDrafts();}})();}}
         activeDocumentDirty={activeSession?.isDirty ?? false}
+        activeDocumentLoading={!activeSession||activeSession.isLoading}
+        activeDocumentLoadError={activeSession?.loadError}
         activeDocumentSyncStatus={activeDocumentSyncStatus}
         activeDocumentPostSaveSyncState={documentPostSaveSyncStates[activeDocumentId]?.state ?? "idle"}
         activeDocumentPendingSaveHint={activeDocumentPendingSaveHint}
         pendingEditorOperations={pendingEditorOperations}
         activeDocumentConflictStatus={activeSession?.conflictStatus ?? "none"}
         activeDocumentHasRecoveredDraft={activeSession?.hasRecoveredDraft ?? false}
+        activeDraftWriteConflict={Boolean(activeSession?.draftWriteConflict)}
+        activeHandwrittenDraftWriteConflict={Boolean(activeHandwrittenSession?.draftWriteConflict)}
+        draftReviewBusy={draftReviewBusy}
+        onReviewChangedDraft={(id,ink)=>void reviewChangedDraft(id,ink)}
         activeDocumentDiskChanged={activeSession?.diskChanged ?? false}
         dirtyDocumentIds={dirtyDocumentIds}
         orphanDraftCount={orphanDrafts.length}
@@ -4509,10 +5045,19 @@ export function App() {
         layoutConfig={layoutConfig}
         onSelectProject={handleSelectProject}
         onCreateProject={() => setCreateProjectOpen(true)}
+        onImportProjectPackage={() => setProjectTransferMode({ kind: "import" })}
+        stateTransitionAuthority={{onBeforeChange:beforeCriticalStateChange,onSettled:afterCriticalStateChange}}
+        onOpenAiChangeHistory={()=>setAiChangeHistoryOpen(true)}
+        onOpenAssetCatalog={()=>setAssetCatalogOpen(true)}
+        onOpenProjectReplace={()=>setProjectReplaceOpen(true)}
+        onExportProjectPackage={() => { if (activeProject) setProjectTransferMode({ kind: "export", projectId: activeProject.id, projectName: activeProject.name }); }}
+        onRetiredProjects={returnFocus=>{retiredProjectsFocus.current=returnFocus;setRetiredProjectsOpen(true);}}
+        onRegisterEditorSnapshot={registerLiveEditor}
         onConfigureProject={() => {
           if (activeProject) setEditProjectOpen(true);
         }}
-        onOpenAppSettings={() => setAppSettingsOpen(true)}
+        onOpenLocalReference={handleOpenLocalReference}
+        onOpenAppSettings={(section) => { setSettingsInitialSection(section ?? "summary"); setAppSettingsOpen(true); }}
         onCreateFolder={(parentId) => void handleCreateFolder(parentId)}
         onImportProjectFile={(parentId) => void promptImportProjectFile(parentId)}
         onRenameNode={handleRenameNode}
@@ -4540,7 +5085,6 @@ export function App() {
         onLogout={() => void handleLogoutGithub()}
         onPullProject={() => void handlePullProject()}
         onPushProject={() => void handlePushProject()}
-        onResolveProjectGithubConflict={(resolution) => void handleResolveProjectGithubConflict(resolution)}
         onOpenProjectGithub={() => void handleOpenProjectGithub()}
         onOpenExternalChanges={() => {
           setExternalChangesOpen(true);
@@ -4548,6 +5092,10 @@ export function App() {
         }}
         onCloseExternalChanges={() => setExternalChangesOpen(false)}
         onRefreshExternalChanges={() => void handleRefreshProtectionState(activeProject?.id)}
+        beforeMixedApplication={async()=>{if(!activeProject||activeAiProjectRef.current!==activeProject.id||!await checkpointOpenWork())return false;return activeAiProjectRef.current===activeProject.id;}}
+        onMixedApplicationChanged={()=>{if(activeProject&&activeAiProjectRef.current===activeProject.id){void handleReloadProjectTree(activeProject.id);void checkOpenDocumentSync({silent:true});void handleRefreshProtectionState(activeProject.id);}}}
+        onHistoricalCopyTreeUnavailable={(projectId,message)=>{if(activeAiProjectRef.current===projectId&&aiWorkspaceEpoch.current.value===historicalCopyRenderEpoch)markProjectTreeIssue(projectId,message);}}
+        onHistoricalCopyTree={(projectId,nextTree)=>{if(activeAiProjectRef.current===projectId&&aiWorkspaceEpoch.current.value===historicalCopyRenderEpoch)setProjectTree(projectId,nextTree);}}
         onExternalChangeDecision={handleExternalChangeDecision}
         onImportExternalChanges={() => void handleImportExternalChanges()}
         onImportSafeExternalChanges={() => void handleImportExternalChanges({ safeOnly: true })}
@@ -4559,6 +5107,7 @@ export function App() {
         onDiscardActiveDocumentDraft={handleDiscardActiveDocumentDraft}
         onSendAiPrompt={handleSendAiPrompt}
         onUpdateAiResearchBrief={setAiResearchBrief}
+        onReviewResearchEvidence={jobId=>{if(activeProject)setResearchEvidenceReview({projectId:activeProject.id,projectName:activeProject.name,jobId});}}
         onStartAiResearch={(brief) => void handleStartAiResearch(brief)}
         onCancelAiResearchBrief={() => {
           setAiResearchBrief(null);
@@ -4576,6 +5125,7 @@ export function App() {
         onRemoveAiContextSource={handleRemoveAiContextSource}
         onExtendAiContextSource={handleExtendAiContextSource}
         onPreviewAiContextSource={handlePreviewAiContextSource}
+        onRefreshAiContextSource={handleRefreshAiContextSource}
         onAddAiContextSourceToProject={handleAddAiContextSourceToProject}
         onAiIntentAction={handleAiIntentAction}
         onApplyAiEditProposal={handleApplyAiEditProposal}
@@ -4590,19 +5140,26 @@ export function App() {
         onOpenReferenceDocument={handleOpenReferenceDocument}
         onActivateTreeNode={handleActivateTreeNode}
         onSelectTreeNode={handleSelectTreeNode}
+        handwrittenPageFocus={handwrittenPageFocus}
+        onHandwrittenPageFocusHandled={requestId=>setHandwrittenPageFocus(current=>current?.requestId===requestId?null:current)}
         onSelectTab={handleSelectTab}
         onCloseTab={handleCloseTab}
         onCloseTabs={handleCloseTabs}
         onReorderDocumentTabs={handleReorderDocumentTabs}
         onTreeContextAction={handleTreeContextAction}
         onExportDocument={handleExportDocument}
+        onSaveDocumentTemplate={handleCaptureDocumentTemplate}
         onHandwrittenChange={handleHandwrittenChange}
         onHandwrittenToolPresetsChange={handleHandwrittenToolPresetsChange}
         onHandwrittenEraserConfigChange={handleHandwrittenEraserConfigChange}
+        onBeforeHandwrittenOcr={beforeHandwrittenOcr}
+        onApplyHandwrittenOcr={applyReviewedHandwrittenOcr}
+        onHandwrittenOcrObserved={observeHandwrittenOcr}
         onSaveHandwrittenNote={handleSaveHandwrittenNote}
         onExportHandwrittenNote={handleExportHandwrittenNote}
         onAddHandwrittenNoteContext={handleAddHandwrittenNoteContext}
         onMoveTreeNode={handleMoveTreeNodeDrop}
+        onBatchAction={activeProject ? (action, nodeIds,initialTargetFolderId) => {if(action==="export")setProjectTransferMode({kind:"export",projectId:activeProject.id,projectName:activeProject.name,nodeIds});else setFileBatch({ projectId: activeProject.id, action, nodeIds,initialTargetFolderId,workspaceEpoch:aiWorkspaceEpoch.current.value });} : undefined}
         onImportProjectImage={handleImportProjectImage}
         onBuildImageReference={handleBuildImageReference}
         onBuildHandwrittenImageReference={handleBuildHandwrittenImageReference}
@@ -4618,6 +5175,9 @@ export function App() {
         onDiscardPendingDocumentChanges={requestDiscardActiveDocumentDraft}
         onKeepLocalVersion={() => void handleSave(activeDocumentId, true)}
         onLoadDiskVersion={() => void handleLoadDiskVersion()}
+        onMergeDiskVersion={()=>void requestDocumentMerge()}
+        onRestoreVersionParts={versionId=>void requestDocumentMerge(versionId)}
+        onReviewRemoteVersion={activeProject&&(activeProject.syncMode==="manual-github"||activeProject.syncMode==="auto-github")?()=>void requestDocumentMerge(undefined,true):undefined}
         onToggleHistory={() => {
           if (historyEnabled) setHistoryOpen((isOpen) => !isOpen);
         }}
@@ -4626,44 +5186,34 @@ export function App() {
       />
       <GlobalTooltip />
       <StartupOverlay loading={!configLoaded} />
-      <LocalRuntimeRecoveryOverlay
-        open={localRuntimeRecoveryOpen}
-        error={localRuntimeRecoveryError}
-        onRetry={handleRetryLocalRuntimeRecovery}
-      />
+      {exitProtection&&<ModalFrame label="Protegiendo el trabajo antes de salir" onClose={()=>{}} className="!z-[180] !bg-white"><section className="max-w-sm p-5 text-center"><h2 data-autofocus tabIndex={-1} className="text-lg font-semibold outline-none">Protegiendo el trabajo antes de salir</h2><p role="status" className="mt-3 text-sm leading-6 text-ink-secondary">Se confirman los borradores y las notas antes de cerrar. Si falta una confirmación, el espacio permanece abierto para resolverla.</p></section></ModalFrame>}
+      {updateProtection&&<ModalFrame label="Trabajo protegido para actualizar" onClose={()=>{}} className="!z-[175] !bg-white"><section className="max-w-sm p-5 text-center"><h2 data-autofocus tabIndex={-1} className="text-lg font-semibold outline-none">Trabajo protegido para actualizar</h2><p role="status" className="mt-3 text-sm leading-6 text-ink-secondary">{updateProtection==="protecting"?"Se confirma el trabajo actual y se prepara la instalación. Las nuevas ediciones y capturas esperan para conservar este punto de recuperación.":"El instalador se ha abierto o su resultado requiere revisión. El espacio permanece protegido. Si vuelves a trabajar, comprueba que la instalación haya terminado o se haya cancelado."}</p>{updateProtection==="installer-open"&&<button className="mt-4 min-h-11 rounded bg-brand-orange px-4 text-sm font-semibold text-white" onClick={()=>void returnFromUpdatePreparation()}>Volver al espacio</button>}</section></ModalFrame>}
+      {criticalTransitionBusy&&<ModalFrame label="Revisando el estado protegido" onClose={()=>{}} className="!z-[170] !bg-white"><section className="max-w-sm p-5 text-center"><h2 data-autofocus tabIndex={-1} className="text-lg font-semibold outline-none">Revisando el estado protegido</h2><p role="status" className="mt-3 text-sm leading-6 text-ink-secondary">El trabajo está protegido. Se comprueba la operación y se vuelve a cargar el estado conservado, sin repetir acciones.</p></section></ModalFrame>}
+      {aiChangeHistoryOpen&&activeProject&&<AiChangeHistoryDialog key={activeProject.id} projectId={activeProject.id} projectName={activeProject.name} onClose={()=>setAiChangeHistoryOpen(false)} onBeforeChange={beforeCriticalStateChange} onSettled={afterCriticalStateChange}/>}
+      {projectReplaceOpen&&activeProject&&<ProjectReplaceDialog key={activeProject.id} projectId={activeProject.id} projectName={activeProject.name} onClose={()=>setProjectReplaceOpen(false)} onBeforeReview={async()=>{if(!await checkpointOpenWork())throw Error("Protege los cambios pendientes antes de revisar el reemplazo");}} onBeforeChange={beforeCriticalStateChange} onSettled={afterCriticalStateChange}/>}
+      {localRuntimeRecoveryOpen && <StartupRecovery error={localRuntimeRecoveryError} onRetry={handleRetryLocalRuntimeRecovery}/>}
       <AppNoticeBanner notice={notice} onClose={() => setNotice(null)} />
+      <ExportStatus progress={exportProgress} saved={exportedFileNotice} opening={exportOpening} onClose={()=>setExportedFileNotice(null)} onOpen={()=>{if(!exportedFileNotice||exportOpening)return;setExportOpening(true);void openMobileExport(exportedFileNotice.exportId).catch(error=>showError(error,"El archivo está guardado, pero no se pudo abrir.")).finally(()=>setExportOpening(false));}}/>
       {recordingNotice && <div role="status" className="fixed bottom-20 right-4 z-[130] flex items-center gap-3 rounded-lg border border-line bg-white p-3 text-sm shadow-lg"><span>Transcripción guardada</span><button className="min-h-11 text-brand-orange" onClick={()=>{void openRecordingDocument(recordingNotice.id);setRecordingNotice(null);}}>Abrir documento</button><button className="min-h-11 px-2" aria-label="Cerrar aviso de transcripción" onClick={()=>setRecordingNotice(null)}>×</button></div>}
-      {recordingPanel && <div className="fixed inset-0 z-[110] flex justify-end bg-black/20"><div className="relative h-full w-full max-w-[520px] border-l border-line bg-white shadow-xl"><RecordingPanel initialDestination={recordingDestination} onClose={() => {setRecordingPanel(false); if(activeProject) void getProjectTree(activeProject.id).then(setTree);}} onOpenDocument={id => {void openRecordingDocument(id);}} /></div></div>}
-      <button type="button" aria-label="Abrir Grabaciones" title="Grabaciones" className="fixed bottom-4 right-4 z-40 grid h-11 w-11 place-items-center rounded-full border border-line bg-white text-brand-orange shadow-md" onClick={() => {setRecordingDestination(null);setRecordingPanel(true);}}><RecordingIcon size={20}/></button>
-      <AppSettingsDialog
-        onOpenRecordings={() => {setRecordingDestination(null);setRecordingPanel(true);}}
-        open={appSettingsOpen}
-        appearance={appearanceConfig}
-        diagnostics={diagnosticsConfig}
-        exportTemplate={exportTemplateConfig}
-        exportTemplatePath={exportTemplatePath}
-        ai={aiConfig}
-        aiIndexStatus={aiIndexStatus}
-        traceLogStatus={traceLogStatus}
-        runtimeServicesStatus={runtimeServicesStatus}
-        runtimeServicesRefreshing={runtimeServicesRefreshing}
-        saveState={appSettingsSaveState}
-        saveMessage={appSettingsSaveMessage}
-        configPersistenceAvailable={configPersistenceAvailable}
-        onClose={() => setAppSettingsOpen(false)}
-        onAppearanceChange={handleAppearanceConfigChange}
-        onDiagnosticsChange={handleDiagnosticsConfigChange}
-        onExportTemplateChange={handleExportTemplateChange}
-        onResetExportTemplate={() => void handleResetExportTemplate()}
-        onAiChange={handleAiConfigChange}
-        onSaveOpenAiKey={(apiKey) => void handleSaveOpenAiKey(apiKey)}
-        onDeleteOpenAiKey={() => void handleDeleteOpenAiKey()}
-        onRebuildAiIndex={() => void handleRebuildAiIndex()}
-        onReindexImages={() => void handleReindexProjectImages()}
-        onDeleteAiIndex={() => void handleDeleteAiIndex()}
-        onOpenTraceLogFolder={() => void handleOpenTraceLogFolder()}
-        onRefreshRuntimeServices={() => void refreshRuntimeServiceStatus()}
-      />
+      {aiResultReviewOpen && <AiResultReviewDialog {...aiResultReview} onClose={() => setAiResultReviewOpen(false)} onRetry={entry => aiResultReview.retain(entry.result)} onReload={aiResultReview.reload} onRemove={aiResultReview.remove} onCopy={async (id, outputId) => {
+        const entry = aiResultReview.entries.find(entry => entry.result.id === id);
+        const result = await aiResultReview.copy(id, outputId);
+        if (!result) return null;
+        if (entry && entry.result.projectId === activeAiProjectRef.current) setProjectTree(entry.result.projectId, result.tree);
+        return result.node?.path ?? result.node?.name ?? "Archivo nuevo en el proyecto de origen";
+      }}/>}
+      {researchEvidenceReview&&activeProject?.id===researchEvidenceReview.projectId&&<ResearchEvidenceReviewDialog key={researchEvidenceReview.projectId+researchEvidenceReview.jobId} {...researchEvidenceReview} onClose={()=>setResearchEvidenceReview(null)} onOpenLocalReference={handleOpenLocalReference} onOpenExternal={url=>{void openExternalUrl(url).catch(error=>showError(error,"No se pudo abrir la fuente externa"));}}/>}
+      {assetCatalogOpen&&activeProject&&<AssetCatalogDialog key={activeProject.id} projectId={activeProject.id} projectName={activeProject.name} onClose={()=>setAssetCatalogOpen(false)} onOpen={target=>{setAssetCatalogOpen(false);handleOpenLocalReference(target);}} onOpenExternal={url=>{void openExternalUrl(url).catch(error=>showError(error,"No se pudo abrir el enlace externo"));}}/>}
+      {assetMoveReview.review&&<AssetMoveImpactDialog language={appearanceConfig.language} key={assetMoveReview.review.path} review={assetMoveReview.review} onDecide={assetMoveReview.settle}/>}
+      {meetingMinutes&&<MeetingMinutesDialog key={meetingMinutes.projectId+meetingMinutes.sessionId} {...meetingMinutes} onClose={()=>setMeetingMinutes(null)} onBeforeChange={beforeCriticalStateChange} onSettled={afterCriticalStateChange} onPublished={id=>{setMeetingMinutes(null);setPendingRecordingDocument({id,projectId:id.split("::")[0]});}}/>}
+      {recordingPanel && <div className="fixed inset-0 z-[110] flex justify-end bg-black/20"><div className="relative h-full w-full max-w-[520px] border-l border-line bg-white shadow-xl"><RecordingPanel compact embedded onOpenMinutes={(sessionId,projectId)=>{setRecordingPanel(false);setMeetingMinutes({sessionId,projectId});}} onOpenSettings={()=>{setRecordingPanel(false);if(activeProject)void handleReloadProjectTree(activeProject.id);setAppSettingsOpen(true);}} initialDestination={recordingDestination} onClose={() => {setRecordingPanel(false); if(activeProject) void handleReloadProjectTree(activeProject.id);}} onOpenDocument={id => {void openRecordingDocument(id);}} /></div></div>}
+      {trashOpen && activeProject && <ProjectTrashDialog projectId={activeProject.id} projectName={activeProject.name} onRestored={result => applyFileOperationResult(result)} onClose={() => setTrashOpen(false)}/>}
+      {fileBatch && activeProject?.id === fileBatch.projectId && <FileBatchDialog {...fileBatch} nodes={tree} folders={collectFolders(tree)} beforeExecute={beforeFileBatchExecute} onClose={() => {assetMoveReview.settle(false);setFileBatch(null);}} onApplied={plan => {
+        if(fileBatchRef.current!==fileBatch||activeAiProjectRef.current!==fileBatch.projectId||aiWorkspaceEpoch.current.value!==fileBatch.workspaceEpoch)return;
+        if(plan.action==="context"){void refreshAiContextSources(fileBatch.projectId).catch(error=>showError(error,"El contexto se ha actualizado; no se pudo refrescar su vista."));return;}
+        for (const effect of fileBatchEffects(plan,id=>findNodeById(tree,id))) applyFileOperationResult(effect.result,effect.source,effect.openPaths);
+      }}/>}
+
       <AiDeleteConfirmationDialog
         pendingDelete={aiPendingDelete}
         onCancel={() => setAiPendingDelete(null)}
@@ -4696,6 +5246,8 @@ export function App() {
       <CreateDocumentDialog
         open={createDocumentOpen}
         initialKind={createDocumentInitialKind}
+        projectId={activeProject?.id}
+        destinationLabel={activeProject ? `${activeProject.name} / ${createDocumentParentId ? findNodeById(tree, createDocumentParentId)?.path ?? "Carpeta seleccionada" : "Raíz del proyecto"}` : undefined}
         onClose={() => {
           setCreateDocumentOpen(false);
           setCreateDocumentParentId(null);
@@ -4703,10 +5255,18 @@ export function App() {
         }}
         onCreate={handleCreateDocument}
       />
+      {templateCapture && (
+        <SaveDocumentTemplateDialog source={templateCapture} onClose={() => setTemplateCapture(null)} onSaved={name => {
+          setTemplateCapture(null);
+          setNotice({ title: "Plantilla guardada", message: `«${name}» está disponible en Crear documento.`, tone: "info" });
+        }}/>
+      )}
       <CreateProjectDialog
         open={createProjectOpen}
         onClose={() => setCreateProjectOpen(false)}
         onCreate={handleCreateProject}
+        onImportPackage={() => setProjectTransferMode({ kind: "import" })}
+        onProjectTemplates={()=>setProjectTemplateCatalog(true)}
         authStatus={authStatus}
         capabilities={projectCapabilities}
         githubRepositories={githubRepositories}
@@ -4732,13 +5292,22 @@ export function App() {
         onVerifyGithubConnection={() => handleVerifyGithubConnection()}
         onRefreshGithubRepositories={() => void refreshGithubRepositories()}
       />
+      {projectLocationReview.review&&<ProjectLocationReviewDialog review={projectLocationReview.review} onConfirm={projectLocationReview.confirm} onCancel={projectLocationReview.cancel}/>}
+      {projectTemplateCatalog&&<ProjectTemplateCatalogDialog onClose={()=>setProjectTemplateCatalog(false)} onChoose={mode=>{setProjectTemplateCatalog(false);setProjectTransferMode(mode);}} onImport={()=>{setProjectTemplateCatalog(false);setProjectTransferMode({kind:"import"});}}/>}
+      {projectTransferMode && <ProjectTransferDialog key={expectedBackupTransferId??"project-transfer"} expectedTransferId={expectedBackupTransferId} onBeforeChange={beforeCriticalStateChange} onSettled={afterCriticalStateChange} mode={projectTransferMode} onClose={() => {setProjectTransferMode(null);setExpectedBackupTransferId(undefined);}} onImported={async () => {
+        const updated = await listProjects(); setProjects(updated);
+      }}/>}
+      {retiredProjectsOpen&&<RetiredProjectsDialog onClose={()=>setRetiredProjectsOpen(false)} fallbackFocus={()=>retiredProjectsFocus.current?.()??null} onCatalogChanged={async()=>{const updated=await listProjects();setProjects(updated);}}/>}
       <DocumentFooterActionDialog
+        key={documentFooterDialog?`${documentFooterDialog.documentId}:${documentFooterDialog.action}`:"no-footer-action"}
         open={documentFooterDialog !== null}
-        action={documentFooterDialog}
-        documentName={activeSession?.document?.name ?? "documento"}
+        action={documentFooterDialog?.action??null}
+        documentName={documentFooterDialog?.revision.document?.name ?? "documento"}
         onCancel={() => setDocumentFooterDialog(null)}
-        onConfirm={() => void confirmDocumentFooterDialog()}
+        onConfirm={confirmDocumentFooterDialog}
       />
+      {documentMerge&&<DocumentConflictDialog name={documentMerge.expected.document?.name??"Documento"} localMarkdown={documentMerge.expected.markdown} review={documentMerge.review} loading={documentMerge.loading} busy={documentMerge.busy} error={documentMerge.error} checkingAttempt={documentMerge.checkingAttempt} onCheckAttempt={documentMerge.attemptPayload?()=>void applyMergedDocument(documentMerge.attemptPayload!.mergedMarkdown,true):undefined} onReload={()=>void requestDocumentMerge(documentMerge.historyVersionId,documentMerge.remote)} onApply={markdown=>void applyMergedDocument(markdown)} onClose={()=>{if(!documentMerge.busy){++documentMergeEpoch.current;setDocumentMerge(null);}}}/>}
+      {handwrittenMerge?.expected.content&&<HandwrittenConflictDialog name={handwrittenMerge.expected.note?.name??"Nota"} localContent={handwrittenMerge.expected.content} review={handwrittenMerge.review} loading={handwrittenMerge.loading} busy={handwrittenMerge.busy} error={handwrittenMerge.error} checkingAttempt={handwrittenMerge.checkingAttempt} onCheckAttempt={handwrittenMerge.attemptPayload?()=>void applyMergedHandwritten(handwrittenMerge.attemptPayload!.mergedContent,true):undefined} onReload={()=>void requestHandwrittenMerge()} onApply={content=>void applyMergedHandwritten(content)} onClose={()=>{if(!handwrittenMerge.busy){++handwrittenMergeEpoch.current;setHandwrittenMerge(null);}}}/>}
       <MoveDocumentDialog
         open={moveNode !== null}
         node={moveNode}
@@ -4747,250 +5316,232 @@ export function App() {
         onMove={handleMoveNode}
       />
       <CloseDirtyDocumentDialog
+        key={closeDocumentId??"no-document-to-close"}
         open={closeDocumentId !== null}
         documentName={closeDocumentId ? tabs.find((tab) => tab.id === closeDocumentId)?.name ?? handwrittenTabs.find((tab) => tab.id === closeDocumentId)?.name ?? "documento" : ""}
         onCancel={() => {
           setCloseDocumentId(null);
           setPendingCloseDocumentIds([]);
         }}
-        onDiscard={() => {
-          if (!closeDocumentId) return;
+        onDiscard={async() => {
+          if (!closeDocumentId) return false;
           const documentId = closeDocumentId;
           const isHandwritten = handwrittenTabs.some((tab) => tab.id === documentId);
-          setCloseDocumentId(null);
-          void (isHandwritten ? discardHandwrittenNoteDraft(documentId) : discardDocumentDraft(documentId))
-            .then(() => {
-              if (isHandwritten) closeHandwrittenTabNow(documentId);
-              else closeTabNow(documentId);
-              showNextPendingCloseDialog();
-            })
-            .catch((error) => showError(error, "No se pudo descartar el borrador interno."));
+          const close=()=>{
+            if(isHandwritten){const{[documentId]:_closed,...remaining}=handwrittenSessionsRef.current;handwrittenSessionsRef.current=remaining;closeHandwrittenTabNow(documentId);}
+            else{const{[documentId]:_closed,...remaining}=documentSessionsRef.current;documentSessionsRef.current=remaining;closeTabNow(documentId);}
+            setCloseDocumentId(null);showNextPendingCloseDialog();
+          };
+          return isHandwritten
+            ?discardSessionForClose({id:documentId,queue:sessionWrites.current,pending:pendingSaveIds.current,current:()=>handwrittenSessionsRef.current[documentId],sameRevision:sameHandwrittenRevision,discard:()=>discardHandwrittenNoteDraft(documentId,handwrittenSessionsRef.current[documentId]?.draftWriteRevision??null),close,protect:session=>{void persistHandwrittenDraft(documentId,session,true);}})
+            :discardSessionForClose({id:documentId,queue:sessionWrites.current,pending:pendingSaveIds.current,current:()=>documentSessionsRef.current[documentId],sameRevision:sameDocumentRevision,discard:()=>discardDocumentDraft(documentId,documentSessionsRef.current[documentId]?.draftWriteRevision??null),close,protect:session=>{void persistDraft(documentId,session,true);}});
         }}
-        onSave={() => {
-          if (!closeDocumentId) return;
+        onSave={async() => {
+          if (!closeDocumentId) return false;
           const documentId = closeDocumentId;
           const isHandwritten = handwrittenTabs.some((tab) => tab.id === documentId);
-          void (isHandwritten ? handleSaveHandwrittenNote(documentId) : handleSave(documentId)).then((saved) => {
-            setCloseDocumentId(null);
-            if (saved) {
-              if (isHandwritten) closeHandwrittenTabNow(documentId);
-              else closeTabNow(documentId);
-              showNextPendingCloseDialog();
-            }
-          });
+          const saved=await (isHandwritten ? handleSaveHandwrittenNote(documentId) : handleSave(documentId));
+          if(!saved||(isHandwritten?handwrittenSessionsRef.current[documentId]?.isDirty:documentSessionsRef.current[documentId]?.isDirty))return false;
+          setCloseDocumentId(null);
+          if (isHandwritten) closeHandwrittenTabNow(documentId);
+          else closeTabNow(documentId);
+          showNextPendingCloseDialog();return true;
         }}
       />
       <RecoverableDraftsDialog
+        projects={projects}
+        activeProjectId={activeProject?.id}
+        initialCategory={lastProtectedCopy?"archive":"review"}
+        onBeforeChange={beforeCriticalStateChange}
+        onSettled={afterCriticalStateChange}
         open={recoverableDraftsOpen}
         drafts={orphanDrafts}
+        limited={orphanCoverage.limited}
+        coverageWarnings={orphanCoverage.warnings}
         onClose={() => setRecoverableDraftsOpen(false)}
-        onRefresh={() => void refreshOrphanDrafts()}
-        onRestore={(draft) => void handleRestoreOrphanDraft(draft)}
-        onDiscard={(draftKey) => void handleDiscardOrphanDraft(draftKey)}
+        onRefresh={refreshOrphanDrafts}
+        onRestore={handleRestoreOrphanDraft}
+        onDiscard={handleDiscardOrphanDraft}
+        review={(archived,copies) => <RecoveryReviewSection knownCopies={copies} knownCopy={lastProtectedCopy} open={recoverableDraftsOpen} archived={archived} projects={projects} activeProjectId={activeProject?.id} onRecovered={handleRecoveredCopy} onChanged={() => void refreshOrphanDrafts()}/>}
       />
     </>
   );
 
-  async function loadDocumentSession(documentId: string, forceReload = false) {
-    setDocumentSessions((currentSessions) => {
-      const currentSession = currentSessions[documentId];
-      if (currentSession?.isLoading && !forceReload) return currentSessions;
-      return {
-        ...currentSessions,
-        [documentId]: {
-          ...createEmptyDocumentSession(currentSession?.loadVersion ?? 0),
-          ...currentSession,
-          isLoading: true,
-          loadVersion: forceReload ? (currentSession?.loadVersion ?? 0) + 1 : currentSession?.loadVersion ?? 0,
-        },
-      };
-    });
-
+  async function loadDocumentSession(documentId: string, forceReload = false, expected?: DocumentSession) {
+    if (expected && !sameDocumentRevision(documentSessionsRef.current[documentId], expected)) return false;
+    if (documentLoads.current.has(documentId) && !forceReload) return;
+    const requestId = ++sessionLoadSequence.current;
+    documentLoads.current.set(documentId, requestId);
+    setDocumentSessions(current => expected && !sameDocumentRevision(current[documentId], expected) ? current : ({ ...current, [documentId]: beginDocumentLoad(current[documentId], requestId, forceReload) }));
     try {
       const record = await getDocument(documentId);
-      setDocumentSessions((currentSessions) => {
-        const currentSession = currentSessions[documentId];
-        return {
-          ...currentSessions,
-          [documentId]: createLoadedDocumentSession(record, currentSession),
-        };
+      if (documentLoads.current.get(documentId) !== requestId) return;
+      const revisionCurrent = !expected || sameDocumentRevision(documentSessionsRef.current[documentId], expected);
+      setDocumentSessions(current => {
+        const settled = settleDocumentLoad(current[documentId], requestId, record);
+        return settled ? { ...current, [documentId]: settled } : current;
       });
+      if (!revisionCurrent) return false;
       try {
         const response = await getDocumentsSyncStatus([{ documentId, baseFingerprint: record.baseFingerprint }]);
-        setDocumentSyncStatuses((currentStatuses) => ({
-          ...currentStatuses,
-          ...Object.fromEntries(response.documents.map((status) => [status.documentId, status])),
-        }));
+        if (documentLoads.current.get(documentId) !== requestId) return;
+        const latest = documentSessionsRef.current[documentId];
+        if (!latest?.document || latest.baseFingerprint?.sha256 !== record.baseFingerprint?.sha256) return;
+        setDocumentSyncStatuses(current => ({ ...current, ...Object.fromEntries(response.documents.map(status => [status.documentId, status])) }));
       } catch (error) {
-        showError(error, "No se pudo comprobar el estado del documento abierto.", {
-          source: "app.documentSync.load",
-          suppressApiConnectionNotice: true,
+        if (documentLoads.current.get(documentId) === requestId) showError(error, "No se pudo comprobar el estado del documento abierto.", {
+          source: "app.documentSync.load", suppressApiConnectionNotice: true,
         });
       }
+      return true;
     } catch (error) {
-      setDocumentSessions((currentSessions) => {
-        const { [documentId]: _failedSession, ...nextSessions } = currentSessions;
-        return nextSessions;
+      if (documentLoads.current.get(documentId) !== requestId) return;
+      setDocumentSessions(current => {
+        const settled = settleDocumentLoad(current[documentId], requestId);
+        if (settled) return { ...current, [documentId]: settled };
+        const { [documentId]: _failed, ...remaining } = current;
+        return remaining;
       });
-      showError(error, "No se pudo abrir el documento.");
+      showError(error, "No se pudo abrir el documento. Se conserva el contenido que ya estaba abierto.");
+      return false;
+    } finally {
+      if (documentLoads.current.get(documentId) === requestId) documentLoads.current.delete(documentId);
     }
   }
 
-  async function loadHandwrittenNoteSession(noteId: string, forceReload = false) {
-    setHandwrittenSessions((currentSessions) => {
-      const currentSession = currentSessions[noteId];
-      if (currentSession?.isLoading && !forceReload) return currentSessions;
-      return {
-        ...currentSessions,
-        [noteId]: {
-          ...createEmptyHandwrittenNoteSession(currentSession?.loadVersion ?? 0),
-          ...currentSession,
-          isLoading: true,
-          loadVersion: forceReload ? (currentSession?.loadVersion ?? 0) + 1 : currentSession?.loadVersion ?? 0,
-        },
-      };
-    });
-
+  async function loadHandwrittenNoteSession(noteId: string, forceReload = false, expected?: HandwrittenNoteSession) {
+    if (expected && !sameHandwrittenRevision(handwrittenSessionsRef.current[noteId], expected)) return false;
+    if (handwrittenLoads.current.has(noteId) && !forceReload) return;
+    const requestId = ++sessionLoadSequence.current;
+    handwrittenLoads.current.set(noteId, requestId);
+    setHandwrittenSessions(current => expected && !sameHandwrittenRevision(current[noteId], expected) ? current : ({ ...current, [noteId]: beginHandwrittenLoad(current[noteId], requestId, forceReload) }));
     try {
       const record = await getHandwrittenNote(noteId);
-      setHandwrittenSessions((currentSessions) => {
-        const currentSession = currentSessions[noteId];
-        return {
-          ...currentSessions,
-          [noteId]: createLoadedHandwrittenNoteSession(record, currentSession),
-        };
+      if (handwrittenLoads.current.get(noteId) !== requestId) return;
+      const revisionCurrent = !expected || sameHandwrittenRevision(handwrittenSessionsRef.current[noteId], expected);
+      setHandwrittenSessions(current => {
+        const settled = settleHandwrittenLoad(current[noteId], requestId, record);
+        return settled ? { ...current, [noteId]: settled } : current;
       });
+      return revisionCurrent;
     } catch (error) {
-      setHandwrittenSessions((currentSessions) => {
-        const { [noteId]: _failedSession, ...nextSessions } = currentSessions;
-        return nextSessions;
+      if (handwrittenLoads.current.get(noteId) !== requestId) return;
+      setHandwrittenSessions(current => {
+        const settled = settleHandwrittenLoad(current[noteId], requestId);
+        if (settled) return { ...current, [noteId]: settled };
+        const { [noteId]: _failed, ...remaining } = current;
+        return remaining;
       });
-      showError(error, "No se pudo abrir la nota a mano.");
+      showError(error, "No se pudo abrir la nota a mano. Se conservan los trazos que ya estaban abiertos.");
+      return false;
+    } finally {
+      if (handwrittenLoads.current.get(noteId) === requestId) handwrittenLoads.current.delete(noteId);
     }
   }
 
-  async function persistDraft(documentId: string, session: DocumentSession) {
-    if (!shouldPersistDraft(session)) return true;
-    const requestMarkdown = session.markdown;
-    try {
-      const draft = await saveDocumentDraft(documentId, {
-        markdown: requestMarkdown,
-        baseFingerprint: session.baseFingerprint,
-        baseContentHash: session.savedContentHash ?? null,
-      });
-      const latestSession = documentSessionsRef.current[documentId];
-      if (!latestSession || !markdownMatchesSaved(latestSession.markdown, requestMarkdown)) {
-        if (latestSession && !latestSession.isDirty) void discardPersistedDocumentDraft(documentId);
-        return true;
-      }
-      setDocumentSessions((currentSessions) => {
-        const currentSession = currentSessions[documentId];
-        if (!currentSession) return currentSessions;
-        if (!markdownMatchesSaved(currentSession.markdown, requestMarkdown)) return currentSessions;
-        if (!draft.isDirty) {
-          return updateSession(currentSessions, documentId, {
-            lastDraftMarkdown: "",
-            draftUpdatedAt: null,
-            hasRecoveredDraft: false,
-            draftContentHash: null,
-            savedContentHash: draft.savedContentHash ?? draft.diskContentHash ?? currentSession.savedContentHash ?? null,
-            pendingDraftDiscard: false,
-            pendingSaveReason: null,
-          });
-        }
-        return updateSession(currentSessions, documentId, {
-          lastDraftMarkdown: requestMarkdown,
-          draftUpdatedAt: draft.draftUpdatedAt,
-          hasRecoveredDraft: Boolean(draft.hasDraft ?? true),
-          draftContentHash: draft.draftContentHash ?? currentSession.draftContentHash ?? null,
-          savedContentHash: draft.savedContentHash ?? draft.diskContentHash ?? currentSession.savedContentHash ?? null,
-          pendingDraftDiscard: false,
-        });
-      });
-      return true;
-    } catch (error) {
-      showError(error, "No se pudo guardar el borrador interno del documento.");
-      return false;
-    }
+  function markDraftWriteBlocked(id:string,ink:boolean){
+    if(ink){const current=handwrittenSessionsRef.current[id];if(!current)return;const next={...current,draftWriteConflict:true,saveState:"idle" as const};handwrittenSessionsRef.current={...handwrittenSessionsRef.current,[id]:next};setHandwrittenSessions(all=>({...all,[id]:next}));}
+    else{const current=documentSessionsRef.current[id];if(!current)return;const next={...current,draftWriteConflict:true,saveState:"idle" as const};documentSessionsRef.current={...documentSessionsRef.current,[id]:next};setDocumentSessions(all=>({...all,[id]:next}));}
   }
 
-  async function persistHandwrittenDraft(noteId: string, session: HandwrittenNoteSession) {
-    if (!shouldPersistHandwrittenDraft(session) || !session.content) return true;
-    const requestContent = session.content;
-    try {
-      const draft = await saveHandwrittenNoteDraft(noteId, {
-        content: requestContent,
-        baseFingerprint: session.baseFingerprint,
-        baseContentHash: session.savedContentHash ?? null,
-      });
-      const latestSession = handwrittenSessionsRef.current[noteId];
-      if (!latestSession?.content || !handwrittenContentMatchesSaved(latestSession.content, requestContent)) {
-        if (latestSession && !latestSession.isDirty) void discardPersistedHandwrittenDraft(noteId);
-        return true;
+  async function protectBlockedEdit(id:string,ink:boolean):Promise<ProtectionOutcome>{
+    const session=ink?handwrittenSessionsRef.current[id]:documentSessionsRef.current[id];
+    if(!session)return "superseded";
+    const payload="markdown" in session?{documentId:id,markdown:session.markdown,baseFingerprint:session.baseFingerprint??null}
+      :session.content?{documentId:id,content:session.content,baseFingerprint:session.baseFingerprint??null}:null;
+    if(!payload)return "failed";
+    try{const proof=await localEditProtection.current.protect(payload);setLastProtectedCopy(proof.copy);const current=ink?handwrittenSessionsRef.current[id]:documentSessionsRef.current[id];
+      return (ink?sameHandwrittenRevision(current as HandwrittenNoteSession,session as HandwrittenNoteSession):sameDocumentRevision(current as DocumentSession,session as DocumentSession))?"protected":"superseded";
+    }catch(error){showError(error,"No se confirmó la copia de la edición abierta. Se conserva en el editor; revisa Recuperación antes de cerrar.");return "failed";}
+  }
+
+  async function reviewChangedDraft(id:string,ink:boolean){
+    if(pendingSaveIds.current.has(id))return;
+    checkpointPendingEditorInput();
+    pendingSaveIds.current.add(id);setDraftReviewBusy(id);
+    try{await sessionWrites.current.run(id,async()=>{
+      if(ink){const expected=handwrittenSessionsRef.current[id];if(!expected?.content)return;
+        if(await protectBlockedEdit(id,true)!=="protected")return;
+        const record=await getHandwrittenNote(id);
+        if(!sameHandwrittenRevision(handwrittenSessionsRef.current[id],expected))throw new Error("Hay trazos nuevos. Se mantienen abiertos; conserva de nuevo antes de revisar.");
+        const loaded=createLoadedHandwrittenNoteSession(record,{...expected,loadVersion:expected.loadVersion+1});
+        handwrittenSessionsRef.current={...handwrittenSessionsRef.current,[id]:loaded};setHandwrittenSessions(all=>({...all,[id]:loaded}));
+      }else{const expected=documentSessionsRef.current[id];if(!expected?.document)return;
+        if(await protectBlockedEdit(id,false)!=="protected")return;
+        const record=await getDocument(id);
+        if(!sameDocumentRevision(documentSessionsRef.current[id],expected))throw new Error("Hay texto nuevo. Se mantiene abierto; conserva de nuevo antes de revisar.");
+        const loaded=createLoadedDocumentSession(record,{...expected,loadVersion:expected.loadVersion+1});
+        documentSessionsRef.current={...documentSessionsRef.current,[id]:loaded};setDocumentSessions(all=>({...all,[id]:loaded}));
       }
-      setHandwrittenSessions((currentSessions) => {
-        const currentSession = currentSessions[noteId];
-        if (!currentSession?.content) return currentSessions;
-        if (!handwrittenContentMatchesSaved(currentSession.content, requestContent)) return currentSessions;
-        if (!draft.isDirty) {
-          return updateHandwrittenNoteSession(currentSessions, noteId, {
-            lastDraftContentJson: "",
-            draftUpdatedAt: null,
-            hasRecoveredDraft: false,
-            draftContentHash: null,
-            savedContentHash: draft.savedContentHash ?? draft.diskContentHash ?? currentSession.savedContentHash ?? null,
-            pendingDraftDiscard: false,
-          });
-        }
-        return updateHandwrittenNoteSession(currentSessions, noteId, {
-          lastDraftContentJson: stringifyHandwrittenContent(requestContent),
-          draftUpdatedAt: draft.draftUpdatedAt,
-          hasRecoveredDraft: Boolean(draft.hasDraft ?? true),
-          draftContentHash: draft.draftContentHash ?? currentSession.draftContentHash ?? null,
-          savedContentHash: draft.savedContentHash ?? draft.diskContentHash ?? currentSession.savedContentHash ?? null,
-          pendingDraftDiscard: false,
-        });
-      });
-      return true;
-    } catch (error) {
-      showError(error, "No se pudo guardar el borrador interno de la nota.");
-      return false;
-    }
+      setNotice({title:"Borrador guardado abierto",message:"Tu edición anterior está conservada en Recuperación. Puedes recuperarla como otro archivo para comparar ambas.",tone:"info"});
+    });}catch(error){showError(error,"No se pudo revisar el borrador. La edición abierta se conserva.");}
+    finally{pendingSaveIds.current.delete(id);setDraftReviewBusy(null);}
+  }
+
+  async function persistDraft(documentId: string, session: DocumentSession, forceProtection = false) {
+    if(aiChangeJournal.current.hasDocument(documentId))return "superseded" as ProtectionOutcome;
+    return sessionWrites.current.run<ProtectionOutcome>(documentId, async () => {
+      if(aiChangeJournal.current.hasDocument(documentId))return "superseded";
+      const latest=documentSessionsRef.current[documentId];
+      if((!forceProtection&&pendingSaveIds.current.has(documentId))||!latest||latest.loadVersion!==session.loadVersion||latest.markdown!==session.markdown)return "superseded";
+      if(latest.draftWriteConflict)return protectBlockedEdit(documentId,false);
+      if(!shouldPersistDraft(latest,forceProtection))return "protected";
+      session=latest;const requestMarkdown=session.markdown;
+      try{
+        const draft=await saveDocumentDraft(documentId,{markdown:requestMarkdown,baseFingerprint:session.baseFingerprint,baseContentHash:session.savedContentHash??null,expectedDraftWriteRevision:session.draftWriteRevision??null});
+        const current=acknowledgeDraftWrite(documentSessionsRef.current[documentId],session,draft.draftWriteRevision);
+        if(!current)return "superseded";
+        if(current.loadVersion!==session.loadVersion||current.savedMarkdown!==session.savedMarkdown||current.baseFingerprint?.sha256!==session.baseFingerprint?.sha256)return "superseded";
+        const matches=current.loadVersion===session.loadVersion&&current.markdown===requestMarkdown;
+        const next=matches?{...current,lastDraftMarkdown:draft.isDirty?requestMarkdown:"",draftUpdatedAt:draft.draftUpdatedAt,hasRecoveredDraft:!!draft.hasDraft,draftContentHash:draft.draftContentHash??null,savedContentHash:draft.savedContentHash??draft.diskContentHash??current.savedContentHash,pendingDraftDiscard:false,pendingSaveReason: draft.isDirty?current.pendingSaveReason:null}:current;
+        documentSessionsRef.current={...documentSessionsRef.current,[documentId]:next};setDocumentSessions(all=>({...all,[documentId]:next}));
+        if(!matches){if(!current.isDirty)void discardPersistedDocumentDraft(documentId);return "superseded";}
+        return "protected";
+      }catch(error){if(isDraftWriteConflict(error)){markDraftWriteBlocked(documentId,false);return protectBlockedEdit(documentId,false);}showError(error,"No se pudo guardar el borrador interno del documento.");return "failed";}
+    });
+  }
+
+  async function persistHandwrittenDraft(noteId: string, session: HandwrittenNoteSession, forceProtection = false) {
+    if(aiChangeJournal.current.hasDocument(noteId)||ocrDraftWrites.current.has(noteId))return "superseded" as ProtectionOutcome;
+    return sessionWrites.current.run<ProtectionOutcome>(noteId, async () => {
+      if(aiChangeJournal.current.hasDocument(noteId)||ocrDraftWrites.current.has(noteId))return "superseded";
+      const latest=handwrittenSessionsRef.current[noteId];
+      if((!forceProtection&&pendingSaveIds.current.has(noteId))||!latest?.content||latest.loadVersion!==session.loadVersion||stringifyHandwrittenContent(latest.content)!==(session.content?stringifyHandwrittenContent(session.content):""))return "superseded";
+      if(latest.draftWriteConflict)return protectBlockedEdit(noteId,true);
+      if(!shouldPersistHandwrittenDraft(latest,forceProtection))return "protected";
+      session=latest;const requestContent=latest.content;
+      try{
+        const draft=await saveHandwrittenNoteDraft(noteId,{content:requestContent,baseFingerprint:session.baseFingerprint,baseContentHash:session.savedContentHash??null,expectedDraftWriteRevision:session.draftWriteRevision??null});
+        const current=acknowledgeDraftWrite(handwrittenSessionsRef.current[noteId],session,draft.draftWriteRevision);
+        if(!current)return "superseded";
+        if(current.loadVersion!==session.loadVersion||current.savedContent!==session.savedContent||current.baseFingerprint?.sha256!==session.baseFingerprint?.sha256)return "superseded";
+        const matches=current.loadVersion===session.loadVersion&&current.content&&handwrittenContentMatchesSaved(current.content,requestContent);
+        const next=matches?{...current,lastDraftContentJson:draft.isDirty?stringifyHandwrittenContent(requestContent):"",draftUpdatedAt:draft.draftUpdatedAt,hasRecoveredDraft:!!draft.hasDraft,draftContentHash:draft.draftContentHash??null,savedContentHash:draft.savedContentHash??draft.diskContentHash??current.savedContentHash,pendingDraftDiscard:false,
+          note:current.note?{...current.note,sourceUnavailable:!!draft.sourceWarning,recoveryWarning:draft.sourceWarning??(current.note.sourceUnavailable?null:current.note.recoveryWarning),baseVerified:draft.sourceWarning?false:current.note.baseVerified}:null,
+          diskChanged:!!draft.sourceWarning||current.diskChanged,conflictStatus:draft.sourceWarning?"disk-changed" as const:current.conflictStatus}:current;
+        handwrittenSessionsRef.current={...handwrittenSessionsRef.current,[noteId]:next};setHandwrittenSessions(all=>({...all,[noteId]:next}));
+        if(!matches){if(!current.isDirty)void discardPersistedHandwrittenDraft(noteId);return "superseded";}
+        return "protected";
+      }catch(error){if(isDraftWriteConflict(error)){markDraftWriteBlocked(noteId,true);return protectBlockedEdit(noteId,true);}showError(error,"No se pudo guardar el borrador interno de la nota.");return "failed";}
+    });
   }
 
   async function discardPersistedDocumentDraft(documentId: string) {
     if (draftDiscardInFlightRef.current.has(documentId)) return true;
     draftDiscardInFlightRef.current.add(documentId);
     try {
-      await discardDocumentDraft(documentId);
-      setDocumentSessions((currentSessions) => {
-        const currentSession = currentSessions[documentId];
-        if (!currentSession || currentSession.isDirty) return currentSessions;
-        return updateSession(currentSessions, documentId, {
-          lastDraftMarkdown: "",
-          draftUpdatedAt: null,
-          hasRecoveredDraft: false,
-          draftContentHash: null,
-          pendingDraftDiscard: false,
-          pendingSaveReason: null,
-        });
-      });
-      setDocumentSyncStatuses((currentStatuses) => {
-        const status = currentStatuses[documentId];
-        if (!status) return currentStatuses;
-        return {
-          ...currentStatuses,
-          [documentId]: {
-            ...status,
-            hasDraft: false,
-            draftContentHash: null,
-            conflictStatus: status.diskChanged ? "disk-changed" : "none",
-            localChanged: Boolean(status.diskChanged),
-          },
-        };
-      });
+      return await sessionWrites.current.run(documentId, async () => {
+      const expected=documentSessionsRef.current[documentId];
+      if(!expected||expected.isDirty||pendingSaveIds.current.has(documentId))return true;
+      if(expected.draftWriteConflict)return await protectBlockedEdit(documentId,false)==="protected";
+      await discardDocumentDraft(documentId,expected.draftWriteRevision??null);
+      const current=acknowledgeDraftWrite(documentSessionsRef.current[documentId],expected,null);
+      if(current){const next=current.isDirty?current:{...current,lastDraftMarkdown:"",pendingSaveReason:null,draftUpdatedAt:null,hasRecoveredDraft:false,draftContentHash:null,pendingDraftDiscard:false};
+        documentSessionsRef.current={...documentSessionsRef.current,[documentId]:next};setDocumentSessions(all=>({...all,[documentId]:next}));}
       return true;
+      });
     } catch (error) {
+      if(isDraftWriteConflict(error)){markDraftWriteBlocked(documentId,false);return await protectBlockedEdit(documentId,false)==="protected";}
       showError(error, "No se pudo limpiar el borrador interno del documento.", {
         source: "app.documentDraft.discard",
         suppressApiConnectionNotice: true,
@@ -5005,20 +5556,18 @@ export function App() {
     if (handwrittenDraftDiscardInFlightRef.current.has(noteId)) return true;
     handwrittenDraftDiscardInFlightRef.current.add(noteId);
     try {
-      await discardHandwrittenNoteDraft(noteId);
-      setHandwrittenSessions((currentSessions) => {
-        const currentSession = currentSessions[noteId];
-        if (!currentSession || currentSession.isDirty) return currentSessions;
-        return updateHandwrittenNoteSession(currentSessions, noteId, {
-          lastDraftContentJson: "",
-          draftUpdatedAt: null,
-          hasRecoveredDraft: false,
-          draftContentHash: null,
-          pendingDraftDiscard: false,
-        });
-      });
+      return await sessionWrites.current.run(noteId, async () => {
+      const expected=handwrittenSessionsRef.current[noteId];
+      if(!expected||expected.isDirty||pendingSaveIds.current.has(noteId))return true;
+      if(expected.draftWriteConflict)return await protectBlockedEdit(noteId,true)==="protected";
+      await discardHandwrittenNoteDraft(noteId,expected.draftWriteRevision??null);
+      const current=acknowledgeDraftWrite(handwrittenSessionsRef.current[noteId],expected,null);
+      if(current){const next=current.isDirty?current:{...current,lastDraftContentJson:"",draftUpdatedAt:null,hasRecoveredDraft:false,draftContentHash:null,pendingDraftDiscard:false};
+        handwrittenSessionsRef.current={...handwrittenSessionsRef.current,[noteId]:next};setHandwrittenSessions(all=>({...all,[noteId]:next}));}
       return true;
+      });
     } catch (error) {
+      if(isDraftWriteConflict(error)){markDraftWriteBlocked(noteId,true);return await protectBlockedEdit(noteId,true)==="protected";}
       showError(error, "No se pudo limpiar el borrador interno de la nota.", {
         source: "app.handwrittenDraft.discard",
         suppressApiConnectionNotice: true,
@@ -5029,59 +5578,104 @@ export function App() {
     }
   }
 
-  async function persistNotes(markdown: string) {
-    setNotesSaveState("saving");
-    try {
-      const saved = await saveUserNotes(markdown);
-      setNotesSavedMarkdown(saved.markdown);
-      setNotesUpdatedAt(saved.updatedAt);
-      setNotesSaveState("idle");
-      return true;
-    } catch (error) {
-      setNotesSaveState("error");
-      showError(error, "No se pudieron guardar las notas automáticamente.", {
-        source: "app.notesPersistence",
-        suppressApiConnectionNotice: true,
-      });
-      return false;
+  async function persistNotes(markdown:string){
+    return protectNotesSnapshot(markdown,{queue:sessionWrites.current,current:()=>notesLoadedRef.current?notesMarkdownRef.current:undefined,saved:()=>notesSavedMarkdownRef.current,write:saveUserNotes,
+      started:()=>setNotesSaveState("saving"),
+      acknowledge:saved=>{notesSavedMarkdownRef.current=saved.markdown;setNotesSavedMarkdown(saved.markdown);setNotesUpdatedAt(saved.updatedAt);setNotesSaveState("idle");},
+      failed:error=>{setNotesSaveState("error");showError(error,"No se pudieron guardar las notas automáticamente.",{source:"app.notesPersistence",suppressApiConnectionNotice:true});}});
+  }
+
+  async function checkpointOpenWork(finalizeInput=true){
+    try{
+      if(finalizeInput){
+        checkpointPendingEditorInput();
+        const snapshots=captureWorkspaceEditorSnapshots(liveEditorSnapshots.current,documentSessionsRef.current,{id:NOTES_WORKSPACE_TAB_ID,loaded:notesLoadedRef.current,markdown:notesMarkdownRef.current});
+        for(const snapshot of snapshots){if(snapshot.documentId===NOTES_WORKSPACE_TAB_ID)handleNotesMarkdownChange(snapshot.markdown);else handleMarkdownChange(snapshot.documentId,snapshot.markdown);}
+      }
+      return await flushPendingDrafts();
+    }catch{return false;}
+  }
+
+  async function reconcileOpenWork(){
+    const projectId=activeAiProjectRef.current;
+    const results=await Promise.all([checkOpenDocumentSync({silent:true}),projectId?refreshExternalChangeSet(projectId,{reportErrors:false,currentOnly:true}):Promise.resolve(true)]);
+    if(!results.every(Boolean))throw new Error("No se confirmó la revisión del estado local");
+  }
+
+  async function flushPendingDrafts(captureProjectId?:string) {
+    if(captureProjectId){
+      try{for(const snapshot of captureProjectEditorSnapshots(captureProjectId,liveEditorSnapshots.current,documentSessionsRef.current))handleMarkdownChange(snapshot.documentId,snapshot.markdown);}
+      catch(error){showError(error,"No se pudo capturar el texto actual. El proyecto y su editor permanecen abiertos; vuelve a intentarlo.");return false;}
     }
+    const protectedDocuments=new Map<string,DocumentSession>(),protectedInk=new Map<string,HandwrittenNoteSession>();
+    for(let pass=0;pass<4;pass++){
+      await sessionWrites.current.idle();
+      const pendingDrafts=Object.entries(documentSessionsRef.current).filter(([id,session])=>(shouldPersistDraft(session)||session.draftWriteConflict)&&(!protectedDocuments.has(id)||!sameDocumentRevision(session,protectedDocuments.get(id)!)));
+      const pendingInk=Object.entries(handwrittenSessionsRef.current).filter(([id,session])=>(shouldPersistHandwrittenDraft(session)||session.draftWriteConflict)&&(!protectedInk.has(id)||!sameHandwrittenRevision(session,protectedInk.get(id)!)));
+      const notes=notesLoadedRef.current&&notesMarkdownRef.current!==notesSavedMarkdownRef.current?notesMarkdownRef.current:null;
+      if(!pendingDrafts.length&&!pendingInk.length&&notes===null&&!pendingSaveIds.current.size)return true;
+      const results=await Promise.all([
+        ...pendingDrafts.map(async([id,session])=>{const result=await persistDraft(id,session,true);if(result==="protected")protectedDocuments.set(id,session);return result;}),
+        ...pendingInk.map(async([id,session])=>{const result=await persistHandwrittenDraft(id,session,true);if(result==="protected")protectedInk.set(id,session);return result;}),
+        ...(notes!==null?[persistNotes(notes)]:[]),
+      ]);
+      if(results.includes("failed"))return false;
+      const documentsPending=Object.entries(documentSessionsRef.current).some(([id,session])=>(shouldPersistDraft(session)||session.draftWriteConflict)&&(!protectedDocuments.has(id)||!sameDocumentRevision(session,protectedDocuments.get(id)!)));
+      const inkPending=Object.entries(handwrittenSessionsRef.current).some(([id,session])=>(shouldPersistHandwrittenDraft(session)||session.draftWriteConflict)&&(!protectedInk.has(id)||!sameHandwrittenRevision(session,protectedInk.get(id)!)));
+      if(!documentsPending&&!inkPending&&(!notesLoadedRef.current||notesMarkdownRef.current===notesSavedMarkdownRef.current)&&!pendingSaveIds.current.size)return true;
+      await new Promise<void>(resolve=>window.setTimeout(resolve,0));
+    }
+    setNotice({title:"Espera a que termine el guardado",message:"Hay cambios nuevos o un guardado en curso. Vuelve a intentar la operación cuando termine.",tone:"info"});
+    return false;
   }
 
-  async function flushPendingDrafts() {
-    const pendingDrafts = Object.entries(documentSessions).filter(([, session]) => shouldPersistDraft(session));
-    const pendingHandwrittenDrafts = Object.entries(handwrittenSessions).filter(([, session]) => shouldPersistHandwrittenDraft(session));
-    const results = await Promise.all([
-      ...pendingDrafts.map(([documentId, session]) => persistDraft(documentId, session)),
-      ...pendingHandwrittenDrafts.map(([noteId, session]) => persistHandwrittenDraft(noteId, session)),
-    ]);
-    return results.every(Boolean);
+  async function handleLoadDiskVersion(documentId = activeDocumentId) {
+    try {
+      return await replaceSessionFromDisk({id:documentId,queue:sessionWrites.current,pending:pendingSaveIds.current,
+        current:()=>documentSessionsRef.current[documentId],sameRevision:sameDocumentRevision,
+        readAndDiscard:()=>loadDocumentDiskVersion(documentId,documentSessionsRef.current[documentId]?.draftWriteRevision??null),
+        apply:(record,expected)=>{
+          const loaded=createLoadedDocumentSession(record,{...expected,loadVersion:expected.loadVersion+1});
+          documentSessionsRef.current={...documentSessionsRef.current,[documentId]:loaded};
+          setDocumentSessions(current=>({...current,[documentId]:loaded}));
+        },protect:session=>{void persistDraft(documentId,session,true);}});
+    } catch (error) { showError(error, "No se pudo cargar la versión del disco. Se conserva el contenido abierto."); return false; }
   }
 
-  async function handleLoadDiskVersion() {
-    if (!activeDocumentId) return;
-    await discardDocumentDraft(activeDocumentId);
-    await loadDocumentSession(activeDocumentId, true);
+  async function handleLoadHandwrittenDiskVersion(noteId = activeHandwrittenNoteId) {
+    try {
+      return await replaceSessionFromDisk({id:noteId,queue:sessionWrites.current,pending:pendingSaveIds.current,
+        current:()=>handwrittenSessionsRef.current[noteId],sameRevision:sameHandwrittenRevision,
+        readAndDiscard:()=>loadHandwrittenDiskVersion(noteId,handwrittenSessionsRef.current[noteId]?.draftWriteRevision??null),
+        apply:(record,expected)=>{
+          const loaded=createLoadedHandwrittenNoteSession(record,{...expected,loadVersion:expected.loadVersion+1});
+          handwrittenSessionsRef.current={...handwrittenSessionsRef.current,[noteId]:loaded};
+          setHandwrittenSessions(current=>({...current,[noteId]:loaded}));
+        },protect:session=>{void persistHandwrittenDraft(noteId,session,true);}});
+    } catch (error) { showError(error, "No se pudo cargar la nota del disco. Se conservan los trazos abiertos."); return false; }
   }
 
-  async function checkOpenDocumentSync() {
-    const documents = Object.entries(documentSessions)
+  async function checkOpenDocumentSync(options:{silent?:boolean}={}) {
+    const observedSessions=documentSessionsRef.current;
+    const documents = Object.entries(observedSessions)
       .filter(([, session]) => session.document && !session.isLoading)
       .map(([documentId, session]) => ({
         documentId,
         baseFingerprint: session.baseFingerprint,
       }));
-    if (documents.length === 0) return;
+    if (documents.length === 0) return true;
 
     try {
       const response = await getDocumentsSyncStatus(documents);
+      response.documents=response.documents.filter(status=>acceptsDocumentSyncObservation(documentSessionsRef.current[status.documentId],observedSessions[status.documentId]));
       setDocumentSyncStatuses((currentStatuses) => ({
         ...currentStatuses,
-        ...Object.fromEntries(response.documents.map((status) => [status.documentId, status])),
+        ...Object.fromEntries(response.documents.filter(status=>acceptsDocumentSyncObservation(documentSessionsRef.current[status.documentId],observedSessions[status.documentId])).map((status) => [status.documentId, status])),
       }));
       const cleanChangedDocumentIds = response.documents
         .filter((status) => {
           if (!status.diskChanged) return false;
-          const session = documentSessions[status.documentId];
+          const session = documentSessionsRef.current[status.documentId];
           return Boolean(session && !session.isDirty && !session.hasRecoveredDraft && !status.hasDraft);
         })
         .map((status) => status.documentId);
@@ -5090,7 +5684,7 @@ export function App() {
         let nextSessions = currentSessions;
         for (const status of response.documents) {
           const session = nextSessions[status.documentId];
-          if (!session) continue;
+          if (!acceptsDocumentSyncObservation(session,observedSessions[status.documentId])) continue;
 
           const patch: Partial<DocumentSession> = {};
           if (!status.exists && status.orphaned) {
@@ -5125,68 +5719,86 @@ export function App() {
       for (const documentId of cleanChangedDocumentIds) {
         void loadDocumentSession(documentId, true);
       }
+      return true;
     } catch (error) {
-      showError(error, "No se pudo comprobar el estado de sincronización de los documentos.", {
+      if(!options.silent)showError(error, "No se pudo comprobar el estado de sincronización de los documentos.", {
         source: "app.documentSync",
         suppressApiConnectionNotice: true,
       });
+      return false;
     }
   }
 
   async function refreshOrphanDrafts() {
+    const sequence=++orphanReviewSequence.current;
     try {
-      setOrphanDrafts(await listOrphanDrafts());
+      const inventory=await getOrphanDraftInventory();if(sequence!==orphanReviewSequence.current)return false;setOrphanDrafts(inventory.items);setOrphanCoverage({limited:inventory.limited,warnings:inventory.warnings});return true;
     } catch (error) {
+      if(sequence!==orphanReviewSequence.current)return false;
       showError(error, "No se pudieron cargar los borradores recuperables.", {
         source: "app.orphanDrafts",
         suppressApiConnectionNotice: true,
       });
+      return false;
     }
   }
 
   async function handleRestoreOrphanDraft(draft: OrphanDraft) {
-    try {
-      const restored = await restoreOrphanDraft(draft.draftKey);
-      setOrphanDrafts((currentDrafts) => currentDrafts.filter((currentDraft) => currentDraft.draftKey !== draft.draftKey));
-      if (activeProject?.id === restored.document.projectId) {
-        setProjectTree(restored.document.projectId, await getProjectTree(restored.document.projectId));
-      }
-      openOrReplaceTab(restored.document.id, restored.document.name);
-      setDocumentSessions((currentSessions) => ({
-        ...currentSessions,
-        [restored.document.id]: {
-          document: restored.document,
-          markdown: restored.document.markdown,
-          savedMarkdown: restored.document.markdown,
-          isDirty: false,
-          isLoading: false,
-          saveState: "idle",
-          loadVersion: 0,
-          lastDraftMarkdown: "",
-          baseFingerprint: restored.document.baseFingerprint,
-          savedContentHash: restored.document.savedContentHash ?? restored.document.diskContentHash ?? null,
-          draftContentHash: null,
-          conflictStatus: "none",
-          diskChanged: false,
-          orphaned: false,
-          hasRecoveredDraft: false,
-          draftUpdatedAt: null,
-          pendingDraftDiscard: false,
-          pendingSaveReason: null,
-        },
-      }));
-      setRecoverableDraftsOpen(false);
-    } catch (error) {
-      showError(error, "No se pudo recrear el archivo desde el borrador.");
-    }
+    const id=draft.documentId,ink=draft.kind==="handwritten-note";
+    if(pendingSaveIds.current.has(id))return false;
+    const expectedDoc=documentSessionsRef.current[id],expectedNote=handwrittenSessionsRef.current[id];
+    pendingSaveIds.current.add(id);let committed=false;
+    try{
+      const restored=await sessionWrites.current.run(id,async()=>{
+        const value=await restoreOrphanDraft(draft.draftKey,draft);committed=true;
+        if(value.note){const current=handwrittenSessionsRef.current[id];
+          if(current&&expectedNote&&current.loadVersion===expectedNote.loadVersion){const next=acknowledgeHandwrittenSave(current,value.note,value.note.content);handwrittenSessionsRef.current={...handwrittenSessionsRef.current,[id]:next};setHandwrittenSessions(all=>({...all,[id]:next}));}
+        }else{const current=documentSessionsRef.current[id];
+          if(current&&expectedDoc&&current.loadVersion===expectedDoc.loadVersion){const next=acknowledgeDocumentSave(current,value.document,value.document.markdown);documentSessionsRef.current={...documentSessionsRef.current,[id]:next};setDocumentSessions(all=>({...all,[id]:next}));}
+        }
+        return value;
+      });
+      pendingSaveIds.current.delete(id);
+      const record=restored.note??restored.document;
+      setOrphanDrafts(current=>current.filter(item=>item.draftKey!==draft.draftKey));setRecoverableDraftsOpen(false);
+      if(activeProject?.id!==record.projectId){setNotice({title:"Archivo recreado",message:"Se ha recreado en su proyecto de origen. Selecciona ese proyecto para abrirlo; tu espacio actual se conserva.",tone:"info"});return true;}
+      await handleReloadProjectTree(record.projectId);
+      if(restored.note)handleOpenHandwrittenNote(record.id,record.name);else openOrReplaceTab(record.id,record.name);
+      if(restored.recoveryWarning)setNotice({title:"Archivo recreado; copia conservada",message:restored.recoveryWarning,tone:"info"});return true;
+    }catch(error){if(!committed)throw error;showError(error,"El archivo se ha recreado, pero no se pudo actualizar la vista. Consulta el proyecto sin repetir la recuperación.");return true;}
+    finally{pendingSaveIds.current.delete(id);if(ink){const current=handwrittenSessionsRef.current[id];if(current)void persistHandwrittenDraft(id,current);}else{const current=documentSessionsRef.current[id];if(current)void persistDraft(id,current);}}
   }
 
-  async function handleDiscardOrphanDraft(draftKey: string) {
-    try {
-      await discardOrphanDraft(draftKey);
-      setOrphanDrafts((currentDrafts) => currentDrafts.filter((draft) => draft.draftKey !== draftKey));
-    } catch (error) {
-      showError(error, "No se pudo descartar el borrador recuperable.");
+  async function handleDiscardOrphanDraft(draft: OrphanDraft) {
+    const id=draft.documentId;
+    if(pendingSaveIds.current.has(id))return false;
+    const doc=documentSessionsRef.current[id],note=handwrittenSessionsRef.current[id];
+    if(doc?.isDirty||doc?.hasRecoveredDraft||doc?.isLoading||note?.isDirty||note?.hasRecoveredDraft||note?.isLoading)throw new Error("El borrador sigue abierto. Revisa y cierra esa pestaña antes de retirar su copia de recuperación; la edición abierta se conserva.");
+    pendingSaveIds.current.add(id);
+    try{await sessionWrites.current.run(id,async()=>{
+      const chosenDoc=documentSessionsRef.current[id],chosenNote=handwrittenSessionsRef.current[id];
+      if(chosenDoc?.isDirty||chosenDoc?.hasRecoveredDraft||chosenDoc?.isLoading||chosenNote?.isDirty||chosenNote?.hasRecoveredDraft||chosenNote?.isLoading)throw new Error("La edición sigue abierta; cierra esa pestaña antes de retirar su copia.");
+      await discardOrphanDraft(draft.draftKey,draft);
+      const nextDoc=chosenDoc?acknowledgeDraftWrite(documentSessionsRef.current[id],chosenDoc,null):undefined;
+      const nextNote=chosenNote?acknowledgeDraftWrite(handwrittenSessionsRef.current[id],chosenNote,null):undefined;
+      if(nextDoc){documentSessionsRef.current={...documentSessionsRef.current,[id]:nextDoc};setDocumentSessions(all=>({...all,[id]:nextDoc}));}
+      if(nextNote){handwrittenSessionsRef.current={...handwrittenSessionsRef.current,[id]:nextNote};setHandwrittenSessions(all=>({...all,[id]:nextNote}));}
+    });setOrphanDrafts(current=>current.filter(item=>item.draftKey!==draft.draftKey));return true;}
+    finally{pendingSaveIds.current.delete(id);const doc=documentSessionsRef.current[id],note=handwrittenSessionsRef.current[id];if(doc)void persistDraft(id,doc);if(note)void persistHandwrittenDraft(id,note);}
+  }
+
+  async function handleRecoveredCopy(restored: RestoreDraftResponse) {
+    const record = restored.note ?? restored.document;
+    if (activeProject?.id !== record.projectId) {
+      setNotice({ title: "Archivo nuevo recuperado", message: "Se ha creado en el proyecto elegido. Selecciona ese proyecto para abrirlo; la copia de origen se conserva.", tone: "info" });
+      return;
+    }
+    await handleReloadProjectTree(record.projectId);
+    if (restored.note) {
+      handleOpenHandwrittenNote(record.id, record.name);
+    } else {
+      openOrReplaceTab(record.id, record.name);
+      void loadDocumentSession(record.id, true);
     }
   }
 }
@@ -5223,7 +5835,7 @@ function getUniqueFolderName(nodes: DocumentTreeNode[]) {
 
 function getDeletedOperationPaths(response: AiInteractionResponse) {
   return response.operations
-    .filter((operation) => operation.type === "node_deleted" && operation.path)
+    .filter((operation) => operation.type === "node_deleted" && operation.runtimeApplied === true && operation.path)
     .map((operation) => normalizeDocumentPath(operation.path ?? ""));
 }
 
@@ -5253,12 +5865,14 @@ function buildActiveHandwrittenSummary(content: HandwrittenNoteContent, pageId: 
   };
 }
 
-function markAiHandwrittenDraftApplied(session: HandwrittenNoteSession, content: HandwrittenNoteContent, updatedAt: string): HandwrittenNoteSession {
-  if (!session.isDirty) return session;
+function markAiHandwrittenDraftApplied(session: HandwrittenNoteSession, content: HandwrittenNoteContent, updatedAt: string,draftWriteRevision?:string|null): HandwrittenNoteSession {
+  if (!session.isDirty) return {...session,draftWriteRevision:draftWriteRevision===undefined?session.draftWriteRevision:draftWriteRevision};
   return {
     ...session,
     hasRecoveredDraft: true,
     lastDraftContentJson: stringifyHandwrittenContent(content),
+    draftWriteRevision: draftWriteRevision===undefined?session.draftWriteRevision:draftWriteRevision,
+    draftWriteConflict: draftWriteRevision===undefined?session.draftWriteConflict:false,
     draftUpdatedAt: updatedAt,
     draftContentHash: null,
     pendingDraftDiscard: false,
@@ -5356,76 +5970,6 @@ function setAllFoldersOpen(nodes: DocumentTreeNode[], open: boolean): DocumentTr
 
     return node;
   });
-}
-
-function getTemplateMarkdown(template: string, documentName: string) {
-  const title = documentName.replace(/\.md$/i, "").replace(/-/g, " ");
-
-  if (template === "meeting") {
-    return `# ${title}\n\n## Información general\n\n## Asistentes\n\n## Acuerdos\n\n- [ ] Nueva tarea\n`;
-  }
-
-  if (template === "requirements") {
-    return `# ${title}\n\n## Requisitos funcionales\n\n- \n\n## Requisitos no funcionales\n\n- \n`;
-  }
-
-  if (template === "decision") {
-    return `# ${title}\n\n## Contexto\n\n## Decisión\n\n## Consecuencias\n\n`;
-  }
-
-  return `# ${title}\n\n`;
-}
-
-function resolveProjectTabs(tabsByProject: Record<string, ProjectTabsConfig>, projectId: string, tree: DocumentTreeNode[]) {
-  const configuredTabs = normalizeProjectTabs(tabsByProject[projectId] ?? defaultProjectTabsConfig);
-  const knownDocumentIds = new Set(collectDocuments(tree).map((node) => node.id));
-  const knownHandwrittenNoteIds = new Set(collectHandwrittenNotes(tree).map((node) => node.id));
-
-  const openTabs = configuredTabs.openTabs.filter((tab) => knownDocumentIds.has(tab.id));
-  const openHandwrittenTabs = (configuredTabs.openHandwrittenTabs ?? []).filter((tab) => knownHandwrittenNoteIds.has(tab.id));
-  return normalizeProjectTabs({
-    openTabs,
-    activeDocumentId: knownDocumentIds.has(configuredTabs.activeDocumentId) ? configuredTabs.activeDocumentId : openTabs[0]?.id ?? "",
-    openHandwrittenTabs,
-    activeHandwrittenNoteId: knownHandwrittenNoteIds.has(configuredTabs.activeHandwrittenNoteId ?? "") ? configuredTabs.activeHandwrittenNoteId : openHandwrittenTabs[0]?.id ?? "",
-    activeWorkspaceTabId: [...openTabs, ...openHandwrittenTabs].some((tab) => tab.id === configuredTabs.activeWorkspaceTabId)
-      ? configuredTabs.activeWorkspaceTabId ?? ""
-      : openHandwrittenTabs[0]?.id ?? openTabs[0]?.id ?? "",
-  });
-}
-
-function normalizeProjectTabs(projectTabs: ProjectTabsConfig): ProjectTabsConfig {
-  const seen = new Set<string>();
-  const openTabs = projectTabs.openTabs.filter((tab) => {
-    if (!tab.id || !tab.name || seen.has(tab.id)) return false;
-    seen.add(tab.id);
-    return true;
-  });
-
-  const normalizedOpenTabs = openTabs.map((tab) => ({ id: tab.id, name: tab.name, kind: "document" as const }));
-  const activeDocumentId = normalizedOpenTabs.some((tab) => tab.id === projectTabs.activeDocumentId)
-    ? projectTabs.activeDocumentId
-    : normalizedOpenTabs[0]?.id ?? "";
-  const seenHandwritten = new Set<string>();
-  const openHandwrittenTabs = (projectTabs.openHandwrittenTabs ?? []).filter((tab) => {
-    if (!tab.id || !tab.name || seenHandwritten.has(tab.id)) return false;
-    seenHandwritten.add(tab.id);
-    return true;
-  }).map((tab) => ({ id: tab.id, name: tab.name, kind: "handwritten-note" as const }));
-  const activeHandwrittenNoteId = openHandwrittenTabs.some((tab) => tab.id === projectTabs.activeHandwrittenNoteId)
-    ? projectTabs.activeHandwrittenNoteId ?? ""
-    : openHandwrittenTabs[0]?.id ?? "";
-  const activeWorkspaceTabId = [...normalizedOpenTabs, ...openHandwrittenTabs].some((tab) => tab.id === projectTabs.activeWorkspaceTabId)
-    ? projectTabs.activeWorkspaceTabId ?? ""
-    : activeHandwrittenNoteId || activeDocumentId;
-
-  return {
-    openTabs: normalizedOpenTabs,
-    activeDocumentId,
-    openHandwrittenTabs,
-    activeHandwrittenNoteId,
-    activeWorkspaceTabId,
-  };
 }
 
 function reorderOpenDocumentTabs(tabs: OpenDocumentTab[], draggedTabId: string, targetTabId: string, placement: "before" | "after") {
@@ -5619,57 +6163,6 @@ function StartupOverlay({ loading }: { loading: boolean }) {
   );
 }
 
-function LocalRuntimeRecoveryOverlay({
-  open,
-  error,
-  onRetry,
-}: {
-  open: boolean;
-  error: string | null;
-  onRetry: () => void;
-}) {
-  if (!open) return null;
-
-  return (
-    <div className="fixed inset-0 z-[130] flex min-h-[100dvh] items-center justify-center bg-white px-5 py-6">
-      <section className="w-full max-w-[420px]">
-        <BrandMark className="h-11 w-11" />
-        <div className="mt-6 flex items-center gap-2 text-[11px] font-semibold uppercase text-brand-orange">
-          Runtime móvil
-        </div>
-        <h1 className="mt-2 text-[23px] font-semibold leading-tight text-ink-primary">Runtime local no disponible</h1>
-        <p className="mt-3 text-[12px] leading-5 text-ink-secondary">
-          Android usa el runtime local de Tauri/Rust para abrir proyectos y documentos sin depender de un ordenador encendido.
-        </p>
-        <div className="mt-6 rounded-md border border-line bg-panel px-4 py-4">
-          <div className="flex items-start gap-3">
-            <RefreshCw size={18} className="mt-0.5 shrink-0 text-brand-orange" strokeWidth={2} />
-            <div>
-              <div className="text-[12px] font-semibold text-ink-primary">Contrato Tauri local</div>
-              <p className="mt-1 text-[11px] leading-5 text-ink-secondary">
-                KnowNext.ai {APP_VERSION} usa solo el runtime Tauri/Rust integrado en Android. Reintenta el arranque para volver a inicializarlo.
-              </p>
-            </div>
-          </div>
-        </div>
-        {error ? (
-          <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-3 text-[11px] leading-5 text-red-700" role="alert">
-            {error}
-          </div>
-        ) : null}
-        <button
-          type="button"
-          className="mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-brand-orange px-4 text-[12px] font-semibold text-white transition hover:bg-brand-orange-dark"
-          onClick={onRetry}
-        >
-          <RefreshCw size={15} />
-          Reintentar runtime local
-        </button>
-      </section>
-    </div>
-  );
-}
-
 function getGithubDeviceFlowErrorMessage(error?: string | null) {
   if (error === "github_remote_not_configured") return "GitHub remoto no está configurado en esta instalación.";
   if (error === "github_network_unavailable") return "No se pudo contactar con GitHub. Comprueba la conexión e inténtalo de nuevo.";
@@ -5819,20 +6312,6 @@ function markNodeEditing(nodes: DocumentTreeNode[], nodeId: string | null): Docu
   }));
 }
 
-function collectDocuments(nodes: DocumentTreeNode[]): DocumentTreeNode[] {
-  return nodes.flatMap((node) => {
-    if (node.type === "document") return [node];
-    return node.children ? collectDocuments(node.children) : [];
-  });
-}
-
-function collectHandwrittenNotes(nodes: DocumentTreeNode[]): DocumentTreeNode[] {
-  return nodes.flatMap((node) => {
-    if (node.type === "handwritten-note") return [node];
-    return node.children ? collectHandwrittenNotes(node.children) : [];
-  });
-}
-
 function findFirstDocument(nodes: DocumentTreeNode[]): DocumentTreeNode | null {
   for (const node of nodes) {
     if (node.type === "document") return node;
@@ -5907,6 +6386,7 @@ function aiEditOperationIsStale(
     ? notesMarkdown
     : documentSessions[operation.documentId]?.markdown;
   if (typeof currentMarkdown !== "string") return false;
+  if (typeof operation.expectedMarkdown === "string" && operation.expectedMarkdown !== currentMarkdown) return true;
 
   if (operation.action === "replace_selection" || operation.action === "edit_block") {
     const originalExcerpt = operation.originalExcerpt?.trim();
@@ -5924,7 +6404,7 @@ function buildActiveEditorAiOperation(
   imageMarkdown?: string | null,
 ): MarkdownEditorExternalOperation | null {
   if (!activeEditorTargetId || operation.documentId !== activeEditorTargetId) return null;
-  const operationId = `ai-${interactionId}-${operation.id}-${Date.now()}`;
+  const operationId = nextAiEditorOperationId(`ai-${interactionId}-${operation.id}`);
 
   if (operation.action === "replace_selection") {
     const replacement = operation.replacementMarkdown ?? operation.markdown;

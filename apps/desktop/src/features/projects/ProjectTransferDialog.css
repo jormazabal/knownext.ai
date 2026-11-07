@@ -1,0 +1,11 @@
+.project-transfer-review details > summary::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-right: 9px;
+  flex-shrink: 0;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+}
+.project-transfer-review details[open] > summary::before { transform: rotate(45deg); }

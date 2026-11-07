@@ -9,16 +9,18 @@ export type DocumentTreeDragData = {
   type: DocumentTreeNode["type"];
   name: string;
   path?: string | null;
+  nodeIds?: string[];
 };
 
 let activeDocumentTreeDragData: DocumentTreeDragData | null = null;
 
-export function setDocumentTreeDragData(dataTransfer: DataTransfer, node: DocumentTreeNode) {
+export function setDocumentTreeDragData(dataTransfer: DataTransfer, node: DocumentTreeNode, nodeIds?:string[]) {
   const payload: DocumentTreeDragData = {
     id: node.id,
     type: node.type,
     name: node.name,
     path: node.path ?? null,
+    ...(nodeIds&&nodeIds.length>1?{nodeIds}:{}),
   };
   const serializedPayload = JSON.stringify(payload);
 
@@ -90,6 +92,7 @@ function parseJsonPayload(rawPayload: string, fileOnly: boolean): DocumentTreeDr
       type: parsedPayload.type,
       name: typeof parsedPayload.name === "string" ? parsedPayload.name : parsedPayload.id,
       path: typeof parsedPayload.path === "string" ? parsedPayload.path : null,
+      ...(Array.isArray(parsedPayload.nodeIds)&&parsedPayload.nodeIds.length>1&&parsedPayload.nodeIds.length<=500&&parsedPayload.nodeIds.every(id=>typeof id==="string"&&id.length>0)?{nodeIds:parsedPayload.nodeIds}:{}),
     };
   } catch {
     return null;

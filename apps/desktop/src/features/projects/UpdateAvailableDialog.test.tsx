@@ -40,14 +40,15 @@ describe("UpdateAvailableDialog", () => {
     expect(onInstall).toHaveBeenCalledTimes(1);
   });
 
-  it("disables actions while downloading and shows progress", () => {
+  it("disables actions while downloading and shows progress", async() => {
+    const user=userEvent.setup(),close=vi.fn();
     render(
       <UpdateAvailableDialog
         update={{ currentVersion: "2.0.1", version: "2.0.2", platform: "android-private" }}
         state="downloading"
         progress={{ downloadedBytes: 50, contentLength: 100, percent: 50 }}
         error="Red interrumpida"
-        onClose={vi.fn()}
+        onClose={close}
         onInstall={vi.fn()}
       />,
     );
@@ -58,5 +59,7 @@ describe("UpdateAvailableDialog", () => {
     expect(screen.getByText("Red interrumpida")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Más tarde" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Actualizando" })).toBeDisabled();
+    expect(screen.getByRole("progressbar",{name:"Descargando actualización"})).toHaveAttribute("aria-valuenow","50");
+    await user.keyboard("{Escape}");expect(close).not.toHaveBeenCalled();
   });
 });

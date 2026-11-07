@@ -1,3 +1,6 @@
+import {ModalFrame} from "../../components/ui/ModalFrame";
+import { reviewedExternalFiles } from "./reviewedExternalFiles";
+import { ProjectRemoteReviewDialog } from "./ProjectRemoteReviewDialog";
 import {
   AlertTriangle,
   Ban,
@@ -20,7 +23,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type {
   ExternalChangeDecision,
@@ -32,6 +35,7 @@ import type {
   ProjectFileSyncPhaseStatus,
   ProjectSyncState,
   ProjectSyncStatus,
+  DocumentTreeNode,
 } from "../../types/domain";
 
 export type OpenDocumentDraftState = {
@@ -61,12 +65,14 @@ type ExternalChangesDrawerProps = {
   onOmitAll: () => void;
   onPushGithub: () => void;
   onPullGithub: () => void;
-  onResolveGithubConflict: (resolution: "keep-local" | "take-remote") => void;
   onOpenGithubRepository: () => void;
   onOpenDocument: (documentId: string, name: string) => void;
   onSaveDocument: (documentId: string) => void | Promise<boolean>;
   onDiscardDocumentDraft: (documentId: string) => void | Promise<boolean>;
   onRefresh: () => void;
+  beforeApply?:()=>Promise<boolean>;onApplicationChanged?:()=>void;
+  onLocalTreeUnavailable?:(projectId:string,message:string)=>void;
+  onLocalTreeChanged?:(projectId:string,tree:DocumentTreeNode[])=>void;
   onClose: () => void;
 };
 
@@ -114,36 +120,37 @@ export function ExternalChangesDrawer({
   onOmitAll,
   onPushGithub,
   onPullGithub,
-  onResolveGithubConflict,
   onOpenGithubRepository,
   onOpenDocument,
   onSaveDocument,
   onDiscardDocumentDraft,
   onRefresh,
+  beforeApply,onApplicationChanged,
+  onLocalTreeChanged,
+  onLocalTreeUnavailable,
   onClose,
 }: ExternalChangesDrawerProps) {
   const [filters, setFilters] = useState<FileSyncFilterState>(emptyFilterState);
-  const [pendingConflictResolution, setPendingConflictResolution] = useState<"keep-local" | "take-remote" | null>(null);
-  const files = useMemo(() => buildDisplayFiles(project, overview, openDrafts, syncStatus), [project, overview, openDrafts, syncStatus]);
+  const [remoteReviewOpen, setRemoteReviewOpen] = useState(false);
+  const reviewedOverview = useMemo(() => overview || changeSet ? { ...overview, projectId: project?.id ?? "", files: reviewedExternalFiles(project?.id, overview, changeSet) } as ProjectFileSyncOverview : null, [project?.id, overview, changeSet]);
+  const files = useMemo(() => buildDisplayFiles(project, reviewedOverview, openDrafts, syncStatus), [project, reviewedOverview, openDrafts, syncStatus]);
+  const graphDiverged = Boolean(syncStatus?.diverged || syncStatus?.hasConflicts || syncStatus?.state === "conflict" || files.some(file => file.githubStatus.state === "conflict"));
   const filterOptions = useMemo(() => buildPhaseFilterOptions(files), [files]);
   const visibleFiles = useMemo(() => files.filter((file) => fileMatchesPhaseFilters(file, filters)), [files, filters]);
   const includedChanges = files.filter((file) => isIncludeDecision(file, decisions)).length;
   const omittedCount = files.filter(isOmittedFile).length;
-  const canUseGithub = hasGithub(project) && !syncStatus?.remotePaused;
-  const canPushGithub = canUseGithub && Boolean(syncStatus?.pendingPush) && includedChanges === 0;
-  const canPullGithub = canUseGithub && Boolean(syncStatus?.pendingPull);
+  const canUseGithub = !graphDiverged && hasGithub(project) && !syncStatus?.remotePaused;
+  const canPushGithub = !graphDiverged && canUseGithub && Boolean(syncStatus?.pendingPush) && includedChanges === 0;
+  const canPullGithub = !graphDiverged && canUseGithub && Boolean(syncStatus?.pendingPull);
   const summary = getHeaderSummary(files, overviewError, busy, syncStatus, syncState, message);
+  const publicationMessage = changeSet?.summary.total ? !changeSet.revision ? "Comprueba de nuevo para revisar los archivos antes de registrarlos." : includedChanges > 0 ? "Se registrará el contenido guardado que has revisado. Si cambia, tendrás que comprobar y confirmar de nuevo." : undefined : undefined;
 
   if (!open) return null;
 
   return (
-    <div className="knownext-modal-overlay fixed inset-0 z-[80] flex items-center justify-center bg-black/20 px-4 py-8" onMouseDown={onClose}>
+    <ModalFrame label="Guardado y sincronización" onClose={onClose} className="!p-4 sm:!p-8" fallbackFocus={()=>document.querySelector<HTMLElement>("[data-workspace-focus-anchor]")}>
       <section
         className="relative flex max-h-[min(820px,calc(100dvh-56px))] w-[min(1080px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="file-sync-title"
-        onMouseDown={(event) => event.stopPropagation()}
       >
         <FileSyncToolbar
           projectName={project?.name ?? "Proyecto"}
@@ -152,6 +159,10 @@ export function ExternalChangesDrawer({
           onRefresh={onRefresh}
           onClose={onClose}
         />
+        {graphDiverged && <section className="mx-4 mt-3 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-md bg-brand-hover px-3 py-2">
+          <p className="min-w-0 flex-1 text-xs leading-5">Ambos lados tienen versiones propias. Revisa las rutas antes de sincronizar; no se sustituye ninguna copia.</p>
+          <button disabled={busy} className="min-h-11 rounded px-3 text-xs font-semibold text-brand-dark hover:bg-white disabled:opacity-50" onClick={() => setRemoteReviewOpen(true)}>Revisar divergencia</button>
+        </section>}
         <FileSyncFilters
           filters={filters}
           options={filterOptions}
@@ -160,6 +171,7 @@ export function ExternalChangesDrawer({
           onClearAll={() => setFilters(emptyFilterState)}
         />
         <BulkActionBar
+          reviewMessage={publicationMessage}
           includedChanges={includedChanges}
           omittedCount={omittedCount}
           acknowledged={acknowledged}
@@ -173,6 +185,7 @@ export function ExternalChangesDrawer({
         />
 
         <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
+          {publicationMessage&&<p className="mb-3 text-[11px] leading-5 text-ink-secondary">{publicationMessage}</p>}
           {overviewError ? (
             <section className="mb-3 rounded-md border border-red-100 bg-red-50 px-4 py-3 text-[12px] text-red-900">
               <div className="flex items-start gap-3">
@@ -187,6 +200,7 @@ export function ExternalChangesDrawer({
               </div>
             </section>
           ) : null}
+          {busy && overview && <p role="status" className="mb-3 text-xs leading-5 text-ink-secondary">Actualizando. Se muestra la última consulta de este proyecto.</p>}
           <FileSyncTable
             files={visibleFiles}
             decisions={decisions}
@@ -203,12 +217,18 @@ export function ExternalChangesDrawer({
               onOpenDocument(documentId, name);
               onClose();
             }}
-            onRequestResolveGithubConflict={setPendingConflictResolution}
             onSaveDocument={onSaveDocument}
             onDiscardDocumentDraft={onDiscardDocumentDraft}
             onRefresh={onRefresh}
           />
-          {!overviewError && visibleFiles.length === 0 ? (
+          {!overviewError && busy && !overview ? (
+            <section role="status" className="rounded-md bg-panel px-4 py-8 text-center">
+              <Loader2 size={22} className="mx-auto animate-spin text-ink-secondary" />
+              <p className="mt-2 text-xs font-semibold">Comprobando el estado de los archivos</p>
+              <p className="mt-1 text-xs leading-5 text-ink-secondary">La lista aparecerá al terminar la consulta. Puedes cerrar esta ventana y seguir trabajando.</p>
+            </section>
+          ) : null}
+          {!overviewError && !busy && visibleFiles.length === 0 ? (
             <section className="rounded-md border border-dashed border-line bg-white px-4 py-10 text-center">
               <CheckCircle2 size={24} className="mx-auto text-green-600" />
               <p className="mt-2 text-[12px] font-semibold text-ink-primary">No hay archivos con estos filtros</p>
@@ -219,29 +239,20 @@ export function ExternalChangesDrawer({
           ) : null}
         </div>
 
-        <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-line px-5 py-4">
-          <div className="min-w-0 truncate text-[11px] text-ink-secondary">
+        <footer className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-line px-5 py-4">
+          <div className="min-w-0 break-words text-[11px] leading-5 text-ink-secondary">
             {summary.footer}
           </div>
-          <button className="inline-flex h-9 items-center gap-2 rounded-md border border-line px-3 text-[11px] font-medium hover:bg-panel" disabled={busy} onClick={onRefresh}>
+          <button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-line px-3 text-[11px] font-medium hover:bg-panel" disabled={busy} onClick={onRefresh}>
             {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
             Comprobar de nuevo
           </button>
         </footer>
 
-        {pendingConflictResolution ? (
-          <GithubConflictConfirmationDialog
-            resolution={pendingConflictResolution}
-            busy={busy}
-            onCancel={() => setPendingConflictResolution(null)}
-            onConfirm={() => {
-              onResolveGithubConflict(pendingConflictResolution);
-              setPendingConflictResolution(null);
-            }}
-          />
-        ) : null}
+        {remoteReviewOpen && project && <ProjectRemoteReviewDialog key={project.id} projectId={project.id} projectName={project.name} beforeApply={beforeApply} onApplicationChanged={onApplicationChanged} onClose={() => setRemoteReviewOpen(false)} onLocalTreeChanged={onLocalTreeChanged} onLocalTreeUnavailable={onLocalTreeUnavailable} onOpenDocument={(id,name) => { onOpenDocument(id,name); setRemoteReviewOpen(false); onClose(); }}/>}
+
       </section>
-    </div>
+    </ModalFrame>
   );
 }
 
@@ -263,19 +274,19 @@ function FileSyncToolbar({
     <header className="shrink-0 border-b border-line px-5 py-4">
       <div className="flex items-start justify-between gap-4">
         <div className="flex min-w-0 items-start gap-3">
-          <span className={["grid h-9 w-9 shrink-0 place-items-center rounded-md", summary.iconClass].join(" ")}>
+          <span className={["hidden h-9 w-9 shrink-0 place-items-center rounded-md sm:grid", summary.iconClass].join(" ")}>
             <Icon size={18} />
           </span>
           <div className="min-w-0">
-            <h2 id="file-sync-title" className="truncate text-[16px] font-semibold text-ink-primary">Guardado y sincronización</h2>
-            <p className="mt-1 truncate text-[11px] text-ink-secondary">
+            <h2 id="file-sync-title" className="break-words text-[16px] font-semibold leading-6 text-ink-primary">Guardado y sincronización</h2>
+            <p className="mt-1 break-words text-[11px] leading-5 text-ink-secondary">
               {projectName} · {summary.detail}
             </p>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <button
-            className="grid h-8 w-8 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange disabled:cursor-not-allowed disabled:opacity-50"
+            className="grid h-11 w-11 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange disabled:cursor-not-allowed disabled:opacity-50"
             data-tooltip="Comprobar de nuevo"
             aria-label="Comprobar guardado y sincronización de nuevo"
             disabled={busy}
@@ -284,7 +295,7 @@ function FileSyncToolbar({
             {busy ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
           </button>
           <button
-            className="grid h-8 w-8 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
+            className="grid h-11 w-11 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
             data-tooltip="Cerrar"
             aria-label="Cerrar guardado y sincronización"
             onClick={onClose}
@@ -311,10 +322,14 @@ function FileSyncFilters({
   onClearAll: () => void;
 }) {
   const [openPhase, setOpenPhase] = useState<FileSyncFilterPhase | null>(null);
+  const [mobileOpen,setMobileOpen]=useState(false);
+  const filterId=useId();
   const selectedCount = filterPhases.reduce((total, phase) => total + filters[phase.id].length, 0);
   return (
-    <nav className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-5 py-2" aria-label="Filtros de guardado y sincronización">
-      <span className="mr-1 text-[10px] font-semibold uppercase text-ink-secondary">Filtros</span>
+    <div className="shrink-0 border-b border-line">
+    <button type="button" aria-expanded={mobileOpen} aria-controls={filterId} onClick={()=>setMobileOpen(value=>!value)} className="flex min-h-11 w-full items-center justify-between gap-2 px-5 text-xs font-medium sm:hidden">Filtrar archivos{selectedCount?` · ${selectedCount} ${selectedCount===1?"activo":"activos"}`:""}<ChevronDown size={14} className={mobileOpen?"rotate-180":""}/></button>
+    <nav id={filterId} className={`${mobileOpen?"flex":"hidden sm:flex"} max-h-[30dvh] flex-wrap items-center gap-2 overflow-y-auto px-5 py-2 sm:max-h-none sm:overflow-visible`} aria-label="Filtros de guardado y sincronización">
+      <span className="mr-1 hidden text-[10px] font-semibold uppercase text-ink-secondary sm:inline">Filtros</span>
       {filterPhases.map((phase) => (
         <PhaseFilterDropdown
           key={phase.id}
@@ -331,13 +346,14 @@ function FileSyncFilters({
       {selectedCount > 0 ? (
         <button
           type="button"
-          className="ml-auto h-8 rounded-md px-2.5 text-[11px] font-semibold text-ink-secondary hover:bg-panel hover:text-ink-primary"
+          className="ml-auto min-h-11 rounded-md px-2.5 text-[11px] font-semibold text-ink-secondary hover:bg-panel hover:text-ink-primary"
           onClick={onClearAll}
         >
           Limpiar filtros ({selectedCount})
         </button>
       ) : null}
     </nav>
+    </div>
   );
 }
 
@@ -363,11 +379,11 @@ function PhaseFilterDropdown({
   const active = selected.length > 0;
   const buttonLabel = active ? `${label}: ${selected.length}` : `${label}: Todos`;
   return (
-    <div className="relative">
+    <div className="relative w-full sm:w-auto">
       <button
         type="button"
         className={[
-          "inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-[11px] font-semibold transition",
+          "inline-flex min-h-11 w-full items-center justify-between sm:w-auto gap-2 rounded-md border px-2.5 text-[11px] font-semibold transition",
           active ? "border-orange-200 bg-brand-hover text-brand-orange" : "border-line bg-white text-ink-secondary hover:bg-panel hover:text-ink-primary",
         ].join(" ")}
         aria-expanded={open}
@@ -379,14 +395,14 @@ function PhaseFilterDropdown({
       </button>
       {open ? (
         <div
-          className="absolute left-0 top-9 z-30 w-56 rounded-md border border-line bg-white p-2 shadow-menu"
+          className="relative mt-1 w-full rounded-md border border-line bg-white p-2 sm:absolute sm:left-0 sm:top-12 sm:z-30 sm:mt-0 sm:w-56 sm:shadow-menu"
           role="menu"
           aria-label={`Filtrar por estado ${label}`}
         >
           <div className="mb-1 flex items-center justify-between gap-2 px-1">
             <span className="text-[10px] font-semibold uppercase text-ink-secondary">{label}</span>
             {active ? (
-              <button type="button" className="text-[10px] font-semibold text-brand-orange hover:text-brand-dark" onClick={() => onClear(phase)}>
+              <button type="button" className="min-h-11 px-2 text-[10px] font-semibold text-brand-orange hover:text-brand-dark" onClick={() => onClear(phase)}>
                 Todos
               </button>
             ) : null}
@@ -397,7 +413,7 @@ function PhaseFilterDropdown({
               return (
                 <label
                   key={option.state}
-                  className="flex h-8 cursor-default items-center gap-2 rounded px-2 text-[11px] text-ink-primary hover:bg-panel"
+                  className="flex min-h-11 cursor-default items-center gap-2 rounded px-2 text-[11px] text-ink-primary hover:bg-panel"
                 >
                   <input
                     type="checkbox"
@@ -419,6 +435,7 @@ function PhaseFilterDropdown({
 }
 
 function BulkActionBar({
+  reviewMessage,
   includedChanges,
   omittedCount,
   acknowledged,
@@ -430,6 +447,7 @@ function BulkActionBar({
   onPushGithub,
   onPullGithub,
 }: {
+  reviewMessage?: string;
   includedChanges: number;
   omittedCount: number;
   acknowledged: boolean;
@@ -444,30 +462,30 @@ function BulkActionBar({
   const hasAction = includedChanges > 0 || (omittedCount > 0 && !acknowledged) || canPushGithub || canPullGithub;
   return (
     <section className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line bg-panel px-5 py-3">
-      <p className="min-w-0 text-[11px] text-ink-secondary">
+      {!reviewMessage&&<p className="hidden min-w-0 text-[11px] text-ink-secondary sm:block">
         {hasAction ? "Resuelve los archivos pendientes desde la lista o ejecuta una acción de lote." : "No hay acciones de lote disponibles ahora."}
-      </p>
-      <div className="flex flex-wrap justify-end gap-2">
+      </p>}
+      <div className="ml-auto flex flex-wrap justify-end gap-2">
         {includedChanges > 0 ? (
-          <button className="inline-flex h-8 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy} onClick={onImport}>
+          <button className="inline-flex min-h-11 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy} onClick={onImport}>
             {busy ? <Loader2 size={14} className="animate-spin" /> : <GitBranch size={14} />}
             Guardar seleccionados en historial ({includedChanges})
           </button>
         ) : null}
         {omittedCount > 0 && !acknowledged ? (
-          <button className="inline-flex h-8 items-center gap-2 rounded-md border border-orange-200 bg-white px-3 text-[11px] font-semibold text-brand-orange hover:bg-brand-hover disabled:opacity-50" disabled={busy} onClick={onOmitAll}>
+          <button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-orange-200 bg-white px-3 text-[11px] font-semibold text-brand-orange hover:bg-brand-hover disabled:opacity-50" disabled={busy} onClick={onOmitAll}>
             <ShieldAlert size={14} />
             Aceptar omitidos ({omittedCount})
           </button>
         ) : null}
         {canPushGithub ? (
-          <button className="inline-flex h-8 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy} onClick={onPushGithub}>
+          <button className="inline-flex min-h-11 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy} onClick={onPushGithub}>
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
             Subir versiones a GitHub
           </button>
         ) : null}
         {canPullGithub ? (
-          <button className="inline-flex h-8 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy} onClick={onPullGithub}>
+          <button className="inline-flex min-h-11 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy} onClick={onPullGithub}>
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
             Actualizar desde GitHub
           </button>
@@ -490,7 +508,6 @@ function FileSyncTable({
   onPullGithub,
   onOpenGithubRepository,
   onOpenDocument,
-  onRequestResolveGithubConflict,
   onSaveDocument,
   onDiscardDocumentDraft,
   onRefresh,
@@ -507,7 +524,6 @@ function FileSyncTable({
   onPullGithub: () => void;
   onOpenGithubRepository: () => void;
   onOpenDocument: (documentId: string, name: string) => void;
-  onRequestResolveGithubConflict: (resolution: "keep-local" | "take-remote") => void;
   onSaveDocument: (documentId: string) => void | Promise<boolean>;
   onDiscardDocumentDraft: (documentId: string) => void | Promise<boolean>;
   onRefresh: () => void;
@@ -515,7 +531,7 @@ function FileSyncTable({
   if (files.length === 0) return null;
   return (
     <section className="rounded-md border border-line bg-white">
-      <div className="sticky top-0 z-10 grid min-h-9 min-w-[900px] grid-cols-[minmax(260px,1.8fr)_100px_120px_140px_140px_132px] items-center gap-3 border-b border-line bg-panel px-3 text-[10px] font-semibold uppercase text-ink-secondary">
+      <div className="sticky top-0 z-10 hidden min-h-9 min-w-[900px] sm:grid grid-cols-[minmax(260px,1.8fr)_100px_120px_140px_140px_132px] items-center gap-3 border-b border-line bg-panel px-3 text-[10px] font-semibold uppercase text-ink-secondary">
         <span>Archivo</span>
         <span>Modificado</span>
         <span>Local</span>
@@ -523,7 +539,7 @@ function FileSyncTable({
         <span>GitHub</span>
         <span className="text-right">Acciones</span>
       </div>
-      <div className="min-w-[900px] divide-y divide-line/70">
+      <div className="divide-y divide-line/70 sm:min-w-[900px]">
         {files.map((file) => (
           <FileSyncRow
             key={file.id}
@@ -539,7 +555,6 @@ function FileSyncTable({
             onPullGithub={onPullGithub}
             onOpenGithubRepository={onOpenGithubRepository}
             onOpenDocument={onOpenDocument}
-            onRequestResolveGithubConflict={onRequestResolveGithubConflict}
             onSaveDocument={onSaveDocument}
             onDiscardDocumentDraft={onDiscardDocumentDraft}
             onRefresh={onRefresh}
@@ -563,7 +578,6 @@ function FileSyncRow({
   onPullGithub,
   onOpenGithubRepository,
   onOpenDocument,
-  onRequestResolveGithubConflict,
   onSaveDocument,
   onDiscardDocumentDraft,
   onRefresh,
@@ -580,25 +594,24 @@ function FileSyncRow({
   onPullGithub: () => void;
   onOpenGithubRepository: () => void;
   onOpenDocument: (documentId: string, name: string) => void;
-  onRequestResolveGithubConflict: (resolution: "keep-local" | "take-remote") => void;
   onSaveDocument: (documentId: string) => void | Promise<boolean>;
   onDiscardDocumentDraft: (documentId: string) => void | Promise<boolean>;
   onRefresh: () => void;
 }) {
   const Icon = getFileIcon(file.kind);
   return (
-    <article className="grid min-h-[58px] grid-cols-[minmax(260px,1.8fr)_100px_120px_140px_140px_132px] items-center gap-3 px-3 py-2 text-[11px] hover:bg-panel/70">
+    <article className="grid min-h-[58px] grid-cols-1 items-center gap-3 px-3 py-4 text-[11px] hover:bg-panel/70 sm:grid-cols-[minmax(260px,1.8fr)_100px_120px_140px_140px_132px] sm:py-2">
       <div className="flex min-w-0 items-center gap-2">
         <Icon size={16} className="shrink-0 text-ink-secondary" />
         <div className="min-w-0">
-          <p className="truncate font-semibold text-ink-primary">{file.name}</p>
-          <p className="mt-0.5 truncate text-[10px] leading-4 text-ink-secondary">{formatParentPath(file.path)}</p>
+          <p className="break-all font-semibold text-ink-primary sm:truncate">{file.name}</p>
+          <p className="mt-0.5 break-all text-[10px] leading-4 text-ink-secondary sm:truncate">{formatParentPath(file.path)}</p>
         </div>
       </div>
-      <span className="text-ink-secondary">{formatDate(file.modifiedAt ?? file.draft?.draftUpdatedAt)}</span>
-      <SyncStatusBadge status={file.localStatus} />
-      <SyncStatusBadge status={file.historyStatus} />
-      <SyncStatusBadge status={file.githubStatus} />
+      <span className="text-ink-secondary"><span className="sm:hidden">Modificado · </span>{formatDate(file.modifiedAt ?? file.draft?.draftUpdatedAt)}</span>
+      <div className="flex min-w-0 items-center justify-between gap-2 sm:block"><span className="text-ink-secondary sm:hidden">Local</span><SyncStatusBadge status={file.localStatus} /></div>
+      <div className="flex min-w-0 items-center justify-between gap-2 sm:block"><span className="text-ink-secondary sm:hidden">Historial local</span><SyncStatusBadge status={file.historyStatus} /></div>
+      <div className="flex min-w-0 items-center justify-between gap-2 sm:block"><span className="text-ink-secondary sm:hidden">GitHub</span><SyncStatusBadge status={file.githubStatus} /></div>
       <FileRowActions
         file={file}
         decision={decision}
@@ -612,7 +625,6 @@ function FileSyncRow({
         onPullGithub={onPullGithub}
         onOpenGithubRepository={onOpenGithubRepository}
         onOpenDocument={onOpenDocument}
-        onRequestResolveGithubConflict={onRequestResolveGithubConflict}
         onSaveDocument={onSaveDocument}
         onDiscardDocumentDraft={onDiscardDocumentDraft}
         onRefresh={onRefresh}
@@ -632,7 +644,7 @@ function SyncStatusBadge({ status }: { status: ProjectFileSyncPhaseStatus }) {
       aria-label={`${status.label}${status.detail ? `: ${status.detail}` : ""}`}
     >
       <span className={["h-1.5 w-1.5 shrink-0 rounded-full", statusDotClass(status.state)].join(" ")} />
-      <span className="truncate">{status.label}</span>
+      <span className="break-words sm:truncate">{status.label}</span>
     </span>
   );
 }
@@ -650,7 +662,6 @@ function FileRowActions({
   onPullGithub,
   onOpenGithubRepository,
   onOpenDocument,
-  onRequestResolveGithubConflict,
   onSaveDocument,
   onDiscardDocumentDraft,
   onRefresh,
@@ -667,7 +678,6 @@ function FileRowActions({
   onPullGithub: () => void;
   onOpenGithubRepository: () => void;
   onOpenDocument: (documentId: string, name: string) => void;
-  onRequestResolveGithubConflict: (resolution: "keep-local" | "take-remote") => void;
   onSaveDocument: (documentId: string) => void | Promise<boolean>;
   onDiscardDocumentDraft: (documentId: string) => void | Promise<boolean>;
   onRefresh: () => void;
@@ -722,17 +732,7 @@ function FileRowActions({
   }
 
   if (file.githubStatus.state === "conflict") {
-    return (
-      <div className="flex justify-end gap-1">
-        {openDocumentButton}
-        <ActionIconButton label={`Usar este equipo para ${file.name}`} tone="primary" disabled={busy} onClick={() => onRequestResolveGithubConflict("keep-local")}>
-          <Upload size={14} />
-        </ActionIconButton>
-        <ActionIconButton label={`Usar GitHub para ${file.name}`} tone="danger" disabled={busy} onClick={() => onRequestResolveGithubConflict("take-remote")}>
-          <Download size={14} />
-        </ActionIconButton>
-      </div>
-    );
+    return <div className="flex items-center justify-end gap-1">{openDocumentButton}<span className="text-[11px] text-ink-secondary">Revisar proyecto</span></div>;
   }
 
   if (canUseGithub && file.githubStatus.state === "pending" && syncStatus?.pendingPush) {
@@ -804,7 +804,7 @@ function ActionIconButton({
   return (
     <button
       type="button"
-      className={["grid h-8 w-8 place-items-center rounded-md border disabled:cursor-not-allowed disabled:opacity-50", className].join(" ")}
+      className={["grid h-11 w-11 shrink-0 place-items-center rounded-md border disabled:cursor-not-allowed disabled:opacity-50", className].join(" ")}
       aria-label={label}
       title={label}
       disabled={disabled}
@@ -812,50 +812,6 @@ function ActionIconButton({
     >
       {children}
     </button>
-  );
-}
-
-function GithubConflictConfirmationDialog({
-  resolution,
-  busy,
-  onCancel,
-  onConfirm,
-}: {
-  resolution: "keep-local" | "take-remote";
-  busy: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  const keepLocal = resolution === "keep-local";
-  return (
-    <div className="knownext-modal-overlay absolute inset-0 z-10 grid place-items-center bg-black/25 px-4" onMouseDown={onCancel}>
-      <section className="w-[min(480px,calc(100vw-56px))] rounded-lg border border-line bg-white p-5 shadow-menu" role="dialog" aria-modal="true" aria-labelledby="github-conflict-confirm-title" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="flex items-start gap-3">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-red-50 text-red-700">
-            <AlertTriangle size={18} />
-          </span>
-          <div className="min-w-0">
-            <h3 id="github-conflict-confirm-title" className="text-[15px] font-semibold text-ink-primary">
-              {keepLocal ? "Usar la versión de este equipo" : "Usar la versión de GitHub"}
-            </h3>
-            <p className="mt-2 text-[12px] leading-5 text-ink-secondary">
-              {keepLocal
-                ? "KnowNext.ai subirá el historial local y GitHub quedará alineado con esta copia."
-                : "KnowNext.ai descargará la versión de GitHub y esta copia local quedará alineada con el repositorio remoto."}
-            </p>
-          </div>
-        </div>
-        <div className="mt-5 flex justify-end gap-2">
-          <button className="h-9 rounded-md border border-line px-4 text-[12px] font-medium hover:bg-panel" disabled={busy} onClick={onCancel}>
-            Cancelar
-          </button>
-          <button className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-orange px-4 text-[12px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" disabled={busy} onClick={onConfirm}>
-            {busy ? <Loader2 size={14} className="animate-spin" /> : keepLocal ? <Upload size={14} /> : <Download size={14} />}
-            Confirmar
-          </button>
-        </div>
-      </section>
-    </div>
   );
 }
 
@@ -985,7 +941,7 @@ function isOmittedFile(file: DisplayFileSyncItem) {
 }
 
 function isIncludeDecision(file: DisplayFileSyncItem, decisions: Record<string, ExternalChangeDecision>) {
-  if (!file.change || file.change.risk === "blocked") return false;
+  if (!file.change || file.change.risk === "blocked" || file.draft) return false;
   return (decisions[file.change.itemId] ?? file.change.decision) === "include";
 }
 
@@ -1017,12 +973,20 @@ function getHeaderSummary(
       footer: "Comprobando el estado del proyecto.",
     };
   }
-  if (conflicts > 0 || syncState === "conflict" || syncStatus?.hasConflicts) {
+  if (syncState === "conflict" || syncStatus?.hasConflicts || syncStatus?.diverged) {
+    return {
+      icon: AlertTriangle,
+      iconClass: "bg-red-50 text-red-700",
+      detail: "El historial del proyecto requiere revisión.",
+      footer: "Revisa las diferencias del proyecto antes de sincronizar.",
+    };
+  }
+  if (conflicts > 0) {
     return {
       icon: AlertTriangle,
       iconClass: "bg-red-50 text-red-700",
       detail: `${conflicts || 1} conflicto(s) requieren decisión.`,
-      footer: "Hay conflictos que requieren elegir una versión.",
+      footer: "Revisa las variantes conservadas antes de continuar.",
     };
   }
   if (drafts > 0) {

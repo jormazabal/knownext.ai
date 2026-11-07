@@ -1,6 +1,8 @@
 import type { AiEditOperation } from "../types/domain";
 
 export type AiMarkdownOperationReviewReason =
+  | "permission_revoked"
+  | "source_changed"
   | "missing_replacement"
   | "missing_anchor"
   | "anchor_not_found"
@@ -22,9 +24,12 @@ export function applyAiEditOperationToMarkdown(
   currentMarkdown: string,
   options: { imageMarkdown?: string | null } = {},
 ): AiMarkdownOperationApplication {
+  if (typeof operation.expectedMarkdown === "string" && operation.expectedMarkdown !== currentMarkdown) {
+    return { applied: false, reason: "source_changed" };
+  }
   if (operation.action === "replace_document") {
     const replacement = operation.markdown ?? operation.replacementMarkdown;
-    if (!replacement) return { applied: false, reason: "missing_replacement" };
+    if (typeof replacement !== "string") return { applied: false, reason: "missing_replacement" };
     return { applied: true, markdown: normalizeLineEndings(replacement) };
   }
 

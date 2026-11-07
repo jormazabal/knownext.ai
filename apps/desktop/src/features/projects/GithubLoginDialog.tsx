@@ -1,4 +1,5 @@
 import type { GithubDeviceStartResponse } from "../../types/domain";
+import {ModalFrame} from "../../components/ui/ModalFrame";
 
 export type GithubLoginState = "idle" | "starting" | "waiting" | "authenticated" | "error";
 
@@ -31,21 +32,21 @@ export function GithubLoginDialog({
   const busy = state === "starting";
   const localGithubFallback = Boolean(device?.mock || (device?.status === "error" && device.error === "github_remote_not_configured"));
   return (
-    <div className="knownext-modal-overlay fixed inset-0 z-[95] grid place-items-center bg-black/20">
-      <section className="w-[460px] rounded-lg border border-line bg-white shadow-menu">
-        <header className="border-b border-line px-5 py-4">
+    <ModalFrame label="Conectar GitHub" onClose={onClose} className="z-[95]">
+      <section className="flex max-h-[calc(100dvh-24px)] w-[min(480px,calc(100vw-24px))] flex-col overflow-hidden rounded-lg bg-white shadow-menu">
+        <header className="shrink-0 px-5 pt-4">
           <h2 className="text-[15px] font-semibold">Conectar GitHub</h2>
           <p className="mt-1 text-[11px] leading-5 text-ink-secondary">
-            La cuenta GitHub activa el historial versionado, la sincronización manual y los proyectos conectados a repositorios.
+            GitHub es opcional para trabajar con archivos locales. Conecta una cuenta para los proyectos que necesitan sincronización con sus repositorios.
           </p>
         </header>
-        <div className="space-y-4 px-5 py-5 text-[11px] text-ink-secondary">
+        <div className="min-h-0 space-y-4 overflow-y-auto px-5 py-4 text-xs leading-5 text-ink-secondary">
           {localGithubFallback ? (
             <>
               <div className="rounded-md border border-orange-200 bg-brand-hover px-3 py-3">
                 <p className="text-[11px] font-semibold text-ink-primary">GitHub remoto no configurado</p>
                 <p className="mt-1 leading-5">
-                  Esta instalación mantiene el historial local activo y pausa la sincronización remota hasta que la conexión GitHub esté disponible.
+                  La sincronización remota no está disponible. Puedes continuar trabajando con tus archivos locales; el historial depende de la capacidad de tu dispositivo y de los ajustes del proyecto.
                 </p>
               </div>
               <p>Puedes seguir editando y guardando documentos. Los proyectos configurados con GitHub mostrarán el acceso remoto como pausado.</p>
@@ -54,7 +55,7 @@ export function GithubLoginDialog({
             <>
               <div className="rounded-md border border-line bg-panel px-3 py-3">
                 <div className="text-[10px] uppercase text-ink-secondary">Código de verificación</div>
-                <div className="mt-1 font-mono text-[22px] font-semibold tracking-normal text-ink-primary">{device.userCode}</div>
+                <div className="mt-1 break-all font-mono text-[22px] font-semibold tracking-normal text-ink-primary">{device.userCode}</div>
               </div>
               <p>Abre GitHub, introduce el código y vuelve aquí para confirmar la conexión.</p>
               <p>KnowNext.ai comprobará la autorización automáticamente cada {Math.max(device.interval, 1)} s.</p>
@@ -62,23 +63,23 @@ export function GithubLoginDialog({
           ) : (
             <p>Inicia el flujo de dispositivo para autorizar KnowNext.ai desde GitHub.</p>
           )}
-          {error ? <p className="text-red-700">{error}</p> : null}
+          {error ? <p role="alert" className="break-words text-red-700">{error}</p> : null}
         </div>
-        <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
-          <button className="h-9 rounded-md border border-line px-4 text-[11px] hover:bg-panel" onClick={onClose}>
+        <footer className="flex shrink-0 flex-wrap justify-end gap-2 px-5 pb-4">
+          <button type="button" className="min-h-11 rounded-md px-4 text-xs hover:bg-panel" onClick={onClose}>
             Cerrar
           </button>
           {!device ? (
-            <button
-              className="h-9 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-60"
+            <button type="button"
+              className="min-h-11 rounded-md bg-brand-orange px-4 text-xs font-semibold text-white hover:bg-brand-dark disabled:opacity-60"
               disabled={busy}
               onClick={onStart}
             >
               {busy ? "Preparando" : "Iniciar login"}
             </button>
           ) : localGithubFallback ? (
-            <button
-              className="h-9 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-60"
+            <button type="button"
+              className="min-h-11 rounded-md bg-brand-orange px-4 text-xs font-semibold text-white hover:bg-brand-dark disabled:opacity-60"
               disabled={busy}
               onClick={onStart}
             >
@@ -86,20 +87,18 @@ export function GithubLoginDialog({
             </button>
           ) : (
             <>
-              <button className="h-9 rounded-md border border-brand-orange px-4 text-[11px] font-semibold text-brand-orange hover:bg-brand-hover" onClick={onOpenGithub}>
-                Abrir GitHub
-              </button>
-              <button
-                className="h-9 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
+              <button type="button"
+                className="min-h-11 rounded-md px-4 text-xs font-medium text-ink-primary hover:bg-panel disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={polling}
                 onClick={onPoll}
               >
-                {polling ? "Comprobando" : "Ya autoricé"}
+                {polling ? "Comprobando" : "Comprobar"}
               </button>
+              <button type="button" className="min-h-11 rounded-md bg-brand-dark px-4 text-xs font-semibold text-white" onClick={onOpenGithub}>Abrir GitHub</button>
             </>
           )}
         </footer>
       </section>
-    </div>
+    </ModalFrame>
   );
 }

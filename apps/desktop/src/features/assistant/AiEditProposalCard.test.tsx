@@ -7,6 +7,31 @@ import { AiEditProposalCard } from "./AiEditProposalCard";
 afterEach(() => cleanup());
 
 describe("AiEditProposalCard", () => {
+  it("states preservation only after its native acknowledgement", () => {
+    const view=render(<AiEditProposalCard proposal={{...proposal,recovery:{stored:true}}} onApply={vi.fn()} onDiscard={vi.fn()}/>);
+    expect(screen.getByRole("status")).toHaveTextContent("Copia conservada");expect(screen.getByRole("status")).toHaveTextContent("hasta que la quites");
+    view.rerender(<AiEditProposalCard proposal={proposal} onApply={vi.fn()} onDiscard={vi.fn()}/>);expect(screen.queryByText(/Copia conservada/)).not.toBeInTheDocument();
+  });
+  it("keeps explicit review available and warns before closing when retention failed", () => {
+    render(<AiEditProposalCard proposal={{...proposal,recovery:{stored:false,error:"Almacén lleno"}}} onApply={vi.fn()} onDiscard={vi.fn()}/>);
+    expect(screen.getByRole("alert")).toHaveTextContent("No cierres la aplicación");expect(screen.getByRole("alert")).toHaveTextContent("Almacén lleno");expect(screen.getByRole("button",{name:"Aplicar"})).toBeEnabled();
+  });
+  it("acknowledges explicit removal without claiming a retained copy still exists", () => {
+    render(<AiEditProposalCard proposal={{...proposal,recovery:{stored:false,removed:true}}} onApply={vi.fn()} onDiscard={vi.fn()}/>);
+    expect(screen.getByRole("alert")).toHaveTextContent("Has retirado la copia conservada");expect(screen.queryByText(/Copia conservada en Resultados IA/)).not.toBeInTheDocument();
+  });
+  it("shows a human target and unfolds the sent base without nested preview scrollers", async () => {
+    const value={...proposal,operations:[{...proposal.operations[0],action:"replace_document" as const,documentLabel:"docs/Plan.md",expectedMarkdown:"Long sent base",markdown:"Complete proposal",replacementMarkdown:null}]};
+    render(<AiEditProposalCard proposal={value} compact onApply={vi.fn()} onDiscard={vi.fn()}/>);const user=userEvent.setup();
+    await user.click(screen.getByRole("button",{name:/Revisar cambios/}));expect(screen.getByText("docs/Plan.md")).toBeInTheDocument();expect(screen.queryByText(proposal.operations[0].documentId)).not.toBeInTheDocument();
+    expect(screen.getByText("Long sent base")).not.toBeVisible();await user.click(screen.getByText("Base enviada",{exact:true}));expect(screen.getByText("Long sent base")).toBeVisible();expect(screen.getByText("Complete proposal")).toBeVisible();
+  });
+  it("blocks repeated apply and discard while awaiting the editor without claiming success", async () => {
+    const apply=vi.fn(),discard=vi.fn();render(<AiEditProposalCard proposal={proposal} applying onApply={apply} onDiscard={discard}/>);
+    expect(screen.getByRole("button",{name:"Aplicando…"})).toBeDisabled();expect(screen.getByRole("button",{name:"Descartar"})).toBeDisabled();
+    expect(screen.queryByText("1 aplicado")).not.toBeInTheDocument();expect(screen.getByRole("checkbox")).toBeDisabled();
+    const user=userEvent.setup();await user.click(screen.getByRole("button",{name:"Aplicando…"}));expect(apply).not.toHaveBeenCalled();expect(discard).not.toHaveBeenCalled();
+  });
   it("renders a focused edit proposal and dispatches apply/discard actions", async () => {
     const user = userEvent.setup();
     const onApply = vi.fn();
@@ -24,7 +49,7 @@ describe("AiEditProposalCard", () => {
     expect(screen.getByText("Cambio sobre texto seleccionado")).toBeInTheDocument();
     expect(screen.getAllByText("Amplía el apartado seleccionado.")).toHaveLength(2);
     expect(screen.getByText("1 cambio")).toBeInTheDocument();
-    expect(screen.getByText("Actual")).toBeInTheDocument();
+    expect(screen.getByText("Base enviada")).toBeInTheDocument();
     expect(screen.getByText("Texto original")).toBeInTheDocument();
     expect(screen.getByText("Texto ampliado")).toBeInTheDocument();
 

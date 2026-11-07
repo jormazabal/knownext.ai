@@ -1,0 +1,5 @@
+# Bloque123 · Cupos de registros y retención de identidades
+
+F04/F06/F17/T08. Consulta explícita y acotada de seis ámbitos de admisión: recibos de combinación, selecciones y aplicaciones mixtas, reuniones de historial, plantillas y traslados. Compartir límites con los productores sin cambiar sus valores. Contar metadatos, incluyendo desconocidos/parciales; sin abrir payloads ni coordinación. Separar ocupación de registros y bytes, ámbito de perfil/proyecto, cobertura y asociación no comprobadas. No se deduce disponibilidad de publicación ni autoridad de borrado de un recuento.
+
+Explicar por qué compactar/retirar archivos no libera identidades antirrepetición y por qué el presupuesto global no modifica estos cupos. Sin reciclado ni poda; acciones desde sus flujos revisados. Lectura independiente, máximo200 ámbitos/10000 entradas/2segundos, parcialidad explícita. UI en Copias y límites, consulta bajo demanda y paginación. Contratos nativos, SDK/interacción y una campaña visual dirigida; no repetir suites, IA, instalación ni activación nativa. No cierra la liberación segura de identidades ni cuotas de productores restantes.

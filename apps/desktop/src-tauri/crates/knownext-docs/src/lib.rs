@@ -1,7 +1,14 @@
+mod markdown_text;
+pub use markdown_text::markdown_excerpt;
+mod markdown_links;
+mod pdf_fonts;
+mod image_layout;
+#[cfg(test)]
+mod image_fidelity_tests;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use image::{ImageFormat, Rgba, RgbaImage};
-#[cfg(not(target_os = "android"))]
+pub use markdown_links::{markdown_destinations, markdown_images, MarkdownDestination, MarkdownImage};
 use printpdf::{
     Actions, BorderArray, BuiltinFont, Color, ColorArray, FontId, Line, LinePoint, LinkAnnotation,
     Mm, Op, PaintMode, ParsedFont, PdfDocument, PdfFontHandle, PdfPage, PdfSaveOptions, Point,
@@ -53,6 +60,14 @@ pub fn handwritten_note_pdf(note: &Value) -> Result<Vec<u8>, String> {
         .as_array()
         .filter(|pages| !pages.is_empty())
         .ok_or_else(|| "La nota no contiene paginas.".to_string())?;
+    let mut pixels = 0.0;
+    for page in pages {
+        let (width, height) = handwritten_page_size(page);
+        pixels += width as f64 * height as f64;
+        if pixels > 32_000_000.0 {
+            return Err("La nota supera el presupuesto de páginas raster del PDF. Conserva todas sus páginas exportando .knote o exporta páginas individuales.".into());
+        }
+    }
     Ok(handwritten_pages_pdf(pages))
 }
 
@@ -118,33 +133,66 @@ pub fn minimal_pdf_with_assets_and_template(
     image_assets: &[ExportImageAsset],
     template: Option<&Value>,
 ) -> Vec<u8> {
-    #[cfg(not(target_os = "android"))]
+    export_pdf_with_assets_and_template(title, markdown, diagram_assets, image_assets, template)
+        .unwrap_or_else(|_| pdf_render_failure())
+}
+
+pub fn export_pdf_with_assets_and_template(
+    title: &str,
+    markdown: &str,
+    diagram_assets: &[DiagramAsset],
+    image_assets: &[ExportImageAsset],
+    template: Option<&Value>,
+) -> Result<Vec<u8>, String> {
+    validate_export_image_layout(markdown, image_assets)?;
+    let mut pixels = 0u64;
+    for bytes in diagram_assets
+        .iter()
+        .map(|asset| asset.png.as_slice())
+        .chain(image_assets.iter().map(|asset| asset.bytes.as_slice()))
     {
-        let template = DocxTemplate::from_value(template);
-        if let Some(bytes) = print_pdf_with_diagrams_and_template(
-            title,
-            markdown,
-            diagram_assets,
-            image_assets,
-            &template,
-        ) {
-            return bytes;
+        let (width, height) = image::ImageReader::new(Cursor::new(bytes))
+            .with_guessed_format()
+            .map_err(|_| "No se puede comprobar una imagen del PDF")?
+            .into_dimensions()
+            .map_err(|_| "Una imagen del PDF está dañada o no es compatible")?;
+        let area = width as u64 * height as u64;
+        pixels = pixels.saturating_add(area);
+        if area > 16_000_000 || pixels > 32_000_000 {
+            return Err("Las imágenes superan el presupuesto de resolución del PDF. Reduce su resolución o conserva el documento en Markdown con sus recursos.".into());
         }
     }
-    #[cfg(target_os = "android")]
-    let _ = (diagram_assets, image_assets);
-
-    let text = markdown
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or(title)
-        .replace(['(', ')', '\\'], " ");
-    format!(
-        "%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n4 0 obj\n<< /Length {} >>\nstream\nBT /F1 16 Tf 72 760 Td ({}) Tj ET\nendstream\nendobj\n5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n",
-        text.len() + 34,
-        text
+    print_pdf_with_diagrams_and_template(
+        title,
+        markdown,
+        diagram_assets,
+        image_assets,
+        &DocxTemplate::from_value(template),
     )
-    .into_bytes()
+}
+pub fn validate_export_image_layout(
+    markdown: &str,
+    image_assets: &[ExportImageAsset],
+) -> Result<(), String> {
+    let blocks = markdown_blocks(markdown);
+    for asset in image_assets {
+        if !blocks
+            .iter()
+            .any(|block| matches!(block,MarkdownBlock::Image{source,..} if source==&asset.source))
+        {
+            return Err("Una imagen está mezclada con texto o usa una referencia aún no representable. Colócala en un párrafo propio o conserva el documento en Markdown; no se ha producido una exportación incompleta.".into());
+        }
+    }
+    Ok(())
+}
+fn pdf_render_failure() -> Vec<u8> {
+    write_pdf_binary_objects(vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 5 0 R /Resources << /Font << /F1 4 0 R >> >> >>".to_vec(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+        pdf_stream(b"BT /F1 12 Tf 40 760 Td (PDF preview unavailable. The original document is unchanged.) Tj ET".to_vec()),
+    ])
 }
 
 pub fn write_docx(path: &Path, markdown: &str) -> Result<(), String> {
@@ -269,7 +317,8 @@ pub fn write_docx_with_assets_template_and_title(
     }
     body_parts.extend(blocks
         .into_iter()
-        .map(|item| match item {
+        .enumerate()
+        .map(|(block_index, item)| match item {
             MarkdownBlock::Heading { level, content } => styled_paragraph_xml(
                 Some(&format!("Heading{level}")),
                 &template.heading(level),
@@ -331,6 +380,7 @@ pub fn write_docx_with_assets_template_and_title(
                     &[code],
                 )
             }
+            MarkdownBlock::PageBreak=>r#"<w:p><w:r><w:br w:type="page"/></w:r></w:p>"#.into(),
             MarkdownBlock::HorizontalRule => format!(
                 r#"<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="{}"/></w:pBdr>{}</w:pPr></w:p>"#,
                 color_value(&template.horizontal_rule_color),
@@ -346,9 +396,10 @@ pub fn write_docx_with_assets_template_and_title(
                         "{}{}",
                         docx_image_paragraph(
                             &rel_id,
-                            index + 1,
+                            block_index + 1,
                             &format!("Diagrama {}", index + 1),
                             &asset.png,
+                            1.0,
                         ),
                         asset
                             .caption
@@ -365,14 +416,16 @@ pub fn write_docx_with_assets_template_and_title(
                     )
                 })
                 .unwrap_or_else(|| "<w:p><w:r><w:t>[Diagrama Mermaid no renderizado]</w:t></w:r></w:p>".to_string()),
-            MarkdownBlock::Image { source, alt } => find_image_asset(image_assets, &source)
+            MarkdownBlock::Image { source, alt, caption, ratio } => find_image_asset(image_assets, &source)
                 .map(|asset| {
-                    docx_image_paragraph(
+                    let image = docx_image_paragraph(
                         &format!("rIdImage{}", image_asset_index(image_assets, &source).unwrap_or(0) + 1),
-                        1_000 + image_asset_index(image_assets, &source).unwrap_or(0),
-                        asset.alt.as_deref().or(Some(alt.as_str())).unwrap_or("Imagen"),
+                        block_index + 1,
+                        &alt,
                         &asset.bytes,
-                    )
+                        ratio,
+                    );
+                    if caption.is_empty() { image } else { format!("{image}{}", styled_paragraph_xml(Some("Normal"), &template.normal, &template, "", &[text_run(&caption, &template.normal, &template, InlineFlags::default())])) }
                 })
                 .unwrap_or_else(|| {
                     styled_paragraph_xml(
@@ -439,6 +492,7 @@ enum MarkdownBlock {
     Quote(String),
     CodeBlock(String),
     HorizontalRule,
+    PageBreak,
     Table {
         headers: Vec<String>,
         rows: Vec<Vec<String>>,
@@ -447,6 +501,8 @@ enum MarkdownBlock {
     Image {
         source: String,
         alt: String,
+        caption: String,
+        ratio: f64,
     },
 }
 
@@ -640,6 +696,7 @@ fn markdown_blocks(markdown: &str) -> Vec<MarkdownBlock> {
     while index < lines.len() {
         let line = lines[index];
         let trimmed = line.trim();
+        if trimmed=="<!-- knownext:page-break -->"{blocks.push(MarkdownBlock::PageBreak);index+=1;continue;}
         if trimmed.is_empty() {
             index += 1;
             continue;
@@ -665,11 +722,12 @@ fn markdown_blocks(markdown: &str) -> Vec<MarkdownBlock> {
             index += 1;
             continue;
         }
-        if let Some((alt, source)) =
+        if let Some((alt, source, caption)) =
             markdown_image_block(trimmed).or_else(|| html_image_block(trimmed))
         {
-            blocks.push(MarkdownBlock::Image { source, alt });
-            index += 1;
+            let (ratio, consumed) = image_layout::after_image(&lines[index + 1..], &alt);
+            blocks.push(MarkdownBlock::Image { source, alt, caption, ratio });
+            index += 1 + consumed;
             continue;
         }
         if let Some((headers, rows, consumed)) = table_block(&lines[index..]) {
@@ -795,24 +853,12 @@ fn is_table_separator(line: &str) -> bool {
     })
 }
 
-fn markdown_image_block(trimmed: &str) -> Option<(String, String)> {
-    let rest = trimmed.strip_prefix("![")?;
-    let alt_end = rest.find(']')?;
-    let after_alt = &rest[alt_end + 1..];
-    let destination = after_alt.strip_prefix('(')?;
-    let destination_end = find_markdown_link_close(destination)?;
-    let trailing = destination[destination_end + 1..].trim();
-    if !trailing.is_empty() {
-        return None;
-    }
-    let source = parse_markdown_link_destination(&destination[..destination_end]);
-    if source.is_empty() {
-        return None;
-    }
-    Some((rest[..alt_end].trim().to_string(), source.to_string()))
+fn markdown_image_block(trimmed: &str) -> Option<(String, String, String)> {
+    if !trimmed.starts_with("![") { return None; }
+    image_layout::single_image(trimmed)
 }
 
-fn html_image_block(trimmed: &str) -> Option<(String, String)> {
+fn html_image_block(trimmed: &str) -> Option<(String, String, String)> {
     if !trimmed.to_ascii_lowercase().starts_with("<img") {
         return None;
     }
@@ -823,6 +869,7 @@ fn html_image_block(trimmed: &str) -> Option<(String, String)> {
             .trim()
             .to_string(),
         source.trim().to_string(),
+        html_attr_value(trimmed, "title").unwrap_or("").to_string(),
     ))
 }
 
@@ -1119,6 +1166,33 @@ fn parse_inline_segments_with(
     let mut index = 0;
     while index < text.len() {
         let rest = &text[index..];
+        if let Some(after) = rest.strip_prefix('\\') {
+            if let Some(ch) = after.chars().next().filter(|ch| ch.is_ascii_punctuation()) {
+                segments.push(InlineSegment {
+                    text: ch.to_string(),
+                    flags: active_flags,
+                    link_target: active_link.clone(),
+                    highlight_color: active_highlight_color.clone(),
+                });
+                index += 1 + ch.len_utf8();
+                continue;
+            }
+        }
+        if let Some((content, consumed)) =
+            parse_wrapped(rest, "***", "***").or_else(|| parse_wrapped(rest, "___", "___"))
+        {
+            let mut flags = active_flags;
+            flags.bold = true;
+            flags.italic = true;
+            segments.extend(parse_inline_segments_with(
+                content,
+                flags,
+                active_link.clone(),
+                active_highlight_color.clone(),
+            ));
+            index += consumed;
+            continue;
+        }
         if let Some((label, target, consumed)) = parse_link(rest) {
             let mut flags = active_flags;
             flags.link = true;
@@ -1259,6 +1333,7 @@ fn collect_docx_link_relationships(blocks: &[MarkdownBlock]) -> BTreeMap<String,
             }
             MarkdownBlock::CodeBlock(_)
             | MarkdownBlock::HorizontalRule
+            | MarkdownBlock::PageBreak
             | MarkdownBlock::Diagram(_)
             | MarkdownBlock::Image { .. } => {}
         }
@@ -1321,7 +1396,7 @@ fn parse_link(value: &str) -> Option<(&str, &str, usize)> {
 }
 
 fn next_inline_marker(value: &str) -> Option<usize> {
-    ["[", "**", "__", "~~", "`", "<u>", "<mark", "*", "_"]
+    ["\\", "[", "**", "__", "~~", "`", "<u>", "<mark", "*", "_"]
         .iter()
         .filter_map(|marker| value.find(marker))
         .filter(|index| *index > 0)
@@ -1462,17 +1537,19 @@ fn decode_png_data_url(value: &str) -> Option<Vec<u8>> {
     BASE64_STANDARD.decode(data.trim()).ok()
 }
 
-fn docx_image_paragraph(rel_id: &str, doc_pr_id: usize, name: &str, bytes: &[u8]) -> String {
-    let (cx, cy) = docx_image_extent(bytes);
+fn docx_image_paragraph(rel_id: &str, doc_pr_id: usize, name: &str, bytes: &[u8], ratio: f64) -> String {
+    let (cx, cy) = docx_image_extent(bytes, ratio);
     let name = xml_attr_escape(name);
     format!(
-        r#"<w:p><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="{cx}" cy="{cy}"/><wp:docPr id="{doc_pr_id}" name="{name}"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="{doc_pr_id}" name="{name}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="{rel_id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"#
+        r#"<w:p><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="{cx}" cy="{cy}"/><wp:docPr id="{doc_pr_id}" name="{name}" descr="{name}"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="{doc_pr_id}" name="{name}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="{rel_id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"#
     )
 }
 
-fn docx_image_extent(bytes: &[u8]) -> (i64, i64) {
-    let max_width = 5_760_000_i64;
-    let fallback = (max_width, 3_240_000_i64);
+fn docx_image_extent(bytes: &[u8], sizing: f64) -> (i64, i64) {
+    let max_width = 5_760_000_f64;
+    let max_height = 7_200_000_f64;
+    let sizing = if sizing.is_finite() { sizing.clamp(0.01, 4.0) } else { 1.0 };
+    let fallback = ((max_width * sizing.min(1.0)).round() as i64, (3_240_000.0 * sizing.min(1.0)).round() as i64);
     let Some((width, height)) = image_dimensions(bytes) else {
         return fallback;
     };
@@ -1480,8 +1557,8 @@ fn docx_image_extent(bytes: &[u8]) -> (i64, i64) {
         return fallback;
     }
     let ratio = height as f64 / width as f64;
-    let calculated_height = (max_width as f64 * ratio).round() as i64;
-    (max_width, calculated_height.clamp(900_000, 7_200_000))
+    let target_width = (max_width * sizing).min(max_width).min(max_height / ratio);
+    (target_width.round() as i64, (target_width * ratio).round() as i64)
 }
 
 fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
@@ -2211,7 +2288,6 @@ fn parse_hex_color(value: &str) -> [u8; 3] {
     [17, 24, 39]
 }
 
-#[cfg(not(target_os = "android"))]
 struct PdfRenderContext {
     doc: PdfDocument,
     pages: Vec<PdfPage>,
@@ -2224,19 +2300,18 @@ struct PdfRenderContext {
     margin_top_pt: f32,
     margin_bottom_pt: f32,
     y: f32,
-    regular_font: Option<FontId>,
-    bold_font: Option<FontId>,
-    mono_font: Option<FontId>,
+    line_spacing: f32,
+    fonts: BTreeMap<&'static str, pdf_fonts::RegisteredFont>,
+    error: Option<String>,
 }
 
-#[cfg(not(target_os = "android"))]
 fn print_pdf_with_diagrams_and_template(
     title: &str,
     markdown: &str,
     diagram_assets: &[DiagramAsset],
     image_assets: &[ExportImageAsset],
     template: &DocxTemplate,
-) -> Option<Vec<u8>> {
+) -> Result<Vec<u8>, String> {
     let mut context = PdfRenderContext::new(title, template);
     if template.include_title {
         context.render_wrapped_text(
@@ -2309,10 +2384,26 @@ fn print_pdf_with_diagrams_and_template(
             }
             MarkdownBlock::CodeBlock(content) => {
                 for line in content.lines() {
-                    context.render_wrapped_text(line, &template.code, 12.0, 0.0);
+                    let segment = InlineSegment {
+                        text: line.to_string(),
+                        flags: InlineFlags {
+                            code: true,
+                            ..InlineFlags::default()
+                        },
+                        link_target: None,
+                        highlight_color: None,
+                    };
+                    context.render_wrapped_segments(
+                        &[segment],
+                        &template.code,
+                        12.0,
+                        0.0,
+                        template,
+                    );
                 }
                 context.y -= template.space_after_pt as f32;
             }
+            MarkdownBlock::PageBreak=>context.end_page(),
             MarkdownBlock::HorizontalRule => {
                 let mut rule_style = template.normal.clone();
                 rule_style.color = template.horizontal_rule_color.clone();
@@ -2327,10 +2418,14 @@ fn print_pdf_with_diagrams_and_template(
                 context.render_table(&headers, &rows, template);
             }
             MarkdownBlock::Diagram(index) => {
-                context.render_diagram(index, diagram_assets, template)?;
+                context
+                    .render_diagram(index, diagram_assets, template)
+                    .ok_or("Un diagrama no puede representarse en PDF")?;
             }
-            MarkdownBlock::Image { source, alt } => {
-                context.render_export_image(&source, &alt, image_assets, template)?;
+            MarkdownBlock::Image { source, alt, caption, ratio } => {
+                context
+                    .render_export_image(&source, &alt, &caption, ratio, image_assets, template)
+                    .ok_or_else(|| format!("No se puede incluir la imagen en PDF: {source}"))?;
             }
         }
     }
@@ -2338,19 +2433,23 @@ fn print_pdf_with_diagrams_and_template(
     if context.ops.is_empty() {
         context.render_wrapped_text(title, &template.normal, 0.0, template.space_after_pt);
     }
-    Some(context.finish())
+    context.finish()
 }
 
-#[cfg(not(target_os = "android"))]
 impl PdfRenderContext {
     fn new(title: &str, template: &DocxTemplate) -> Self {
         let (page_width_mm, page_height_mm) = pdf_page_size_mm(template);
         let page_height_pt = mm_to_pt(page_height_mm as f64) as f32;
         let margin_top_pt = mm_to_pt(template.margin_top_mm) as f32;
         let mut doc = PdfDocument::new(title);
-        let regular_font = load_pdf_font(&mut doc, PDF_REGULAR_FONT_CANDIDATES);
-        let bold_font = load_pdf_font(&mut doc, PDF_BOLD_FONT_CANDIDATES);
-        let mono_font = load_pdf_font(&mut doc, PDF_MONO_FONT_CANDIDATES);
+        if let Ok(elapsed) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            if let Ok(exported_at) = printpdf::DateTime::from_unix_timestamp(elapsed.as_secs() as i64) {
+                doc.metadata.info.creation_date = exported_at;
+                doc.metadata.info.modification_date = exported_at;
+                doc.metadata.info.metadata_date = exported_at;
+            }
+        }
+        doc.metadata.info.creator = "KnowNext.ai".into();
         Self {
             doc,
             pages: Vec::new(),
@@ -2363,9 +2462,9 @@ impl PdfRenderContext {
             margin_top_pt,
             margin_bottom_pt: mm_to_pt(template.margin_bottom_mm) as f32,
             y: page_height_pt - margin_top_pt,
-            regular_font,
-            bold_font,
-            mono_font,
+            line_spacing: template.line_spacing as f32,
+            fonts: BTreeMap::new(),
+            error: None,
         }
     }
 
@@ -2444,7 +2543,7 @@ impl PdfRenderContext {
         template: &DocxTemplate,
     ) {
         let font_size = style.font_size_pt as f32;
-        let line_height = (font_size * 1.25).max(font_size + 3.0);
+        let line_height = (font_size * self.line_spacing).max(font_size + 3.0);
         let lines =
             wrap_inline_segments(segments, style, template, self.content_width_pt(indent_pt));
         self.y -= style.space_before_pt as f32;
@@ -2483,7 +2582,7 @@ impl PdfRenderContext {
             } else {
                 pdf_color(&style.color)
             };
-            let width = text_width_pt(&segment.text, size, flags.code);
+            let width = pdf_fonts::width(&segment.text, &style, flags);
             if let Some(highlight_color) = segment.highlight_color.as_deref() {
                 self.draw_filled_rect(
                     x_pt - 1.0,
@@ -2493,14 +2592,8 @@ impl PdfRenderContext {
                     pdf_color(highlight_color_hex(highlight_color)),
                 );
             }
-            self.draw_text_line(
-                &segment.text,
-                x_pt,
-                y_pt,
-                self.pdf_font_with_flags(&style, flags),
-                size,
-                color,
-            );
+            let font = self.pdf_font_with_flags(&style, flags, &segment.text);
+            self.draw_text_line(&segment.text, x_pt, y_pt, font, size, color);
             if flags.underline {
                 self.draw_line(
                     x_pt,
@@ -2574,12 +2667,36 @@ impl PdfRenderContext {
         if headers.is_empty() {
             return;
         }
-        let columns = headers.len().min(8);
+        if headers.len() > 8 {
+            // Wide tables reflow by record instead of silently dropping columns.
+            for (index, row) in rows.iter().enumerate() {
+                self.render_wrapped_text(
+                    &format!("Registro {}", index + 1),
+                    template.heading(4),
+                    0.0,
+                    4.0,
+                );
+                for (column, header) in headers.iter().enumerate() {
+                    self.render_wrapped_markdown(
+                        &format!(
+                            "**{header}:** {}",
+                            row.get(column).map(String::as_str).unwrap_or("")
+                        ),
+                        &template.normal,
+                        0.0,
+                        template.normal.space_after_pt,
+                        template,
+                    );
+                }
+            }
+            return;
+        }
+        let columns = headers.len();
         let table_width = self.content_width_pt(0.0);
         let column_width = table_width / columns as f32;
         let padding = 4.0;
         let font_size = (template.normal.font_size_pt as f32 - 1.0).max(8.0);
-        let line_height = (font_size * 1.2).max(font_size + 2.0);
+        let line_height = (font_size * self.line_spacing).max(font_size + 2.0);
         let text_color = pdf_color(&template.normal.color);
         let rule_color = pdf_color("#E5E7EB");
         let header_color = pdf_color("#111827");
@@ -2600,6 +2717,36 @@ impl PdfRenderContext {
             rule_color.clone(),
         );
         for row in rows {
+            let lines = row
+                .iter()
+                .take(columns)
+                .map(|cell| {
+                    wrap_inline_segments(
+                        &parse_inline_segments(cell),
+                        &body_style,
+                        template,
+                        (column_width - padding * 2.0).max(24.0),
+                    )
+                    .len()
+                })
+                .max()
+                .unwrap_or(1)
+                .max(1);
+            let needed = lines as f32 * line_height + padding * 2.0 + 2.0;
+            if self.y - needed < self.margin_bottom_pt {
+                self.end_page();
+                self.render_table_row(
+                    &normalize_table_row(headers.to_vec(), columns),
+                    columns,
+                    column_width,
+                    padding,
+                    line_height,
+                    &header_style,
+                    template,
+                    pdf_color("#111827"),
+                    rule_color.clone(),
+                );
+            }
             self.render_table_row(
                 &normalize_table_row(row.clone(), columns),
                 columns,
@@ -2638,6 +2785,19 @@ impl PdfRenderContext {
             .collect::<Vec<_>>();
         let line_count = wrapped.iter().map(Vec::len).max().unwrap_or(1).max(1);
         let row_height = line_count as f32 * line_height + padding * 2.0;
+        if row_height > self.page_height_pt - self.margin_top_pt - self.margin_bottom_pt {
+            // A single cell/row may span several pages; never paint below the page.
+            for (column, cell) in cells.iter().enumerate() {
+                self.render_wrapped_markdown(
+                    &format!("{}: {cell}", column + 1),
+                    style,
+                    0.0,
+                    style.space_after_pt,
+                    template,
+                );
+            }
+            return;
+        }
         self.ensure_space(row_height + 2.0);
         let row_top = self.y;
         let row_bottom = self.y - row_height;
@@ -2747,14 +2907,17 @@ impl PdfRenderContext {
             .get(index)
             .filter(|asset| !asset.png.is_empty())
         else {
-            return Some(());
+            return None;
         };
         let mut warnings = Vec::new();
         let image = RawImage::decode_from_bytes(&asset.png, &mut warnings).ok()?;
         let natural_width_pt = image.width as f32 * 72.0 / 144.0;
         let natural_height_pt = image.height as f32 * 72.0 / 144.0;
         let max_width = self.content_width_pt(0.0);
-        let scale = (max_width / natural_width_pt).min(1.0);
+        let max_height = self.page_height_pt - self.margin_top_pt - self.margin_bottom_pt - 28.0;
+        let scale = (max_width / natural_width_pt)
+            .min(max_height / natural_height_pt)
+            .min(1.0);
         let image_height = natural_height_pt * scale;
         self.ensure_space(image_height + 28.0);
         let image_id = self.doc.add_image(&image);
@@ -2789,43 +2952,30 @@ impl PdfRenderContext {
         &mut self,
         source: &str,
         alt: &str,
+        caption: &str,
+        ratio: f64,
         image_assets: &[ExportImageAsset],
         template: &DocxTemplate,
     ) -> Option<()> {
         let Some(asset) = find_image_asset(image_assets, source) else {
-            self.render_wrapped_text(
-                &format!("[Imagen no disponible: {alt}]"),
-                &template.normal,
-                0.0,
-                template.space_after_pt,
-            );
-            return Some(());
+            return None;
         };
-        if !self.render_raw_image(&asset.bytes, template) {
-            self.render_wrapped_text(
-                &format!(
-                    "[Imagen no compatible: {}]",
-                    asset.alt.as_deref().unwrap_or(alt)
-                ),
-                &template.normal,
-                0.0,
-                template.space_after_pt,
-            );
-            return Some(());
+        if !self.render_raw_image(&asset.bytes, template, ratio) {
+            return None;
         }
-        let caption = asset.alt.as_deref().unwrap_or(alt).trim();
+        let caption = if caption.is_empty() { alt } else { caption }.trim();
         if !caption.is_empty() {
             let mut caption_style = template.normal.clone();
             caption_style.font_size_pt = (caption_style.font_size_pt - 1.0).max(8.0);
             caption_style.color = "#6B7280".to_string();
-            self.render_wrapped_text(caption, &caption_style, 0.0, template.space_after_pt);
+            self.render_wrapped_segments(&[InlineSegment { text: caption.to_string(), ..InlineSegment::default() }], &caption_style, 0.0, template.space_after_pt, template);
         } else {
             self.y -= template.space_after_pt as f32;
         }
         Some(())
     }
 
-    fn render_raw_image(&mut self, bytes: &[u8], template: &DocxTemplate) -> bool {
+    fn render_raw_image(&mut self, bytes: &[u8], template: &DocxTemplate, sizing: f64) -> bool {
         if bytes.is_empty() {
             return false;
         }
@@ -2839,7 +2989,10 @@ impl PdfRenderContext {
             return false;
         }
         let max_width = self.content_width_pt(0.0);
-        let scale = (max_width / natural_width_pt).min(1.0);
+        let max_height = self.page_height_pt - self.margin_top_pt - self.margin_bottom_pt - 28.0;
+        let limit = (max_width / natural_width_pt).min(max_height / natural_height_pt);
+        let sizing = if sizing.is_finite() { sizing.clamp(0.01, 4.0) as f32 } else { 1.0 };
+        let scale = (limit.min(1.0) * sizing).min(limit);
         let image_height = natural_height_pt * scale;
         self.ensure_space(image_height + 28.0);
         let image_id = self.doc.add_image(&image);
@@ -2858,34 +3011,46 @@ impl PdfRenderContext {
         true
     }
 
-    fn finish(mut self) -> Vec<u8> {
+    fn finish(mut self) -> Result<Vec<u8>, String> {
+        if let Some(error) = self.error {
+            return Err(error);
+        }
         self.end_page();
-        self.doc
+        Ok(self
+            .doc
             .with_pages(self.pages)
-            .save(&PdfSaveOptions::default(), &mut Vec::new())
+            .save(&PdfSaveOptions::default(), &mut Vec::new()))
     }
 
-    fn pdf_font_with_flags(&self, style: &DocxTextStyle, flags: InlineFlags) -> PdfFontHandle {
-        let family = style.font_family.to_ascii_lowercase();
-        let format = style.text_format.to_ascii_lowercase();
-        let bold = flags.bold || format.contains("bold");
-        let external =
-            if family.contains("courier") || family.contains("consolas") || family.contains("mono")
-            {
-                self.mono_font.as_ref().or(self.regular_font.as_ref())
-            } else if bold {
-                self.bold_font.as_ref().or(self.regular_font.as_ref())
-            } else {
-                self.regular_font.as_ref()
-            };
-        external
-            .cloned()
-            .map(PdfFontHandle::External)
-            .unwrap_or_else(|| PdfFontHandle::Builtin(pdf_builtin_font_with_flags(style, flags)))
+    fn pdf_font_with_flags(
+        &mut self,
+        style: &DocxTextStyle,
+        flags: InlineFlags,
+        text: &str,
+    ) -> PdfFontHandle {
+        let (key, bytes) = pdf_fonts::select(style, flags);
+        if !self.fonts.contains_key(key) {
+            match pdf_fonts::register(&mut self.doc, bytes) {
+                Ok(font) => {
+                    self.fonts.insert(key, font);
+                }
+                Err(error) => {
+                    self.error = Some(error);
+                    return PdfFontHandle::Builtin(BuiltinFont::Helvetica);
+                }
+            }
+        }
+        let font = &self.fonts[key];
+        if let Some(ch) = text
+            .chars()
+            .find(|ch| !ch.is_control() && !font.characters.contains(&(*ch as u32)))
+        {
+            self.error=Some(format!("La fuente PDF no representa U+{:04X}. Elige DOCX/Markdown para conservar el contenido.",ch as u32));
+        }
+        PdfFontHandle::External(font.id.clone())
     }
 }
 
-#[cfg(not(target_os = "android"))]
 fn pdf_page_size_mm(template: &DocxTemplate) -> (f32, f32) {
     if template.page_size == "Letter" {
         (215.9, 279.4)
@@ -2894,72 +3059,6 @@ fn pdf_page_size_mm(template: &DocxTemplate) -> (f32, f32) {
     }
 }
 
-#[cfg(not(target_os = "android"))]
-const PDF_REGULAR_FONT_CANDIDATES: &[&str] = &[
-    r"C:\Windows\Fonts\segoeui.ttf",
-    r"C:\Windows\Fonts\arial.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/Library/Fonts/Arial.ttf",
-    "/System/Library/Fonts/Supplemental/Arial.ttf",
-];
-
-#[cfg(not(target_os = "android"))]
-const PDF_BOLD_FONT_CANDIDATES: &[&str] = &[
-    r"C:\Windows\Fonts\segoeuib.ttf",
-    r"C:\Windows\Fonts\arialbd.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    "/Library/Fonts/Arial Bold.ttf",
-    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-];
-
-#[cfg(not(target_os = "android"))]
-const PDF_MONO_FONT_CANDIDATES: &[&str] = &[
-    r"C:\Windows\Fonts\consola.ttf",
-    r"C:\Windows\Fonts\cour.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-    "/Library/Fonts/Courier New.ttf",
-    "/System/Library/Fonts/Supplemental/Courier New.ttf",
-];
-
-#[cfg(not(target_os = "android"))]
-fn load_pdf_font(doc: &mut PdfDocument, candidates: &[&str]) -> Option<FontId> {
-    for candidate in candidates {
-        let Ok(bytes) = std::fs::read(candidate) else {
-            continue;
-        };
-        let mut warnings = Vec::new();
-        if let Some(font) = ParsedFont::from_bytes(&bytes, 0, &mut warnings) {
-            return Some(doc.add_font(&font));
-        }
-    }
-    None
-}
-
-#[cfg(not(target_os = "android"))]
-fn pdf_builtin_font_with_flags(style: &DocxTextStyle, flags: InlineFlags) -> BuiltinFont {
-    let family = style.font_family.to_ascii_lowercase();
-    let format = style.text_format.to_ascii_lowercase();
-    let bold = flags.bold || format.contains("bold");
-    if family.contains("courier") || family.contains("consolas") || family.contains("mono") {
-        if bold {
-            BuiltinFont::CourierBold
-        } else {
-            BuiltinFont::Courier
-        }
-    } else if family.contains("times") || family.contains("georgia") {
-        if bold {
-            BuiltinFont::TimesBold
-        } else {
-            BuiltinFont::TimesRoman
-        }
-    } else if bold {
-        BuiltinFont::HelveticaBold
-    } else {
-        BuiltinFont::Helvetica
-    }
-}
-
-#[cfg(not(target_os = "android"))]
 fn pdf_color(value: &str) -> Color {
     let hex = color_value(value);
     if hex.len() != 6 {
@@ -3016,41 +3115,64 @@ fn wrap_inline_segments(
     template: &DocxTemplate,
     width_pt: f32,
 ) -> Vec<Vec<InlineSegment>> {
-    let mut lines: Vec<Vec<InlineSegment>> = Vec::new();
+    let mut lines = Vec::new();
     let mut current: Vec<InlineSegment> = Vec::new();
-    let mut current_width = 0.0_f32;
+    let mut current_width = 0.0;
     for segment in segments {
-        for word in segment.text.split_whitespace() {
-            let mut token = segment.clone();
-            token.text = if current.is_empty() {
-                word.to_string()
-            } else {
-                format!(" {word}")
-            };
-            let style = pdf_segment_style(&token, base_style, template);
-            let token_width =
-                text_width_pt(&token.text, style.font_size_pt as f32, token.flags.code);
-            if current_width + token_width > width_pt && !current.is_empty() {
+        let style = pdf_segment_style(segment, base_style, template);
+        let advances = pdf_fonts::advances(&segment.text, &style, segment.flags);
+        let mut offset = 0;
+        while offset < advances.len() {
+            let whitespace = advances[offset].0.is_whitespace();
+            let start = offset;
+            while offset < advances.len() && advances[offset].0.is_whitespace() == whitespace {
+                offset += 1;
+            }
+            let mut run = advances[start..offset].to_vec();
+            if whitespace && !segment.flags.code {
+                if current.is_empty() {
+                    continue;
+                }
+                run = pdf_fonts::advances(" ", &style, segment.flags);
+            }
+            let total: f32 = run.iter().map(|(_, width)| width).sum();
+            if !whitespace && current_width + total > width_pt && !current.is_empty() {
                 lines.push(std::mem::take(&mut current));
                 current_width = 0.0;
-                token.text = word.to_string();
             }
-            let style = pdf_segment_style(&token, base_style, template);
-            let token_width =
-                text_width_pt(&token.text, style.font_size_pt as f32, token.flags.code);
-            push_inline_segment(&mut current, token);
-            current_width += token_width;
+            let mut text = String::new();
+            let mut text_width = 0.0;
+            for (ch, width) in run {
+                if current_width + text_width + width > width_pt
+                    && (!current.is_empty() || !text.is_empty())
+                {
+                    if !text.is_empty() {
+                        let mut fragment = segment.clone();
+                        fragment.text = std::mem::take(&mut text);
+                        current.push(fragment);
+                    }
+                    lines.push(std::mem::take(&mut current));
+                    current_width = 0.0;
+                    text_width = 0.0;
+                    if whitespace && !segment.flags.code {
+                        continue;
+                    }
+                }
+                text.push(ch);
+                text_width += width;
+            }
+            if !text.is_empty() {
+                let mut fragment = segment.clone();
+                fragment.text = text;
+                current.push(fragment);
+                current_width += text_width;
+            }
         }
     }
     if !current.is_empty() {
         lines.push(current);
     }
     lines
-}
-
-fn text_width_pt(text: &str, font_size: f32, mono: bool) -> f32 {
-    let factor = if mono { 0.58 } else { 0.52 };
-    text.chars().count() as f32 * font_size * factor
 }
 
 fn pdf_segment_style(
@@ -3167,6 +3289,12 @@ pub fn write_xlsx(path: &Path, sheet_name: &str, rows: &[Vec<String>]) -> Result
     zip.finish().map_err(|error| error.to_string())?;
     Ok(())
 }
+
+mod bounded_office_text;
+mod bounded_pdf_text;
+pub use bounded_pdf_text::{extract_pdf_pages_bounded,extract_pdf_text_bounded,read_pdf_text_bounded};
+pub use bounded_office_text::extract_office_text_bounded;
+pub use bounded_office_text::extract_office_body_text_bounded;
 
 pub fn extract_plain_text(path: &Path) -> String {
     match path
@@ -3585,7 +3713,6 @@ Texto con <mark data-knx-highlight="pink">resaltado</mark>.
         let _ = std::fs::remove_file(path);
     }
 
-    #[cfg(not(target_os = "android"))]
     #[test]
     fn pdf_render_draws_highlight_background_polygon() {
         let template = DocxTemplate::from_value(None);
@@ -3837,27 +3964,40 @@ Texto con <mark data-knx-highlight="pink">resaltado</mark>.
             "document": { "includeTitle": true, "linkColor": "#D85A12", "horizontalRuleColor": "#E5E7EB" }
         });
 
+        let mut pixel_png = Cursor::new(Vec::new());
+        RgbaImage::from_pixel(2, 1, Rgba([243, 112, 33, 255]))
+            .write_to(&mut pixel_png, ImageFormat::Png)
+            .unwrap();
         let image = ExportImageAsset {
             source: "assets/pixel.png".to_string(),
             alt: Some("Pixel PDF".to_string()),
             content_type: "image/png".to_string(),
-            bytes: BASE64_STANDARD
-                .decode("iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAQAAADcG2hMAAAAD0lEQVR42mP8z8BQDwAFgwJ/lx8a3wAAAABJRU5ErkJggg==")
-                .unwrap(),
+            bytes: pixel_png.into_inner(),
         };
-        let bytes = minimal_pdf_with_assets_and_template(
+        let bytes = export_pdf_with_assets_and_template(
             "Documento PDF",
             &format!("{markdown}\n\n![Pixel PDF](assets/pixel.png)\n"),
             &[],
             &[image],
             Some(&template),
-        );
+        )
+        .unwrap();
 
         assert!(bytes.starts_with(b"%PDF-"));
         assert!(bytes.len() > 2_000);
         let pdf_text = String::from_utf8_lossy(&bytes);
         assert!(pdf_text.contains("/URI"));
         assert!(pdf_text.contains("https://knownext.ai"));
+        let parsed = lopdf::Document::load_mem(&bytes).unwrap();
+        assert!(parsed
+            .objects
+            .values()
+            .any(|object| object.as_stream().ok().is_some_and(|stream| stream
+                .dict
+                .get(b"Subtype")
+                .and_then(lopdf::Object::as_name)
+                .ok()
+                == Some(b"Image".as_slice()))));
         assert!(markdown_blocks(markdown)
             .iter()
             .any(|block| matches!(block, MarkdownBlock::Table { headers, rows } if headers.len() == 2 && rows.len() == 1)));
@@ -3872,6 +4012,88 @@ Texto con <mark data-knx-highlight="pink">resaltado</mark>.
         )
         .len()
             > 1);
+    }
+
+    #[test]
+    fn checked_pdf_rejects_missing_resources_and_unsupported_characters() {
+        for markdown in [
+            "# Documento\n\n![Fuente](missing.png)",
+            "# Documento\n\n```mermaid\ngraph TD;A-->B;\n```",
+        ] {
+            assert!(export_pdf_with_assets_and_template("QA", markdown, &[], &[], None).is_err());
+        }
+        let error = export_pdf_with_assets_and_template(
+            "QA",
+            "Contenido 🧪 no representable",
+            &[],
+            &[],
+            None,
+        )
+        .unwrap_err();
+        assert!(error.contains("U+1F9EA"));
+    }
+    #[test]
+    fn handwritten_pdf_rejects_total_raster_budget_before_allocating_pages() {
+        let page = json!({"id":"large","size":{"width":4096,"height":4096},"strokes":[]});
+        let note = json!({"pages":[page.clone(),page]});
+        let error = handwritten_note_pdf(&note).unwrap_err();
+        assert!(error.contains("presupuesto"));
+        assert!(error.contains(".knote"));
+    }
+    #[test]
+    fn pdf_wrap_preserves_code_spacing_long_words_and_inline_boundaries() {
+        let template = DocxTemplate::from_value(None);
+        let text = format!("    let_value = {}", "W".repeat(240));
+        let segment = InlineSegment {
+            text: text.clone(),
+            flags: InlineFlags {
+                code: true,
+                ..InlineFlags::default()
+            },
+            ..InlineSegment::default()
+        };
+        let lines = wrap_inline_segments(&[segment], &template.code, &template, 110.0);
+        assert!(lines.len() > 2);
+        assert_eq!(
+            lines
+                .iter()
+                .flatten()
+                .map(|segment| segment.text.as_str())
+                .collect::<String>(),
+            text
+        );
+        for line in lines {
+            assert!(
+                line.iter()
+                    .map(|segment| pdf_fonts::width(&segment.text, &template.code, segment.flags))
+                    .sum::<f32>()
+                    <= 110.01
+            );
+        }
+        let segments = parse_inline_segments("texto**unido**final");
+        let lines = wrap_inline_segments(&segments, &template.normal, &template, 500.0);
+        assert_eq!(
+            lines
+                .iter()
+                .flatten()
+                .map(|segment| segment.text.as_str())
+                .collect::<String>(),
+            "textounidofinal"
+        );
+    }
+    #[test]
+    fn inline_export_preserves_combined_emphasis_and_escaped_delimiters() {
+        let segments = parse_inline_segments(r"***Combinado*** y \*literal\*");
+        assert!(segments.iter().any(|segment| segment.text == "Combinado"
+            && segment.flags.bold
+            && segment.flags.italic));
+        assert_eq!(
+            segments
+                .iter()
+                .map(|segment| segment.text.as_str())
+                .collect::<String>(),
+            "Combinado y *literal*"
+        );
     }
 
     #[test]
@@ -3918,3 +4140,10 @@ Texto con <mark data-knx-highlight="pink">resaltado</mark>.
         assert!(pdf_text.contains("/Subtype /Image"));
     }
 }
+
+/// Outline derives from the same block parser as both renderers, ignoring fenced code.
+pub fn export_outline(markdown:&str)->Vec<(usize,String)>{markdown_blocks(markdown).into_iter().filter_map(|b|if let MarkdownBlock::Heading{level,content}=b{Some((level,content))}else{None}).take(1000).collect()}
+
+pub fn export_diagram_count(markdown:&str)->usize{markdown_blocks(markdown).iter().filter(|b|matches!(b,MarkdownBlock::Diagram(_))).count()}
+
+#[cfg(test)]mod portability_tests{use super::*;#[test]fn portability_block_cover_break_and_outline_share_the_real_parser(){let md="# Portada\n\n<!-- knownext:page-break -->\n\n# Índice\n\n<!-- knownext:page-break -->\n\n## Sección\n\nTexto completo ñ\n\n```md\n# No es un título\n```";let outline=export_outline(md);assert_eq!(outline.len(),3);assert_eq!(markdown_blocks(md).iter().filter(|b|matches!(b,MarkdownBlock::PageBreak)).count(),2);let pdf=export_pdf_with_assets_and_template("QA",md,&[],&[],None).unwrap();let text=extract_pdf_text_bounded(&pdf,2*1024*1024).unwrap();assert!(text.contains("Sección"));assert!(text.split_whitespace().collect::<Vec<_>>().join(" ").contains("Texto completo"),"{text:?}");}}

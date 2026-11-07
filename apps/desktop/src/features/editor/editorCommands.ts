@@ -1,9 +1,9 @@
 import type { Editor } from "@milkdown/kit/core";
-import { commandsCtx, editorViewCtx, parserCtx } from "@milkdown/kit/core";
+import { commandsCtx, editorViewCtx, parserCtx, serializerCtx } from "@milkdown/kit/core";
 import { Slice, type Node as ProseMirrorNode } from "@milkdown/kit/prose/model";
 import { TextSelection, type EditorState } from "@milkdown/kit/prose/state";
 import type { PluginKey } from "@milkdown/kit/prose/state";
-import { redoDepth, undoDepth } from "@milkdown/kit/prose/history";
+import { closeHistory, redoDepth, undoDepth } from "@milkdown/kit/prose/history";
 import { lift } from "@milkdown/kit/prose/commands";
 import {
   createCodeBlockCommand,
@@ -26,9 +26,57 @@ import type { MarkdownEditorAction, MarkdownEditorController, MarkdownEditorForm
 import { emptyMarkdownEditorHistoryState } from "./editorTypes";
 import { defaultMarkdownHighlightColor, highlightSchema, normalizeMarkdownHighlightColor } from "./highlightExtension";
 import { toggleUnderlineCommand } from "./underlineExtension";
+import { documentHeadings, documentMatches } from "./documentTools";
+import { replacementImageAttributes } from "./imageFidelity";
 
-export function createMarkdownEditorController(editor: Editor, selectionFocusPluginKey?: PluginKey, transientTextPluginKey?: PluginKey): MarkdownEditorController {
+export function createMarkdownEditorController(editor: Editor, selectionFocusPluginKey?: PluginKey, transientTextPluginKey?: PluginKey,
+  publishedSnapshot?: () => { markdown: string; document: ProseMirrorNode } | null,
+): MarkdownEditorController {
   return {
+    getMarkdownSnapshot() {
+      return editor.action(ctx => {
+        const view = ctx.get(editorViewCtx);
+        if(view.composing)throw new Error("Termina la composición de texto antes de insertar o cambiar de vista. El contenido permanece en el editor.");
+        const document = view.state.doc;
+        const snapshot = publishedSnapshot?.();
+        return snapshot?.document.eq(document) ? snapshot.markdown : ctx.get(serializerCtx)(document);
+      });
+    },
+    matchesMarkdown(markdown) {
+      try {
+        const snapshot = publishedSnapshot?.();
+        return snapshot?.markdown === markdown && editor.action(ctx => {const view=ctx.get(editorViewCtx);return !view.composing&&snapshot.document.eq(view.state.doc);});
+      }
+      catch { return false; }
+    },
+    getHeadings() { return editor.action(ctx => documentHeadings(ctx.get(editorViewCtx).state.doc)); },
+    findText(query, options) { return editor.action(ctx => documentMatches(ctx.get(editorViewCtx).state.doc, query, 1001, options)); },
+    navigateTo(position, endPosition) {
+      return editor.action(ctx => {
+        const view = ctx.get(editorViewCtx);
+        const target = Math.max(0, Math.min(position, view.state.doc.content.size));
+        const selection = endPosition === undefined
+          ? TextSelection.near(view.state.doc.resolve(target))
+          : TextSelection.between(view.state.doc.resolve(target), view.state.doc.resolve(Math.max(target, Math.min(endPosition, view.state.doc.content.size))));
+        view.dispatch(view.state.tr.setSelection(selection).scrollIntoView());
+        view.focus(); return true;
+      });
+    },
+    replaceText(query, replacement, all, index = 0, options) {
+      return editor.action(ctx => {
+        const view = ctx.get(editorViewCtx);
+        const matches = documentMatches(view.state.doc, query, 1001, options);
+        if (matches.length > 1000) return 0;
+        const selected = all ? matches : matches[index] ? [matches[index]] : [];
+        if (!selected.length) return 0;
+        let transaction = view.state.tr;
+        for (const match of [...selected].reverse()) transaction = transaction.insertText(replacement, match.from, match.to);
+        view.dispatch(closeHistory(transaction).setMeta("addToHistory", true).scrollIntoView());
+        // Subsequent typing is a separate undo step from this reviewed replacement.
+        view.dispatch(closeHistory(view.state.tr));
+        view.focus(); return selected.length;
+      });
+    },
     run(action, options) {
       return editor.action((ctx) => {
         const view = ctx.get(editorViewCtx);
@@ -145,6 +193,18 @@ export function createMarkdownEditorController(editor: Editor, selectionFocusPlu
         return false;
       }
     },
+    appendMarkdown(markdown, options) {
+      try {
+        return editor.action(ctx => {
+          const view=ctx.get(editorViewCtx);if(view.composing)return false;
+          const next=ctx.get(parserCtx)(markdown);if(!next.childCount)return false;
+          const transaction=closeHistory(view.state.tr).insert(view.state.doc.content.size,next.content).setMeta("addToHistory",options?.addToHistory!==false);
+          view.dispatch(transaction);
+          view.dispatch(closeHistory(view.state.tr));
+          return true;
+        });
+      }catch{return false;}
+    },
     insertMarkdown(markdown, options) {
       try {
         return editor.action((ctx) => {
@@ -196,10 +256,7 @@ export function createMarkdownEditorController(editor: Editor, selectionFocusPlu
           if (!nextImage) return false;
 
           const transaction = view.state.tr
-            .setNodeMarkup(image.position, undefined, {
-              ...image.node.attrs,
-              ...nextImage.attrs,
-            })
+            .setNodeMarkup(image.position, undefined, replacementImageAttributes(image.node,nextImage))
             .setMeta("addToHistory", options?.addToHistory !== false)
             .scrollIntoView();
 

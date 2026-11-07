@@ -14,6 +14,7 @@ export type Project = {
 };
 
 export type ProjectPayload = {
+  locationReview?:import("./projectLocation").ProjectLocationReceipt;
   name: string;
   folderPath: string;
   icon: string;
@@ -49,6 +50,7 @@ export type ProjectCapabilities = {
   canCreateLocalProject: boolean;
   canOpenLocalFolder: boolean;
   canUseLocalGit: boolean;
+  localGitReason?: string | null;
   canConnectGithub: boolean;
   canUseGithubApi: boolean;
   requiresGithubLoginForVersioning: boolean;
@@ -268,6 +270,7 @@ export type ExternalChangeSummary = {
 
 export type ExternalChangeSet = {
   id: string;
+  revision?: string | null;
   projectId: string;
   title: string;
   source: "filesystem" | "git";
@@ -285,6 +288,7 @@ export type ExternalChangeImportDecision = {
 };
 
 export type ExternalChangeImportRequest = {
+  revision: string;
   decisions: ExternalChangeImportDecision[];
   syncRemote: boolean;
 };
@@ -293,6 +297,8 @@ export type ExternalChangeImportResult = {
   status: ProjectSyncState;
   message: string;
   tree: DocumentTreeNode[];
+  treeAvailable?:boolean;
+  treeWarning?:string|null;
   versionTitle?: string | null;
   syncedAt?: string | null;
   pendingRemoteSync: boolean;
@@ -305,6 +311,8 @@ export type AuthUser = {
 };
 
 export type AuthStatus = {
+  storageError?: string | null;
+  credentialStorageError?: string | null;
   isAuthenticated: boolean;
   provider?: string | null;
   user?: AuthUser | null;
@@ -338,6 +346,10 @@ export type GithubRepositorySummary = GithubRepository & {
 export type LayoutConfig = {
   sidebarWidth: number;
   historyWidth: number;
+  navigationVisible?: boolean;
+  contextPinned?: boolean;
+  firstUseDismissed?: boolean;
+  contextKind?: "assistant" | "document" | "properties" | "references";
 };
 
 export type AppearanceThemeMode = "system" | "light" | "dark";
@@ -565,11 +577,15 @@ export type AiConfig = {
 };
 
 export type AiConfigStatus = AiConfig & {
+  credentialStorageError?: string | null;
+  credentialProtection?: "windows-dpapi-user" | "android-keystore-aes-gcm" | "legacy-local" | "unavailable";
   openaiKeyConfigured: boolean;
   openaiKeyPreview?: string | null;
 };
 
 export type OpenAiKeyStatus = {
+  storageError?: string | null;
+  protection?: "windows-dpapi-user" | "legacy-local" | "unavailable";
   configured: boolean;
   preview?: string | null;
 };
@@ -642,15 +658,30 @@ export type AffectedDocument = {
   newId?: string | null;
   name?: string | null;
   path?: string | null;
+  referenceUpdated?: boolean;
+  previousMarkdown?: string;
+  document?: DocumentRecord;
 };
 
 export type FileOperationResult = {
   tree: DocumentTreeNode[];
+  /** False for durable effect receipts or an unavailable tree refresh. */
+  treeAvailable?: boolean;
+  treeWarning?:string|null;
   node?: DocumentTreeNode | null;
   affectedDocuments: AffectedDocument[];
+  warnings?: string[];
+  recoveryPending?: boolean;
+  referencesPending?: boolean;
+  favoritesPending?: boolean;
+  importReceipt?: import("./fileImports").FileImportReceipt;
 };
 
 export type DocumentRecord = {
+  draftWriteRevision?: string | null;
+  draftWriteConflict?: boolean;
+  recoveryWarning?: string | null;
+  baseVerified?: boolean;
   id: string;
   name: string;
   path: string;
@@ -749,6 +780,11 @@ export type HandwrittenNoteContent = {
 };
 
 export type HandwrittenNoteRecord = {
+  draftWriteRevision?: string | null;
+  draftWriteConflict?: boolean;
+  sourceUnavailable?: boolean;
+  recoveryWarning?: string | null;
+  baseVerified?: boolean;
   id: string;
   name: string;
   path: string;
@@ -824,6 +860,7 @@ export type ReferenceDocumentWorkspaceTab = {
   path: string;
   format: "pdf" | "docx" | "xlsx";
   readonly: true;
+  pageFocus?:{pageNumber:number;requestId:number};
 };
 
 export type AiConversationWorkspaceTab = {
@@ -916,6 +953,7 @@ export type SpreadsheetSheetsResponse = {
 };
 
 export type VersionRecord = {
+  milestone?: import("./history").HistoryMilestone | null;
   id: string;
   hash: string;
   title: string;
@@ -928,6 +966,13 @@ export type VersionRecord = {
 
 export type CreateVersionResponse = {
   version: VersionRecord;
+};
+
+export type RestoreVersionResponse = {
+  version: VersionRecord | null;
+  savedDocument: DocumentRecord;
+  historyWarning?: string | null;
+  recoveryWarning?: string | null;
 };
 
 export type AiPromptRequest = {
@@ -1144,6 +1189,7 @@ export type AiResearchUsage = {
   cachedInputTokens: number;
   outputTokens: number;
   reasoningTokens: number;
+  embeddingTokens?:number;
   totalTokens: number;
   estimatedCostEur?: number | null;
   currency: "EUR";
@@ -1262,6 +1308,9 @@ export type AiResearchExportRequest = {
   format: "markdown" | "pdf" | "docx" | "package";
 };
 export type AiResearchJob = {
+  conversationWarning?: string | null;
+  usageWarning?: string | null;
+  persistenceWarning?: string | null;
   id: string;
   projectId: string;
   brief: AiResearchBrief;
@@ -1297,6 +1346,9 @@ export type AiResearchJob = {
   draftMarkdown?: string | null;
   researchFindings?: string[];
   tree?: DocumentTreeNode[] | null;
+  treeAvailable?:boolean;
+  treeWarning?:string|null;
+  treeDeferred?:boolean;
   usedSkills?: string[];
   skillApplications?: AiSkillApplication[];
   skillDiagnostics?: AiSkillDiagnostic[];
@@ -1408,10 +1460,14 @@ export type AiConversationEventType =
   | "image_inserted";
 
 export type AiInteractionRequest = {
+  readOnly?:boolean;
+  activeDocumentDraftContentHash?: string | null;
+  activeHandwrittenDraftContentHash?: string | null;
   projectId: string;
   documentId?: string | null;
   prompt: string;
   activeMarkdown: string;
+  activeDocumentBaseFingerprint?: DocumentFingerprint | null;
   targetKind?: "markdown_document" | "notes" | "handwritten_note" | "project";
   handwrittenNoteId?: string | null;
   activeHandwrittenPageId?: string | null;
@@ -1470,6 +1526,8 @@ export type AiContextSource = {
   mimeType?: string | null;
   sizeBytes: number;
   status: AiContextSourceStatus;
+  sourceOrigin?:"file"|"snapshot"|"unverified";
+  requiresReview?:boolean;
   weight: AiContextWeight;
   warning?: string | null;
   error?: string | null;
@@ -1635,7 +1693,7 @@ export type AssetMetadata = {
   height?: number | null;
   colorDepthBits?: number | null;
   updatedAt: string;
-  usageCount: number;
+  usageCount: number | null;
   indexed: boolean;
   indexStatus: string;
   visualDescription?: string | null;
@@ -1665,6 +1723,8 @@ export type AssetUsageResponse = {
 export type AssetImportResponse = {
   tree: DocumentTreeNode[];
   asset: AssetMetadata;
+  importReceipt?: import("./fileImports").FileImportReceipt;
+  warnings?: string[];
 };
 
 export type InsertImageReferenceResponse = {
@@ -1689,12 +1749,20 @@ export type AiContextSourcePreviewResponse = {
   source: AiContextSource;
   previewText?: string | null;
   metadata: Record<string, unknown>;
+  originReview?:AiContextOriginReview;
+};
+export type AiContextOriginReview={
+  source:AiContextSource;sourceRevision:string;status:"current"|"changed"|"unavailable"|"unverified"|"unsupported"|"snapshot";
+  canRefresh:boolean;fileRevision:string|null;locationRevision:string|null;checkedAt:string;message?:string;
+  publicationReviewed?:boolean;lastRefresh?:{format:1;attemptId:string;previousSourceRevision:string;fileRevision:string;locationRevision:string}|null;
 };
 
 export type AiContextAddToProjectResponse = {
   documentId: string;
   path: string;
   tree?: DocumentTreeNode[] | null;
+  treeAvailable?:boolean;
+  treeWarning?:string|null;
 };
 
 export type AiPendingIntent = {
@@ -1736,6 +1804,10 @@ export type AiEditOperationPlacement = {
 
 export type AiEditOperation = {
   id: string;
+  /** Client-owned request snapshot. Never accepted as model authority. */
+  expectedMarkdown?: string;
+  /** Client display label; documentId remains the execution identity. */
+  documentLabel?: string;
   action: AiEditOperationAction;
   documentId: string;
   summary: string;
@@ -1759,6 +1831,9 @@ export type AiEditOperation = {
 
 export type AiEditProposal = {
   id: string;
+  /** Derived from the native output receipt; never from a model-owned proposal field. */
+  recovery?: { resultId?: string; stored: boolean; error?: string; removed?: boolean };
+  requiresConfirmation?: boolean;
   projectId: string;
   interactionId: string;
   status: AiEditProposalStatus;
@@ -1874,6 +1949,7 @@ export type AiHandwrittenDrawingProposal = {
 };
 
 export type AiUpdatedHandwrittenNote = {
+  draftWriteRevision?: string | null;
   noteId: string;
   content: HandwrittenNoteContent;
   summary: string;
@@ -1949,6 +2025,7 @@ export type AiAgenticTask = {
 };
 
 export type AiOperation = {
+  runtimeApplied?: boolean;
   type: AiOperationType;
   status: "completed" | "blocked" | "pending" | "error";
   message: string;
@@ -1984,6 +2061,12 @@ export type AiConversationResponse = {
 };
 
 export type AiInteractionResponse = {
+  /** Output-only review retained by the native runtime, including rejected commits. */
+  retainedResult?: { result: import("./aiResults").AiReviewRecord; stored: boolean; error?: string };
+  /** Text edit review policy stamped by the runtime. Missing means review. */
+  requiresEditConfirmation?: boolean;
+  /** Runtime-owned origin, including when the project changed during the wait. */
+  originProjectRootHash?: string;
   interactionId: string;
   status: AiInteractionStatus;
   display: AiInteractionDisplay;
@@ -2001,6 +2084,9 @@ export type AiInteractionResponse = {
   editProposalStatus?: AiEditProposalStatus | null;
   answer?: string | null;
   conversationEvents: AiConversationEvent[];
+  conversationWarning?: string | null;
+  usageWarning?: string | null;
+  persistenceWarning?: string | null;
   operations: AiOperation[];
   updatedDocument?: AiUpdatedDocument | null;
   drawingProposal?: AiHandwrittenDrawingProposal | null;
@@ -2008,6 +2094,8 @@ export type AiInteractionResponse = {
   generatedImages?: AiGeneratedImage[];
   task?: AiAgenticTask | null;
   tree?: DocumentTreeNode[] | null;
+  treeAvailable?:boolean;
+  treeWarning?:string|null;
   affectedDocuments: AffectedDocument[];
   requiresConfirmation?: AiPendingDelete | null;
   contextSources?: AiContextSource[];
@@ -2019,6 +2107,11 @@ export type AiInteractionResponse = {
 
 export type AiIndexStatusResponse = {
   projectId: string;
+  checkedAt?: string;
+  indexRevision?: string | null;
+  indexSizeBytes?: number | null;
+  indexReadable?: boolean;
+  documentCountKnown?: boolean;
   enabled: boolean;
   status: AiRagConfig["status"];
   vectorStoreId?: string | null;
@@ -2033,6 +2126,7 @@ export type AiIndexStatusResponse = {
 };
 
 export type AiUsageModelSummary = {
+  unpricedEntries?:number;
   model: string;
   interactions: number;
   inputTokens: number;
@@ -2047,6 +2141,7 @@ export type AiUsageModelSummary = {
 };
 
 export type AiUsageCapabilitySummary = {
+  unpricedEntries?:number;
   capability: "document_ai" | "image_generation" | "vision" | "audio" | "agentic_tasks";
   label: string;
   interactions: number;
@@ -2062,10 +2157,25 @@ export type AiUsageCapabilitySummary = {
 };
 
 export type AiUsageSummaryResponse = {
+  projectId?:string|null;
+  availableProjects?:Array<{id:string;name:string;state:"registered"|"retired"|"unavailable"}>;
+  projectNamesComplete?:boolean;
+  periodTimeZone?:"UTC";
+  coverage?:"retained-local-records"|"local-period-aggregates";
+  recordedEntries?:number;
+  ledgerCreatedAt?:string;
+  legacyWindowOnly?:boolean;
+  periodGroups?:number;
+  retainedEntries?:number;
+  entryLimit?:number;
+  unscopedEntries?:number;
+  totalInteractions?:number;
+  totalTokens?:number;
   legacyEntries?: number;
   unpricedEntries?: number;
   totalEstimatedCostUsd?: number;
   exchangeRate?: {date?:string; usdPerEur?:number; source?:string};
+  exchangeRateWarning?: string | null;
   costNote?:string;
   month: string;
   currency: "EUR";
@@ -2077,12 +2187,14 @@ export type AiUsageSummaryResponse = {
 };
 
 export type SaveDocumentPayload = {
+  expectedDraftWriteRevision?: string | null;
   markdown: string;
   baseFingerprint?: DocumentFingerprint | null;
   force?: boolean;
 };
 
 export type SaveDraftPayload = {
+  expectedDraftWriteRevision?: string | null;
   markdown: string;
   baseFingerprint?: DocumentFingerprint | null;
   baseContentHash?: string | null;
@@ -2095,18 +2207,22 @@ export type CreateHandwrittenNotePayload = {
 };
 
 export type SaveHandwrittenNotePayload = {
+  expectedDraftWriteRevision?: string | null;
   content: HandwrittenNoteContent;
   baseFingerprint?: DocumentFingerprint | null;
   force?: boolean;
 };
 
 export type SaveHandwrittenNoteDraftPayload = {
+  expectedDraftWriteRevision?: string | null;
   content: HandwrittenNoteContent;
   baseFingerprint?: DocumentFingerprint | null;
   baseContentHash?: string | null;
 };
 
 export type HandwrittenNoteDraftResponse = {
+  draftWriteRevision?: string | null;
+  sourceWarning?: string | null;
   noteId: string;
   draftUpdatedAt?: string | null;
   isDirty: boolean;
@@ -2147,6 +2263,7 @@ export type HandwrittenNoteInsertMarkdownResponse = {
 };
 
 export type DraftResponse = {
+  draftWriteRevision?: string | null;
   documentId: string;
   draftUpdatedAt?: string | null;
   isDirty: boolean;
@@ -2193,6 +2310,11 @@ export type SyncStatusResponse = {
 };
 
 export type OrphanDraft = {
+  fingerprint?: string | null;
+  locationRevision?: string | null;
+  projectName?: string | null;
+  kind?: "document" | "handwritten-note";
+  pageCount?: number;
   draftKey: string;
   documentId: string;
   projectId: string;
@@ -2205,6 +2327,5 @@ export type OrphanDraft = {
   reason?: string | null;
 };
 
-export type RestoreDraftResponse = {
-  document: DocumentRecord;
-};
+export type RestoreDraftResponse = ({ kind?: "document"; document: DocumentRecord; note?: never }
+  | { kind: "handwritten-note"; note: HandwrittenNoteRecord; document?: never }) & { recoveryWarning?: string | null };

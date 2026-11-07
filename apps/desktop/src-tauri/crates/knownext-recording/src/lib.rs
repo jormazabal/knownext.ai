@@ -1,7 +1,11 @@
 pub mod audio;
 pub mod model;
+mod metadata;
+mod portable;
 mod native;
 pub mod transcription;
+mod source;
+pub use source::transcript_source;
 
 use model::*;
 #[cfg(test)]
@@ -17,9 +21,10 @@ use std::{
 };
 
 type Reply = mpsc::Sender<Result<Value, String>>;
+enum Work { Request(String,Value,Reply), Portable(knownext_core::recording_portability::PortableRecording,Reply) }
 #[derive(Clone)]
 pub struct RecordingService {
-    sender: mpsc::Sender<(String, Value, Reply)>,
+    sender: mpsc::Sender<Work>,
     pub root: PathBuf,
     pub processing: Arc<Mutex<()>>,
 }
@@ -27,6 +32,11 @@ struct Engine {
     root: PathBuf,
     _lock: File,
     settings: Settings,
+    settings_error:Option<String>,
+    settings_recovery_revision:Option<String>,
+    unavailable_sessions:usize,
+    session_revisions:HashMap<String,Option<String>>,
+    recovery_pending:HashSet<String>,
     sessions: Vec<Session>,
     revision: u64,
     sources: Vec<native::Source>,
@@ -35,6 +45,7 @@ struct Engine {
     active: Option<String>,
     preview: bool,
     dictation: bool,
+    restart_hold: bool,
     dictation_owner: Option<String>,
     levels: [f32; 2],
     warning: Option<String>,
@@ -47,9 +58,13 @@ struct Engine {
     in_flight: HashSet<String>,
 }
 pub fn atomic_json<T: serde::Serialize>(path: &Path, data: &T) -> Result<(), String> {
+    metadata::bytes(path)?;
+    if fs::symlink_metadata(path).ok().is_some_and(|meta|meta.permissions().readonly()){return Err("Metadatos de grabación de solo lectura; se conservan".into());}
     let mut temp = tempfile::NamedTempFile::new_in(path.parent().ok_or("Ruta inválida")?)
         .map_err(|e| e.to_string())?;
-    serde_json::to_writer(&mut temp, data).map_err(|e| e.to_string())?;
+    let raw=serde_json::to_vec(data).map_err(|e|e.to_string())?;
+    if raw.len()>4*1024*1024{return Err("Metadatos de grabación fuera de límites; se conserva el original".into());}
+    temp.write_all(&raw).map_err(|e|e.to_string())?;
     temp.as_file().sync_all().map_err(|e| e.to_string())?;
     temp.persist(path).map_err(|e| e.to_string())?;
     Ok(())
@@ -57,6 +72,8 @@ pub fn atomic_json<T: serde::Serialize>(path: &Path, data: &T) -> Result<(), Str
 impl RecordingService {
     pub fn new(root: PathBuf) -> Result<Self, String> {
         fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+        metadata::directory(&root)?;
+        metadata::bytes(&root.join("capture.lock"))?;
         let lock = OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -66,67 +83,22 @@ impl RecordingService {
             .map_err(|e| e.to_string())?;
         fs2::FileExt::try_lock_exclusive(&lock)
             .map_err(|_| "Ya existe una instancia que utiliza este perfil".to_string())?;
-        let settings = fs::read(root.join("settings.json"))
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default();
-        let mut sessions: Vec<Session> = vec![];
-        for entry in fs::read_dir(&root).map_err(|e| e.to_string())?.flatten() {
-            let path = entry.path().join("session.json");
-            if let Ok(bytes) = fs::read(&path) {
-                if let Ok(mut s) = serde_json::from_slice::<Session>(&bytes) {
-                    if entry.file_name().to_string_lossy() != s.id {
-                        continue;
-                    }
-                    if matches!(s.status, Status::Recording | Status::Paused) {
-                        let mut recovered = 0;
-                        for name in ["microphone.pcm", "system.pcm"] {
-                            if let Ok(file) =
-                                OpenOptions::new().write(true).open(entry.path().join(name))
-                            {
-                                let length = file.metadata().map_err(|e| e.to_string())?.len();
-                                file.set_len(length - length % 2)
-                                    .map_err(|e| e.to_string())?;
-                                recovered = recovered.max(length / 2);
-                            }
-                        }
-                        s.samples = recovered;
-                        s.recovered = true;
-                        s.status = Status::Attention;
-                        s.error = Some("Grabación interrumpida. Se ha recuperado el audio disponible; revisa el final.".into());
-                    }
-                    // Cancellation may have left an HTTP request in flight when the app closed.
-                    if s.chunks.iter().any(|c| c.status == "sending")
-                        && s.status != Status::Completed
-                    {
-                        for c in &mut s.chunks {
-                            if c.status == "sending" {
-                                c.status = "unknown".into();
-                            }
-                        }
-                        s.status = Status::Attention;
-                        s.error=Some("Hay un envío sin resultado confirmado. Reintentar puede repetir consumo.".into());
-                    }
-                    if s.status == Status::Transcribing {
-                        for chunk in &mut s.chunks {
-                            if chunk.status == "sending" {
-                                chunk.status = "unknown".into();
-                            }
-                        }
-                        if s.chunks.iter().any(|c| c.status == "unknown") {
-                            s.status = Status::Attention;
-                            s.error = Some("Procesamiento interrumpido. Revisa los fragmentos antes de reintentar.".into());
-                        } else {
-                            s.status = Status::Queued;
-                        }
-                    }
-                    s.revision += 1;
-                    atomic_json(&path, &s)?;
-                    sessions.push(s);
-                }
+        let (settings,settings_error,settings_recovery_revision)=metadata::settings(&root);
+        let mut sessions=vec![];let mut unavailable_sessions=0;let mut session_revisions=HashMap::new();let mut recovery_pending=HashSet::new();
+        for entry in fs::read_dir(&root).map_err(|_|"No se puede consultar las sesiones")? {
+            let entry=entry.map_err(|_|"No se pudo completar la consulta de sesiones")?;let id=entry.file_name().to_string_lossy().to_string();if uuid::Uuid::parse_str(&id).is_err(){if metadata::directory(&entry.path()).is_ok()&&fs::symlink_metadata(entry.path().join("session.json")).is_ok(){unavailable_sessions+=1;}continue;}
+            if metadata::directory(&entry.path()).is_err(){unavailable_sessions+=1;continue;}
+            let (mut session,raw)=match metadata::session(&root,&id){Ok(Some(value))=>value,Ok(None)=>{unavailable_sessions+=1;continue;},Err(_)=>{unavailable_sessions+=1;continue;}};
+            session_revisions.insert(id.clone(),Some(metadata::hash(&raw)));
+            let interrupted=matches!(session.status,Status::Recording|Status::Paused|Status::Transcribing)||session.chunks.iter().any(|chunk|chunk.status=="sending");
+            if interrupted {
+                if matches!(session.status,Status::Recording|Status::Paused){let mut recovered=0;for name in ["microphone.pcm","system.pcm"]{if let Ok(meta)=fs::symlink_metadata(entry.path().join(name)){if meta.is_file()&&!metadata::linked(&meta){recovered=recovered.max(meta.len()/2);}}}session.samples=recovered;session.recovered=true;}
+                for chunk in &mut session.chunks{if chunk.status=="sending"{chunk.status="unknown".into();}}
+                session.status=Status::Attention;session.error=Some("Sesión interrumpida. Se conservan los archivos originales; revisa el final y los envíos antes de continuar.".into());recovery_pending.insert(id);
             }
+            sessions.push(session);
         }
-        let (sender, receiver) = mpsc::channel::<(String, Value, Reply)>();
+        let (sender, receiver) = mpsc::channel::<Work>();
         let engine_root = root.clone();
         std::thread::Builder::new()
             .name("knownext-capture".into())
@@ -135,6 +107,7 @@ impl RecordingService {
                     root: engine_root,
                     _lock: lock,
                     settings,
+                    settings_error,settings_recovery_revision,unavailable_sessions,session_revisions,recovery_pending,
                     sessions,
                     revision: 1,
                     sources: vec![],
@@ -143,6 +116,7 @@ impl RecordingService {
                     active: None,
                     preview: false,
                     dictation: false,
+                    restart_hold: false,
                     dictation_owner: None,
                     levels: [0.0; 2],
                     warning: None,
@@ -157,7 +131,11 @@ impl RecordingService {
                 engine.cleanup();
                 loop {
                     match receiver.recv_timeout(Duration::from_millis(20)) {
-                        Ok((action, payload, reply)) => {
+                        Ok(Work::Portable(input,reply)) => {
+                            let result=engine.import_portable(input);
+                            let _=reply.send(result);
+                        }
+                        Ok(Work::Request(action, payload, reply)) => {
                             let result = engine.command(&action, payload);
                             let _ = reply.send(result);
                         }
@@ -186,30 +164,52 @@ impl RecordingService {
             processing: Arc::new(Mutex::new(())),
         })
     }
+    pub fn import_portable(&self,input:knownext_core::recording_portability::PortableRecording)->Result<Value,String>{
+        let (tx,rx)=mpsc::channel();self.sender.send(Work::Portable(input,tx)).map_err(|_|"No se pudo reservar la copia de grabación")?;rx.recv().map_err(|_|"La copia no está confirmada; consulta Grabaciones sin repetir")?
+    }
     pub fn request(&self, action: &str, payload: Value) -> Result<Value, String> {
         let (tx, rx) = mpsc::channel();
         self.sender
-            .send((action.into(), payload, tx))
+            .send(Work::Request(action.into(), payload, tx))
             .map_err(|e| e.to_string())?;
         rx.recv().map_err(|e| e.to_string())?
     }
 }
 impl Engine {
+    fn ensure_portable_idle(&self)->Result<(),String>{if self.active.is_some()||self.preview||self.dictation||!self.sources.is_empty()||!self.in_flight.is_empty(){Err("Finaliza la captura, la vista de niveles o el envío activo antes de traer audio".into())}else{Ok(())}}
+    fn import_portable(&mut self,input:knownext_core::recording_portability::PortableRecording)->Result<Value,String>{
+        self.ensure_portable_idle()?;
+        if self.restart_hold {return Err("Hay una actualización preparada; vuelve al espacio antes de traer audio".into());}
+        if self.sessions.iter().any(|session|session.id==input.id){return Err("La identidad ya está conservada en Grabaciones; no se duplica".into());}
+        let (session,raw)=portable::publish(&self.root,input)?;let id=session.id.clone();self.session_revisions.insert(id.clone(),Some(metadata::hash(&raw)));self.sessions.push(session);self.revision=self.revision.saturating_add(1);Ok(serde_json::json!({"schemaVersion":1,"sessionId":id,"status":"imported","checkedAt":knownext_core::now_iso(),"startsAi":false,"retained":true}))
+    }
     fn session_mut(&mut self, id: &str) -> Result<&mut Session, String> {
         self.sessions
             .iter_mut()
             .find(|s| s.id == id)
             .ok_or_else(|| "Grabación no encontrada".into())
     }
+    fn ensure_session_base(&self,id:&str)->Result<Option<Vec<u8>>,String>{
+        let raw=metadata::session(&self.root,id)?.map(|(_,raw)|raw);let current=raw.as_ref().map(|raw|metadata::hash(raw));let expected=self.session_revisions.get(id).cloned().flatten();if current!=expected{return Err("Los metadatos de la sesión cambiaron; se conservan sin sustituir. Revisa la sesión antes de continuar.".into());}Ok(raw)
+    }
+    fn reload_settings(&mut self){let(value,error,revision)=metadata::settings(&self.root);self.settings=value;self.settings_error=error;self.settings_recovery_revision=revision;self.revision=self.revision.saturating_add(1);}
+    fn ensure_settings_base(&mut self)->Result<(),String>{let(_,error,revision)=metadata::settings(&self.root);if error.is_some()||revision!=self.settings_recovery_revision{self.reload_settings();return Err(self.settings_error.clone().unwrap_or_else(||"Las preferencias cambiaron; revisa los valores actuales antes de continuar.".into()));}Ok(())}
     fn save(&mut self, id: &str) -> Result<(), String> {
-        self.revision += 1;
-        let path = self.root.join(id).join("session.json");
-        let s = self.session_mut(id)?;
-        s.revision += 1;
-        atomic_json(&path, s)
+        let original=self.ensure_session_base(id)?;
+        if self.recovery_pending.contains(id){if let Some(raw)=original.as_ref(){metadata::archive(&self.root,"sessions-recovery",raw)?;self.ensure_session_base(id)?;}}
+        let mut candidate=self.session_mut(id)?.clone();
+        if candidate.chunks.iter().any(|chunk|chunk.usage_receipt.is_some()) {
+            if let Some(raw)=original.as_ref() {
+                let previous:Session=serde_json::from_slice(raw).map_err(|_|"La sesión previa no es compatible; se conserva")?;
+                if previous.chunks.iter().all(|chunk|chunk.usage_receipt.is_none()) {metadata::preserve_usage_origin(&self.root,raw)?;self.ensure_session_base(id)?;}
+            }
+        }
+        candidate.revision=candidate.revision.saturating_add(1);let raw=serde_json::to_vec(&candidate).map_err(|_|"No se pudo preparar la sesión")?;
+        atomic_json(&self.root.join(id).join("session.json"),&candidate)?;*self.session_mut(id)?=candidate;self.session_revisions.insert(id.into(),Some(metadata::hash(&raw)));self.recovery_pending.remove(id);self.revision=self.revision.saturating_add(1);Ok(())
     }
     fn snapshot(&self) -> Value {
         serde_json::to_value(Snapshot {
+            settings_error:self.settings_error.clone(),settings_recovery_revision:self.settings_recovery_revision.clone(),unavailable_sessions:self.unavailable_sessions,
             revision: self.revision,
             sessions: self
                 .sessions
@@ -289,8 +289,21 @@ impl Engine {
         self.save(id)
     }
     fn command(&mut self, action: &str, p: Value) -> Result<Value, String> {
+        if action=="exit-hold" {self.restart_hold=true;return Ok(Value::Null);}
+        if action=="restart-release" {self.restart_hold=false;return Ok(Value::Null);}
+        if action=="restart-hold" {
+            self.ensure_portable_idle().map_err(|_|"Finaliza la captura, el dictado, la escucha de niveles o el envío activo antes de actualizar".to_string())?;
+            if self.sessions.iter().any(|session|matches!(session.status,Status::Queued|Status::Transcribing)){return Err("Finaliza los envíos de audio antes de actualizar".into());}
+            self.restart_hold=true;return Ok(Value::Null);
+        }
+        if self.restart_hold&&!matches!(action,"snapshot"|"devices") {return Err("La actualización está preparada; vuelve al espacio antes de cambiar el audio".into());}
+
+        if matches!(action,"settings"|"start"|"preview"){self.ensure_settings_base()?;}
         let id = p["id"].as_str().unwrap_or("").to_string();
+        if !id.is_empty()&&!matches!(action,"external-pcm"|"lease"|"release"|"job-release")&&self.sessions.iter().any(|session|session.id==id){self.ensure_session_base(&id)?;}
         match action {
+            "transcript" => return transcript_source(&self.root, &id),
+            "portable-ready" => {self.ensure_portable_idle()?;return Ok(Value::Null)},
             "external-pcm" => {
                 let bytes: Vec<u8> =
                     serde_json::from_value(p["bytes"].clone()).map_err(|e| e.to_string())?;
@@ -350,10 +363,15 @@ impl Engine {
             "devices" => {
                 return serde_json::to_value(native::devices()?).map_err(|e| e.to_string())
             }
+            "recover-settings"=>{
+                let revision=p["revision"].as_str().ok_or("La recuperación necesita una revisión de preferencias")?;
+                let result=metadata::recover_settings(&self.root,revision);self.reload_settings();result?;
+            }
             "settings" => {
                 let settings: Settings = serde_json::from_value(p).map_err(|e| e.to_string())?;
                 validate_settings(&settings)?;
                 atomic_json(&self.root.join("settings.json"), &settings)?;
+                self.settings_recovery_revision=Some(metadata::hash(&serde_json::to_vec(&settings).map_err(|_|"No se pudo revisar las preferencias")?));
                 self.settings = settings;
                 self.revision += 1;
             }
@@ -692,6 +710,7 @@ impl Engine {
         Ok(())
     }
     fn delete_audio(&mut self, id: &str) -> Result<(), String> {
+        self.ensure_session_base(id)?;
         if self.active.as_deref() == Some(id)
             || self.in_flight.contains(id)
             || self.leases.iter().any(|(key, t)| {
@@ -765,6 +784,7 @@ mod tests {
             root: root.into(),
             _lock: File::create(root.join("lock")).unwrap(),
             settings: Settings::default(),
+            settings_error:None,settings_recovery_revision:None,unavailable_sessions:0,session_revisions:HashMap::new(),recovery_pending:HashSet::new(),
             sessions: vec![s],
             revision: 1,
             sources: vec![],
@@ -773,6 +793,7 @@ mod tests {
             active: Some(id),
             preview: false,
             dictation: false,
+                    restart_hold: false,
             dictation_owner: None,
             levels: [0.0; 2],
             warning: None,
@@ -804,6 +825,20 @@ mod tests {
         e.command("stop", json!({"id":id})).unwrap();
         assert_eq!(e.sessions[0].status, Status::PendingDestination);
     }
+
+    #[test]
+    fn restart_hold_operations_refuse_active_work_and_block_new_capture_until_released() {
+        let dir=tempfile::tempdir().unwrap();let mut e=engine(dir.path());
+        assert!(e.command("restart-hold",json!({})).is_err());e.active=None;e.tracks=[None,None];
+        e.dictation=true;assert!(e.command("restart-hold",json!({})).is_err());e.dictation=false;
+        e.preview=true;assert!(e.command("restart-hold",json!({})).is_err());e.preview=false;
+        e.in_flight.insert("provider-request".into());assert!(e.command("restart-hold",json!({})).is_err());e.in_flight.clear();
+        e.sessions[0].status=Status::Queued;assert!(e.command("restart-hold",json!({})).is_err());e.sessions[0].status=Status::Attention;
+        e.command("restart-hold",json!({})).unwrap();assert!(e.command("snapshot",json!({})).is_ok());
+        for action in ["start","preview","queue","claim","dictation-acquire","settings"] {assert!(e.command(action,json!({})).is_err(),"{action}");}
+        e.command("restart-release",json!({})).unwrap();assert!(e.command("portable-ready",json!({})).is_ok());
+        e.command("exit-hold",json!({})).unwrap();assert!(e.command("start",json!({})).is_err());assert!(e.command("snapshot",json!({})).is_ok());
+    }
     #[test]
     fn last_input_off_pauses_and_does_not_discard() {
         let dir = tempfile::tempdir().unwrap();
@@ -831,6 +866,8 @@ mod tests {
         });
         s.chunks = vec![
             Chunk {
+                usage_receipt: None,
+                usage_recorded: false,
                 sha256: None,
                 start: 0,
                 samples: 50,
@@ -839,6 +876,8 @@ mod tests {
                 languages: vec!["eu".into()],
             },
             Chunk {
+                usage_receipt: None,
+                usage_recorded: false,
                 sha256: None,
                 start: 50,
                 samples: 50,
@@ -928,4 +967,12 @@ mod tests {
         service.request("dictation-release", json!({})).unwrap();
         service.request("dictation-acquire", json!({})).unwrap();
     }
+    #[test]
+    fn portable_import_respects_capture_preview_dictation_and_job_gates_then_registers_only_a_stopped_copy(){
+        use knownext_core::recording_portability::{PortableRecording,PortableRecordingOrigin};
+        let input=||{let pcm=vec![1,0,2,0];PortableRecording{id:"117b16d1-16d1-54aa-8b15-0d44209d4db6".into(),origin:PortableRecordingOrigin{schema_version:1,identity:"a".repeat(64),project_id:"owned".into(),source_sha256:"b".repeat(64),microphone_sha256:Some(metadata::hash(&pcm)),system_sha256:None},name:"Audio trasladado".into(),microphone:Some(pcm),system:None}};
+        let root=tempfile::tempdir().unwrap();let mut engine=engine(root.path());assert!(engine.import_portable(input()).is_err());assert!(!root.path().join(input().id).exists());engine.active=None;engine.tracks=[None,None];engine.preview=true;assert!(engine.command("portable-ready",json!({})).is_err());engine.preview=false;engine.dictation=true;assert!(engine.import_portable(input()).is_err());engine.dictation=false;engine.in_flight.insert("other-job".into());assert!(engine.import_portable(input()).is_err());engine.in_flight.clear();assert!(engine.command("portable-ready",json!({})).is_ok());let result=engine.import_portable(input()).unwrap();assert_eq!(result["startsAi"],false);assert_eq!(result["retained"],true);let id=input().id;let session=engine.sessions.iter().find(|session|session.id==id).unwrap();assert_eq!(session.status,Status::Attention);assert!(session.chunks.is_empty());assert!(engine.command("claim",json!({})).unwrap().is_null());assert!(engine.import_portable(input()).is_err());
+        let path=root.path().join(&id).join("session.json");let mut future:Value=serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();future["portableOrigin"]["schemaVersion"]=json!(99);let raw=serde_json::to_vec(&future).unwrap();fs::write(&path,&raw).unwrap();assert!(metadata::session(root.path(),&id).is_err());assert_eq!(fs::read(&path).unwrap(),raw);
+    }
+
 }

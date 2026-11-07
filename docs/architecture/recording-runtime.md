@@ -34,3 +34,17 @@ La compilación y las pruebas con PCM sintético no prueban el comportamiento de
 
 
 Fuentes del catálogo y contratos: [modelos OpenAI](https://developers.openai.com/api/docs/models), [transcripción de archivos](https://developers.openai.com/api/docs/guides/speech-to-text), [BCE](https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml). Cada entrada del catálogo conserva también su URL y fecha de consulta.
+
+
+### Recibos de consumo por fragmento
+Chunk añade usageReceipt opcional y usageRecorded (omitido si falso). Recibo tipado compartido en knownext-core, sin texto/credenciales; inicio y proyecto fijados al enviar. Se persiste antes de HTTP, se confirma junto a transcripción y se entrega idempotente a LocalApi::record_recording_usage. Con resultado incierto se mantiene sin importe EUR confirmado. Una nueva retransmisión explícita usa otra identidad; reintento de acuse local conserva el mismo recibo. Entregar texto ya completo no requiere clave/presupuesto. Reconciliar usa manifiesto completo de disco, nunca snapshot UI con texto omitido. Copia previa exacta por digest antes del primer recibo: sessions-recovery,500/128MiB, sin limpieza implícita. Android clona el mismo LocalApi del servicio para compartir puertas de uso y presupuestos. No downgrade2.6 ni reconstrucción retrospectiva de consumos sin recibo.
+
+
+### Audio portable · bloque124
+
+Importación portable de escritorio: origen tipado1 opcional en Session (omitido si ausente), futuro rechazado/preservado al leer; identity/SHA y proyecto receptor, sin ruta/estado del proveedor. Publicación exclusiva PCM + session.json al final, attention/keep y sin cola/coste/caducidad. Identidad ocupada no se repite; copiar no transcribe. Admisión global opcional y límite del almacén de512MiB/1000 carpetas para admitir nuevas copias, medición10000 entradas/2segundos. Captura ordinaria conserva sus reglas. Android solo revisión por ahora.
+
+
+### Historial portable y grabaciones integradas · bloques125–126
+
+RecordingPanel admite embedded para el gestor del espacio: compacto, sesiones iniciales visibles, cierre/Ajustes y áreas44px; bandeja conserva comportamiento. useCompactRecordingWindow solo redimensiona label recordings, después de comprobar runtime/móvil. No se inicia captura/transcripción al abrir sesiones o ajustes.

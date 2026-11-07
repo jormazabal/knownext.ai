@@ -1,4 +1,6 @@
 import { Crepe } from "@milkdown/crepe";
+import { imageBlockConfig } from "@milkdown/kit/component/image-block";
+import { inlineImageConfig } from "@milkdown/kit/component/image-inline";
 import { editorViewCtx, prosePluginsCtx } from "@milkdown/kit/core";
 import type { Ctx } from "@milkdown/kit/ctx";
 import { historyProviderConfig } from "@milkdown/kit/plugin/history";
@@ -36,8 +38,10 @@ import type { MarkdownEditorSelection } from "./editorTypes";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
 import "./MarkdownEditor.css";
+import { createDocumentPasteGuard, insertClipboardPlainText, type DocumentPasteNotice, documentPublication, preservedBlockSchema, configureDocumentFidelity } from "./documentFidelity";
+import { configureImageFidelity, remarkImageFidelity, syncRenderedImageMetadata } from "./imageFidelity";
 
-type MarkdownEditorProps = {
+export type MarkdownEditorProps = {
   documentKey: string;
   markdown: string;
   onChange: (markdown: string, source?: MarkdownEditorChangeSource) => void;
@@ -49,6 +53,7 @@ type MarkdownEditorProps = {
   onDiagramEditRequest?: (target: MarkdownEditorDiagramEditTarget) => void;
   selectionFocus?: MarkdownEditorSelection | null;
   zoomPercent: number;
+  resolveImageSource?: (source: string) => string;
 };
 
 type MarkdownEditorCallbacks = {
@@ -73,11 +78,14 @@ const selectionFocusPluginKey = new PluginKey<SelectionFocusRange | null>("known
 const transientTextPluginKey = new PluginKey<TransientTextPreview | null>("knownext-transient-text-preview");
 const persistentCaretPluginKey = new PluginKey<PersistentCaretState>("knownext-persistent-caret");
 
-function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, onImageEditRequest, onDiagramEditRequest, selectionFocus, zoomPercent }: MarkdownEditorProps) {
+function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, onImageEditRequest, onDiagramEditRequest, selectionFocus, zoomPercent, resolveImageSource }: MarkdownEditorProps) {
+  const imageSourceResolverRef = useRef(resolveImageSource);
+  imageSourceResolverRef.current = resolveImageSource;
   const editorShellRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
-  const skipInitialUpdate = useRef(true);
+  const originalDocumentRef = useRef<{ markdown: string; document: ProseMirrorNode } | null>(null);
   const lastMarkdownRef = useRef(markdown);
+  const publishedDocumentRef = useRef<{ markdown: string; document: ProseMirrorNode } | null>(null);
   const lastFormatStateRef = useRef<MarkdownEditorFormatState>({});
   const lastHistoryStateRef = useRef<MarkdownEditorHistoryState>({ canUndo: false, canRedo: false, undoDepth: 0, redoDepth: 0 });
   const lastSelectionRef = useRef<MarkdownEditorSelection | null>(null);
@@ -89,6 +97,7 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
   const [imageEditOverlay, setImageEditOverlay] = useState<ImageEditOverlayState | null>(null);
   const [diagramEditOverlay, setDiagramEditOverlay] = useState<DiagramEditOverlayState | null>(null);
   const [mediaViewer, setMediaViewer] = useState<VisualMediaViewerMedia | null>(null);
+  const [pasteNotice, setPasteNotice] = useState<DocumentPasteNotice | null>(null);
 
   useEffect(() => {
     callbacksRef.current = { onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, onImageEditRequest, onDiagramEditRequest };
@@ -98,6 +107,9 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
     const crepe = new Crepe({
       root,
       defaultValue: markdown,
+      featureConfigs: {
+        [Crepe.Feature.Placeholder]: { text: document.documentElement.lang === "en" ? "Start writing…" : document.documentElement.lang === "eu" ? "Hasi idazten…" : "Empieza a escribir…" },
+      },
       features: {
         [Crepe.Feature.BlockEdit]: false,
         [Crepe.Feature.LinkTooltip]: false,
@@ -108,6 +120,7 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
     crepe.editor.config((ctx) => {
       ctx.update(historyProviderConfig.key, (config) => ({ ...config, depth: 100, newGroupDelay: 500 }));
       ctx.update(prosePluginsCtx, (plugins) => [
+        createDocumentPasteGuard(setPasteNotice),
         createMermaidDiagramPlugin((target) => callbacksRef.current.onDiagramEditRequest?.(target)),
         ...plugins,
         createSelectionFocusPlugin(),
@@ -116,10 +129,17 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
       ]);
       configureUnderlineMarkdownSerialization(ctx);
       configureHighlightMarkdownSerialization(ctx);
+      configureImageFidelity(ctx);
+      configureDocumentFidelity(ctx);
+      const proxyDomURL = (source: string) => imageSourceResolverRef.current?.(source) ?? source;
+      ctx.update(imageBlockConfig.key, config => ({ ...config, proxyDomURL, captionPlaceholderText: document.documentElement.lang === "en" ? "Image caption" : document.documentElement.lang === "eu" ? "Irudiaren oina" : "Pie de imagen" }));
+      ctx.update(inlineImageConfig.key, config => ({ ...config, proxyDomURL }));
     });
     crepe.editor.use(createMermaidDiagramViewPlugin((target) => callbacksRef.current.onDiagramEditRequest?.(target)));
     crepe.editor.use(remarkUnderlineHtmlPlugin).use(underlineSchema).use(toggleUnderlineCommand);
     crepe.editor.use(remarkHighlightHtmlPlugin).use(highlightSchema).use(toggleHighlightCommand).use(clearHighlightCommand);
+    crepe.editor.use(remarkImageFidelity);
+    crepe.editor.use(preservedBlockSchema);
 
     crepe.on((listener) => {
       const syncFormatState = (ctx: Ctx, selection?: Selection) => {
@@ -141,6 +161,8 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
 
       listener.mounted((ctx) => {
         syncFormatState(ctx);
+        publishedDocumentRef.current = { markdown: lastMarkdownRef.current, document: ctx.get(editorViewCtx).state.doc };
+        originalDocumentRef.current = publishedDocumentRef.current;
         normalizeRenderedImageBlocks(viewRef.current);
       });
       listener.selectionUpdated((ctx, selection) => syncFormatState(ctx, selection));
@@ -148,16 +170,17 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
         syncFormatState(ctx);
         normalizeRenderedImageBlocks(viewRef.current);
       });
-      listener.markdownUpdated((_ctx, nextMarkdown) => {
-        const initialUpdate = skipInitialUpdate.current;
-        if (skipInitialUpdate.current) {
-          skipInitialUpdate.current = false;
-          if (nextMarkdown === lastMarkdownRef.current) return;
-        }
-        if (nextMarkdown === lastMarkdownRef.current) return;
-
-        lastMarkdownRef.current = nextMarkdown;
-        callbacksRef.current.onChange(nextMarkdown, initialUpdate ? "initial-normalization" : "user");
+      listener.markdownUpdated((ctx, nextMarkdown) => {
+        const nextDocument = ctx.get(editorViewCtx).state.doc;
+        const previous = publishedDocumentRef.current;
+        // An update before mounted is initialization, never user input.
+        if (!previous) { publishedDocumentRef.current = { markdown: lastMarkdownRef.current, document: nextDocument }; return; }
+        const publication = documentPublication(originalDocumentRef.current, previous, nextDocument, nextMarkdown);
+        if (!publication) return;
+        publishedDocumentRef.current = publication;
+        if (publication.markdown === lastMarkdownRef.current) return;
+        lastMarkdownRef.current = publication.markdown;
+        callbacksRef.current.onChange(publication.markdown, "user");
       });
     });
 
@@ -170,7 +193,7 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
     const editor = get();
     if (editor) {
       controllerReadyRef.current = true;
-      const controller = createMarkdownEditorController(editor, selectionFocusPluginKey, transientTextPluginKey);
+      const controller = createMarkdownEditorController(editor, selectionFocusPluginKey, transientTextPluginKey, () => publishedDocumentRef.current);
       controllerRef.current = controller;
       callbacksRef.current.onControllerChange(controller);
       notifyFormatState(controller.getFormatState());
@@ -280,6 +303,14 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
       onPointerDownCapture={handleEditorPointerDown}
       onLoadCapture={handleEditorMediaLoad}
     >
+      {pasteNotice && <div role="alert" className="knownext-editor-paste-notice"><p>{pasteNotice.message} El original permanece en el portapapeles.</p><div>
+        {pasteNotice.plainText && <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => {
+          const view = viewRef.current;
+          if (view && insertClipboardPlainText(view, pasteNotice)) setPasteNotice(null);
+          else setPasteNotice({ ...pasteNotice, plainText: "", message: "El documento o la selección cambiaron. Vuelve a copiar y pegar para elegir el destino actual." });
+        }}>Pegar solo el texto</button>}
+        <button type="button" onClick={() => setPasteNotice(null)}>Cerrar aviso</button>
+      </div></div>}
       <Milkdown />
       {imageEditOverlay ? (
         <div
@@ -309,8 +340,9 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
           <button
             type="button"
             className="knownext-image-edit-action"
-            title="Resetear tamaño"
-            aria-label="Resetear tamaño"
+            title={imageEditOverlay.target.sizingReadOnly ? "Se conservan los ajustes de tamaño que esta versión no puede interpretar" : "Restablecer tamaño"}
+            aria-label="Restablecer tamaño"
+            disabled={imageEditOverlay.target.sizingReadOnly}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -489,6 +521,7 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
 
     const view = viewRef.current;
     const image = view ? findImageEditTarget(view, imageElement) : null;
+    if (image?.sizingReadOnly) return;
     const metrics = calculateImageSizingMetrics(imageElement);
     if (!metrics) return;
 
@@ -868,6 +901,7 @@ function resetImageSizeAtPosition(view: EditorView | null, position: number) {
 
   const image = findImageNodeNearPosition(view.state, position);
   if (!image) return false;
+  if (image.node.attrs.knownextSizingReadOnly) return false;
 
   const resetRenderedImage = () => resetRenderedImageElementSize(view, image.node, image.position);
   const attrs = { ...image.node.attrs };
@@ -876,6 +910,7 @@ function resetImageSizeAtPosition(view: EditorView | null, position: number) {
   if ("ratio" in attrs) {
     changed = attrs.ratio !== 1;
     attrs.ratio = 1;
+    if (changed) attrs.knownextSizingExplicit = true;
   }
 
   for (const attributeName of ["width", "height", "style"]) {
@@ -965,12 +1000,14 @@ function normalizeRenderedImageElementSize(
   imageElement: HTMLImageElement,
   options: { view?: EditorView | null; forceManual?: boolean } = {},
 ): RenderedImageSizeResult | null {
+  const imageNode = options.view ? findImageNodeNearDomPosition(options.view, imageElement)?.node : null;
+  if (imageNode) syncRenderedImageMetadata(imageElement, imageNode.attrs);
   if (!imageElement.naturalWidth || !imageElement.naturalHeight) return null;
 
   const metrics = calculateImageSizingMetrics(imageElement);
   if (!metrics) return null;
 
-  const nodeRatio = options.view ? findImageNodeNearDomPosition(options.view, imageElement)?.node.attrs.ratio : null;
+  const nodeRatio = imageNode?.attrs.ratio;
   const storedRatio = readImageRatio(nodeRatio);
   const proposedHeight = options.forceManual ? readRenderedImageHeight(imageElement) : null;
   const proposedWidth = proposedHeight ? proposedHeight * (imageElement.naturalWidth / imageElement.naturalHeight) : metrics.defaultWidth * storedRatio;
@@ -995,12 +1032,14 @@ function calculateImageSizingMetrics(imageElement: HTMLImageElement) {
   if (!Number.isFinite(availableWidth) || availableWidth <= 0) return null;
 
   const defaultWidth = Math.max(1, availableWidth * getResponsiveImageDefaultWidthRatio());
-  const minWidth = Math.min(100 * (naturalWidth / naturalHeight), defaultWidth, availableWidth);
+  // A minimum height made panoramic images almost impossible to reduce.
+  // Bound the width instead, and never exceed a narrow available canvas.
+  const minWidth = Math.min(100, defaultWidth, availableWidth);
 
   return {
     availableWidth,
     defaultWidth,
-    minWidth: Math.max(48, minWidth),
+    minWidth: Math.max(1, minWidth),
   };
 }
 
@@ -1051,12 +1090,13 @@ function applyManualImageSize(imageElement: HTMLImageElement, targetWidth: numbe
 function updateImageRatioAtPosition(view: EditorView, position: number, ratio: number) {
   const image = findImageNodeNearPosition(view.state, position);
   if (!image) return false;
+  if (image.node.attrs.knownextSizingReadOnly) return false;
 
   const nextRatio = Number.parseFloat(ratio.toFixed(2));
   const currentRatio = readImageRatio(image.node.attrs.ratio);
   if (Math.abs(currentRatio - nextRatio) < 0.01) return false;
 
-  const attrs = { ...image.node.attrs, ratio: nextRatio };
+  const attrs = { ...image.node.attrs, ratio: nextRatio, knownextSizingExplicit: true };
   view.dispatch(view.state.tr.setNodeMarkup(image.position, undefined, attrs).scrollIntoView());
   window.requestAnimationFrame(() => normalizeRenderedImageBlocks(view));
   return true;
@@ -1159,7 +1199,8 @@ function imageNodeToEditTarget(node: EditorState["doc"], position: number): Mark
     position,
     src: readStringNodeAttribute(node.attrs.src || node.attrs.url),
     alt: readStringNodeAttribute(node.attrs.alt),
-    title: readNullableStringNodeAttribute(node.attrs.title),
+    title: readNullableStringNodeAttribute(node.attrs.caption ?? node.attrs.title),
+    sizingReadOnly: Boolean(node.attrs.knownextSizingReadOnly),
   };
 }
 
@@ -1170,6 +1211,7 @@ function imageEditOverlayStatesAreEqual(currentOverlay: ImageEditOverlayState | 
     currentOverlay.target.position === nextOverlay.target.position &&
     currentOverlay.target.src === nextOverlay.target.src &&
     currentOverlay.target.alt === nextOverlay.target.alt &&
+    currentOverlay.target.sizingReadOnly === nextOverlay.target.sizingReadOnly &&
     currentOverlay.target.title === nextOverlay.target.title
   );
 }

@@ -1,0 +1,19 @@
+# Avance135 · Bloque7: recursos, plantillas y conocimiento conectado
+
+[Reporte visual](avance-135.html) · [Criterios/delegación](bloque-135.md) · [Contratos y límites](../../architecture/resources-templates-and-links.md) · [Backlog](backlog.csv).
+
+Implementación local con tres subagentes reales reutilizados y ámbitos exclusivos: recording_sources(plantillasdocumentales), meeting_minutes(catálogoagrupadoproyecto), handwritten_ocr(catálogorecursos). Coordinador integra rutas, inventarios, PATCHIPC, menú/paleta, impacto individual/lotes y copias visibles antes de crear. Revisiones independientes sin incidencias concretas abiertas.
+
+39casos nativos únicos correctos:16unitsstorage(12plantillas+4recursosWindows),1contratoTauriPATCH,3recursospúblicos,4adjuntos,2catálogodocumentalprevio,5catálogoproyectogrupado,2plantillasproyectoprevias,2cupos y4archivo privado afectado. Se reutilizan resultados no invalidados. La primera compilación detectó una dependencia de codificación inexistente; sustituida por segmentosUTF8 sin nuevasdependencias. Primera tanda válida pasó30casos ydetectóen5elcarrierFileKind incompatibledeltransportcomún; excepciónestricta de envelope corregida,13objetivosafectados/restantes pasan después(4repetidos porcontratocompartido), total39únicos. Sin suites completas.
+
+56casos frontend únicos correctos:19plantillasdocumentales,17catálogogrupadoproyecto,8recursos y12coordinación/cupos/impacto/preview/lotes. Solo repetición de checks invalidados por cierres. TypeScript/build finalcorrectos; avisos Browserslist/chunks grandes preexistentes. Revisiónfoco/estado: revisarimpactotienecapa150sobrepadre y44px, cancelar no ejecuta, unmount/proyectocambiado/ACKtardíonoaplicaotra selección;sourcecasingWindowssinfalse0; query+fragmentoPDFpreservados, previewmuestraadjuntos/copias yoriginalesconservados.
+
+Rust/Tauri aarch64-linux-android comprobado con NDK28.2.13676358, sin errores y con10avisos condicionales preexistentes. No se ejecutó Gradle/Kotlin ni selector instalado; esa aceptación sigue en P10.
+
+16capturas598–613: componentes/controladores reales con APIcontrolada,0errores/solicitudesexternas/fakeTauri/overflow a320/1280. CapturaSave ycatálogodoc sólolecturas; grupoproyecto1commitACKperdido+1GET sinreplay; catálogorecursos1consulta/3links/1extracción ywebsolocallbackexplícito; movimiento cancelado=false ypreviewCreate sinmutaciones. Son evidencias de diseño/desarrollo, no lectores/selector/apps instalados. Se reutilizan capturas cuyos estados no cambian con cierre explícito/reanudar.
+
+Backlog50/cobertura70 conservanID; F03/F14yrelacionesF07/F17/U12 conciliados. Parentplan/P05/P08, arquitectura y checklist actualizados. Catálogo general sóloarchivosguardados/Markdownlinks, límitesypartial explícitos; formatoextraíble no significa que todos los lectores funcionen. Consentimiento de adjuntos no certifica ausencia de datos personales. Nuevostoremetadata2048/64MiB, sinreutilizaridentidadesalretirarpayload.
+
+Logs de base: output/v3-resource-block-native-final.log(30válidos+carrierfallidocorregido); output/v3-resource-block-catalogue-native-closing.log(13afectados/restantescorrectos); output/v3-resource-block-integration-frontend.log; output/v3-resource-block-batch-final.log; output/v3-resource-block-create-attachment-preview.log; output/v3-resource-block-build-final.log; output/v3-resource-block-android.log. Logs/evidencias de agentes v3-block7-template-attachments*,v3-block7-project-catalogue*,v3-block7-assets*. Fuente/huellas ymatriz en output/v3-resource-block-verification.json.
+
+Continúan investigación8,copiasprogramadas9,UX10 y rendimiento/regresión11. P10 conserva aceptación instalada/física, KotlinSAF/lectores/usuarios y regresión general al finalizar implementación; no UI nativaWindows/Gradle conincidencia. T17 real aplazado por no gasto. Sin proveedor/gasto/suitescompletas/instalación/publicación/commit/push o cambioVERSION2.6.0.

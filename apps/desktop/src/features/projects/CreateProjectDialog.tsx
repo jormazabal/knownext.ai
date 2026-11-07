@@ -13,12 +13,14 @@ import {
   Info,
   Lock,
   RefreshCw,
-  Trash2,
+  ArchiveRestore,
   UploadCloud,
   X,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ModalFrame } from "../../components/ui/ModalFrame";
+import { getApiErrorMessage } from "../../lib/api/client";
 import { selectProjectFolder } from "../../lib/runtime/folders";
 import { isMobileDeviceRuntime, isTauriRuntime } from "../../lib/runtime/platform";
 import type { AuthStatus, GithubPublishVisibility, GithubRepositorySummary, Project, ProjectCapabilities, ProjectCreationMode, ProjectPayload, ProjectSyncStatus, SyncMode, VersioningMode } from "../../types/domain";
@@ -32,9 +34,11 @@ type CreateProjectDialogProps = {
   runtimeMode?: "desktop" | "web";
   project?: Project | null;
   onClose: () => void;
-  onCreate: (project: ProjectDialogInput) => void;
-  onUpdate?: (projectId: string, project: ProjectDialogInput) => void;
-  onDelete?: (projectId: string) => void;
+  onCreate: (project: ProjectDialogInput) => void | boolean | Promise<void | boolean>;
+  onImportPackage?: () => void;
+  onProjectTemplates?:()=>void;
+  onUpdate?: (projectId: string, project: ProjectDialogInput) => void | boolean | Promise<void | boolean>;
+  onDelete?: (projectId: string) => void | boolean | Promise<void | boolean>;
   authStatus?: AuthStatus;
   capabilities?: ProjectCapabilities | null;
   githubRepositories?: GithubRepositorySummary[];
@@ -66,7 +70,7 @@ const defaultCapabilities: ProjectCapabilities = {
   canUseLocalGit: false,
   canConnectGithub: false,
   canUseGithubApi: false,
-  requiresGithubLoginForVersioning: true,
+  requiresGithubLoginForVersioning: false,
 };
 
 const wizardSteps: { id: WizardStepId; title: string; description: string }[] = [
@@ -84,6 +88,8 @@ export function CreateProjectDialog({
   project,
   onClose,
   onCreate,
+  onImportPackage,
+  onProjectTemplates,
   onUpdate,
   onDelete,
   authStatus = anonymousAuth,
@@ -112,19 +118,22 @@ export function CreateProjectDialog({
   const [detachGitConfirmed, setDetachGitConfirmed] = useState(false);
   const [activeStep, setActiveStep] = useState<WizardStepId>("scenario");
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const submitting = useRef(false);
 
-  const isWebRuntime = runtimeMode ? runtimeMode === "web" : !isTauriRuntime() || isMobileDeviceRuntime();
+  const usesManagedStorage = runtimeMode ? runtimeMode === "web" : !isTauriRuntime() || isMobileDeviceRuntime();
   const SelectedIcon = getProjectIcon(icon);
   const isEditing = mode === "edit";
   const selectedGithubRepository = githubRepositories.find((repository) => repository.owner === githubOwner && repository.repo === githubRepo);
   const derivedMode = deriveProjectMode(startMode, localHistoryChoice, githubSyncPreference);
-  const finalFolderPath = isWebRuntime && !isEditing
+  const finalFolderPath = usesManagedStorage && !isEditing
     ? ""
     : startMode === "local-new" && newProjectParentPath.trim() && newProjectFolderName.trim()
     ? joinProjectFolderPath(newProjectParentPath, newProjectFolderName)
     : folderPath;
   const hasGithubRepository = Boolean(githubOwner.trim() && githubRepo.trim());
-  const hasFolder = isWebRuntime && !isEditing ? true : startMode === "local-new" ? Boolean(newProjectParentPath.trim() && newProjectFolderName.trim()) : Boolean(folderPath.trim());
+  const hasFolder = usesManagedStorage && !isEditing ? true : startMode === "local-new" ? Boolean(newProjectParentPath.trim() && newProjectFolderName.trim()) : Boolean(folderPath.trim());
   const activeStepIndex = wizardSteps.findIndex((step) => step.id === activeStep);
   const canSubmit = hasFolder && (!derivedMode.requiresGithubRepository || hasGithubRepository);
   const currentProtectionLevel = getProjectProtectionLevel(project);
@@ -139,16 +148,17 @@ export function CreateProjectDialog({
   const reviewItems = useMemo(() => {
     const repository = hasGithubRepository ? `${githubOwner.trim()}/${githubRepo.trim()}` : "Pendiente";
     return [
-      { label: "Situación", value: startModeLabel(startMode, isWebRuntime && !isEditing) },
-      { label: isWebRuntime && !isEditing ? "Almacenamiento" : "Ubicación local", value: isWebRuntime && !isEditing ? "Servidor web de KnowNext.ai" : finalFolderPath || "Pendiente" },
+      { label: "Situación", value: startModeLabel(startMode, usesManagedStorage && !isEditing) },
+      { label: usesManagedStorage && !isEditing ? "Almacenamiento" : "Ubicación local", value: usesManagedStorage && !isEditing ? "En este dispositivo" : finalFolderPath || "Pendiente" },
       ...(derivedMode.requiresGithubRepository ? [{ label: "Repositorio GitHub", value: repository }] : []),
       ...(localHistoryChoice === "publish-github" || localHistoryChoice === "publish-github-auto" ? [{ label: "Visibilidad GitHub", value: githubPublishVisibility === "private" ? "Privado" : "Público" }] : []),
     ];
-  }, [derivedMode.requiresGithubRepository, finalFolderPath, githubOwner, githubPublishVisibility, githubRepo, hasGithubRepository, isEditing, isWebRuntime, localHistoryChoice, startMode]);
+  }, [derivedMode.requiresGithubRepository, finalFolderPath, githubOwner, githubPublishVisibility, githubRepo, hasGithubRepository, isEditing, usesManagedStorage, localHistoryChoice, startMode]);
 
   useEffect(() => {
     if (!open) return;
     setDeleteConfirmationOpen(false);
+    setSubmitError(null);
 
     if (isEditing && project) {
       setName(project.name);
@@ -175,7 +185,7 @@ export function CreateProjectDialog({
     setFolderPath("");
     setNewProjectParentPath("");
     setNewProjectFolderName("");
-    setStartMode(isWebRuntime ? "local-new" : "local-existing");
+    setStartMode(usesManagedStorage ? "local-new" : "local-existing");
     setLocalHistoryChoice("files-only");
     setGithubOwner("");
     setGithubRepo("");
@@ -184,7 +194,7 @@ export function CreateProjectDialog({
     setDetachGithubConfirmed(false);
     setDetachGitConfirmed(false);
     setActiveStep("scenario");
-  }, [isEditing, isWebRuntime, open, project]);
+  }, [isEditing, usesManagedStorage, open, project]);
 
   useEffect(() => {
     if (!open || isEditing || !authStatus.isAuthenticated || githubRepositories.length > 0) return;
@@ -247,7 +257,7 @@ export function CreateProjectDialog({
       name: name.trim() || githubRepo.trim() || "Nuevo proyecto",
       icon,
       iconColor,
-      folderPath: isWebRuntime ? "" : finalFolderPath.trim(),
+      folderPath: usesManagedStorage ? "" : finalFolderPath.trim(),
       creationMode: derivedMode.creationMode,
       storageMode: derivedMode.storageMode,
       versioningMode: derivedMode.versioningMode,
@@ -273,15 +283,15 @@ export function CreateProjectDialog({
     if (!githubRepo.trim()) setGithubRepo(slugifyGithubRepoName(name || newProjectFolderName || lastPathSegment(finalFolderPath) || "documentacion"));
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
+    if (submitting.current || !canSubmitEffective) return;
+    submitting.current = true; setBusy(true); setSubmitError(null);
     const nextProject = buildProjectInput();
-
-    if (isEditing && project) {
-      onUpdate?.(project.id, nextProject);
-      return;
-    }
-
-    onCreate(nextProject);
+    try {
+      const result = isEditing && project ? await onUpdate?.(project.id, nextProject) : await onCreate(nextProject);
+      if (result === false) setSubmitError("No se ha completado la operación. Revisa el aviso; la configuración se conserva.");
+    } catch (error) { setSubmitError(getApiErrorMessage(error, "No se pudo guardar el proyecto.")); }
+    finally { submitting.current = false; setBusy(false); }
   }
 
   async function pickFolder(currentPath = folderPath) {
@@ -296,10 +306,15 @@ export function CreateProjectDialog({
     return selectedPath;
   }
 
-  function handleConfirmDelete() {
-    if (!project) return;
-    onDelete?.(project.id);
-    setDeleteConfirmationOpen(false);
+  async function handleConfirmDelete() {
+    if (!project || submitting.current) return;
+    submitting.current = true; setBusy(true); setSubmitError(null);
+    try {
+      const result = await onDelete?.(project.id);
+      if (result === false) setSubmitError("No se pudo quitar el proyecto. Se conserva la configuración abierta.");
+      else setDeleteConfirmationOpen(false);
+    } catch (error) { setSubmitError(getApiErrorMessage(error, "No se pudo quitar el proyecto.")); }
+    finally { submitting.current = false; setBusy(false); }
   }
 
   function goToNextStep() {
@@ -313,15 +328,13 @@ export function CreateProjectDialog({
   }
 
   return (
-    <div className="knownext-modal-overlay fixed inset-0 z-[80] grid place-items-center bg-black/20 p-4">
+    <ModalFrame label={isEditing ? "Editar proyecto" : "Crear proyecto de documentación"} onClose={()=>{if(!submitting.current)onClose();}}>
       <section
         className={[
           "flex max-h-[calc(100dvh-32px)] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu",
           isEditing ? "w-[min(640px,calc(100vw-32px))]" : "w-[min(960px,calc(100vw-32px))]",
         ].join(" ")}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="create-project-dialog-title"
+        aria-busy={busy}
       >
         <header className="flex shrink-0 items-center justify-between border-b border-line px-5 py-4">
           <div className="flex min-w-0 items-center gap-3">
@@ -337,15 +350,17 @@ export function CreateProjectDialog({
               </p>
             </div>
           </div>
-          <button className="grid h-8 w-8 shrink-0 place-items-center rounded-md hover:bg-brand-hover" onClick={onClose} aria-label="Cerrar">
+          <button disabled={busy} className="grid h-11 w-11 shrink-0 place-items-center rounded-md hover:bg-brand-hover" onClick={onClose} aria-label="Cerrar">
             <X size={17} />
           </button>
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+        <fieldset disabled={busy} className="min-w-0 border-0 p-0">
           <div className={isEditing ? "grid grid-cols-1" : "grid grid-cols-1 md:grid-cols-[260px_minmax(0,1fr)]"}>
             {!isEditing ? (
               <aside className="border-b border-line bg-panel px-5 py-4 md:border-b-0 md:border-r">
-                <div className="space-y-3">
+                <p className="mb-2 text-xs font-medium text-ink-secondary md:hidden">Paso {activeStepIndex + 1} de {wizardSteps.length} · {wizardSteps[activeStepIndex].title}</p>
+                <div className="flex gap-1 md:block md:space-y-3">
                   {wizardSteps.map((step, index) => {
                     const complete = index < activeStepIndex;
                     const selected = step.id === activeStep;
@@ -354,9 +369,11 @@ export function CreateProjectDialog({
                     return (
                       <button
                         key={step.id}
+                        aria-label={`Paso ${index + 1}: ${step.title}`}
+                        aria-current={selected ? "step" : undefined}
                         disabled={!reachable}
                         className={[
-                          "flex w-full items-start gap-3 rounded-md px-2 py-2 text-left transition",
+                          "flex min-h-11 flex-1 items-center justify-center gap-3 rounded-md px-2 py-2 text-left transition md:w-full md:items-start md:justify-start",
                           selected ? "bg-white shadow-[0_1px_2px_rgba(17,24,39,0.08)]" : "hover:bg-white/70",
                           !reachable ? "cursor-not-allowed opacity-55 hover:bg-transparent" : "",
                         ].join(" ")}
@@ -373,7 +390,7 @@ export function CreateProjectDialog({
                         >
                           {complete ? <Check size={13} /> : index + 1}
                         </span>
-                        <span className="min-w-0">
+                        <span className="hidden min-w-0 md:block">
                           <span className="block text-[11px] font-semibold text-ink-primary">{step.title}</span>
                           <span className="mt-0.5 block text-[10px] leading-4 text-ink-secondary">{step.description}</span>
                         </span>
@@ -425,20 +442,21 @@ export function CreateProjectDialog({
                   detachGitConfirmed={detachGitConfirmed}
                   onDetachGithubConfirmedChange={setDetachGithubConfirmed}
                   onDetachGitConfirmedChange={setDetachGitConfirmed}
-                  isWebRuntime={isWebRuntime}
+                  usesManagedStorage={usesManagedStorage}
                 />
               ) : activeStep === "scenario" ? (
-                <ScenarioStep
+                <><ScenarioStep
                   startMode={startMode}
                   authStatus={authStatus}
                   capabilities={capabilities}
-                  isWebRuntime={isWebRuntime}
+                  usesManagedStorage={usesManagedStorage}
                   onLoginGithub={onLoginGithub}
                   onSelect={(nextMode) => {
                     setStartMode(nextMode);
                     setLocalHistoryChoice(nextMode === "local-existing-git" ? "local-git" : "files-only");
                   }}
                 />
+                {onImportPackage && <button type="button" onClick={onImportPackage} className="mt-3 min-h-11 rounded px-3 text-xs text-brand-orange hover:bg-brand-hover">Importar un paquete de proyecto…</button>}{onProjectTemplates&&<button type="button" onClick={onProjectTemplates} className="mt-2 min-h-11 rounded px-3 text-xs text-brand-orange hover:bg-brand-hover">Plantillas de proyecto…</button>}</>
               ) : activeStep === "location" ? (
                 <LocationStep
                   startMode={startMode}
@@ -463,7 +481,7 @@ export function CreateProjectDialog({
                     if (!name.trim()) setName(nextName);
                   }}
                   onSelectFolder={pickFolder}
-                  isWebRuntime={isWebRuntime}
+                  usesManagedStorage={usesManagedStorage}
                 />
               ) : activeStep === "versioning" ? (
                 <VersioningStep
@@ -514,34 +532,37 @@ export function CreateProjectDialog({
               )}
             </div>
           </div>
+        </fieldset>
         </div>
-        <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-line bg-white px-5 py-4">
+        {submitError && !deleteConfirmationOpen && <p role="alert" className="px-5 pb-3 text-sm text-red-700">{submitError}</p>}
+        <footer className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-line bg-white px-5 py-4">
           {isEditing && project && onDelete ? (
             <button
-              className="flex h-9 items-center gap-2 rounded-md px-3 text-[11px] font-medium text-red-700 hover:bg-red-50"
+              className="flex min-h-11 items-center gap-2 rounded-md px-3 text-[11px] font-medium text-ink-secondary hover:bg-brand-hover"
               type="button"
+              disabled={busy}
               onClick={() => setDeleteConfirmationOpen(true)}
             >
-              <Trash2 size={15} />
-              Eliminar proyecto
+              <ArchiveRestore size={15} />
+              Retirar proyecto
             </button>
           ) : (
-            <span className="text-[11px] text-ink-secondary">{getFooterHint(activeStep, startMode, derivedMode, hasFolder, hasGithubRepository)}</span>
+            <span className="min-w-0 text-[11px] text-ink-secondary">{getFooterHint(activeStep, startMode, derivedMode, hasFolder, hasGithubRepository)}</span>
           )}
-          <div className="flex justify-end gap-2">
+          <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
             {!isEditing && activeStepIndex > 0 ? (
-              <button className="flex h-9 items-center gap-2 rounded-md border border-line px-3 text-[11px] hover:bg-panel" type="button" onClick={goToPreviousStep}>
+              <button disabled={busy} className="flex min-h-11 items-center gap-2 rounded-md border border-line px-3 text-[11px] hover:bg-panel" type="button" onClick={goToPreviousStep}>
                 <ArrowLeft size={14} />
                 Anterior
               </button>
             ) : null}
-            <button className="h-9 rounded-md border border-line px-4 text-[11px] hover:bg-panel" onClick={onClose}>
+            <button disabled={busy} className="min-h-11 rounded-md border border-line px-4 text-[11px] hover:bg-panel" onClick={onClose}>
               Cancelar
             </button>
             {!isEditing && activeStep !== "review" ? (
               <button
-                className="flex h-9 items-center gap-2 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={!canContinue}
+                className="flex min-h-11 items-center gap-2 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={busy || !canContinue}
                 onClick={goToNextStep}
               >
                 Siguiente
@@ -549,50 +570,53 @@ export function CreateProjectDialog({
               </button>
             ) : (
               <button
-                className="h-9 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={!canSubmitEffective}
+                className="min-h-11 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={busy || !canSubmitEffective}
                 onClick={handleSubmit}
               >
-                {isEditing ? "Guardar cambios" : "Crear proyecto"}
+                {busy ? "Guardando…" : isEditing ? "Guardar cambios" : "Crear proyecto"}
               </button>
             )}
           </div>
         </footer>
       </section>
       {deleteConfirmationOpen && project ? (
-        <div className="knownext-modal-overlay fixed inset-0 z-[90] grid place-items-center bg-black/25">
+        <ModalFrame label="Retirar proyecto de KnowNext.ai" className="z-[90]" onClose={()=>{if(!submitting.current)setDeleteConfirmationOpen(false);}}>
           <section className="w-[min(440px,calc(100vw-32px))] rounded-lg border border-line bg-white shadow-menu">
             <header className="flex items-start gap-3 border-b border-line px-5 py-4">
-              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-red-50 text-red-700">
-                <AlertTriangle size={17} />
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-brand-hover text-brand-orange">
+                <ArchiveRestore size={17} />
               </span>
               <div className="min-w-0">
-                <h3 className="text-[15px] font-semibold text-ink-primary">Eliminar proyecto de KnowNext.ai</h3>
+                <h3 className="text-[15px] font-semibold text-ink-primary">Retirar proyecto de KnowNext.ai</h3>
                 <p className="mt-1 text-[11px] leading-5 text-ink-secondary">
-                  Se quitará este proyecto de la aplicación y se eliminarán sus enlaces a las carpetas de documentación. Los archivos y carpetas del disco no se borrarán ni se modificarán.
+                  Se quitará del selector. Los archivos, el historial y los borradores se conservarán. Podrás reincorporarlo desde Proyectos retirados, con la misma identidad y sus pestañas.
                 </p>
               </div>
             </header>
+            {submitError && <p role="alert" className="px-5 pt-4 text-sm text-red-700">{submitError}</p>}
             <footer className="flex justify-end gap-2 px-5 py-4">
               <button
                 className="h-9 rounded-md border border-line px-4 text-[11px] hover:bg-panel"
                 type="button"
+                disabled={busy}
                 onClick={() => setDeleteConfirmationOpen(false)}
               >
                 Cancelar
               </button>
               <button
-                className="h-9 rounded-md bg-red-700 px-4 text-[11px] font-semibold text-white hover:bg-red-800"
+                className="min-h-11 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark"
                 type="button"
+                disabled={busy}
                 onClick={handleConfirmDelete}
               >
-                Eliminar proyecto
+                Retirar proyecto
               </button>
             </footer>
           </section>
-        </div>
+        </ModalFrame>
       ) : null}
-    </div>
+    </ModalFrame>
   );
 }
 
@@ -600,14 +624,14 @@ function ScenarioStep({
   startMode,
   authStatus,
   capabilities,
-  isWebRuntime,
+  usesManagedStorage,
   onLoginGithub,
   onSelect,
 }: {
   startMode: ProjectStartMode;
   authStatus: AuthStatus;
   capabilities: ProjectCapabilities | null;
-  isWebRuntime: boolean;
+  usesManagedStorage: boolean;
   onLoginGithub?: () => void;
   onSelect: (mode: ProjectStartMode) => void;
 }) {
@@ -617,8 +641,8 @@ function ScenarioStep({
       <StepHeader
         title="Qué tipo de proyecto vas a configurar"
         description={
-          isWebRuntime
-            ? "En navegador los proyectos se guardan dentro del almacenamiento gestionado del runtime local. Elige si empiezas desde cero o si quieres traer un repositorio GitHub."
+          usesManagedStorage
+            ? "Tus proyectos se guardan en este dispositivo. Puedes empezar sin cuenta; traer un repositorio de GitHub requiere conexión."
             : "La decisión importante es dónde existe hoy la documentación. A partir de ahí el asistente solo pide las opciones que afectan a ese caso."
         }
       />
@@ -626,15 +650,15 @@ function ScenarioStep({
         <ModeTab
           active={startMode === "local-new"}
           icon={FolderPlus}
-          title={isWebRuntime ? "Proyecto web nuevo" : "Carpeta local nueva"}
+          title={usesManagedStorage ? "Proyecto nuevo" : "Carpeta local nueva"}
           description={
-            isWebRuntime
-              ? "Empiezas desde cero. KnowNext.ai creará los Markdown dentro de la carpeta sandbox del runtime local."
+            usesManagedStorage
+              ? "Crea un espacio de documentos en este dispositivo, disponible sin conexión."
               : "Empiezas desde cero. KnowNext.ai creará o usará una ruta local vacía para guardar Markdown."
           }
           onClick={() => onSelect("local-new")}
         />
-        {!isWebRuntime ? (
+        {!usesManagedStorage ? (
           <>
             <ModeTab
               active={startMode === "local-existing"}
@@ -646,7 +670,7 @@ function ScenarioStep({
             <ModeTab
               active={startMode === "local-existing-git"}
               disabled={!capabilities?.canUseLocalGit}
-              disabledReason="La integración de Git local todavía no está disponible en esta instalación."
+              disabledReason={capabilities?.localGitReason ?? "El historial local no está disponible en esta instalación."}
               icon={FolderGit2}
               title="Carpeta con Git/GitHub"
               description="La carpeta ya tiene Git local, y puede tener remoto GitHub. KnowNext.ai respetará esa configuración."
@@ -657,11 +681,11 @@ function ScenarioStep({
         <ModeTab
           active={startMode === "github-existing"}
           disabled={githubUnavailable}
-          disabledReason={isWebRuntime ? "Conecta GitHub para seleccionar un repositorio y traerlo al almacenamiento local gestionado." : "Conecta GitHub para seleccionar un repositorio y crear su copia local de trabajo."}
+          disabledReason={usesManagedStorage ? "Conecta GitHub para seleccionar un repositorio y traerlo al almacenamiento local gestionado." : "Conecta GitHub para seleccionar un repositorio y crear su copia local de trabajo."}
           icon={Github}
           title="Repo GitHub existente"
           description={
-            isWebRuntime
+            usesManagedStorage
               ? "La documentación ya vive en GitHub. Seleccionarás el repo y KnowNext.ai lo descargará en el almacenamiento local gestionado."
               : "La documentación ya vive en GitHub. Seleccionarás el repo y una carpeta local donde trabajar con su copia."
           }
@@ -704,7 +728,7 @@ function LocationStep({
   onGithubRepoChange,
   onNameSuggestion,
   onSelectFolder,
-  isWebRuntime,
+  usesManagedStorage,
 }: {
   startMode: ProjectStartMode;
   folderPath: string;
@@ -726,21 +750,21 @@ function LocationStep({
   onGithubRepoChange: (repo: string) => void;
   onNameSuggestion: (name: string) => void;
   onSelectFolder: (currentPath?: string) => Promise<string | null>;
-  isWebRuntime: boolean;
+  usesManagedStorage: boolean;
 }) {
   const isGithubSource = startMode === "github-existing";
   const isNewLocalProject = startMode === "local-new";
-  const title = isWebRuntime
+  const title = usesManagedStorage
     ? isGithubSource
       ? "Repo origen y almacenamiento local"
       : "Almacenamiento local del proyecto"
     : isGithubSource
       ? "Repo origen y carpeta local"
       : "Carpeta de documentación";
-  const description = isWebRuntime
+  const description = usesManagedStorage
     ? isGithubSource
-      ? "Selecciona el repositorio GitHub. KnowNext.ai guardará la copia editable dentro de la carpeta sandbox del runtime local."
-      : "En navegador no se selecciona carpeta del equipo. KnowNext.ai creará este proyecto dentro del almacenamiento gestionado del runtime local."
+      ? "Selecciona el repositorio GitHub. Su copia editable se guardará en este dispositivo."
+      : "KnowNext.ai guardará los documentos en su almacenamiento local. No necesitas elegir una carpeta para empezar."
     : isGithubSource
       ? "Un proyecto de GitHub necesita dos datos: el repositorio remoto y la carpeta local donde KnowNext.ai guardará la copia editable."
       : isNewLocalProject
@@ -765,8 +789,8 @@ function LocationStep({
             onNameSuggestion={onNameSuggestion}
           />
         ) : null}
-        {isWebRuntime ? (
-          <WebStorageNotice isGithubSource={isGithubSource} />
+        {usesManagedStorage ? (
+          <ManagedStorageNotice isGithubSource={isGithubSource} />
         ) : isNewLocalProject ? (
           <NewLocalProjectFolderFields
             parentPath={newProjectParentPath}
@@ -849,7 +873,7 @@ function VersioningStep({
   const selectedProtectionLevel = getProtectionLevel(null, localHistoryChoice);
   const automaticSyncAvailable = selectedProtectionLevel !== "files";
   const disabledProtectionLevels: Partial<Record<ProjectProtectionLevel, string>> = {
-    ...(!capabilities?.canUseLocalGit ? { git: "La integración de Git local todavía no está disponible en esta instalación." } : {}),
+    ...(!capabilities?.canUseLocalGit ? { git: capabilities?.localGitReason ?? "El historial local no está disponible en esta instalación." } : {}),
     ...(githubUnavailable ? { github: "Conecta GitHub y activa Git local para usar histórico con sincronización remota." } : {}),
   };
 
@@ -923,7 +947,7 @@ function VersioningStep({
             <GuidanceNote
               icon={Lock}
               title="Git local no disponible"
-              description="La integración de Git local todavía no está disponible en esta instalación."
+              description={capabilities?.localGitReason ?? "El historial local no está disponible en esta instalación."}
             />
           </div>
         ) : null}
@@ -1048,7 +1072,7 @@ function ProjectIdentityStep({
   );
 }
 
-function WebStorageNotice({ isGithubSource }: { isGithubSource: boolean }) {
+function ManagedStorageNotice({ isGithubSource }: { isGithubSource: boolean }) {
   return (
     <div className="rounded-md border border-orange-200 bg-brand-hover px-3 py-3">
       <div className="flex items-start gap-3">
@@ -1056,7 +1080,7 @@ function WebStorageNotice({ isGithubSource }: { isGithubSource: boolean }) {
         <div className="min-w-0">
           <div className="text-[11px] font-semibold text-ink-primary">Almacenamiento local gestionado</div>
           <p className="mt-1 text-[10px] leading-4 text-ink-secondary">
-            En navegador no se elige una carpeta del equipo. KnowNext.ai creará este proyecto dentro de la carpeta sandbox del runtime local para que puedas depurar sin depender del selector nativo de Windows.
+            El proyecto se guardará en el almacenamiento de KnowNext.ai de este dispositivo. Podrás trabajar sin conexión y exportar tus documentos.
           </p>
           <p className="mt-2 text-[10px] leading-4 text-ink-secondary">
             {isGithubSource
@@ -1109,7 +1133,7 @@ function EditProjectForm({
   detachGitConfirmed,
   onDetachGithubConfirmedChange,
   onDetachGitConfirmedChange,
-  isWebRuntime,
+  usesManagedStorage,
 }: {
   project?: Project | null;
   name: string;
@@ -1150,14 +1174,14 @@ function EditProjectForm({
   detachGitConfirmed: boolean;
   onDetachGithubConfirmedChange: (confirmed: boolean) => void;
   onDetachGitConfirmedChange: (confirmed: boolean) => void;
-  isWebRuntime: boolean;
+  usesManagedStorage: boolean;
 }) {
   const githubRepository = project?.githubRepository;
   const githubConnected = Boolean(githubRepository || project?.syncMode === "manual-github" || project?.syncMode === "auto-github");
-  const canEditFolder = !isWebRuntime && !githubConnected;
-  const folderReadOnlyLabel = isWebRuntime ? "Almacenamiento gestionado" : "Carpeta local gestionada";
-  const folderReadOnlyHelp = isWebRuntime
-    ? "En navegador los proyectos viven en la carpeta sandbox del runtime local. No se reasigna desde la interfaz."
+  const canEditFolder = !usesManagedStorage && !githubConnected;
+  const folderReadOnlyLabel = usesManagedStorage ? "Almacenamiento gestionado" : "Carpeta local gestionada";
+  const folderReadOnlyHelp = usesManagedStorage
+    ? "Este proyecto usa el almacenamiento local de KnowNext.ai. Su ubicación se administra desde la aplicación."
     : "Solo lectura. Para usar otra ubicación, crea un proyecto nuevo desde ese repositorio GitHub.";
   const githubActionsUnavailable = !authStatus.isAuthenticated || !capabilities?.canUseGithubApi || !capabilities?.canUseLocalGit;
   const githubActionReason = !authStatus.isAuthenticated
@@ -1221,16 +1245,18 @@ function EditProjectForm({
 
       <section className="rounded-md border border-line bg-white px-4 py-4">
         <SectionTitle title="Sincronización" />
-        <ProjectProtectionStateCards project={project} localHistoryChoice={localHistoryChoice} onSelectLevel={selectProtectionLevel} />
+        <ProjectProtectionStateCards project={project} localHistoryChoice={localHistoryChoice} onSelectLevel={selectProtectionLevel} disabledLevels={{
+          ...(!capabilities?.canUseLocalGit?{git:capabilities?.localGitReason??"Git local no está disponible en este dispositivo.",github:capabilities?.localGitReason??"Git local no está disponible en este dispositivo."}:!capabilities?.canUseGithubApi?{github:"La conexión con GitHub no está disponible en esta instalación."}:{}),
+        }}/>
         <AutomaticSyncToggle
-          disabled={!automaticSyncAvailable}
+          disabled={!automaticSyncAvailable||!capabilities?.canUseLocalGit}
           protectionLevel={selectedProtectionLevel}
           value={githubSyncPreference === "auto"}
           onChange={(enabled) => updateGithubSyncPreference(enabled ? "auto" : "manual")}
         />
       </section>
 
-      {!isWebRuntime ? (
+      {!usesManagedStorage ? (
         <section className="rounded-md border border-line bg-white px-4 py-4">
           <SectionTitle
             title="Carpeta local"
@@ -1386,7 +1412,7 @@ function ProjectProtectionStateCards({
           selected ? "border-brand-orange bg-brand-hover shadow-[inset_0_0_0_1px_rgba(243,112,33,0.16)]" : "border-line bg-panel",
           onSelectLevel && !disabled ? "hover:border-brand-orange" : "",
           !onSelectLevel ? "cursor-default" : "",
-          disabled ? "cursor-not-allowed opacity-55" : "",
+          disabled ? "cursor-not-allowed" : "",
         ].join(" ");
         const content = (
           <div className="flex items-center gap-3">
@@ -1396,7 +1422,7 @@ function ProjectProtectionStateCards({
             <Icon size={16} className={selected ? "shrink-0 text-brand-orange" : "shrink-0 text-ink-secondary"} />
             <div className="grid min-w-0 flex-1 gap-1 sm:grid-cols-[minmax(190px,0.45fr)_1fr] sm:items-center">
               <div className="text-[11px] font-semibold leading-4 text-ink-primary">{item.title}</div>
-              <p className="text-[10px] leading-4 text-ink-secondary">{item.description}</p>
+              <p className="text-[10px] leading-4 text-ink-secondary">{disabledReason ?? item.description}</p>
             </div>
           </div>
         );
@@ -1526,19 +1552,20 @@ function AutomaticSyncToggle({
         aria-label={title}
         disabled={disabled || readOnly}
         className={[
-          "relative h-6 w-11 shrink-0 rounded-full border transition",
-          value && !disabled ? "border-brand-orange bg-brand-orange" : "border-line bg-white",
+          "relative grid h-11 w-11 shrink-0 place-items-center rounded-md transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-orange",
           disabled ? "cursor-not-allowed opacity-60" : readOnly ? "cursor-default" : "hover:border-brand-orange",
         ].join(" ")}
         onClick={() => onChange(!value)}
       >
-        <span
-          className={[
-            "absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition",
-            value && !disabled ? "left-[21px]" : "left-0.5",
-            !value || disabled ? "border border-line" : "",
-          ].join(" ")}
-        />
+        <span aria-hidden="true" className={["relative h-6 w-11 rounded-full border", value && !disabled ? "border-brand-orange bg-brand-orange" : "border-line bg-white"].join(" ")}>
+          <span
+            className={[
+              "absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition",
+              value && !disabled ? "left-[21px]" : "left-0.5",
+              !value || disabled ? "border border-line" : "",
+            ].join(" ")}
+          />
+        </span>
       </button>
       <div className="min-w-0">
         <div className="text-[11px] font-semibold text-ink-primary">{title}</div>
@@ -2625,9 +2652,9 @@ function sanitizeGithubRepoNameInput(value: string) {
     .slice(0, 100);
 }
 
-function startModeLabel(startMode: ProjectStartMode, isWebRuntime = false) {
+function startModeLabel(startMode: ProjectStartMode, usesManagedStorage = false) {
   if (startMode === "github-existing") return "Repo GitHub existente";
-  if (startMode === "local-new") return isWebRuntime ? "Proyecto web nuevo" : "Carpeta local nueva";
+  if (startMode === "local-new") return usesManagedStorage ? "Proyecto nuevo" : "Carpeta local nueva";
   if (startMode === "local-existing-git") return "Carpeta con Git/GitHub";
   return "Carpeta local existente";
 }

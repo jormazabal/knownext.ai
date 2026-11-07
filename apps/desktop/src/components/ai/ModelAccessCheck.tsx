@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { checkModelAccess } from "../../lib/api/recordings";
-export function ModelAccessCheck({ model }: { model: string }) {
+export function ModelAccessCheck({ model,language="es" }: { model: string;language?:"es"|"en" }) {
+  const t=(es:string,en:string)=>language==="en"?en:es;
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   return (
@@ -14,7 +15,7 @@ export function ModelAccessCheck({ model }: { model: string }) {
           try {
             const result = await checkModelAccess(model);
             setMessage(
-              `${result.accountVisible ? "Modelo visible en la cuenta" : "Modelo no visible o acceso denegado"} (HTTP ${result.httpStatus}). ${result.message}`,
+              `${result.accountVisible ? t("Modelo visible en la cuenta","Model visible in the account") : t("Modelo no visible o acceso denegado","Model unavailable or access denied")} (HTTP ${result.httpStatus}). ${result.message}`,
             );
           } catch (e) {
             setMessage(String(e));
@@ -23,7 +24,7 @@ export function ModelAccessCheck({ model }: { model: string }) {
           }
         }}
       >
-        {busy ? "Comprobando…" : "Comprobar acceso al modelo"}
+        {busy ? t("Comprobando…","Checking…") : t("Comprobar acceso al modelo","Check model access")}
       </button>
       <p role="status">{message}</p>
     </div>

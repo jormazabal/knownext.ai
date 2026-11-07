@@ -8,14 +8,22 @@ use std::time::Duration;
 
 // Called on a dedicated worker. Credential and document callbacks hold the app
 // storage lock only for local operations; HTTP never runs under that lock.
+pub fn reconcile_usage(service:&RecordingService,
+    usage:impl Fn(&knownext_core::recording_usage::RecordingUsageReceipt)->Result<(),String>
+)->Result<(),String>{
+    let Ok(_guard)=service.processing.try_lock() else{return Ok(());};
+    reconcile_receipts(service,&usage)
+}
 pub fn drain(
     service: &RecordingService,
-    key: impl Fn() -> Result<String, String>,
+    key: impl Fn(&str) -> Result<String, String>,
+    usage: impl Fn(&knownext_core::recording_usage::RecordingUsageReceipt) -> Result<(), String>,
     document: impl Fn(&str, &Destination, &str) -> Result<String, String>,
 ) -> Result<(), String> {
     let Ok(_guard) = service.processing.try_lock() else {
         return Ok(());
     };
+    reconcile_receipts(service, &usage)?;
     loop {
         let value = service.request("claim", json!({}))?;
         if value.is_null() {
@@ -23,33 +31,29 @@ pub fn drain(
         }
         let mut session: Session = serde_json::from_value(value).map_err(|e| e.to_string())?;
         let _lease = JobLease(service, session.id.clone());
-        if let Err(error) = process(service, &mut session, &key, &document, false) {
-            service.request(
-                "job-update",
-                json!({"id":session.id,"error":error,"chunks":session.chunks}),
-            )?;
+        if let Err(error) = process(service, &mut session, &key, &usage, &document, false) {
+            finish_failed(service, &mut session, error)?;
         }
     }
 }
 pub fn one_fragment(
     service: &RecordingService,
-    key: impl Fn() -> Result<String, String>,
+    key: impl Fn(&str) -> Result<String, String>,
+    usage: impl Fn(&knownext_core::recording_usage::RecordingUsageReceipt) -> Result<(), String>,
     document: impl Fn(&str, &Destination, &str) -> Result<String, String>,
 ) -> Result<bool, String> {
     let Ok(_guard) = service.processing.try_lock() else {
         return Ok(true);
     };
+    reconcile_receipts(service, &usage)?;
     let value = service.request("claim", json!({}))?;
     if value.is_null() {
         return Ok(false);
     }
     let mut session: Session = serde_json::from_value(value).map_err(|e| e.to_string())?;
     let _lease = JobLease(service, session.id.clone());
-    if let Err(error) = process(service, &mut session, &key, &document, true) {
-        service.request(
-            "job-update",
-            json!({"id":session.id,"error":error,"chunks":session.chunks}),
-        )?;
+    if let Err(error) = process(service, &mut session, &key, &usage, &document, true) {
+        finish_failed(service, &mut session, error)?;
     }
     let snapshot = service.request("snapshot", json!({}))?;
     Ok(snapshot["sessions"]
@@ -67,11 +71,11 @@ fn running(service: &RecordingService, id: &str) -> Result<bool, String> {
 fn process(
     service: &RecordingService,
     session: &mut Session,
-    key: &impl Fn() -> Result<String, String>,
+    key: &impl Fn(&str) -> Result<String, String>,
+    usage: &impl Fn(&knownext_core::recording_usage::RecordingUsageReceipt) -> Result<(), String>,
     document: &impl Fn(&str, &Destination, &str) -> Result<String, String>,
     one: bool,
 ) -> Result<(), String> {
-    let credential = key()?;
     knownext_core::model_catalog::validate(&session.settings.model, "transcription")?;
     if session.settings.model != "gpt-transcribe" {
         return Err("El modelo del trabajo ya no es compatible".into());
@@ -84,6 +88,8 @@ fn process(
             let samples = audio::mix(&root, start, count)?;
             let length = audio::cut(&samples, start + count == session.samples) as u64;
             session.chunks.push(Chunk {
+                usage_receipt: None,
+                usage_recorded: false,
                 sha256: Some(audio::checksum(&samples[..length as usize])),
                 start,
                 samples: length,
@@ -107,14 +113,12 @@ fn process(
         if !running(service, &session.id)? {
             return Ok(());
         }
+        // A local receipt retry must finish before a new provider send. Completed
+        // fragments can therefore be delivered with no credential or budget check.
+        settle_receipt(service, session, index, usage)?;
         if session.chunks[index].status == "completed" {
             continue;
         }
-        session.chunks[index].status = "sending".into();
-        service.request(
-            "job-update",
-            json!({"id":session.id,"chunks":session.chunks}),
-        )?;
         let chunk = &session.chunks[index];
         let pcm = audio::mix(&root, chunk.start, chunk.samples)?;
         if chunk
@@ -129,6 +133,21 @@ fn process(
         }
         let bytes = audio::wav(&pcm);
         drop(pcm);
+        let project = session.destination.as_ref().ok_or("Elige una carpeta")?.project_id.clone();
+        let credential = key(&project)?;
+        let chunk = &mut session.chunks[index];
+        chunk.usage_receipt = Some(knownext_core::recording_usage::RecordingUsageReceipt {
+            id: uuid::Uuid::new_v4().to_string(),
+            started_at: knownext_core::now_iso(),
+            project_id: project,
+            model: session.settings.model.clone(),
+            samples: chunk.samples,
+            exchange_rate: session.cost["exchangeRate"].clone(),
+            confirmed: false,
+        });
+        chunk.usage_recorded = false;
+        chunk.status = "sending".into();
+        service.request("job-update", json!({"id":session.id,"chunks":session.chunks}))?;
         let mut attempt = 0;
         let response = loop {
             if !running(service, &session.id)? {
@@ -177,6 +196,7 @@ fn process(
                     "unknown"
                 }
                 .into();
+                preserve_outcome(service, session, index, usage)?;
                 return Err(if error.is_connect() {
                     "No se ha podido conectar. El audio está guardado."
                 } else {
@@ -192,6 +212,7 @@ fn process(
                     "pending"
                 }
                 .into();
+                preserve_outcome(service, session, index, usage)?;
                 return Err(format!("OpenAI ha respondido HTTP {status}. Revisa conexión, acceso al modelo y credenciales."));
             }
             Ok(response) => {
@@ -199,11 +220,13 @@ fn process(
                     Ok(v) => v,
                     Err(_) => {
                         chunk.status = "unknown".into();
+                        preserve_outcome(service, session, index, usage)?;
                         return Err("Respuesta incompleta. El resultado no está confirmado; reintentar puede repetir consumo.".into());
                     }
                 };
                 let Some(text) = body["text"].as_str() else {
                     chunk.status = "unknown".into();
+                    preserve_outcome(service, session, index, usage)?;
                     return Err("Respuesta sin transcripción confirmada".into());
                 };
                 chunk.text = Some(text.into());
@@ -216,12 +239,14 @@ fn process(
                     })
                     .unwrap_or_default();
                 chunk.status = "completed".into();
+                if let Some(receipt) = chunk.usage_receipt.as_mut() { receipt.confirmed = true; }
             }
         }
         service.request(
             "job-update",
             json!({"id":session.id,"chunks":session.chunks}),
         )?;
+        settle_receipt(service, session, index, usage)?;
         if one && session.chunks.iter().any(|c| c.status != "completed") {
             service.request("job-update", json!({"id":session.id,"requeue":true}))?;
             return Ok(());
@@ -255,6 +280,57 @@ fn process(
     let id = document(&session.id, destination, &markdown)?;
     service.request("job-update", json!({"id":session.id,"documentId":id}))?;
     session.status = Status::Completed;
+    Ok(())
+}
+
+fn finish_failed(service: &RecordingService, session: &mut Session, error: String) -> Result<(), String> {
+    // First persist the exact outcome; an uncertain local acknowledgement can be
+    // observed again, but must never change a previously billed receipt payload.
+    service.request("job-update", json!({"id":session.id,"error":error,"chunks":session.chunks}))?;
+    Ok(())
+}
+fn reconcile_receipts(service:&RecordingService,
+    usage:&impl Fn(&knownext_core::recording_usage::RecordingUsageReceipt)->Result<(),String>
+)->Result<(),String>{
+    let snapshot=service.request("snapshot",json!({}))?;
+    for value in snapshot["sessions"].as_array().ok_or("No se puede consultar el inventario de recibos")? {
+        // UI snapshots intentionally omit transcripts. Never write their chunks
+        // back: reload the authoritative full session and preserve every text.
+        let status:Status=serde_json::from_value(value["status"].clone()).map_err(|_|"Estado de sesión no compatible")?;
+        if matches!(status,Status::Queued|Status::Transcribing|Status::Recording|Status::Paused){continue;}
+        let id=value["id"].as_str().ok_or("Identidad de sesión no compatible")?;
+        let (mut session,_)=crate::metadata::session(&service.root,id)?.ok_or("La sesión ya no está disponible; se conserva su referencia")?;
+        session.status=status;
+        for chunk in &mut session.chunks {if chunk.status=="sending"{chunk.status="unknown".into();}}
+        for index in 0..session.chunks.len() {
+            if let Err(error)=settle_receipt(service,&mut session,index,usage) {
+                service.request("warning",json!({"message":error}))?;
+                return Err(error);
+            }
+        }
+    }
+    Ok(())
+}
+fn preserve_outcome(service:&RecordingService,session:&mut Session,index:usize,
+    usage:&impl Fn(&knownext_core::recording_usage::RecordingUsageReceipt)->Result<(),String>
+)->Result<(),String>{
+    service.request("job-update", json!({"id":session.id,"chunks":session.chunks}))?;
+    settle_receipt(service,session,index,usage)
+}
+fn settle_receipt(
+    service: &RecordingService,
+    session: &mut Session,
+    index: usize,
+    usage: &impl Fn(&knownext_core::recording_usage::RecordingUsageReceipt) -> Result<(), String>,
+) -> Result<(), String> {
+    let chunk = &mut session.chunks[index];
+    if !chunk.usage_recorded && matches!(chunk.status.as_str(), "completed" | "unknown" | "sending") {
+        if let Some(receipt) = &chunk.usage_receipt {
+            usage(receipt).map_err(|error|format!("El audio y el recibo están conservados. No se inicia otro envío hasta registrar el consumo: {error}"))?;
+            chunk.usage_recorded = true;
+            service.request("job-update", json!({"id":session.id,"chunks":session.chunks}))?;
+        }
+    }
     Ok(())
 }
 

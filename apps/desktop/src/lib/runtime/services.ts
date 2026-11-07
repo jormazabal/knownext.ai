@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import {runLocalOperation} from "./localOperations";
 import { expectedRuntimeProfile, requestJson, type RuntimeHealth } from "../api/client";
 import { APP_VERSION } from "../appVersion";
 
@@ -35,7 +36,7 @@ type TauriWindow = Window & {
 const BROWSER_SERVICE_STATUS_TIMEOUT_MS = 5000;
 export async function getRuntimeServiceStatus() {
   if (isTauriRuntime()) {
-    return invoke<RuntimeServicesStatus>("get_runtime_service_status");
+    return runLocalOperation(()=>invoke<RuntimeServicesStatus>("get_runtime_service_status"),{native:false,label:"Comprobación del entorno",timeoutMs:10_000});
   }
 
   return getBrowserRuntimeServiceStatus();

@@ -1,0 +1,2 @@
+export type RecoveryContentReview={key:string;revision:string;copySha256:string;fileName:string;byteLength:number;text:string;previewTruncated:boolean;canExport:boolean;canRestore:false;provenanceVerified:false;checkedAt:string}&({schemaVersion:1;kind:"document"}|{schemaVersion:2;kind:"handwritten-note";pageCount:number;strokeCount:number});
+export type RecoveryContentDelivery={status:"saved"|"cancelled";fileName?:string;byteLength?:number;requestId:string;completedAt:string};

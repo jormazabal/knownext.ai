@@ -177,7 +177,63 @@
                 <File Id="UpdateTaskUninstaller" Source="uninstall-task.ps1" KeyPath="yes" Checksum="yes"/>
             </Component>
             {{/if}}
-            {{resources}}
+            <!-- Explicit HKCU-keyed resource components preserve per-user MSI
+                 repair/removal. The guard admits exactly Noto + Proton's four
+                 reviewed resources, never generic generated resource XML. -->
+            <?ifndef env.TAURI_KNOWNEXT_FONT_LICENSE?>
+                <?error TAURI_KNOWNEXT_FONT_LICENSE must identify the reviewed bundled Noto license?>
+            <?endif?>
+            <?ifndef env.TAURI_KNOWNEXT_PROTON_RESOURCES?>
+                <?error Prepare and validate the pinned Proton resources before building the installer?>
+            <?endif?>
+            <?ifndef env.TAURI_KNOWNEXT_PROTON_COMPONENT_GUID?>
+                <?error The Proton resources require a stable component GUID derived from this upgrade family?>
+            <?endif?>
+            <Directory Id="KnownextResourceCrates" Name="crates">
+                <Directory Id="KnownextResourceDocs" Name="knownext-docs">
+                    <Directory Id="KnownextResourceAssets" Name="assets">
+                        <Directory Id="KnownextResourceFonts" Name="fonts">
+                            <!-- One license component per upgrade family. The
+                                 family UUID is stable across versions and is
+                                 distinct for the public and C1 installers;
+                                 it is not used by another component. WiX cannot
+                                 auto-generate a GUID for this mixed file/HKCU
+                                 component, so do not restore Guid="*" here. -->
+                            <Component Id="KnownextNotoLicense" Guid="{{upgrade_code}}" Win64="$(var.Win64)">
+                                <File Id="KnownextNotoLicenseFile"
+                                      Name="OFL.txt"
+                                      Source="$(env.TAURI_KNOWNEXT_FONT_LICENSE)" />
+                                <RegistryValue Root="HKCU"
+                                               Key="Software\\{{manufacturer}}\\{{product_name}}\Components"
+                                               Name="Noto font license"
+                                               Type="integer"
+                                               Value="1"
+                                               KeyPath="yes" />
+                                <RemoveFolder Id="RemoveKnownextResourceFonts" Directory="KnownextResourceFonts" On="uninstall" />
+                                <RemoveFolder Id="RemoveKnownextResourceAssets" Directory="KnownextResourceAssets" On="uninstall" />
+                                <RemoveFolder Id="RemoveKnownextResourceDocs" Directory="KnownextResourceDocs" On="uninstall" />
+                                <RemoveFolder Id="RemoveKnownextResourceCrates" Directory="KnownextResourceCrates" On="uninstall" />
+                            </Component>
+                        </Directory>
+                    </Directory>
+                </Directory>
+            </Directory>
+            <Directory Id="KnownextNativeResources" Name="resources">
+                <Directory Id="KnownextProtonResources" Name="proton">
+                    <Directory Id="KnownextProtonWindowsResources" Name="windows">
+                        <Component Id="KnownextProtonNativeSdk" Guid="$(env.TAURI_KNOWNEXT_PROTON_COMPONENT_GUID)" Win64="$(var.Win64)">
+                            <File Id="KnownextProtonSdkDll" Name="knownext_proton.dll" Source="$(env.TAURI_KNOWNEXT_PROTON_RESOURCES)\knownext_proton.dll" Checksum="yes" />
+                            <File Id="KnownextProtonCryptoDll" Name="proton_crypto.dll" Source="$(env.TAURI_KNOWNEXT_PROTON_RESOURCES)\proton_crypto.dll" Checksum="yes" />
+                            <File Id="KnownextProtonNotices" Name="THIRD-PARTY-NOTICES.txt" Source="$(env.TAURI_KNOWNEXT_PROTON_RESOURCES)\THIRD-PARTY-NOTICES.txt" />
+                            <File Id="KnownextProtonProvenance" Name="provenance.json" Source="$(env.TAURI_KNOWNEXT_PROTON_RESOURCES)\provenance.json" />
+                            <RegistryValue Root="HKCU" Key="Software\\{{manufacturer}}\\{{product_name}}\Components" Name="Proton native SDK" Type="integer" Value="1" KeyPath="yes" />
+                            <RemoveFolder Id="RemoveKnownextProtonWindows" Directory="KnownextProtonWindowsResources" On="uninstall" />
+                            <RemoveFolder Id="RemoveKnownextProton" Directory="KnownextProtonResources" On="uninstall" />
+                            <RemoveFolder Id="RemoveKnownextNativeResources" Directory="KnownextNativeResources" On="uninstall" />
+                        </Component>
+                    </Directory>
+                </Directory>
+            </Directory>
             <Component Id="CMP_UninstallShortcut" Guid="*">
 
                 <Shortcut Id="UninstallShortcut"
@@ -235,9 +291,8 @@
 
             <ComponentRef Id="RegistryEntries"/>
 
-            {{#each resource_file_ids as |resource_file_id| ~}}
-                <ComponentRef Id="{{ resource_file_id }}"/>
-            {{/each~}}
+            <ComponentRef Id="KnownextNotoLicense"/>
+            <ComponentRef Id="KnownextProtonNativeSdk"/>
 
             {{#if enable_elevated_update_task}}
                 <ComponentRef Id="UpdateTask" />

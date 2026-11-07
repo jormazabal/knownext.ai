@@ -1,0 +1,4 @@
+export type SystemRecoveryCopy={id:string;group:string;groupLabel:string;name:string;byteLength:number;modifiedAt:string|null;canReview:boolean};
+export type SystemRecoveryInventory={items:SystemRecoveryCopy[];warnings:string[];limited:boolean;entryLimit:number;fileLimit:number;queriedAt:string};
+export type SystemRecoveryReview={id:string;fingerprint:string;byteLength:number;name:string;groupLabel:string;provenance:"verified-filename-digest"|"digest-mismatch"|"copy-fingerprint-only";summary:{format:string;message:string;entries?:number|null;fragments?:number;completedFragments?:number;durationSeconds?:number|null};canExport:boolean;canRestore:false;relatedRecoveryId?:string;checkedAt:string};
+export type SystemRecoveryDelivery={status:"saved"|"cancelled";fileName?:string;byteLength?:number;requestId:string;completedAt:string};

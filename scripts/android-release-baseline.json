@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "applicationId": "ai.knownext.mobile",
+  "versionName": "2.6.0",
+  "versionCode": 2006000,
+  "minimumSdk": 24,
+  "certificateSha256": "18d0db03027d208ae7afa9c5083cb22e6565a0daf7e2b64377490657da271569",
+  "apkSha256": "f9ad8d3ac5b28ff515b2cf2816f4249e221af2809402367072a4d301a677cd68",
+  "sourceUrl": "https://github.com/jormazabal/knownext.ai/releases/download/v2.6.0/KnowNext.ai-android-arm64-v2.6.0.apk"
+}

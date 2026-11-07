@@ -1,8 +1,8 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CreateProjectDialog } from "./CreateProjectDialog";
-import type { Project, ProjectSyncStatus } from "../../types/domain";
+import type { Project, ProjectCapabilities, ProjectSyncStatus } from "../../types/domain";
 
 const openDialog = vi.hoisted(() => vi.fn());
 
@@ -39,7 +39,43 @@ const activeProject: Project = {
   isGitRepository: false,
 };
 
+// Capabilities are runtime authority, not implied by a project's legacy metadata.
+const localGitCapabilities:ProjectCapabilities={canCreateLocalProject:true,canOpenLocalFolder:true,canUseLocalGit:true,canConnectGithub:false,canUseGithubApi:false,requiresGithubLoginForVersioning:false};
+const githubCapabilities:ProjectCapabilities={...localGitCapabilities,canConnectGithub:true,canUseGithubApi:true};
+
 describe("CreateProjectDialog", () => {
+  it("blocks unsupported Git activation in project editing while preserving legacy metadata editing",async()=>{
+    const update=vi.fn();render(<CreateProjectDialog open mode="edit" project={{...activeProject,versioningMode:"local-git",syncMode:"auto-local"}} onClose={vi.fn()} onCreate={vi.fn()} onUpdate={update} capabilities={{canCreateLocalProject:true,canOpenLocalFolder:true,canUseLocalGit:false,localGitReason:"Git no disponible en QA",canConnectGithub:false,canUseGithubApi:false,requiresGithubLoginForVersioning:false}}/>);
+    expect(screen.getByRole("button",{name:/Archivos locales \+ Git local El historial|Archivos locales \+ Git local Git no disponible/})).toBeDisabled();
+    expect(screen.getByRole("button",{name:/Archivos locales \+ Git local \+ GitHub/})).toBeDisabled();
+    expect(screen.getByRole("switch",{name:/Sincronización automática/})).toBeDisabled();
+    await userEvent.clear(screen.getByLabelText("Nombre del proyecto"));await userEvent.type(screen.getByLabelText("Nombre del proyecto"),"Identidad conservada");
+    await userEvent.click(screen.getByRole("button",{name:"Guardar cambios"}));expect(update).toHaveBeenCalledWith(activeProject.id,expect.objectContaining({name:"Identidad conservada",versioningMode:"local-git"}));
+  });
+  it("keeps project configuration and prevents duplicate requests during a failed update", async () => {
+    let finish!: (result: boolean) => void;
+    const update = vi.fn(()=>new Promise<boolean>(resolve=>{finish=resolve;}));
+    const close = vi.fn();
+    render(<CreateProjectDialog open mode="edit" project={activeProject} onClose={close} onCreate={vi.fn()} onUpdate={update}/>);
+    await userEvent.clear(screen.getByLabelText("Nombre del proyecto"));
+    await userEvent.type(screen.getByLabelText("Nombre del proyecto"), "Conservar configuración");
+    await userEvent.click(screen.getByRole("button",{name:"Guardar cambios"}));
+    expect(screen.getByRole("button",{name:"Guardando…"})).toBeDisabled();
+    await userEvent.keyboard("{Escape}");
+    expect(close).not.toHaveBeenCalled();
+    await act(async()=>finish(false));
+    expect(update).toHaveBeenCalledOnce();
+    expect(screen.getByRole("alert")).toHaveTextContent("la configuración se conserva");
+    expect(screen.getByLabelText("Nombre del proyecto")).toHaveValue("Conservar configuración");
+  });
+  it("describes native Android projects as local device storage", async () => {
+    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Linux; Android 16)" });
+    render(<CreateProjectDialog open onClose={vi.fn()} onCreate={vi.fn()}/>);
+    expect(screen.getByRole("tab", { name: /proyecto nuevo/i })).toBeInTheDocument();
+    expect(screen.queryByText(/navegador|sandbox|servidor web/i)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Siguiente" }));
+    expect(screen.getByText(/No necesitas elegir una carpeta/)).toBeInTheDocument();
+  });
   it("keeps wizard steps and configuration content in a single modal scroll region", () => {
     render(
       <CreateProjectDialog
@@ -122,6 +158,7 @@ describe("CreateProjectDialog", () => {
         onClose={vi.fn()}
         onCreate={vi.fn()}
         onUpdate={onUpdate}
+        capabilities={localGitCapabilities}
       />,
     );
 
@@ -169,6 +206,7 @@ describe("CreateProjectDialog", () => {
         onClose={vi.fn()}
         onCreate={vi.fn()}
         onUpdate={onUpdate}
+        capabilities={githubCapabilities}
       />,
     );
 
@@ -232,6 +270,7 @@ describe("CreateProjectDialog", () => {
         onClose={vi.fn()}
         onCreate={vi.fn()}
         onUpdate={onUpdate}
+        capabilities={githubCapabilities}
       />,
     );
 
@@ -409,7 +448,7 @@ describe("CreateProjectDialog", () => {
     expect(screen.getByDisplayValue("SUA")).toBeInTheDocument();
   });
 
-  it("asks for confirmation before deleting a project reference", async () => {
+  it("explains reversible retirement before removing a project association", async () => {
     const onDelete = vi.fn();
 
     render(
@@ -424,12 +463,13 @@ describe("CreateProjectDialog", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: /eliminar proyecto/i }));
+    await userEvent.click(screen.getByRole("button", { name: /retirar proyecto/i }));
 
-    expect(screen.getByRole("heading", { name: /eliminar proyecto de knownext\.ai/i })).toBeInTheDocument();
-    expect(screen.getByText(/los archivos y carpetas del disco no se borr/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /retirar proyecto de knownext\.ai/i })).toBeInTheDocument();
+    expect(screen.getByText(/los archivos, el historial y los borradores se conservarán/i)).toBeInTheDocument();
+    expect(screen.getByText(/misma identidad y sus pestañas/i)).toBeInTheDocument();
 
-    await userEvent.click(screen.getAllByRole("button", { name: /eliminar proyecto/i })[1]);
+    await userEvent.click(within(screen.getByRole("dialog",{name:"Retirar proyecto de KnowNext.ai"})).getByRole("button", { name: /retirar proyecto/i }));
 
     expect(onDelete).toHaveBeenCalledWith("project-beta");
   });
@@ -512,7 +552,7 @@ describe("CreateProjectDialog", () => {
       />,
     );
 
-    expect(screen.getByRole("tab", { name: /proyecto web nuevo/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /proyecto nuevo/i })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /carpeta local existente/i })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /siguiente/i }));
     expect(screen.getAllByText(/almacenamiento local gestionado/i).length).toBeGreaterThan(0);

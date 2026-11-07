@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+const desktop=vi.hoisted(()=>({check:vi.fn(),relaunch:vi.fn()}));
+vi.mock("@tauri-apps/plugin-updater",()=>({check:desktop.check}));
+vi.mock("@tauri-apps/plugin-process",()=>({relaunch:desktop.relaunch}));
 import { checkForUpdate, getUpdaterStatus, installUpdate } from "./updater";
 
 describe("runtime updater", () => {
@@ -130,3 +133,24 @@ function createAndroidManifest(overrides: Partial<{
     ],
   };
 }
+
+it("protects edits made during Windows download immediately before installation",async()=>{
+ Object.defineProperty(window,"__TAURI_INTERNALS__",{value:{},configurable:true});
+ const order:string[]=[];let revision=1;
+ const update={currentVersion:"2.6.0",version:"3.0.0",download:vi.fn(async()=>{order.push("download");revision=2;}),install:vi.fn(async()=>{order.push("install");})};
+ desktop.check.mockResolvedValue(update);desktop.relaunch.mockImplementation(async()=>{order.push("relaunch");});
+ await checkForUpdate();await installUpdate(undefined,async()=>{expect(revision).toBe(2);order.push("protect latest");});
+ expect(order).toEqual(["download","protect latest","install","relaunch"]);
+});
+it("keeps a downloaded Windows candidate when protection fails and never installs or relaunches it",async()=>{
+ Object.defineProperty(window,"__TAURI_INTERNALS__",{value:{},configurable:true});
+ const update={currentVersion:"2.6.0",version:"3.0.0",download:vi.fn(async()=>{}),install:vi.fn(async()=>{})};desktop.check.mockResolvedValue(update);desktop.relaunch.mockClear();
+ await checkForUpdate();await expect(installUpdate(undefined,async()=>{throw Error("pending draft");})).rejects.toThrow("pending draft");expect(update.install).not.toHaveBeenCalled();expect(desktop.relaunch).not.toHaveBeenCalled();
+ await installUpdate(undefined,async()=>{});expect(update.download).toHaveBeenCalledTimes(1);expect(update.install).toHaveBeenCalledTimes(1);
+});
+it("protects Android before its combined native download and cleans up a synchronous bridge failure",async()=>{
+ Object.defineProperty(window,"__TAURI_INTERNALS__",{value:{},configurable:true});Object.defineProperty(window.navigator,"userAgent",{value:"Mozilla/5.0 Android",configurable:true});
+ const bridge=createAndroidBridge();window.KnownextAndroidUpdater=bridge;await checkForUpdate();
+ await expect(installUpdate(undefined,async()=>{throw Error("active audio");})).rejects.toThrow("active audio");expect(bridge.downloadAndInstall).not.toHaveBeenCalled();
+ const remove=vi.spyOn(window,"removeEventListener");bridge.downloadAndInstall.mockImplementation(()=>{throw Error("native bridge failed");});await expect(installUpdate(undefined,async()=>{})).rejects.toThrow("native bridge failed");expect(remove).toHaveBeenCalledWith("knownext-android-updater",expect.any(Function));
+});

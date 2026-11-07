@@ -47,7 +47,8 @@ export function ExternalChangesBanner({ changeSet, syncState, busy, onReview, on
       {!needsReview ? (
         <button
           className="h-7 rounded-md bg-brand-orange px-2.5 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={busy}
+          disabled={busy || !changeSet.revision}
+          title={!changeSet.revision ? "Comprueba y revisa los archivos antes de registrarlos" : undefined}
           onClick={onImportSafe}
         >
           Guardar recomendados

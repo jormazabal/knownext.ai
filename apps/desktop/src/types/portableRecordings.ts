@@ -1,0 +1,4 @@
+export type PortableRecordingEntry={id:string;label:string;source:string;hasAudio:boolean};
+export type PortableRecordingCatalog={schemaVersion:1;projectId:string;revision:string;checkedAt:string;items:PortableRecordingEntry[];unavailable:number;limited:boolean;scope:"portable-recordings-only"};
+export type PortableRecordingReview={schemaVersion:1;projectId:string;entryId:string;catalogRevision:string;revision:string;checkedAt:string;name:string;sourceCreatedAt:string|null;sourceSha256:string;sessionId:string;seconds:number;bytes:number;parts:number;microphone:boolean;systemAudio:boolean;nativeState:"absent"|"occupied"|"unavailable";canImport:boolean;importSupported:boolean;preservesSource:true;startsAi:false;retained:true};
+export type PortableRecordingResult={schemaVersion:1;projectId:string;entryId:string;requestRevision:string;sessionId:string;status:"imported";checkedAt:string;startsAi:false;retained:true;preservesSource:true};

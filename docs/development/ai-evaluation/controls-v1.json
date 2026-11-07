@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "runId": "evaluator-controls-v1",
+  "origin": "synthetic-control",
+  "executedAt": "2026-11-01T03:00:00Z",
+  "corpusSha256": "a922077966c6234ba9f9077f019abff9afe1dd0a610dae9e7765c5bb010ffe64",
+  "model": null,
+  "attempts": [
+    {
+      "caseId": "query-01",
+      "repetition": 1,
+      "response": {
+        "status": "completed",
+        "answer": "El piloto incluye dos talleres [S1].",
+        "operations": []
+      },
+      "expectedContractPass": true
+    },
+    {
+      "caseId": "query-01",
+      "repetition": 2,
+      "response": {
+        "status": "completed",
+        "answer": "He creado otro documento.",
+        "operations": [
+          {
+            "type": "document_created",
+            "status": "ready"
+          }
+        ],
+        "updatedDocument": {
+          "markdown": "Unexpected"
+        }
+      },
+      "expectedContractPass": false
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+use knownext_storage::LocalApi;
+use serde_json::{json,Value};
+use std::{fs,path::PathBuf,process::Command};
+fn request(api:&LocalApi,method:&str,path:&str,body:Value)->Value{let response=api.handle(method,path,body,vec![]).unwrap();assert!(response.status<400,"{}",response.body);response.body}
+fn version(api:&LocalApi,project:&str,id:&str,title:&str)->String{request(api,"POST",&format!("/api/projects/{project}/versions"),json!({"documentId":id,"title":title}))["version"]["id"].as_str().unwrap().into()}
+#[test]
+fn collections_keep_immutable_references_across_rename_and_preserve_other_document_members(){
+    let owned=tempfile::tempdir().unwrap();let state=owned.path().join("state");let api=LocalApi::new(state.clone(),"qa".into(),"test".into());
+    let project=request(&api,"POST","/api/projects",json!({"name":"Owned collections","versioningMode":"local-git","syncMode":"none"}));let pid=project["id"].as_str().unwrap();let root=PathBuf::from(project["folderPath"].as_str().unwrap());let id=format!("{pid}::Review.md");let route=format!("/api/documents/{id}/history/groups");
+    fs::write(root.join("Review.md"),"# Owned first\n").unwrap();let first=version(&api,pid,&id,"Owned first");fs::write(root.join("Review.md"),"# Owned second\n").unwrap();let second=version(&api,pid,&id,"Owned second");
+    let initial=request(&api,"GET",&route,Value::Null);assert_eq!(initial["revision"],Value::Null);assert!(!state.join("history-groups").exists());
+    let create=json!({"action":"create","groupId":"history-group-owned","revision":null,"title":" Revisión del cliente ","description":"Owned purpose","versionId":first});let saved=request(&api,"POST",&route,create.clone());
+    let store=state.join("history-groups").join(format!("{pid}.json"));let exact=fs::read(&store).unwrap();request(&api,"POST",&route,create);assert_eq!(fs::read(&store).unwrap(),exact);
+    let added=request(&api,"POST",&route,json!({"action":"add","groupId":"history-group-owned","revision":saved["revision"],"versionId":second}));assert_eq!(added["groups"][0]["documentVersionIds"].as_array().unwrap().len(),2);assert_eq!(fs::read_to_string(root.join("Review.md")).unwrap(),"# Owned second\n");
+    let other=format!("{pid}::Other.md");fs::write(root.join("Other.md"),"# Other\n").unwrap();let other_version=version(&api,pid,&other,"Owned other");
+    let other_added=request(&api,"POST",&format!("/api/documents/{other}/history/groups"),json!({"action":"add","groupId":"history-group-owned","revision":added["revision"],"versionId":other_version}));assert_eq!(other_added["groups"][0]["referenceCount"],3);assert_eq!(other_added["groups"][0]["documentVersionIds"],json!([other_version]));
+    let stale=fs::read(&store).unwrap();assert!(api.handle("POST",&route,json!({"action":"rename","groupId":"history-group-owned","revision":saved["revision"],"title":"Obsolete","description":""}),vec![]).is_err());assert_eq!(fs::read(&store).unwrap(),stale);
+    fs::rename(root.join("Review.md"),root.join("Renamed.md")).unwrap();let hooks=owned.path().join("empty-hooks");fs::create_dir(&hooks).unwrap();
+    for arguments in [vec!["add","-A","--","Review.md","Renamed.md"],vec!["commit","-m","Owned rename"]]{let output=Command::new("git").arg("-C").arg(&root).args(["-c","user.name=Owned QA","-c","user.email=qa@example.invalid","-c"]).arg(format!("core.hooksPath={}",hooks.display())).args(arguments).output().unwrap();assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));}
+    let renamed=format!("/api/documents/{pid}::Renamed.md/history/groups");let followed=request(&api,"GET",&renamed,Value::Null);assert_eq!(followed["groups"][0]["referenceCount"],3);let ids=followed["groups"][0]["documentVersionIds"].as_array().unwrap();assert!(ids.contains(&json!(first)));assert!(ids.contains(&json!(second)));assert_eq!(fs::read(&store).unwrap(),stale);
+    let retired=request(&api,"POST",&renamed,json!({"action":"retire","groupId":"history-group-owned","revision":followed["revision"]}));assert_eq!(retired["groups"][0]["retired"],true);assert_eq!(retired["groups"][0]["referenceCount"],3);
+    let reopened=request(&api,"POST",&renamed,json!({"action":"reopen","groupId":"history-group-owned","revision":retired["revision"]}));assert_eq!(reopened["groups"][0]["retired"],false);
+    let snapshot=request(&api,"GET",&format!("/api/documents/{pid}::Renamed.md/history"),Value::Null);assert!(snapshot["versions"].as_array().unwrap().iter().any(|entry|entry["id"]==first));
+}
+#[test]
+fn incompatible_collection_stores_and_foreign_versions_never_become_writable_empty_data(){
+    let owned=tempfile::tempdir().unwrap();let state=owned.path().join("state");let api=LocalApi::new(state.clone(),"qa".into(),"test".into());let project=request(&api,"POST","/api/projects",json!({"name":"Owned groups guards","versioningMode":"local-git","syncMode":"none"}));let pid=project["id"].as_str().unwrap();let root=PathBuf::from(project["folderPath"].as_str().unwrap());let id=format!("{pid}::Owned.md");let route=format!("/api/documents/{id}/history/groups");fs::write(root.join("Owned.md"),"# Owned").unwrap();let first=version(&api,pid,&id,"Owned");
+    fs::create_dir_all(state.join("history-groups")).unwrap();let store=state.join("history-groups").join(format!("{pid}.json"));let create=json!({"action":"create","groupId":"history-group-owned","revision":null,"title":"Owned","description":"","versionId":first});
+    for bytes in [br#"{"schemaVersion":99,"groups":[],"future":"preserve"}"#.as_slice(),br#"{"broken":"owned"}"#.as_slice()]{fs::write(&store,bytes).unwrap();assert!(api.handle("GET",&route,Value::Null,vec![]).is_err());assert!(api.handle("POST",&route,create.clone(),vec![]).is_err());assert_eq!(fs::read(&store).unwrap(),bytes);}
+    fs::remove_file(&store).unwrap();let mut invalid=create.clone();invalid["versionId"]=json!("0".repeat(40));assert!(api.handle("POST",&route,invalid,vec![]).is_err());assert!(!store.exists());let saved=request(&api,"POST",&route,create);let exact=fs::read(&store).unwrap();assert!(api.handle("POST",&route,json!({"action":"create","groupId":"history-group-other","revision":saved["revision"],"title":"OWNED","description":"","versionId":first}),vec![]).is_err());assert_eq!(fs::read(&store).unwrap(),exact);
+}

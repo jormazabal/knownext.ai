@@ -1,0 +1,3 @@
+export type RecoveryFamilyItem={key:string;name:string;directory?:boolean;regular?:boolean;archivedAt?:string;phase?:"closed"|"closing"|"retirement";revision?:string};
+export type RecoveryFamilyCatalog={schemaVersion:1;families?:string[];family?:string;items?:RecoveryFamilyItem[];archived?:RecoveryFamilyItem[];total?:number;archivedTotal?:number;offset?:number;nextOffset?:number|null};
+export type RecoveryUnitReview={schemaVersion:1;family:string;key:string;revision:string;archived:boolean;files:{path:string;bytes:number;sha256:string}[];bytes:number;canClose:boolean;canExport:boolean;canRetire?:boolean;remainingFiles?:number;phase?:string;message:string};

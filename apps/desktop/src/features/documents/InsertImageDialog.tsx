@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Image as ImageIcon, Link, NotebookPen, Search, Trash2, Upload, X } from "lucide-react";
 import { getProjectImageContentUrl } from "../../lib/api/projects";
+import { markdownImage } from "../../lib/markdownImage";
+import { projectImageAsset } from "../../lib/projectImageSources";
+import { getApiErrorMessage } from "../../lib/api/client";
+import { ModalFrame } from "../../components/ui/ModalFrame";
+import "./InsertImageDialog.css";
 import type { AssetImportResponse, DocumentTreeNode, HandwrittenNoteInsertMarkdownResponse, InsertImageReferenceResponse } from "../../types/domain";
 
 type InsertImageDialogProps = {
@@ -37,12 +42,20 @@ export function InsertImageDialog({
   const isEditMode = variant === "edit";
   const projectVisuals = useMemo(() => collectProjectVisuals(tree), [tree]);
   const uploadParentId = useMemo(() => resolveDocumentParentFolderId(tree, activeDocumentPath), [tree, activeDocumentPath]);
-  const initialProjectAsset = useMemo(() => findImageByInitialUrl(projectVisuals, activeProjectId, initialUrl), [activeProjectId, projectVisuals, initialUrl]);
+  const initialProjectAsset = useMemo(() => projectImageAsset(initialUrl, activeProjectId, activeDocumentPath ?? "", tree), [activeProjectId, activeDocumentPath, tree, initialUrl]);
   const [tabMode, setTabMode] = useState<"project" | "upload" | "url">(() => (initialProjectAsset ? "project" : isEditMode && isEditModeUrl(initialUrl) ? "url" : "project"));
   const [query, setQuery] = useState("");
   const [altText, setAltText] = useState(initialAltText);
   const [url, setUrl] = useState(initialUrl || "https://");
   const [busy, setBusy] = useState(false);
+  const [error,setError] = useState<string|null>(null);
+  const [pendingUpload,setPendingUpload] = useState<{file:File;imported:AssetImportResponse|null}|null>(null);
+  const [previewExpanded,setPreviewExpanded] = useState(()=>typeof window.matchMedia==="function" ? window.matchMedia("(min-width: 821px)").matches : true);
+  const inFlight=useRef(false);
+  const owner=useRef({projectId:activeProjectId,documentId:activeDocumentId,mounted:true});
+  if(owner.current.projectId!==activeProjectId||owner.current.documentId!==activeDocumentId)owner.current={projectId:activeProjectId,documentId:activeDocumentId,mounted:true};
+  useEffect(()=>{owner.current.mounted=true;return()=>{owner.current.mounted=false;};},[]);
+  useEffect(()=>{inFlight.current=false;setBusy(false);setError(null);setPendingUpload(null);},[activeProjectId,activeDocumentId]);
   const [selectedAssetId, setSelectedAssetId] = useState(initialProjectAsset?.id ?? projectVisuals[0]?.id ?? "");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const selectedAsset = projectVisuals.find((visual) => visual.id === selectedAssetId) ?? null;
@@ -63,52 +76,77 @@ export function InsertImageDialog({
   }, [selectedAssetId, visibleImages]);
 
   async function insertSelectedAsset(assetId = selectedAssetId) {
-    if (!assetId) return;
+    if (!assetId || inFlight.current) return;
+    const scope=owner.current;const current=()=>owner.current===scope&&scope.mounted;
+    inFlight.current=true;setError(null);
     setBusy(true);
     try {
       const visual = projectVisuals.find((item) => item.id === assetId);
       if (!visual) return;
+      if (isEditMode && visual.id === initialProjectAsset?.id && initialUrl) {
+        onInsert(markdownImage(altText || visual.name.replace(/\.[^.]+$/, ""), initialUrl));
+        return;
+      }
       const reference = visual.type === "handwritten-note"
         ? await onBuildHandwrittenReference?.(activeDocumentId, visual.id, altText || visual.name.replace(/\.knote$/i, ""))
         : await onBuildReference(activeDocumentId, visual.id, altText || null);
-      if (!reference) return;
-      onInsert(reference.markdown);
+      if (!reference) throw new Error("Esta referencia no está disponible en el documento activo.");
+      if(current())onInsert(reference.markdown);
+    } catch(requestError) {
+      if(current())setError(getApiErrorMessage(requestError,"No se pudo preparar la referencia. Puedes volver a intentarlo.").slice(0,1000));
     } finally {
-      setBusy(false);
+      if(current()){inFlight.current=false;setBusy(false);}
     }
   }
 
-  async function uploadAndInsert(file: File) {
+  async function uploadAndInsert(file = pendingUpload?.file) {
+    if(!file || inFlight.current)return;
+    const scope=owner.current;const current=()=>owner.current===scope&&scope.mounted;
+    let imported=file===pendingUpload?.file ? pendingUpload.imported : null;
+    inFlight.current=true;setError(null);setPendingUpload({file,imported});
     setBusy(true);
     try {
-      const imported = await onImportImage(uploadParentId, file);
-      const reference = await onBuildReference(activeDocumentId, imported.asset.id, altText || imported.asset.name.replace(/\.[^.]+$/, ""));
-      onInsert(reference.markdown);
+      if(!imported){
+        imported = await onImportImage(uploadParentId, file);
+        if(!current())return;
+        if(imported.asset.projectId!==scope.projectId){imported=null;throw new Error("La imagen pertenece a otro proyecto; no se insertó ninguna referencia.");}
+        setPendingUpload({file,imported});
+        if(imported.importReceipt?.renamed||imported.importReceipt?.treeAvailable===false)return;
+      }
+      const reference = await onBuildReference(scope.documentId, imported.asset.id, altText || imported.asset.name.replace(/\.[^.]+$/, ""));
+      if(current())onInsert(reference.markdown);
+    } catch(requestError) {
+      if(current()){
+        const message=getApiErrorMessage(requestError,"No se pudo completar la inserción.").slice(0,1000);
+        setError(imported ? `La imagen ya está en el proyecto como ${imported.asset.name}. No se insertó la referencia. ${message}` : message);
+      }
     } finally {
-      setBusy(false);
+      if(current()){inFlight.current=false;setBusy(false);}
     }
   }
 
   function insertUrl() {
     if (!url.trim()) return;
     const alt = altText.trim() || "Imagen";
-    onInsert(buildImageMarkup(alt, url.trim()));
+    onInsert(markdownImage(alt, url.trim()));
   }
 
   return (
-    <div className="knownext-modal-overlay fixed inset-0 z-[98] grid place-items-center bg-black/20 px-4">
+    <ModalFrame label={isEditMode?"Editar imagen":"Insertar imagen"} onClose={onClose} className="knownext-modal-overlay insert-image-dialog fixed inset-0 z-[98] grid place-items-center bg-black/20 px-4">
       <section className="flex max-h-[min(760px,calc(100dvh-48px))] w-[min(920px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu">
         <header className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
           <div>
             <h2 className="text-[15px] font-semibold text-ink-primary">{isEditMode ? "Editar imagen" : "Insertar imagen"}</h2>
             <p className="mt-1 text-[11px] text-ink-secondary">
-              {isEditMode ? "Cambia la imagen, actualiza el texto alternativo o elimina la referencia." : "Usa una imagen o nota a mano del proyecto, sube una nueva o enlaza una URL externa."}
+              {busy ? "Si cierras, la imagen que ya se haya copiado permanecerá en el proyecto; la referencia no se insertará." : isEditMode ? "Cambia la imagen, actualiza el texto alternativo o elimina la referencia." : "Usa una imagen o nota a mano del proyecto, sube una nueva o enlaza una URL externa."}
             </p>
           </div>
           <button className="grid h-8 w-8 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange" onClick={onClose} aria-label="Cerrar">
             <X size={16} />
           </button>
         </header>
+        {error && <p role="alert" className="mx-5 mt-3 break-words rounded-md bg-orange-50 px-3 py-2 text-xs leading-5 text-orange-900">{error}</p>}
+        {!!pendingUpload?.imported?.warnings?.length && <p role="status" className="mx-5 mt-2 break-words text-xs leading-5 text-ink-secondary">{pendingUpload.imported.warnings.join(" ")}</p>}
         <div className="flex border-b border-line px-5 pt-3">
           {[
             ["project", "Proyecto"],
@@ -119,18 +157,20 @@ export function InsertImageDialog({
               key={value}
               className={["h-8 border-b-2 px-3 text-[11px] font-semibold", tabMode === value ? "border-brand-orange text-brand-orange" : "border-transparent text-ink-secondary hover:text-ink-primary"].join(" ")}
               onClick={() => setTabMode(value as typeof tabMode)}
+              disabled={busy}
             >
               {label}
             </button>
           ))}
         </div>
-        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_300px] overflow-hidden max-[820px]:grid-cols-1">
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_300px] overflow-hidden max-[820px]:grid-cols-1 max-[820px]:overflow-y-auto">
           <div className="min-h-0 overflow-y-auto px-5 py-4">
             <label className="block text-[11px] font-semibold text-ink-secondary">
               Texto alternativo
               <input
                 className="mt-1 h-9 w-full rounded-md border border-line px-3 text-[12px] text-ink-primary outline-none focus:border-brand-orange"
                 value={altText}
+                disabled={busy}
                 onChange={(event) => setAltText(event.target.value)}
                 placeholder="Descripcion breve de la imagen"
               />
@@ -185,14 +225,16 @@ export function InsertImageDialog({
               <div className="mt-4 rounded-md border border-dashed border-line bg-panel px-4 py-8 text-center">
                 <Upload size={22} className="mx-auto text-brand-orange" />
                 <p className="mt-2 text-[12px] font-semibold text-ink-primary">Subir imagen al proyecto</p>
-                <p className="mt-1 text-[11px] text-ink-secondary">Se copiara al proyecto y se insertara una referencia relativa.</p>
-                <button className="mt-4 h-8 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark" onClick={() => fileInputRef.current?.click()}>
-                  Seleccionar imagen
+                <p className="mt-1 text-[11px] text-ink-secondary">Se copiará al proyecto y se insertará una referencia relativa. Máximo 32 MiB; si el nombre ya existe, se conservarán ambos.</p>
+                {pendingUpload && <p className="mt-2 break-words text-xs text-ink-secondary">{pendingUpload.file.name}{pendingUpload.imported ? ` · Guardada como ${pendingUpload.imported.asset.name}` : ""}</p>}
+                <button disabled={busy} className="mt-4 min-h-11 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:opacity-50" onClick={() => fileInputRef.current?.click()}>
+                  {pendingUpload ? "Elegir otra imagen" : "Seleccionar imagen"}
                 </button>
                 <input
                   ref={fileInputRef}
                   className="hidden"
                   type="file"
+                  disabled={busy}
                   accept="image/png,image/jpeg,image/webp,image/gif"
                   onChange={(event) => {
                     const file = event.currentTarget.files?.[0];
@@ -211,8 +253,8 @@ export function InsertImageDialog({
               </label>
             )}
           </div>
-          <aside className="border-l border-line bg-panel/40 px-4 py-4 max-[820px]:hidden">
-            <p className="text-[11px] font-semibold text-ink-secondary">Vista previa</p>
+          <details open={previewExpanded} onToggle={event=>setPreviewExpanded(event.currentTarget.open)} className="overflow-y-auto border-l border-line bg-panel/40 px-4 py-4 max-[820px]:border-l-0 max-[820px]:border-t max-[820px]:overflow-visible">
+            <summary className="min-h-11 cursor-pointer py-3 text-[11px] font-semibold text-ink-secondary">Vista previa</summary>
             <div className="mt-2 grid aspect-[4/3] place-items-center overflow-hidden rounded-md border border-line bg-white">
               {previewSource ? (
                 <img className="max-h-full max-w-full object-contain" src={previewSource} alt={altText || selectedAsset?.name || "Vista previa"} />
@@ -244,7 +286,7 @@ export function InsertImageDialog({
                 </div>
               ) : null}
             </dl>
-          </aside>
+          </details>
         </div>
         <footer className="flex justify-between gap-2 border-t border-line px-5 py-4">
           {isEditMode && onDelete ? (
@@ -262,16 +304,16 @@ export function InsertImageDialog({
             disabled={busy || (tabMode === "project" && !selectedAssetId)}
             onClick={() => {
               if (tabMode === "project") void insertSelectedAsset();
-              if (tabMode === "upload") fileInputRef.current?.click();
+              if (tabMode === "upload") {if(pendingUpload)void uploadAndInsert();else fileInputRef.current?.click();}
               if (tabMode === "url") insertUrl();
             }}
           >
-            {busy ? (isEditMode ? "Guardando" : "Insertando") : isEditMode ? "Guardar cambios" : "Insertar"}
+            {busy ? (isEditMode ? "Guardando" : "Insertando") : tabMode==="upload"&&pendingUpload&&error ? pendingUpload.imported ? "Reintentar inserción" : "Reintentar subida" : tabMode==="upload"&&pendingUpload?.imported ? "Insertar imagen guardada" : isEditMode ? "Guardar cambios" : "Insertar"}
           </button>
           </div>
         </footer>
       </section>
-    </div>
+    </ModalFrame>
   );
 }
 
@@ -280,15 +322,6 @@ function collectProjectVisuals(nodes: DocumentTreeNode[]): DocumentTreeNode[] {
     if (node.type === "image" || node.type === "handwritten-note") return [node];
     return node.children ? collectProjectVisuals(node.children) : [];
   });
-}
-
-function findImageByInitialUrl(images: DocumentTreeNode[], projectId: string, initialUrl: string) {
-  if (!projectId || !initialUrl) return null;
-  return images.find((image) => image.type === "image" && (initialUrl === getProjectImageContentUrl(projectId, image.id) || initialUrl.endsWith(encodeURIComponent(image.id)) || initialUrl.endsWith(image.path ?? ""))) ?? null;
-}
-
-function buildImageMarkup(alt: string, source: string) {
-  return `![${alt}](${source})`;
 }
 
 function isPreviewableUrl(value: string) {

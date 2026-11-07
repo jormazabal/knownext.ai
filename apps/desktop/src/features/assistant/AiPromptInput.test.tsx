@@ -559,34 +559,20 @@ describe("AiPromptInput", () => {
     expect(screen.getByText("Diagramas 1")).toBeInTheDocument();
     expect(screen.getByText("Tokens 41k")).toBeInTheDocument();
     expect(screen.getByText("Coste aprox. 0,38 €")).toBeInTheDocument();
-    expect(screen.getByText("La investigación está trabajando. Puedes cancelarla; no se creará documento parcial.")).toBeInTheDocument();
+    expect(screen.getByText("La investigación está trabajando. Puedes solicitar detenerla; los resultados ya guardados se conservan.")).toBeInTheDocument();
     expect(screen.queryByText(/Puedes cambiar el plan o dejar que/)).not.toBeInTheDocument();
   });
 
+  it("portals compact prompt options outside transformed parents, trapping focus and returning without sending",async()=>{
+    mockCompactPromptMode(true);const submit=vi.fn();const result=render(<div style={{transform:"translateX(20px)",overflow:"hidden",height:40}}><AiPromptInput documentId="modal-options-doc" projectId="modal-options-project" markdown="Contenido" providerReady onSubmit={submit}/></div>);const trigger=screen.getByRole("button",{name:"Opciones del prompt"});trigger.focus();await userEvent.keyboard("{Enter}");const dialog=screen.getByRole("dialog",{name:"Opciones del prompt"});expect(dialog.parentElement).toBe(document.body);expect(result.container.inert).toBe(true);const close=screen.getByRole("button",{name:"Cerrar opciones del prompt"});expect(close).toHaveFocus();await userEvent.tab({shift:true});expect(dialog.contains(document.activeElement)).toBe(true);fireEvent.keyDown(document.activeElement!,{key:"Escape",isComposing:true});expect(dialog).toBeInTheDocument();await userEvent.keyboard("{Escape}");expect(screen.queryByRole("dialog")).not.toBeInTheDocument();expect(trigger).toHaveFocus();expect(result.container.inert).toBe(false);expect(submit).not.toHaveBeenCalled();expect(transcriptionMock.state.start).not.toHaveBeenCalled();
+  });
   it("asks for confirmation before cancelling a running research job", async () => {
     const onCancelResearchJob = vi.fn();
-
-    render(
-      <AiPromptInput
-        documentId="doc-1"
-        projectId="project-1"
-        markdown="Contenido"
-        providerReady
-        onSubmit={vi.fn()}
-        researchJob={makeResearchJob()}
-        researchJobs={[]}
-        onCancelResearchJob={onCancelResearchJob}
-      />,
-    );
-
-    await userEvent.click(screen.getByRole("button", { name: "Cancelar" }));
-
-    expect(screen.getByRole("dialog", { name: "Cancelar investigación" })).toBeInTheDocument();
-    expect(onCancelResearchJob).not.toHaveBeenCalled();
-
-    await userEvent.click(screen.getByRole("button", { name: "Cancelar investigación" }));
-
-    expect(onCancelResearchJob).toHaveBeenCalledWith("job-1");
+    const result=render(<div style={{transform:"translateX(20px)",overflow:"hidden",height:40}}><AiPromptInput documentId="doc-1" projectId="project-1" markdown="Contenido" providerReady onSubmit={vi.fn()} researchJob={makeResearchJob()} researchJobs={[]} onCancelResearchJob={onCancelResearchJob}/></div>);
+    const trigger=screen.getByRole("button",{name:"Cancelar"});trigger.focus();await userEvent.click(trigger);
+    const dialog=screen.getByRole("dialog", { name: "Cancelar investigación" });expect(dialog.parentElement).toBe(document.body);expect(result.container.inert).toBe(true);expect(screen.getByText(/Se solicitará detener el proceso. Los resultados y documentos ya guardados se conservan/)).toBeVisible();expect(screen.getByRole("button",{name:"Volver"})).toHaveFocus();
+    await userEvent.keyboard("{Escape}");expect(trigger).toHaveFocus();expect(onCancelResearchJob).not.toHaveBeenCalled();await userEvent.click(trigger);
+    const confirm=screen.getByRole("button",{name:"Cancelar investigación"});fireEvent.click(confirm);fireEvent.click(confirm);await act(async()=>{});expect(onCancelResearchJob).toHaveBeenCalledOnce();expect(onCancelResearchJob).toHaveBeenCalledWith("job-1");expect(screen.getByRole("button",{name:"Cancelación solicitada"})).toBeDisabled();expect(screen.getByPlaceholderText(/Pregunta algo sobre este documento/)).toHaveFocus();expect(result.container.inert).toBe(false);
   });
 
   it("shows stale heartbeat as recent inactivity without changing job status", () => {

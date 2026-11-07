@@ -2,6 +2,20 @@
 
 All KnowNext.ai releases use one monolithic application version for the frontend, Tauri shell, Rust runtime, Windows updater, and Android updater.
 
+## 3.0.0 - 2026-11-07
+
+- Fixed per-user MSI installation of the bundled font license with an HKCU key path, explicit empty-directory cleanup and a strict resource mapping guard.
+
+- Consolidated the v3 local-first workspace, contextual panels, batch actions and simpler/advanced settings.
+- Added reviewed editing/history/reversion, resource/template workflows, portable state, integrity/conflict recovery and bounded retention/quotas/backups.
+- Completed compact recording, minutes and handwritten-note workflows, research evidence review and honest capability/coverage states.
+- Deferred secondary views, reduced initial JavaScript by14.32%, and added private session-only timing counters and bounded Unicode search.
+- Added direct Proton synchronization in an explicitly labelled personal non-commercial experimental beta, with remembered encrypted sessions, events, recoverable operations, conflicts, empty directories, reviewed local retention and provider migration/return. No Proton Drive client is required.
+- Corrected false pending markers produced by readonly scans/previews and literal Git filename handling during compatible migrations.
+- Packaged the native SDK/crypto inside Windows and Android, with source-pinned reproducible builds, third-party notices and corresponding sources. Preserved existing updater and Android signing identities.
+- Source regression:1,158frontend and740Rust cases passed plus two explicit synthetic benchmarks; installed candidate acceptance is recorded separately.
+- Real-provider AI evaluation remains deferred without spend. ARM physical devices, Android token-expiry/24-hour checks, forced write interruption and live GitHub migration retain separate acceptance; the release report records signed artifact/update validation.
+
 ## 2.6.0 - 2026-10-30
 
 - Added meeting recording from the Windows system tray, the application and project folders, with microphone/system audio selection, signal meters, pause/resume and Markdown transcription using the existing OpenAI credential.

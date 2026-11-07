@@ -1,9 +1,27 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type PointerEvent } from "react";
-import { AlertTriangle, ArrowLeft, FileText, GitCompareArrows, History, Image as ImageIcon, Maximize2, Minus, PanelLeftClose, PanelLeftOpen, Plus, RotateCcw } from "lucide-react";
+import type {HandwrittenOcrApplyRequest,HandwrittenOcrApply,HandwrittenOcrResult} from "../types/handwrittenOcr";
+import {HistoryRestoreDialog} from "../features/history/HistoryRestoreDialog";
+import type {HandwrittenPageFocus,WorkspaceNodeFocus} from "../types/localSearch";
+import { useWorkspaceSurfaceTransition } from "./useWorkspaceSurfaceTransition";
+import { projectImageSource } from "../lib/projectImageSources";
+import type { SettingsWorkspace } from "../types/settings";
+import { DocumentToolsPanel } from "../features/editor/DocumentToolsPanel";
+import { WorkspaceWelcome } from "../features/projects/WorkspaceWelcome";
+import {ProjectTreeReadIssue} from "../features/documents/ProjectTreeReadIssue";
+import { LoadFailure } from "../components/ui/LoadFailure";
+import { WorkspaceCommandPalette } from "../features/documents/WorkspaceCommandPalette";
+import { Search } from "lucide-react";
+import "./DesktopLayout.css";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
+import {createDeferredView} from "../components/ui/createDeferredView";
+import {notesSaveFeedback} from "../features/documents/notesSaveFeedback";
+import type {MarkdownEditorProps} from "../features/editor/MarkdownEditor";
+import { AlertTriangle, ArrowLeft, FileText, GitCompareArrows, History, Image as ImageIcon, Maximize2, Mic, Minus, PanelLeftClose, PanelLeftOpen, PanelRightOpen, PanelRightClose, Pin, Settings, Trash2, Plus, RotateCcw } from "lucide-react";
 import { AiConversationView } from "../features/assistant/AiConversationView";
 import { AiPromptInput, type AiPromptExecutionOptions } from "../features/assistant/AiPromptInput";
 import { AiResponseBubble } from "../features/assistant/AiResponseBubble";
 import { DocumentStatusBar } from "../features/documents/DocumentStatusBar";
+import {DocumentConflictBanner} from "../features/documents/DocumentConflictBanner";
+import {DraftWriteConflictBanner} from "../features/documents/DraftWriteConflictBanner";
 import { DocumentTabs } from "../features/documents/DocumentTabs";
 import { DocumentTree, type DocumentTreeAction, type ProjectTreeStatus } from "../features/documents/DocumentTree";
 import { InsertDiagramDialog } from "../features/documents/InsertDiagramDialog";
@@ -28,17 +46,21 @@ import {
   type MarkdownEditorImageEditTarget,
   type MarkdownEditorSelection,
 } from "../features/editor/editorTypes";
-import { ReadonlyMarkdownViewer } from "../features/editor/ReadonlyMarkdownViewer";
 import { ProjectActions } from "../features/projects/ProjectActions";
 import { ProjectSelector } from "../features/projects/ProjectSelector";
 import { ReleaseNotesViewer } from "../features/releaseNotes/ReleaseNotesViewer";
-import { formatVersionFullDate, VersionHistoryPanel, type VersionPreview, type VersionPreviewMode } from "../features/versions/VersionHistoryPanel";
+import { HistoryComparisonSurface } from "../features/versions/HistoryComparisonSurface";
+import { HistoryPreviewWorkspace } from "../features/versions/HistoryPreviewWorkspace";
+import { formatVersionFullDate, VersionHistoryPanel, type VersionPreview } from "../features/versions/VersionHistoryPanel";
+import { DocumentInfoPanel } from "../features/editor/DocumentInfoPanel";
+import { DocumentReferencesPanel } from "../features/editor/DocumentReferencesPanel";
+import { useContextVisibility } from "../app/useContextVisibility";
+import type { LocalReferenceTarget } from "../types/documentReferences";
 import { BrandMark } from "../components/brand/BrandMark";
 import { TitleBar } from "../components/window/TitleBar";
-import { getProjectImageContentUrl } from "../lib/api/projects";
 import { getDocumentTreeFileDragData } from "../lib/dragData";
 import { isMobileDeviceRuntime, isPhoneAppShell } from "../lib/runtime/platform";
-import type { ActivityEvent, AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiEditProposal, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiResearchBrief, AiResearchJob, AiSelectionFocus, AiSkillApplication, AiSkillDiagnostic, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, CreateVersionResponse, DocumentConflictStatus, DocumentPostSaveSyncState, DocumentRecord, DocumentSyncStatus, DocumentTreeNode, ExportFormat, ExternalChangeDecision, ExternalChangeSet, HandwrittenEraserConfig, HandwrittenExportFormat, HandwrittenNoteContent, HandwrittenNoteInsertMarkdownResponse, HandwrittenNoteRecord, HandwrittenToolPreset, InsertImageReferenceResponse, LayoutConfig, Project, ProjectFileSyncOverview, ProjectSyncState, ProjectSyncStatus, ProjectVersioningStatus, VersionRecord, WorkspaceTab } from "../types/domain";
+import type { ActivityEvent, AiConfigStatus, AiContextSearchResult, AiContextSource, AiContextSourcePreviewResponse, AiConversationEvent, AiEditProposal, AiIndexStatusResponse, AiIntentActionType, AiPendingIntent, AiResearchBrief, AiResearchJob, AiSelectionFocus, AiSkillApplication, AiSkillDiagnostic, AiUsageSummaryResponse, AppearanceConfig, AssetImportResponse, AssetMetadata, AuthStatus, RestoreVersionResponse, DocumentConflictStatus, DocumentPostSaveSyncState, DocumentRecord, DocumentSyncStatus, DocumentTreeNode, ExportFormat, ExternalChangeDecision, ExternalChangeSet, HandwrittenEraserConfig, HandwrittenExportFormat, HandwrittenNoteContent, HandwrittenNoteInsertMarkdownResponse, HandwrittenNoteRecord, HandwrittenToolPreset, InsertImageReferenceResponse, LayoutConfig, Project, ProjectFileSyncOverview, ProjectSyncState, ProjectSyncStatus, ProjectVersioningStatus, VersionRecord, WorkspaceTab } from "../types/domain";
 
 const sidebarWidthConfig = {
   defaultWidth: 338,
@@ -52,9 +74,18 @@ const historyWidthConfig = {
   maxWidth: 460,
 };
 
-const MarkdownEditor = lazy(() => import("../features/editor/MarkdownEditor").then((module) => ({ default: module.MarkdownEditor })));
+const MarkdownEditor = createDeferredView<MarkdownEditorProps>(() => import("../features/editor/MarkdownEditor").then((module) => ({ default: module.MarkdownEditor })),"Preparando editor…","No se pudo cargar el editor. Los cambios del documento se conservan.");
 
 type DesktopLayoutProps = {
+  continuityNotice?:ReactNode;
+  applyingAiEditProposalId?: string | null;
+  canApplyEditorOperation?: (operation: MarkdownEditorExternalOperation) => boolean;
+  aiResultReview?: { count: number; hasError: boolean; onOpen: () => void };
+  settingsWorkspace?: SettingsWorkspace;
+  onBatchAction?: (action: import("../types/fileBatch").SelectionAction, nodeIds: string[], targetFolderId?:string|null) => void;
+  onOpenTrash?: () => void;
+  onOpenRecordings: () => void;
+  appearance?: AppearanceConfig;
   appVersion: string;
   appLanguage: AppearanceConfig["language"];
   markdownExtendedUnderlineEnabled: boolean;
@@ -78,18 +109,24 @@ type DesktopLayoutProps = {
   aiResearchJobs: AiResearchJob[];
   aiContextSources: AiContextSource[];
   tree: DocumentTreeNode[];
+  treeReadIssue?:string|null;
+  treeReadBusy?:boolean;
+  onReloadProjectTree?:()=>void;
   tabs: WorkspaceTab[];
   activeTabId: string;
   activeDocumentId: string;
   activeTreeNodeId: string;
   activeImageId: string;
   activeHandwrittenNoteId: string;
+  handwrittenPageFocus?:HandwrittenPageFocus|null;
+  onHandwrittenPageFocusHandled?:(requestId:number)=>void;
   editorSessions: EditorDocumentSession[];
   notesMarkdown: string;
   notesUpdatedAt: string | null;
   notesEditorKey: string;
   notesLoaded: boolean;
   notesSaveState: "idle" | "saving" | "error";
+  notesDirty:boolean;
   releaseNotesMarkdown: string;
   activeDocument: DocumentRecord | null;
   activeMarkdown: string;
@@ -98,8 +135,17 @@ type DesktopLayoutProps = {
   handwrittenToolPresets: HandwrittenToolPreset[];
   handwrittenEraserConfig: HandwrittenEraserConfig;
   activeHandwrittenDirty: boolean;
+  activeHandwrittenLoading?: boolean;
   activeHandwrittenSaveState: "idle" | "saving" | "saved" | "error";
+  activeHandwrittenConflictStatus?: DocumentConflictStatus;
+  activeHandwrittenDiskChanged?: boolean;
+  onKeepHandwrittenVersion?: () => void;
+  onLoadHandwrittenDiskVersion?: () => void;
+  onMergeHandwrittenDiskVersion?: () => void;
+  onRecoverHandwrittenCopy?:()=>void;
   activeDocumentDirty: boolean;
+  activeDocumentLoading?: boolean;
+  activeDocumentLoadError?: string;
   activeDocumentSyncStatus: DocumentSyncStatus | null;
   activeDocumentPostSaveSyncState: DocumentPostSaveSyncState;
   activeDocumentPendingSaveHint?: string | null;
@@ -107,6 +153,10 @@ type DesktopLayoutProps = {
   activeDocumentConflictStatus: DocumentConflictStatus;
   activeDocumentHasRecoveredDraft: boolean;
   activeDocumentDiskChanged: boolean;
+  activeDraftWriteConflict?:boolean;
+  activeHandwrittenDraftWriteConflict?:boolean;
+  draftReviewBusy?:string|null;
+  onReviewChangedDraft?:(id:string,ink:boolean)=>void;
   dirtyDocumentIds: string[];
   orphanDraftCount: number;
   isCheckingForUpdates: boolean;
@@ -129,8 +179,17 @@ type DesktopLayoutProps = {
   layoutConfig: LayoutConfig;
   onSelectProject: (project: Project) => void;
   onCreateProject: () => void;
+  onImportProjectPackage?: () => void;
+  onExportProjectPackage?: () => void;
+  onOpenAssetCatalog?:()=>void;
+  onOpenProjectReplace?:()=>void;
+  onOpenAiChangeHistory?:()=>void;
+  stateTransitionAuthority?:import("../types/stateMigrations").StateTransitionAuthority;
+  onRetiredProjects?: (returnFocus:()=>HTMLElement|null) => void;
+  onRegisterEditorSnapshot?: (id:string, controller:MarkdownEditorController|null, released?:MarkdownEditorController|null) => void;
   onConfigureProject: () => void;
-  onOpenAppSettings: () => void;
+  onOpenLocalReference: (target: LocalReferenceTarget) => void;
+  onOpenAppSettings: (section?: "ai") => void;
   onCreateFolder: (parentId: string | null) => void;
   onImportProjectFile: (parentId: string | null) => void;
   onRenameNode: (nodeId: string, name: string) => void;
@@ -147,22 +206,25 @@ type DesktopLayoutProps = {
   onLogout: () => void;
   onPullProject: () => void;
   onPushProject: () => void;
-  onResolveProjectGithubConflict: (resolution: "keep-local" | "take-remote") => void;
   onOpenProjectGithub: () => void;
   onOpenExternalChanges: () => void;
   onCloseExternalChanges: () => void;
   onRefreshExternalChanges: () => void;
+  beforeMixedApplication?:()=>Promise<boolean>;onMixedApplicationChanged?:()=>void;
+  onHistoricalCopyTreeUnavailable?:(projectId:string,message:string)=>void;
+  onHistoricalCopyTree?:(projectId:string,tree:DocumentTreeNode[])=>void;
   onExternalChangeDecision: (itemId: string, decision: ExternalChangeDecision) => void;
   onImportExternalChanges: () => void;
   onImportSafeExternalChanges: () => void;
   onOmitExternalChanges: () => void;
   onSaveDocument: (documentId: string) => Promise<boolean>;
   onDiscardDocumentDraft: (documentId: string) => Promise<boolean>;
-  onRestoreVersion: (versionId: string) => Promise<CreateVersionResponse | null>;
+  onRestoreVersion: (versionId: string) => Promise<RestoreVersionResponse | null>;
   onSaveActiveDocument: () => Promise<boolean>;
   onDiscardActiveDocumentDraft: () => Promise<boolean>;
   onSendAiPrompt: (prompt: string, selectionFocus?: AiSelectionFocus | null, options?: AiPromptExecutionOptions) => void | Promise<void>;
   onUpdateAiResearchBrief: (brief: AiResearchBrief) => void;
+  onReviewResearchEvidence?:(jobId:string)=>void;
   onStartAiResearch: (brief: AiResearchBrief) => void | Promise<void>;
   onCancelAiResearchBrief: () => void;
   onCancelAiResearchJob: (jobId: string) => void | Promise<void>;
@@ -177,6 +239,7 @@ type DesktopLayoutProps = {
   onRemoveAiContextSource: (sourceId: string) => void | Promise<void>;
   onExtendAiContextSource: (sourceId: string) => void | Promise<void>;
   onPreviewAiContextSource: (sourceId: string) => Promise<AiContextSourcePreviewResponse>;
+  onRefreshAiContextSource?:(sourceId:string,review:import("../types/domain").AiContextOriginReview)=>Promise<AiContextSourcePreviewResponse>;
   onAddAiContextSourceToProject: (sourceId: string) => void | Promise<void>;
   onAiIntentAction: (action: AiIntentActionType, intentId: string) => void | Promise<void>;
   onApplyAiEditProposal: (proposalId: string, operationIds?: string[]) => void | Promise<void>;
@@ -190,16 +253,20 @@ type DesktopLayoutProps = {
   onOpenImage: (assetId: string, name: string, path: string) => void;
   onOpenReferenceDocument: (nodeId: string, name: string, path: string) => void;
   onActivateTreeNode: (nodeId: string) => void;
-  onSelectTreeNode: (nodeId: string, type: DocumentTreeNode["type"], name: string) => void;
+  onSelectTreeNode: (nodeId: string, type: DocumentTreeNode["type"], name: string, focus?:WorkspaceNodeFocus) => void;
   onSelectTab: (documentId: string) => void;
   onCloseTab: (documentId: string) => void;
   onCloseTabs: (documentIds: string[]) => void;
   onReorderDocumentTabs: (draggedTabId: string, targetTabId: string, placement: "before" | "after") => void;
   onTreeContextAction: (action: DocumentTreeAction, node: DocumentTreeNode) => void;
-  onExportDocument: (documentId: string, format: ExportFormat) => void | Promise<void>;
+  onExportDocument: (documentId: string, format: ExportFormat, snapshot?: () => string) => void | Promise<void>;
+  onSaveDocumentTemplate?: (documentId: string, snapshot: () => string) => void;
   onHandwrittenChange: (noteId: string, content: HandwrittenNoteContent) => void;
   onHandwrittenToolPresetsChange: (toolPresets: HandwrittenToolPreset[]) => void;
   onHandwrittenEraserConfigChange: (eraser: HandwrittenEraserConfig) => void;
+  onHandwrittenOcrObserved?:(receipt:HandwrittenOcrResult)=>Promise<void>;
+  onBeforeHandwrittenOcr?:(noteId:string)=>Promise<void>;
+  onApplyHandwrittenOcr?:(request:HandwrittenOcrApplyRequest)=>Promise<HandwrittenOcrApply>;
   onSaveHandwrittenNote: (noteId?: string) => Promise<boolean>;
   onExportHandwrittenNote: (noteId: string, format: HandwrittenExportFormat, pageId?: string) => void | Promise<void>;
   onAddHandwrittenNoteContext: (noteId: string) => void | Promise<void>;
@@ -219,6 +286,12 @@ type DesktopLayoutProps = {
   onDiscardPendingDocumentChanges: () => void;
   onKeepLocalVersion: () => void;
   onLoadDiskVersion: () => void;
+  onMergeDiskVersion?: () => void;
+  onRestoreVersionParts?: (versionId:string)=>void;
+  onReviewRemoteVersion?:()=>void;
+  onRetryDocumentLoad: (id: string) => void;
+  onRetryHandwrittenLoad: (id: string) => void;
+  activeHandwrittenLoadError?: string;
   onToggleHistory: () => void;
   onCloseHistory: () => void;
   onLayoutConfigChange: (layoutConfig: Partial<LayoutConfig>) => void;
@@ -230,19 +303,34 @@ type EditorDocumentSession = {
   markdown: string;
   editorKey: string;
   isLoading: boolean;
+  loadError?: string;
 };
 
 type RestoreStrategy = "restore" | "save-and-restore" | "discard-and-restore";
-type DiffLine = { type: "same" | "added" | "removed"; text: string };
-type SideBySideDiffRow = {
-  type: "same" | "changed" | "added" | "removed" | "skip";
-  leftNumber?: number;
-  rightNumber?: number;
-  leftText?: string;
-  rightText?: string;
-};
 
 export function DesktopLayout(props: DesktopLayoutProps) {
+  const [commandsOpen,setCommandsOpen] = useState(false);
+  const [recentByProject,setRecentByProject] = useState<Record<string,string[]>>({});
+  useEffect(()=>{
+    const project = props.activeProject?.id; const id = props.activeTabId;
+    if(project && id) setRecentByProject(current=>({...current,[project]:[id,...(current[project]??[]).filter(item=>item!==id)].slice(0,12)}));
+  },[props.activeProject?.id,props.activeTabId]);
+  useEffect(()=>{
+    const shortcut=(event:globalThis.KeyboardEvent)=>{
+      if((event.ctrlKey||event.metaKey)&&event.shiftKey&&event.key.toLowerCase()==='p'&&!event.isComposing&&!event.repeat){
+        if(document.querySelector('[role="dialog"]'))return;
+        event.preventDefault();setCommandsOpen(true);
+      }
+    };
+    window.addEventListener('keydown',shortcut);
+    return()=>window.removeEventListener('keydown',shortcut);
+  },[]);
+  const settingsMode = Boolean(props.settingsWorkspace?.open);
+  const [settingsNavigationVisible, setSettingsNavigationVisible] = useState(true);
+  const [settingsContextVisible, setSettingsContextVisible] = useState(false);
+  const settingsContentRef = useRef<HTMLElement>(null);
+  const settingsContextRef = useRef<HTMLElement>(null);
+  const documentSurfaceRef = useRef<HTMLElement>(null);
   const mobileShell = isMobileDeviceRuntime();
   const phoneShell = isPhoneAppShell();
   const [editorControllers, setEditorControllers] = useState<Record<string, MarkdownEditorController>>({});
@@ -250,7 +338,55 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   const [editorFormatState, setEditorFormatState] = useState<MarkdownEditorFormatState>(emptyMarkdownEditorFormatState);
   const [editorHistoryStates, setEditorHistoryStates] = useState<Record<string, MarkdownEditorHistoryState>>({});
   const [navigationOpen, setNavigationOpen] = useState(false);
-  const [desktopNavigationVisible, setDesktopNavigationVisible] = useState(true);
+  useWorkspaceSurfaceTransition(settingsMode, settingsContentRef, documentSurfaceRef, setNavigationOpen);
+  const [desktopNavigationVisible, setDesktopNavigationVisible] = useState(props.layoutConfig.navigationVisible !== false);
+  const [contextKind, setContextKind] = useState(()=>readContextKind(props.layoutConfig.contextKind));
+  const contextPinned = Boolean(props.layoutConfig.contextPinned);
+  const [contextVisible, setContextVisible] = useContextVisibility(contextPinned, props.activeProject?.id ?? null, props.activeTabId);
+  const [assistantBusy, setAssistantBusy] = useState(false);
+  const [assistantComposerExpanded, setAssistantComposerExpanded] = useState(false);
+  const assistantComposerHidden = Boolean(props.aiEditProposal?.status === "proposed") && !assistantComposerExpanded && !assistantBusy;
+  const navigationVisible = settingsMode ? settingsNavigationVisible : desktopNavigationVisible;
+  const contextOpen = settingsMode ? settingsContextVisible : contextVisible || props.historyOpen;
+  const navigationToggleRef = useRef<HTMLButtonElement>(null);
+  const contextToggleRef = useRef<HTMLButtonElement>(null);
+  const contextPanelRef = useRef<HTMLElement>(null);
+  function closeContext() {
+    const returnFocus = (settingsMode ? settingsContextRef : contextPanelRef).current?.contains(document.activeElement);
+    if (settingsMode) {
+      setSettingsContextVisible(false);
+      if (returnFocus) requestAnimationFrame(()=>contextToggleRef.current?.focus());
+      return;
+    }
+    setContextVisible(false);
+    if (props.historyOpen) props.onCloseHistory();
+    if (returnFocus) requestAnimationFrame(()=>contextToggleRef.current?.focus());
+  }
+  function changeNavigation(visible: boolean) {
+    if (settingsMode) setSettingsNavigationVisible(visible);
+    else { setDesktopNavigationVisible(visible); props.onLayoutConfigChange({ navigationVisible: visible }); }
+    if (!visible) requestAnimationFrame(()=>navigationToggleRef.current?.focus());
+  }
+  useEffect(()=>{
+    if(!contextOpen)return;
+    const escape=(event:globalThis.KeyboardEvent)=>{
+      if(event.key==='Escape'&&!event.defaultPrevented&&!event.isComposing&&!document.querySelector('[role="dialog"]')&&(settingsMode ? settingsContextRef : contextPanelRef).current?.contains(event.target as Node)){
+        event.preventDefault();closeContext();
+      }
+    };
+    window.addEventListener('keydown',escape);
+    return()=>window.removeEventListener('keydown',escape);
+  },[contextOpen,settingsMode,props.historyOpen,props.onCloseHistory]);
+  useEffect(() => { setDesktopNavigationVisible(props.layoutConfig.navigationVisible !== false); }, [props.layoutConfig.navigationVisible]);
+  useEffect(() => { setContextKind(readContextKind(props.layoutConfig.contextKind)); }, [props.layoutConfig.contextKind]);
+  useEffect(() => { setNavigationOpen(false); }, [props.activeProject?.id, props.activeTabId]);
+  // A navigation transition reveals the center. Opening history explicitly on
+  // the same tab still works, including when it is a temporary overlay.
+  useEffect(() => {
+    if(!window.matchMedia("(min-width: 1280px)").matches && props.historyOpen) props.onCloseHistory();
+  }, [props.activeProject?.id, props.activeTabId]);
+
+
   const [imageZoomPercent, setImageZoomPercent] = useState(100);
   const [imageFitToWindow, setImageFitToWindow] = useState(true);
   const [markdownZoomPercent, setMarkdownZoomPercent] = useState(100);
@@ -262,18 +398,28 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   const hasOpenImage = activeWorkspaceTab?.kind === "image" && Boolean(props.activeImageId);
   const hasOpenReferenceDocument = activeWorkspaceTab?.kind === "reference-document";
   const hasReleaseNotes = activeWorkspaceTab?.kind === "release-notes";
-  const hasNotes = activeWorkspaceTab?.kind === "notes";
+  const showWelcome = props.projects.length === 0 && props.notesLoaded && !props.notesMarkdown.trim()
+    && !props.layoutConfig.firstUseDismissed && (!activeWorkspaceTab || activeWorkspaceTab.kind === "notes");
+  const hasNotes = activeWorkspaceTab?.kind === "notes" && !showWelcome;
   const hasAiConversation = activeWorkspaceTab?.kind === "ai-conversation";
+  const displayedContextKind = effectiveContextKind(contextKind, activeWorkspaceTab?.kind);
+  const historyIsActive = props.historyOpen && hasOpenDocument;
   const hasOpenTab = hasOpenDocument || hasOpenHandwrittenNote || hasOpenImage || hasOpenReferenceDocument || hasReleaseNotes || hasNotes || hasAiConversation;
   const activeEditorId = hasNotes ? "user-notes" : props.activeDocumentId;
   const activeEditorController = editorControllers[activeEditorId] ?? null;
+  function captureActiveDocumentMarkdown() {
+    if (!activeEditorController || !props.activeDocument || props.activeDocument.id !== props.activeDocumentId) throw new Error("El editor aún no está preparado para capturar el documento. Vuelve a intentarlo.");
+    return activeEditorController.getMarkdownSnapshot();
+  }
   const activeEditorHistoryState = editorHistoryStates[activeEditorId] ?? emptyMarkdownEditorHistoryState;
   const [historyPreview, setHistoryPreview] = useState<VersionPreview | null>(null);
+  const [nativeHistoryRestore,setNativeHistoryRestore]=useState<{documentId:string;versionId?:string}|null>(null);
   const [restoreTarget, setRestoreTarget] = useState<VersionRecord | null>(null);
   const [restoringVersion, setRestoringVersion] = useState(false);
   const activeHistoryPreview = historyPreview?.documentId === props.activeDocumentId ? historyPreview : null;
   const promptDocumentId = hasOpenDocument ? props.activeDocumentId : hasNotes && props.activeProject ? "user-notes" : undefined;
   const promptMarkdown = hasOpenDocument ? props.activeMarkdown : hasNotes ? props.notesMarkdown : "";
+
   const sidebar = useResizablePanelWidth({
     ...sidebarWidthConfig,
     width: props.layoutConfig.sidebarWidth,
@@ -321,13 +467,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
 
   const handleReplaceActiveImage = useCallback((target: MarkdownEditorImageEditTarget, markdown: string) => {
     if (!activeEditorController) return;
-    const materializedMarkdown = materializeProjectImageReferences(
-      markdown,
-      props.activeProject?.id ?? "",
-      props.activeDocument?.path ?? "",
-      props.tree,
-    );
-    if (activeEditorController.replaceImageAt(target.position, materializedMarkdown, { addToHistory: true })) {
+    if (activeEditorController.replaceImageAt(target.position, markdown, { addToHistory: true })) {
       refreshActiveEditorState();
     }
     setImageEditTarget(null);
@@ -365,13 +505,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
     const reference = node.type === "image"
       ? await props.onBuildImageReference(props.activeDocumentId, node.id, null)
       : await props.onBuildHandwrittenImageReference(props.activeDocumentId, node.id, node.name.replace(/\.knote$/i, ""));
-    const materializedMarkdown = materializeProjectImageReferences(
-      reference.markdown,
-      props.activeProject.id,
-      props.activeDocument.path,
-      props.tree,
-    );
-    if (!activeEditorController.insertMarkdown(materializedMarkdown, { addToHistory: true })) return false;
+    if (!activeEditorController.insertMarkdown(reference.markdown, { addToHistory: true })) return false;
 
     refreshActiveEditorState();
     return true;
@@ -384,6 +518,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
 
   const handleEditorImageDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     const projectFile = getDocumentTreeFileDragData(event.dataTransfer);
+    if(projectFile?.nodeIds?.length)return;
     if (!isInsertableProjectVisual(projectFile?.type) || !activeEditorController || !hasOpenDocument) return;
 
     event.preventDefault();
@@ -394,6 +529,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
 
   const handleEditorImageDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
     const projectFile = getDocumentTreeFileDragData(event.dataTransfer);
+    if(projectFile?.nodeIds?.length)return;
     if (!isInsertableProjectVisual(projectFile?.type) || !activeEditorController || !hasOpenDocument) return;
 
     event.preventDefault();
@@ -419,6 +555,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   }, [activeEditorController]);
 
   const handleEditorControllerChange = useCallback((documentId: string, controller: MarkdownEditorController | null, releasedController?: MarkdownEditorController | null) => {
+    props.onRegisterEditorSnapshot?.(documentId,controller,releasedController);
     const shouldReleaseController = Boolean(releasedController && editorControllersRef.current[documentId] === releasedController);
 
     setEditorControllers((currentControllers) => {
@@ -451,7 +588,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
         return nextHistoryStates;
       });
     }
-  }, [activeEditorController, activeEditorId]);
+  }, [activeEditorController, activeEditorId, props.onRegisterEditorSnapshot]);
 
   useEffect(() => {
     setEditorFormatState((currentFormatState) =>
@@ -466,16 +603,14 @@ export function DesktopLayout(props: DesktopLayoutProps) {
     if (props.pendingEditorOperations.length === 0) return;
 
     for (const operation of props.pendingEditorOperations) {
+      if (props.canApplyEditorOperation && !props.canApplyEditorOperation(operation)) { props.onEditorOperationFailed({ ...operation, failureReason: "source_changed" }); continue; }
       const controller = editorControllers[operation.documentId];
       if (!controller) continue;
 
-      const session = props.editorSessions.find((candidate) => candidate.documentId === operation.documentId);
-      const isNotesOperation = operation.documentId === "user-notes";
-      const markdown = isNotesOperation
-        ? operation.markdown
-        : session?.document
-        ? materializeProjectImageReferences(operation.markdown, props.activeProject?.id ?? "", session.document.path, props.tree)
-        : operation.markdown;
+      if (typeof operation.expectedMarkdown === "string") {
+        if (!controller.matchesMarkdown(operation.expectedMarkdown)) { props.onEditorOperationFailed({ ...operation, failureReason: "source_changed" }); continue; }
+      }
+      const markdown = operation.markdown;
       const operationKind = operation.kind ?? "replace_document";
       const applied = operationKind === "replace_range"
         ? controller.replaceRange(operation.from ?? 0, operation.to ?? operation.from ?? 0, markdown, { addToHistory: operation.addToHistory ?? true })
@@ -503,6 +638,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
     props.onEditorOperationApplied,
     props.onEditorOperationFailed,
     props.pendingEditorOperations,
+    props.canApplyEditorOperation,
     props.tree,
   ]);
 
@@ -510,7 +646,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
     if (!navigationOpen) return;
 
     function closeOnEscape(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") setNavigationOpen(false);
+      if (event.key === "Escape" && !event.defaultPrevented && !document.querySelector('[role="dialog"]')) { setNavigationOpen(false); requestAnimationFrame(()=>navigationToggleRef.current?.focus()); }
     }
 
     window.addEventListener("keydown", closeOnEscape);
@@ -523,15 +659,15 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   }, [props.activeDocumentId]);
 
   useEffect(() => {
-    if (!props.historyOpen || navigationOpen) return;
+    if (settingsMode || !props.historyOpen || navigationOpen) return;
 
     function closeOnEscape(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") props.onCloseHistory();
+      if (event.key === "Escape" && !event.defaultPrevented && !document.querySelector('[role="dialog"]')) props.onCloseHistory();
     }
 
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [navigationOpen, props.historyOpen, props.onCloseHistory]);
+  }, [navigationOpen, settingsMode, props.historyOpen, props.onCloseHistory]);
 
   const handleOpenDocument = useCallback((documentId: string, name: string) => {
     props.onOpenDocument(documentId, name);
@@ -577,8 +713,22 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   }
 
   return (
-    <div className={["h-full overflow-hidden bg-white text-ink-primary", mobileShell ? "knownext-mobile-shell" : "", phoneShell ? "knownext-phone-shell" : ""].join(" ")}>
+    <div className={["workspace-v3 h-full overflow-hidden bg-white text-ink-primary", mobileShell ? "knownext-mobile-shell" : "", phoneShell ? "knownext-phone-shell" : ""].join(" ")}>
       {mobileShell ? null : <TitleBar />}
+      {commandsOpen && <WorkspaceCommandPalette language={props.appLanguage} key={props.activeProject?.id ?? "none"} tree={props.tree} projectId={props.activeProject?.id ?? null} projects={props.projects} recentIds={recentByProject[props.activeProject?.id ?? ""] ?? []} onClose={()=>setCommandsOpen(false)} onSelectProject={id=>{setNavigationOpen(false);props.settingsWorkspace?.onClose();props.onSelectProject(id);}} onSelectNode={(id,type,name,focus)=>{setNavigationOpen(false);props.settingsWorkspace?.onClose();props.onSelectTreeNode(id,type,name,focus);if(type==='folder'){changeNavigation(true);setNavigationOpen(true);}}} commands={[
+        {id:'settings',label:settingsMode?(props.appLanguage==="en"?'Back to document':'Volver al documento'):(props.appLanguage==="en"?'Open settings':'Abrir configuración'),detail:(props.appLanguage==="en"?'Settings on this device':'Ajustes de este dispositivo'),run:()=>{if(settingsMode)props.settingsWorkspace?.onClose();else props.onOpenAppSettings();}},
+        {id:'project',label:(props.appLanguage==="en"?'Create or open a project':'Crear o abrir un proyecto'),run:props.onCreateProject},
+        ...(props.activeProject&&props.onOpenProjectReplace?[{id:'replace-project',label:(props.appLanguage==="en"?'Replace in documents':'Reemplazar en documentos'),detail:(props.appLanguage==="en"?'Select, compare and apply as drafts':'Seleccionar, comparar y aplicar como borradores'),run:props.onOpenProjectReplace}]:[]),
+        ...(props.activeProject&&props.historyEnabled?[{id:'history-file-restore',label:(props.appLanguage==="en"?'Restore a historical file':'Restaurar archivo histórico'),detail:(props.appLanguage==="en"?'Review Markdown, notes and resources by path':'Revisar Markdown, notas y recursos por ruta'),run:()=>setNativeHistoryRestore({documentId:props.activeDocumentId||`${props.activeProject!.id}::`})}]:[]),
+        ...(props.activeProject&&props.onOpenAssetCatalog?[{id:'asset-catalog',label:(props.appLanguage==="en"?'Project resources and links':'Recursos y enlaces del proyecto'),detail:(props.appLanguage==="en"?'Review attachments, references, available text and missing items':'Consultar adjuntos, referencias, texto disponible y faltantes'),run:props.onOpenAssetCatalog}]:[]),
+        ...(props.activeProject&&props.onOpenAiChangeHistory?[{id:'ai-changes',label:(props.appLanguage==="en"?'AI changes and reversal':'Cambios IA y reversión'),detail:(props.appLanguage==="en"?'Review operations and preserve later edits':'Revisar operaciones y conservar ediciones posteriores'),run:props.onOpenAiChangeHistory}]:[]),
+        {id:'recovery',label:(props.appLanguage==="en"?'Recover drafts':'Recuperar borradores'),detail:props.appLanguage==="en"?`${props.orphanDraftCount} missing files · review other copies`:`${props.orphanDraftCount} archivos desaparecidos · revisar otras copias`,run:props.onOpenRecoverableDrafts},
+        {id:'navigation',label:(window.matchMedia('(min-width: 1024px)').matches?navigationVisible:navigationOpen)?(props.appLanguage==="en"?'Hide navigation':'Ocultar navegación'):(props.appLanguage==="en"?'Show navigation':'Mostrar navegación'),run:()=>{if(window.matchMedia('(min-width: 1024px)').matches)changeNavigation(!navigationVisible);else setNavigationOpen(!navigationOpen);}},
+        {id:'assistant',label:(props.appLanguage==="en"?'Open assistant':'Abrir asistente'),detail:(props.appLanguage==="en"?'Active document context':'Contexto del documento activo'),run:()=>{props.settingsWorkspace?.onClose();setContextKind('assistant');props.onCloseHistory();setContextVisible(true);}},
+        ...(props.activeProject ? [{id:'create',label:(props.appLanguage==="en"?'Create document':'Crear documento'),detail:(props.appLanguage==="en"?'At the project root':'En la raíz del proyecto'),run:()=>props.onCreateDocument(null)}] : []),
+        ...(hasOpenTab && !settingsMode ? [{id:'save',label:(props.appLanguage==="en"?'Save active document':'Guardar documento activo'),run:props.onSave}] : []),
+        ...(props.activeProject && props.onOpenTrash ? [{id:'trash',label:(props.appLanguage==="en"?'Open trash':'Abrir papelera'),detail:(props.appLanguage==="en"?'Recover files and review operations':'Recuperar archivos y revisar operaciones'),run:props.onOpenTrash}] : []),
+      ]}/>}
       <div
         className={["relative flex", mobileShell ? "h-full" : "h-[calc(100%-36px)]"].join(" ")}
         style={mobileShell ? { paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" } : undefined}
@@ -592,12 +742,13 @@ export function DesktopLayout(props: DesktopLayoutProps) {
         ) : null}
         <aside
           className={[
-            "absolute inset-y-0 left-0 z-50 flex shrink-0 flex-col border-r border-line bg-panel shadow-menu transition-transform duration-200 ease-out lg:relative lg:translate-x-0 lg:shadow-none",
-            navigationOpen ? "translate-x-0" : "-translate-x-full",
-            desktopNavigationVisible ? "" : "lg:hidden",
+            "workspace-navigation absolute inset-y-0 left-0 z-50 flex shrink-0 flex-col border-r border-line bg-panel shadow-menu transition-transform duration-200 ease-out lg:relative lg:translate-x-0 lg:shadow-none",
+            navigationOpen ? "visible translate-x-0" : "invisible -translate-x-full lg:visible",
+            navigationVisible ? "" : "lg:hidden",
           ].join(" ")}
           style={{ width: phoneShell ? "min(100vw, 420px)" : sidebar.width, maxWidth: phoneShell ? "100vw" : "calc(100vw - 48px)" }}
         >
+          <div className="min-h-0 flex-1 flex-col" style={{display: settingsMode ? "none" : "flex"}}>
           <div className="px-4 pb-2 pt-3">
             <ProjectSelector
               projects={props.projects}
@@ -619,7 +770,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                     data-tooltip="Ocultar documentos"
                     data-tooltip-placement="bottom"
                     aria-label="Ocultar panel de documentos"
-                    onClick={() => setDesktopNavigationVisible(false)}
+                    onClick={() => changeNavigation(false)}
                   >
                     <PanelLeftClose size={16} />
                   </button>
@@ -627,25 +778,35 @@ export function DesktopLayout(props: DesktopLayoutProps) {
               }
               onSelectProject={props.onSelectProject}
               onCreateProject={props.onCreateProject}
+              onImportPackage={props.onImportProjectPackage}
+              onExportPackage={props.onExportProjectPackage}
+              onOpenHistoryRestore={props.activeProject&&props.historyEnabled?()=>setNativeHistoryRestore({documentId:props.activeDocumentId||`${props.activeProject!.id}::`}):undefined}
+              onOpenAssetCatalog={props.onOpenAssetCatalog}
+              onOpenProjectReplace={props.onOpenProjectReplace}
+              onOpenAiChangeHistory={props.onOpenAiChangeHistory}
+              onRetiredProjects={props.onRetiredProjects}
             />
           </div>
-          <div className="min-h-0 flex-1 overflow-hidden px-2 py-1.5">
-            {props.activeProject ? (
+          <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-2 py-1.5">
+            {props.activeProject&&props.treeReadIssue&&<ProjectTreeReadIssue message={props.treeReadIssue} hasPreviousView={!!props.tree.length} busy={props.treeReadBusy??false} onRetry={()=>props.onReloadProjectTree?.()} onSearch={()=>setCommandsOpen(true)}/>}
+            {props.activeProject&&(!props.treeReadIssue||!!props.tree.length) ? (
               <DocumentTree
+                key={props.activeProject?.id ?? "none"}
+                onBatchAction={props.onBatchAction}
                 nodes={props.tree}
                 activeDocumentId={props.activeDocumentId}
                 activeTreeNodeId={props.activeTreeNodeId}
                 hasActiveProject={Boolean(props.activeProject)}
                 onOpenDocument={handleOpenDocument}
-                onOpenHandwrittenNote={props.onOpenHandwrittenNote}
-                onOpenImage={props.onOpenImage}
-                onOpenReferenceDocument={props.onOpenReferenceDocument}
+                onOpenHandwrittenNote={(...args)=>{setNavigationOpen(false);props.onOpenHandwrittenNote(...args);}}
+                onOpenImage={(...args)=>{setNavigationOpen(false);props.onOpenImage(...args);}}
+                onOpenReferenceDocument={(...args)=>{setNavigationOpen(false);props.onOpenReferenceDocument(...args);}}
                 onActivateTreeNode={props.onActivateTreeNode}
                 onSelectTreeNode={props.onSelectTreeNode}
                 onCreateFolder={props.onCreateFolder}
-                onCreateDocument={props.onCreateDocument}
+                onCreateDocument={(...args)=>{setNavigationOpen(false);props.onCreateDocument(...args);}}
                 onRecordAudio={props.onRecordAudio}
-                onCreateHandwrittenNote={props.onCreateHandwrittenNote}
+                onCreateHandwrittenNote={(...args)=>{setNavigationOpen(false);props.onCreateHandwrittenNote(...args);}}
                 onImportFile={props.onImportProjectFile}
                 onExpandTree={props.onExpandTree}
                 onCollapseTree={props.onCollapseTree}
@@ -677,8 +838,12 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             onOpenReleaseNotes={handleOpenReleaseNotes}
             isCheckingForUpdates={props.isCheckingForUpdates}
           />
+          </div>
+          <div className="min-h-0 flex-1 flex-col" style={{display: settingsMode ? "flex" : "none"}}>
+            {props.settingsWorkspace?.navigation({onNavigate: () => setNavigationOpen(false), onHide: () => {setNavigationOpen(false);changeNavigation(false);}})}
+          </div>
         </aside>
-        {desktopNavigationVisible ? (
+        {navigationVisible ? (
           <div className="hidden lg:block">
             <PanelResizeHandle
               label="Cambiar anchura del árbol de documentos"
@@ -690,39 +855,24 @@ export function DesktopLayout(props: DesktopLayoutProps) {
               onKeyDown={sidebar.resizeWithKeyboard}
             />
           </div>
-        ) : (
-          <div className="hidden w-11 shrink-0 border-r border-line bg-panel px-1.5 py-3 lg:flex lg:flex-col lg:items-center">
-            <button
-              className="grid h-8 w-8 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
-              data-tooltip="Mostrar documentos"
-              data-tooltip-placement="right"
-              aria-label="Mostrar panel de documentos"
-              onClick={() => setDesktopNavigationVisible(true)}
-            >
-              <PanelLeftOpen size={16} />
-            </button>
-            <div className="mt-auto">
-              <ProjectActions
-                compact
-                appVersion={props.appVersion}
-                language={props.appLanguage}
-                authStatus={props.authStatus}
-                aiUsageSummary={props.aiUsageSummary}
-                orphanDraftCount={props.orphanDraftCount}
-                onLoginGithub={props.onLoginGithub}
-                onLogout={props.onLogout}
-                onOpenAppSettings={props.onOpenAppSettings}
-                onOpenRecoverableDrafts={props.onOpenRecoverableDrafts}
-                onCheckForUpdates={props.onCheckForUpdates}
-                onOpenReleaseNotes={handleOpenReleaseNotes}
-                isCheckingForUpdates={props.isCheckingForUpdates}
-              />
-            </div>
-          </div>
-        )}
+        ) : null}
 
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white">
-          {hasOpenTab ? (
+        <main data-workspace-focus-anchor tabIndex={-1} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white">
+          <nav className="workspace-panel-controls" aria-label="Paneles de trabajo">
+            <button ref={navigationToggleRef} aria-label="Alternar navegación" aria-expanded={window.matchMedia("(min-width: 1024px)").matches ? navigationVisible : navigationOpen} onClick={() => { if (window.matchMedia("(min-width: 1024px)").matches) changeNavigation(!navigationVisible); else setNavigationOpen(value => !value); }}><PanelLeftOpen size={16}/><span>Navegación</span></button>
+            {settingsMode && <button aria-label="Volver al documento" onClick={props.settingsWorkspace?.onClose}><ArrowLeft size={16}/><span>Volver al documento</span></button>}
+            <span className="min-w-0 flex-1 truncate text-xs text-ink-secondary">{settingsMode ? (props.appLanguage === "en" ? "This device" : "Este dispositivo") : props.activeProject?.name}</span>
+            <button aria-label="Acceso rápido" title="Acceso rápido · Ctrl/Cmd Shift P" onClick={()=>setCommandsOpen(true)}><Search size={16}/></button>
+            <button aria-label="Abrir Grabaciones" title="Grabaciones" onClick={props.onOpenRecordings}><Mic size={16}/></button>
+            {props.aiResultReview && <button className="relative" aria-label={`Resultados IA conservados${props.aiResultReview.count ? `: ${props.aiResultReview.count}` : ""}`} title={props.aiResultReview.hasError ? "Revisar resultados · Hay un aviso de conservación" : "Resultados IA conservados"} onClick={props.aiResultReview.onOpen}><GitCompareArrows size={16}/><span>Resultados IA{props.aiResultReview.count ? ` · ${props.aiResultReview.count}` : props.aiResultReview.hasError ? " · !" : ""}</span>{(props.aiResultReview.count > 0 || props.aiResultReview.hasError) && <span className="workspace-result-count" aria-hidden="true">{props.aiResultReview.count || "!"}</span>}</button>}
+            <button aria-label="Configuración" aria-pressed={settingsMode} onClick={() => {if(settingsMode)props.settingsWorkspace?.onClose();else props.onOpenAppSettings();}}><Settings size={16}/></button>
+            {!settingsMode && props.activeProject && props.onOpenTrash && <button aria-label="Papelera del proyecto" onClick={props.onOpenTrash}><Trash2 size={16}/></button>}
+            <span className="workspace-activity" role="status">{assistantBusy ? "IA en curso" : props.aiBubble ? "Resultado IA disponible" : ""}</span>
+            <button ref={contextToggleRef} aria-label="Alternar contexto" aria-expanded={contextOpen} onClick={() => { const next = !contextOpen; if(settingsMode){setSettingsContextVisible(next);return;} if (props.historyOpen) props.onCloseHistory(); setContextVisible(next); }}><span>Contexto</span><PanelRightOpen size={16}/></button>
+          </nav>
+          {props.activeProject&&props.treeReadIssue&&!settingsMode&&<div className={navigationVisible?"shrink-0 p-2 lg:hidden":"shrink-0 p-2"}><ProjectTreeReadIssue message={props.treeReadIssue} hasPreviousView={!!props.tree.length} busy={props.treeReadBusy??false} onRetry={()=>props.onReloadProjectTree?.()} onSearch={()=>setCommandsOpen(true)}/></div>}
+          {props.continuityNotice}
+          {hasOpenTab && !settingsMode ? (
             <>
           <DocumentTabs
             tabs={props.tabs}
@@ -735,7 +885,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             onCloseTabs={props.onCloseTabs}
             onReorderDocumentTabs={props.onReorderDocumentTabs}
           />
-              {hasReleaseNotes || hasAiConversation || hasOpenImage || hasOpenReferenceDocument || hasOpenHandwrittenNote ? null : (
+              {hasReleaseNotes || hasAiConversation || hasOpenImage || hasOpenReferenceDocument || hasOpenHandwrittenNote || hasOpenDocument ? null : (
               <MarkdownToolbar
                 historyOpen={props.historyOpen}
                 historyEnabled={props.historyEnabled}
@@ -749,7 +899,8 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 imageInsertionEnabled={!hasNotes}
                 documentActionsEnabled={!hasNotes}
                 onRunEditorAction={handleRunEditorAction}
-                onExportDocument={(format) => props.onExportDocument(props.activeDocumentId, format)}
+                onExportDocument={(format) => props.onExportDocument(props.activeDocumentId, format, captureActiveDocumentMarkdown)}
+                onSaveTemplate={props.onSaveDocumentTemplate ? () => props.onSaveDocumentTemplate!(props.activeDocumentId, captureActiveDocumentMarkdown) : undefined}
                 onMarkdownZoomChange={(nextZoom) => setMarkdownZoomPercent(clamp(Math.round(nextZoom), 80, 150))}
                 onToggleMarkdownSource={() => setMarkdownSourceVisible((visible) => !visible)}
                 onToggleHistory={props.onToggleHistory}
@@ -757,11 +908,11 @@ export function DesktopLayout(props: DesktopLayoutProps) {
               )}
             </>
           ) : null}
-          <div className="flex min-h-0 flex-1">
-            <section className={["relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", hasOpenTab ? "bg-white" : "bg-panel"].join(" ")}>
+          <div className="relative flex min-h-0 flex-1">
+            <section ref={documentSurfaceRef} aria-hidden={settingsMode || undefined} style={{display: settingsMode ? "none" : undefined}} className={["relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", hasOpenTab ? "bg-white" : "bg-panel"].join(" ")}>
               {hasOpenTab ? (
                 <>
-                  <div className={hasAiConversation || hasOpenImage || hasOpenReferenceDocument || hasOpenHandwrittenNote ? "min-h-0 flex-1 overflow-hidden pb-[54px]" : "min-h-0 flex-1 overflow-y-auto px-8 pt-4 mb-[50px]"}>
+                  <div className={hasAiConversation || hasOpenImage || hasOpenReferenceDocument || hasOpenHandwrittenNote || hasOpenDocument ? "min-h-0 flex-1 overflow-hidden pb-[54px]" : "min-h-0 flex-1 overflow-y-auto px-8 pt-4 pb-12"}>
                     <div className={hasAiConversation || hasOpenImage || hasOpenReferenceDocument || hasOpenHandwrittenNote ? "h-full min-h-0 w-full" : "mx-auto max-w-[900px]"}>
                       {hasReleaseNotes ? (
                         <ReleaseNotesViewer markdown={props.releaseNotesMarkdown} />
@@ -773,6 +924,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                           events={props.aiConversationEvents}
                           pendingIntent={props.aiPendingIntent}
                           editProposal={props.aiEditProposal}
+                          applyingEditProposalId={props.applyingAiEditProposalId}
                           staleEditOperationIds={props.staleAiEditOperationIds}
                           blockedEditOperationReasons={props.blockedAiEditOperationReasons}
                           appliedEditOperationIds={props.appliedAiEditOperationIds}
@@ -782,24 +934,45 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                           onOpenDocument={props.onOpenDocument}
                         />
                       ) : hasOpenHandwrittenNote && activeWorkspaceTab?.kind === "handwritten-note" ? (
+                        <div className="flex h-full min-h-0 flex-col">
+                        {props.activeHandwrittenLoadError && <LoadFailure message={props.activeHandwrittenLoadError} onRetry={()=>props.onRetryHandwrittenLoad(activeWorkspaceTab.id)}/>}
+                        {props.activeHandwrittenDraftWriteConflict&&<DraftWriteConflictBanner busy={props.draftReviewBusy===activeWorkspaceTab.id} onReview={()=>props.onReviewChangedDraft?.(activeWorkspaceTab.id,true)} onRecovery={props.onOpenRecoverableDrafts}/>}
+                        {(props.activeHandwrittenDiskChanged || props.activeHandwrittenConflictStatus === "orphaned" || props.activeHandwrittenNote?.baseVerified === false) && <div className="shrink-0 px-3 pt-3"><DocumentConflictBanner
+                          conflictStatus={props.activeHandwrittenConflictStatus ?? "disk-changed"}
+                          baseVerified={props.activeHandwrittenNote?.baseVerified}
+                          sourceUnavailable={props.activeHandwrittenNote?.sourceUnavailable}
+                          recoveryMessage={props.activeHandwrittenNote?.recoveryWarning}
+                          onReviewRecovery={props.onRecoverHandwrittenCopy??props.onOpenRecoverableDrafts}
+                          onRetrySource={()=>props.onRetryHandwrittenLoad(activeWorkspaceTab.id)}
+                          onKeepLocalVersion={()=>props.onKeepHandwrittenVersion?.()}
+                          onLoadDiskVersion={()=>props.onLoadHandwrittenDiskVersion?.()}
+                          onMergeDiskVersion={props.onMergeHandwrittenDiskVersion}
+                        /></div>}
+                        <div className="min-h-0 flex-1">
                         <HandwrittenEditor
                           noteId={activeWorkspaceTab.id}
+                          pageFocus={props.handwrittenPageFocus}
+                          onPageFocusHandled={props.onHandwrittenPageFocusHandled}
                           name={activeWorkspaceTab.name}
                           content={props.activeHandwrittenContent}
                           toolPresets={props.handwrittenToolPresets}
                           eraserConfig={props.handwrittenEraserConfig}
                           isDirty={props.activeHandwrittenDirty}
                           saveState={props.activeHandwrittenSaveState}
+                          onBeforeOcr={props.onBeforeHandwrittenOcr?()=>props.onBeforeHandwrittenOcr!(activeWorkspaceTab.id):undefined}
+                          onApplyOcr={props.onApplyHandwrittenOcr}
+                          onOcrObserved={props.onHandwrittenOcrObserved}
                           onChange={(nextContent) => props.onHandwrittenChange(activeWorkspaceTab.id, nextContent)}
                           onToolPresetsChange={props.onHandwrittenToolPresetsChange}
                           onEraserConfigChange={props.onHandwrittenEraserConfigChange}
                         />
+                        </div>
+                        </div>
                       ) : hasNotes ? (
                         props.notesLoaded ? (
                           markdownSourceVisible ? (
                             <MarkdownSourceViewer markdown={props.notesMarkdown} zoomPercent={markdownZoomPercent} ariaLabel="Markdown puro de Notas" />
                           ) : (
-                            <Suspense fallback={<div className="pt-6 text-[11px] text-ink-secondary">Cargando editor...</div>}>
                               <MarkdownEditor
                                 key={props.notesEditorKey}
                                 documentKey={props.notesEditorKey}
@@ -820,7 +993,6 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                                 selectionFocus={toMarkdownEditorSelection(props.aiSelectionFocus, "user-notes")}
                                 zoomPercent={markdownZoomPercent}
                               />
-                            </Suspense>
                           )
                         ) : (
                           <div className="pt-6 text-[11px] text-ink-secondary">Cargando notas...</div>
@@ -840,7 +1012,8 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                         />
                       ) : hasOpenReferenceDocument && activeWorkspaceTab?.kind === "reference-document" && props.activeProject ? (
                         <ReferenceDocumentViewer project={props.activeProject} tab={activeWorkspaceTab} />
-                      ) : activeHistoryPreview ? (
+                      ) : (
+                        <HistoryComparisonSurface documentId={props.activeDocumentId} preview={activeHistoryPreview ? (
                         <HistoryPreviewWorkspace
                           preview={activeHistoryPreview}
                           currentMarkdown={props.activeMarkdown}
@@ -850,16 +1023,20 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                               ? { ...currentPreview, mode }
                               : currentPreview
                           ))}
-                          onRestore={() => setRestoreTarget(activeHistoryPreview.version)}
+                          onRestore={()=>setNativeHistoryRestore({documentId:activeHistoryPreview.documentId,versionId:activeHistoryPreview.version.id})}
+                          onRestoreParts={props.onRestoreVersionParts?()=>{setHistoryPreview(null);props.onRestoreVersionParts?.(activeHistoryPreview.version.id);}:undefined}
+                          onSwap={() => setHistoryPreview(current => current?.comparison ? {...current, version:current.comparison.version, markdown:current.comparison.markdown, comparison:{version:current.version,markdown:current.markdown}} : current)}
                           onBackToCurrent={() => setHistoryPreview(null)}
                         />
-                      ) : (
-                        <>
-                      {props.activeDocumentDiskChanged || props.activeDocumentConflictStatus === "orphaned" ? (
+                        ) : null}>
+                      {props.activeDraftWriteConflict&&<DraftWriteConflictBanner busy={props.draftReviewBusy===props.activeDocumentId} onReview={()=>props.onReviewChangedDraft?.(props.activeDocumentId,false)} onRecovery={props.onOpenRecoverableDrafts}/>}
+                      {props.activeDocumentDiskChanged || props.activeDocumentConflictStatus === "orphaned" || props.activeDocument?.baseVerified === false ? (
                         <DocumentConflictBanner
                           conflictStatus={props.activeDocumentConflictStatus}
+                          baseVerified={props.activeDocument?.baseVerified}
                           onKeepLocalVersion={props.onKeepLocalVersion}
                           onLoadDiskVersion={props.onLoadDiskVersion}
+                          onMergeDiskVersion={props.onMergeDiskVersion}
                         />
                       ) : null}
                       {props.editorSessions.map((session) => (
@@ -869,16 +1046,17 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                           onDragOver={session.documentId === props.activeDocumentId ? handleEditorImageDragOver : undefined}
                           onDrop={session.documentId === props.activeDocumentId ? handleEditorImageDrop : undefined}
                         >
+                          {session.loadError && <LoadFailure message={session.loadError} onRetry={()=>props.onRetryDocumentLoad(session.documentId)}/>}
                           {session.document ? (
                             markdownSourceVisible && session.documentId === props.activeDocumentId ? (
                               <MarkdownSourceViewer markdown={session.markdown} zoomPercent={markdownZoomPercent} ariaLabel={`Markdown puro de ${session.document.name}`} />
                             ) : (
-                              <Suspense fallback={<div className="pt-6 text-[11px] text-ink-secondary">Cargando editor...</div>}>
                                 <MarkdownEditor
                                   key={session.editorKey}
                                   documentKey={session.editorKey}
-                                  markdown={materializeProjectImageReferences(session.markdown, props.activeProject?.id ?? "", session.document.path, props.tree)}
-                                  onChange={(markdown, source) => props.onMarkdownChange(session.documentId, restoreProjectImageReferences(markdown, props.activeProject?.id ?? "", session.document!.path, props.tree), source)}
+                                  markdown={session.markdown}
+                                  resolveImageSource={source => projectImageSource(source, props.activeProject?.id ?? "", session.document!.path, props.tree)}
+                                  onChange={(markdown, source) => props.onMarkdownChange(session.documentId, markdown, source)}
                                   onControllerChange={(controller, releasedController) => handleEditorControllerChange(session.documentId, controller, releasedController)}
                                   onFormatStateChange={(formatState) => {
                                     if (session.documentId === props.activeDocumentId) {
@@ -896,19 +1074,24 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                                   selectionFocus={toMarkdownEditorSelection(props.aiSelectionFocus, session.documentId)}
                                   zoomPercent={markdownZoomPercent}
                                 />
-                              </Suspense>
                             )
                           ) : (
-                            <div className="pt-6 text-[11px] text-ink-secondary">Cargando documento...</div>
+                            session.isLoading ? <div className="pt-6 text-[11px] text-ink-secondary" role="status">Cargando documento...</div> : null
                           )}
                         </div>
                       ))}
-                        </>
+                        </HistoryComparisonSurface>
                       )}
                     </div>
                   </div>
-                  <div className="pointer-events-none absolute inset-x-0 bottom-[90px] h-4 bg-gradient-to-t from-[rgb(var(--app-surface))] to-transparent" />
+
                 </>
+              ) : showWelcome ? (
+                <WorkspaceWelcome language={props.appLanguage} onCreateProject={props.onCreateProject} onUseNotes={() => {
+                  props.onLayoutConfigChange({ firstUseDismissed: true });
+                  const notes = props.tabs.find(tab => tab.kind === "notes");
+                  if (notes) props.onSelectTab(notes.id);
+                }}/>
               ) : (
                 <>
                   <button
@@ -925,57 +1108,6 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                   </div>
                 </>
               )}
-              {!activeHistoryPreview ? (
-              <AiPromptInput
-                documentId={promptDocumentId}
-                projectId={props.activeProject?.id}
-                markdown={promptMarkdown}
-                providerReady={props.aiConfig.openaiKeyConfigured}
-                transcriptionConfig={props.aiConfig.transcription}
-                documentDictationReady={Boolean((hasOpenDocument || hasNotes) && activeEditorController?.canInsertText())}
-                appliedChangeSummary={props.aiAppliedChange?.documentId === activeEditorId ? props.aiAppliedChange.summary : null}
-                selectionFocus={props.aiSelectionFocus?.documentId === activeEditorId ? props.aiSelectionFocus : null}
-                activeContextSources={props.aiContextSources}
-                researchBrief={props.aiResearchBrief}
-                researchJob={props.aiResearchJob}
-                researchJobs={props.aiResearchJobs}
-                onSubmit={props.onSendAiPrompt}
-                onUpdateResearchBrief={props.onUpdateAiResearchBrief}
-                onStartResearch={props.onStartAiResearch}
-                onCancelResearchBrief={props.onCancelAiResearchBrief}
-                onCancelResearchJob={props.onCancelAiResearchJob}
-                onRetryResearchJob={props.onRetryAiResearchJob}
-                onTranscriptionConfigChange={props.onAiTranscriptionChange}
-                onPreviewDocumentDictation={handlePreviewDocumentDictation}
-                onCommitDocumentDictation={handleCommitDocumentDictation}
-                onClearDocumentDictationPreview={handleClearDocumentDictationPreview}
-                onClearSelectionFocus={props.onClearAiSelectionFocus}
-                onDismissAppliedChange={props.onDismissAiAppliedChange}
-                onSearchProjectDocuments={props.onSearchAiContextDocuments}
-                onAddProjectDocumentContext={props.onAddProjectDocumentContext}
-                onUploadContextFiles={props.onUploadAiContextFiles}
-                onPickLocalContextFiles={props.onPickLocalAiContextFiles}
-                onRemoveContextSource={props.onRemoveAiContextSource}
-                onExtendContextSource={props.onExtendAiContextSource}
-                onPreviewContextSource={props.onPreviewAiContextSource}
-                onAddContextSourceToProject={props.onAddAiContextSourceToProject}
-              />
-              ) : null}
-              {(hasOpenDocument || hasOpenHandwrittenNote) && !activeHistoryPreview ? (
-                <AiResponseBubble
-                  bubble={props.aiBubble}
-                  pendingIntent={props.aiPendingIntent}
-                  editProposal={props.aiEditProposal}
-                  staleEditOperationIds={props.staleAiEditOperationIds}
-                  blockedEditOperationReasons={props.blockedAiEditOperationReasons}
-                  appliedEditOperationIds={props.appliedAiEditOperationIds}
-                  onIntentAction={props.onAiIntentAction}
-                  onApplyEditProposal={props.onApplyAiEditProposal}
-                  onDiscardEditProposal={props.onDiscardAiEditProposal}
-                  onClose={props.onCloseAiBubble}
-                  onOpenConversation={props.onOpenAiConversation}
-                />
-              ) : null}
               {imageInsertOpen && props.activeProject && hasOpenDocument ? (
                 <InsertImageDialog
                   activeProjectId={props.activeProject.id}
@@ -987,13 +1119,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                   onBuildReference={props.onBuildImageReference}
                   onBuildHandwrittenReference={props.onBuildHandwrittenImageReference}
                   onInsert={(markdown) => {
-                    const materializedMarkdown = materializeProjectImageReferences(
-                      markdown,
-                      props.activeProject?.id ?? "",
-                      props.activeDocument?.path ?? "",
-                      props.tree,
-                    );
-                    if (activeEditorController?.insertMarkdown(materializedMarkdown, { addToHistory: true })) {
+                    if (activeEditorController?.insertMarkdown(markdown, { addToHistory: true })) {
                       refreshActiveEditorState();
                     }
                     setImageInsertOpen(false);
@@ -1008,7 +1134,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                   activeDocumentPath={props.activeDocument?.path ?? null}
                   tree={props.tree}
                   initialAltText={imageEditTarget.alt}
-                  initialUrl={formatEditableImageTarget(imageEditTarget.src, props.activeProject.id, props.activeDocument?.path ?? "")}
+                  initialUrl={imageEditTarget.src}
                   onClose={() => setImageEditTarget(null)}
                   onImportImage={props.onImportProjectImage}
                   onBuildReference={props.onBuildImageReference}
@@ -1058,16 +1184,19 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 onOmitAll={props.onOmitExternalChanges}
                 onPushGithub={props.onPushProject}
                 onPullGithub={props.onPullProject}
-                onResolveGithubConflict={props.onResolveProjectGithubConflict}
                 onOpenGithubRepository={props.onOpenProjectGithub}
                 onOpenDocument={props.onOpenDocument}
                 onSaveDocument={props.onSaveDocument}
                 onDiscardDocumentDraft={props.onDiscardDocumentDraft}
                 onRefresh={props.onRefreshExternalChanges}
+                beforeApply={props.beforeMixedApplication} onApplicationChanged={props.onMixedApplicationChanged}
+                onLocalTreeChanged={props.onHistoricalCopyTree} onLocalTreeUnavailable={props.onHistoricalCopyTreeUnavailable}
                 onClose={props.onCloseExternalChanges}
               />
               {hasOpenDocument ? (
                 <DocumentStatusBar
+                  isLoading={props.activeDocumentLoading}
+                  loadError={props.activeDocumentLoadError}
                   isDirty={props.activeDocumentDirty}
                   saveState={props.saveState}
                   wordCount={props.activeDocument?.wordCount ?? countWords(props.activeMarkdown)}
@@ -1089,10 +1218,13 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 <WorkspaceStatusBar
                   kind="MD"
                   title="Notas"
-                  detail={`${countWords(props.notesMarkdown)} palabras · ${getNotesSaveDetail(props.notesSaveState, props.notesUpdatedAt)}`}
+                  detail={`${countWords(props.notesMarkdown)} palabras · ${props.notesLoaded?notesSaveFeedback(props.notesSaveState,props.notesDirty,props.notesUpdatedAt?formatCompactDateTime(props.notesUpdatedAt):null):"Lectura pendiente"}`}
                 />
               ) : hasOpenHandwrittenNote ? (
                 <DocumentStatusBar
+                  isLoading={props.activeHandwrittenLoading}
+                  loadError={props.activeHandwrittenLoadError}
+                  blockedSaveReason={props.activeHandwrittenNote?.sourceUnavailable?props.activeHandwrittenNote.recoveryWarning??"La fuente no es compatible; el borrador local se conserva.":undefined}
                   isDirty={props.activeHandwrittenDirty}
                   saveState={props.activeHandwrittenSaveState}
                   kindLabel="KNOTE"
@@ -1132,40 +1264,127 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 />
               ) : null}
             </section>
-            {props.historyOpen && hasOpenDocument ? (
-              <>
-                <button
-                  className="fixed inset-x-0 bottom-0 top-9 z-40 bg-black/20 lg:hidden"
-                  aria-label="Cerrar historial de versiones"
-                  onClick={props.onCloseHistory}
-                />
-                <div className="hidden lg:block">
-                  <PanelResizeHandle
-                    label="Cambiar anchura del historial de versiones"
-                    minWidth={historyWidthConfig.minWidth}
-                    maxWidth={historyWidthConfig.maxWidth}
-                    value={history.width}
-                    isResizing={history.isResizing}
-                    onPointerDown={history.startResize}
-                    onKeyDown={history.resizeWithKeyboard}
-                  />
-                </div>
-                <div
-                  className="fixed bottom-0 right-0 top-9 z-50 flex shrink-0 shadow-menu lg:relative lg:inset-auto lg:z-auto lg:shadow-none"
-                  style={{ width: history.width, maxWidth: "calc(100vw - 48px)" }}
-                >
+            <section ref={settingsContentRef} tabIndex={-1} aria-label="Configuración de este dispositivo" className="min-h-0 min-w-0 flex-1 overflow-hidden" style={{display: settingsMode ? undefined : "none"}}>{props.settingsWorkspace?.content}</section>
+            <aside ref={contextPanelRef} aria-label="Contexto" hidden={!contextOpen || settingsMode} className="workspace-context" style={{ width: history.width }}>
+              <div className="workspace-context-resize"><PanelResizeHandle
+                label="Cambiar anchura del contexto" minWidth={historyWidthConfig.minWidth} maxWidth={historyWidthConfig.maxWidth}
+                value={history.width} isResizing={history.isResizing} onPointerDown={history.startResize} onKeyDown={history.resizeWithKeyboard}/></div>
+              <header className="workspace-context-header">
+                <label className="sr-only" htmlFor="workspace-context-kind">Contenido del panel contextual</label>
+                <select id="workspace-context-kind" value={historyIsActive ? "history" : displayedContextKind}
+                  onChange={event => {
+                    setContextVisible(true);
+                    if (event.target.value === "history") { if (!props.historyOpen) props.onToggleHistory(); }
+                    else { const kind=readContextKind(event.target.value);setContextKind(kind);props.onLayoutConfigChange({contextKind:kind});if (props.historyOpen) props.onCloseHistory(); }
+                  }}>
+                  <option value="assistant">Asistente</option>
+                  <option value="history" disabled={!hasOpenDocument || !props.historyEnabled}>Historial</option>
+                  <option value="document" disabled={!hasOpenDocument && !hasNotes}>Buscar y secciones</option>
+                  <option value="properties" disabled={!activeWorkspaceTab || hasAiConversation}>Información</option>
+                  <option value="references" disabled={!hasOpenDocument && !hasOpenHandwrittenNote && !hasOpenImage && !hasOpenReferenceDocument}>Referencias</option>
+                </select>
+                <button aria-label={contextPinned ? "Desfijar contexto" : "Fijar contexto"} aria-pressed={contextPinned} onClick={() => props.onLayoutConfigChange({contextPinned:!contextPinned})}><Pin size={16}/></button>
+                <button aria-label="Ocultar contexto" onClick={closeContext}><PanelRightClose size={16}/></button>
+              </header>
+              <div className="workspace-context-content" hidden={historyIsActive || displayedContextKind !== "assistant" || Boolean(activeHistoryPreview)}>
+                <p className="workspace-context-scope">{hasOpenDocument ? props.activeDocument?.name : hasOpenHandwrittenNote ? props.activeHandwrittenNote?.name : hasNotes ? "Notas personales" : props.activeProject?.name ?? "Sin proyecto"}</p>
+                {!props.aiConfig.openaiKeyConfigured && <button className="workspace-configure-ai" onClick={() => props.onOpenAppSettings("ai")}>Configurar IA</button>}
+                {!hasAiConversation && <AiResponseBubble embedded bubble={props.aiBubble} pendingIntent={props.aiPendingIntent} editProposal={props.aiEditProposal}
+                  applyingEditProposalId={props.applyingAiEditProposalId} staleEditOperationIds={props.staleAiEditOperationIds} blockedEditOperationReasons={props.blockedAiEditOperationReasons} appliedEditOperationIds={props.appliedAiEditOperationIds}
+                  onIntentAction={props.onAiIntentAction} onApplyEditProposal={props.onApplyAiEditProposal} onDiscardEditProposal={props.onDiscardAiEditProposal} onClose={props.onCloseAiBubble} onOpenConversation={props.onOpenAiConversation}/>}
+              {props.aiEditProposal?.status === "proposed" && <button type="button" className="min-h-11 w-full py-2 text-left text-xs font-medium text-brand-orange" aria-expanded={!assistantComposerHidden} aria-controls="assistant-composer" disabled={assistantBusy} onClick={() => setAssistantComposerExpanded(value => !value)}>{assistantComposerHidden ? (props.appLanguage === "en" ? "New instruction" : "Nueva instrucción") : (props.appLanguage === "en" ? "Hide input" : "Ocultar entrada")}</button>}
+              <div id="assistant-composer" hidden={assistantComposerHidden}>
+              <AiPromptInput
+                embedded
+                onActivityChange={setAssistantBusy}
+                documentId={promptDocumentId}
+                projectId={props.activeProject?.id}
+                markdown={promptMarkdown}
+                providerReady={props.aiConfig.openaiKeyConfigured}
+                transcriptionConfig={props.aiConfig.transcription}
+                documentDictationReady={Boolean((hasOpenDocument || hasNotes) && activeEditorController?.canInsertText())}
+                appliedChangeSummary={props.aiAppliedChange?.documentId === activeEditorId ? props.aiAppliedChange.summary : null}
+                selectionFocus={props.aiSelectionFocus?.documentId === activeEditorId ? props.aiSelectionFocus : null}
+                activeContextSources={props.aiContextSources}
+                researchBrief={props.aiResearchBrief}
+                researchJob={props.aiResearchJob}
+                researchJobs={props.aiResearchJobs}
+                onSubmit={props.onSendAiPrompt}
+                onUpdateResearchBrief={props.onUpdateAiResearchBrief}
+                onReviewResearchEvidence={props.onReviewResearchEvidence}
+                onStartResearch={props.onStartAiResearch}
+                onCancelResearchBrief={props.onCancelAiResearchBrief}
+                onCancelResearchJob={props.onCancelAiResearchJob}
+                onRetryResearchJob={props.onRetryAiResearchJob}
+                onTranscriptionConfigChange={props.onAiTranscriptionChange}
+                onPreviewDocumentDictation={handlePreviewDocumentDictation}
+                onCommitDocumentDictation={handleCommitDocumentDictation}
+                onClearDocumentDictationPreview={handleClearDocumentDictationPreview}
+                onClearSelectionFocus={props.onClearAiSelectionFocus}
+                onDismissAppliedChange={props.onDismissAiAppliedChange}
+                onSearchProjectDocuments={props.onSearchAiContextDocuments}
+                onAddProjectDocumentContext={props.onAddProjectDocumentContext}
+                onAddProjectSelectionContext={props.onBatchAction?ids=>props.onBatchAction?.("context",ids):undefined}
+                onUploadContextFiles={props.onUploadAiContextFiles}
+                onPickLocalContextFiles={props.onPickLocalAiContextFiles}
+                onRemoveContextSource={props.onRemoveAiContextSource}
+                onExtendContextSource={props.onExtendAiContextSource}
+                onPreviewContextSource={props.onPreviewAiContextSource}
+                onRefreshContextSource={props.onRefreshAiContextSource}
+                onAddContextSourceToProject={props.onAddAiContextSourceToProject}
+              />
+              </div>
+
+              </div>
+              <div className="workspace-context-content" hidden={historyIsActive || displayedContextKind !== "document"}>
+                <DocumentToolsPanel controller={hasOpenDocument || hasNotes ? activeEditorController : null} revision={promptMarkdown} scope={JSON.stringify([props.activeProject?.id, activeEditorId])} name={hasNotes ? "Notas personales" : props.activeDocument?.name ?? "ningún documento"}/>
+              </div>
+              <div className="workspace-context-content" hidden={historyIsActive || displayedContextKind !== "properties"}>
+                <DocumentInfoPanel tab={activeWorkspaceTab ?? null} project={props.activeProject} document={props.activeDocument} note={props.activeHandwrittenNote} image={activeImageAsset}
+                  dirty={hasNotes?props.notesDirty:hasOpenHandwrittenNote ? props.activeHandwrittenDirty : props.activeDocumentDirty}
+                  saveState={hasNotes ? props.notesSaveState : hasOpenHandwrittenNote ? props.activeHandwrittenSaveState : props.saveState}
+                  needsReview={hasOpenHandwrittenNote ? props.activeHandwrittenDiskChanged || props.activeHandwrittenConflictStatus==="orphaned" : hasOpenDocument ? props.activeDocumentDiskChanged || props.activeDocumentConflictStatus==="orphaned" : false}
+                  loadError={hasOpenHandwrittenNote ? props.activeHandwrittenLoadError : hasOpenDocument ? props.editorSessions.find(session=>session.documentId===props.activeDocumentId)?.loadError : undefined}
+                  versioning={props.versioningStatus} onConfigureProject={props.onConfigureProject}/>
+              </div>
+              {!settingsMode && contextOpen && !historyIsActive && displayedContextKind==="references" && <div className="workspace-context-content">
+                {activeWorkspaceTab && props.activeProject && (hasOpenDocument || hasOpenHandwrittenNote || hasOpenImage || hasOpenReferenceDocument) ? <DocumentReferencesPanel
+                  documentId={activeWorkspaceTab.id} name={activeWorkspaceTab.name}
+                  revision={hasOpenDocument ? props.activeDocument?.baseFingerprint?.sha256 ?? "" : hasOpenHandwrittenNote ? props.activeHandwrittenNote?.baseFingerprint?.sha256 ?? "" : ""}
+                  dirty={hasOpenDocument ? props.activeDocumentDirty : hasOpenHandwrittenNote ? props.activeHandwrittenDirty : false}
+                  onOpen={target => {
+                    props.onOpenLocalReference(target);
+                    if (target.kind === "folder" && target.status === "available" && target.projectId === props.activeProject?.id) {
+                      changeNavigation(true); setNavigationOpen(true);
+                      requestAnimationFrame(() => {
+                        const item = Array.from(document.querySelectorAll<HTMLElement>('[data-focus-node-id]')).find(node => node.dataset.focusNodeId === target.id);
+                        item?.focus({ preventScroll: true }); item?.scrollIntoView({ block: "nearest" });
+                      });
+                    }
+                  }}
+                /> : <p className="px-2 py-5 text-sm text-ink-secondary">Abre un archivo del proyecto para consultar sus referencias.</p>}
+              </div>}
+              {props.historyOpen && hasOpenDocument ? <div className="min-h-0 flex-1 overflow-auto">
                   <VersionHistoryPanel
+                    {...props.stateTransitionAuthority}
                     documentId={props.activeDocumentId}
                     documentName={props.activeDocument?.name ?? "documento"}
                     activePreviewVersionId={activeHistoryPreview?.version.id ?? null}
                     onPreviewChange={setHistoryPreview}
-                    onClose={props.onCloseHistory}
+                    onReviewRemoteVersion={props.onReviewRemoteVersion}
+                  onConfigureProject={props.onConfigureProject}
+                  onMilestoneChange={(versionId,milestone)=>setHistoryPreview(current=>current ? {...current,version:current.version.id===versionId?{...current.version,milestone}:current.version,comparison:current.comparison?{...current.comparison,version:current.comparison.version.id===versionId?{...current.comparison.version,milestone}:current.comparison.version}:undefined}:current)}
+                    onClose={closeContext}
                   />
-                </div>
-              </>
-            ) : null}
+              </div> : null}
+            </aside>
+            {props.settingsWorkspace && <aside ref={settingsContextRef} aria-label="Contexto de configuración" hidden={!settingsMode || !settingsContextVisible} className="workspace-context" style={{width: history.width}}>
+              <header className="workspace-context-header"><h2 className="flex-1 text-sm font-semibold">{props.appLanguage === "en" ? "Help and scope" : "Ayuda y alcance"}</h2><button aria-label="Ocultar contexto de configuración" onClick={closeContext}><PanelRightClose size={16}/></button></header>
+              <div className="workspace-context-content">{props.settingsWorkspace.context}</div>
+            </aside>}
           </div>
         </main>
+        {nativeHistoryRestore&&props.activeProject&&<HistoryRestoreDialog {...props.stateTransitionAuthority} projectId={props.activeProject.id} documentId={nativeHistoryRestore.documentId} versionId={nativeHistoryRestore.versionId} onClose={()=>setNativeHistoryRestore(null)}/>}
         {restoreTarget ? (
           <RestoreVersionDialog
             version={restoreTarget}
@@ -1176,119 +1395,6 @@ export function DesktopLayout(props: DesktopLayoutProps) {
           />
         ) : null}
       </div>
-    </div>
-  );
-}
-
-function HistoryPreviewWorkspace({
-  preview,
-  currentMarkdown,
-  markdownZoomPercent,
-  onModeChange,
-  onRestore,
-  onBackToCurrent,
-}: {
-  preview: VersionPreview;
-  currentMarkdown: string;
-  markdownZoomPercent: number;
-  onModeChange: (mode: VersionPreviewMode) => void;
-  onRestore: () => void;
-  onBackToCurrent: () => void;
-}) {
-  const diff = useMemo(() => buildLineDiff(preview.markdown, currentMarkdown), [currentMarkdown, preview.markdown]);
-  const sideBySideDiff = useMemo(() => buildSideBySideDiff(preview.markdown, currentMarkdown), [currentMarkdown, preview.markdown]);
-  const added = diff.filter((line) => line.type === "added").length;
-  const removed = diff.filter((line) => line.type === "removed").length;
-
-  return (
-    <div className="space-y-3">
-      <section className="flex h-11 min-w-0 items-center justify-between gap-2 rounded-md border border-orange-200 bg-brand-hover px-2.5">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="min-w-0 truncate text-[13px] font-semibold text-ink-primary">{preview.version.title || "Versión del documento"}</span>
-          <span className="shrink-0 font-mono text-[11px] text-ink-secondary">{preview.version.hash}</span>
-          <span className="hidden shrink-0 text-[11px] text-ink-secondary md:inline">
-            {formatVersionFullDate(preview.version)}
-          </span>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <span className="hidden text-[11px] text-ink-secondary xl:inline">Actual sin cambios</span>
-          <div className="flex rounded-md border border-orange-200 bg-white/70 p-0.5">
-            <button
-              className={["grid h-7 w-8 place-items-center rounded", preview.mode === "diff" ? "bg-white text-brand-orange shadow-subtle" : "text-ink-secondary hover:text-ink-primary"].join(" ")}
-              onClick={() => onModeChange("diff")}
-              data-tooltip={`Ver cambios: +${added} -${removed}`}
-              aria-label={`Ver cambios: +${added} -${removed}`}
-            >
-              <GitCompareArrows size={14} />
-            </button>
-            <button
-              className={["grid h-7 w-8 place-items-center rounded", preview.mode === "content" ? "bg-white text-brand-orange shadow-subtle" : "text-ink-secondary hover:text-ink-primary"].join(" ")}
-              onClick={() => onModeChange("content")}
-              data-tooltip="Ver contenido"
-              aria-label="Ver contenido"
-            >
-              <FileText size={14} />
-            </button>
-          </div>
-          <button
-            className="grid h-8 w-8 place-items-center rounded-md border border-line bg-white text-ink-secondary hover:bg-panel hover:text-ink-primary"
-            onClick={onBackToCurrent}
-            data-tooltip="Volver a versión actual"
-            aria-label="Volver a versión actual"
-          >
-            <ArrowLeft size={14} />
-          </button>
-          <button
-            className="grid h-8 w-8 place-items-center rounded-md bg-brand-orange text-white hover:bg-brand-dark"
-            onClick={onRestore}
-            data-tooltip="Restaurar versión"
-            aria-label="Restaurar versión"
-          >
-            <RotateCcw size={14} />
-          </button>
-        </div>
-      </section>
-
-      {preview.mode === "content" ? (
-        <section className="rounded-md border border-line bg-white p-4">
-          <div className="mb-3 rounded-md bg-panel px-3 py-2 text-[11px] font-semibold text-ink-secondary">
-            Contenido de solo lectura de la versión seleccionada
-          </div>
-          <ReadonlyMarkdownViewer
-            markdown={preview.markdown}
-            ariaLabel="Contenido de la versión seleccionada"
-            emptyMessage="Esta versión no tiene contenido."
-            zoomPercent={markdownZoomPercent}
-          />
-        </section>
-      ) : (
-        <section className="rounded-md border border-line bg-white">
-          <div className="flex items-center justify-between gap-3 border-b border-line px-3 py-2 text-[11px] font-semibold text-ink-secondary">
-            <span className="flex items-center gap-2">
-            <GitCompareArrows size={14} />
-            Comparación entre esta versión y el documento actual
-            </span>
-            <span className="font-mono text-[10px] text-ink-secondary">-{removed} +{added}</span>
-          </div>
-          <div className="overflow-hidden rounded-b-md font-mono text-[12px] leading-6">
-            {sideBySideDiff.length === 0 ? (
-              <div className="bg-panel px-4 py-3 text-ink-secondary">No hay diferencias relevantes.</div>
-            ) : (
-              <div className="grid grid-cols-2">
-                <div className="border-b border-r border-line bg-panel px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">
-                  Versión seleccionada
-                </div>
-                <div className="border-b border-line bg-panel px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">
-                  Versión actual
-                </div>
-                {sideBySideDiff.map((row, index) => (
-                  <SideBySideDiffRowView key={`${row.type}-${index}-${row.leftNumber ?? ""}-${row.rightNumber ?? ""}`} row={row} />
-                ))}
-              </div>
-            )}
-          </div>
-        </section>
-      )}
     </div>
   );
 }
@@ -1370,237 +1476,6 @@ function RestoreVersionDialog({
   );
 }
 
-function SideBySideDiffRowView({ row }: { row: SideBySideDiffRow }) {
-  if (row.type === "skip") {
-    return (
-      <>
-        <div className="border-r border-line bg-panel px-3 py-1 text-center text-[11px] text-ink-secondary">...</div>
-        <div className="bg-panel px-3 py-1 text-center text-[11px] text-ink-secondary">...</div>
-      </>
-    );
-  }
-
-  return (
-    <>
-      <DiffCell
-        lineNumber={row.leftNumber}
-        text={row.leftText}
-        tone={row.type === "removed" || row.type === "changed" ? "removed" : row.type === "added" ? "empty" : "same"}
-      />
-      <DiffCell
-        lineNumber={row.rightNumber}
-        text={row.rightText}
-        tone={row.type === "added" || row.type === "changed" ? "added" : row.type === "removed" ? "empty" : "same"}
-      />
-    </>
-  );
-}
-
-function DiffCell({
-  lineNumber,
-  text,
-  tone,
-}: {
-  lineNumber?: number;
-  text?: string;
-  tone: "same" | "added" | "removed" | "empty";
-}) {
-  return (
-    <div
-      className={[
-        "grid min-w-0 grid-cols-[42px_1fr] gap-2 border-b border-line/70 px-2 py-0.5",
-        tone === "same" ? "bg-white text-ink-secondary" : "",
-        tone === "added" ? "bg-green-50 text-green-800" : "",
-        tone === "removed" ? "bg-red-50 text-red-800" : "",
-        tone === "empty" ? "bg-panel/70 text-ink-secondary" : "",
-      ].join(" ")}
-    >
-      <span className="select-none text-right text-[10px] text-ink-secondary/70">{lineNumber ?? ""}</span>
-      <span className="min-w-0 whitespace-pre-wrap break-words">{text || " "}</span>
-    </div>
-  );
-}
-
-function buildLineDiff(previous: string, current: string): DiffLine[] {
-  if (previous === current) return [];
-  const previousLines = previous.split(/\r?\n/);
-  const currentLines = current.split(/\r?\n/);
-  const table = Array.from({ length: previousLines.length + 1 }, () => Array(currentLines.length + 1).fill(0) as number[]);
-  for (let row = previousLines.length - 1; row >= 0; row -= 1) {
-    for (let column = currentLines.length - 1; column >= 0; column -= 1) {
-      table[row][column] = previousLines[row] === currentLines[column]
-        ? table[row + 1][column + 1] + 1
-        : Math.max(table[row + 1][column], table[row][column + 1]);
-    }
-  }
-
-  const diff: DiffLine[] = [];
-  let row = 0;
-  let column = 0;
-  while (row < previousLines.length && column < currentLines.length) {
-    if (previousLines[row] === currentLines[column]) {
-      diff.push({ type: "same", text: previousLines[row] });
-      row += 1;
-      column += 1;
-    } else if (table[row + 1][column] >= table[row][column + 1]) {
-      diff.push({ type: "removed", text: previousLines[row] });
-      row += 1;
-    } else {
-      diff.push({ type: "added", text: currentLines[column] });
-      column += 1;
-    }
-  }
-  while (row < previousLines.length) {
-    diff.push({ type: "removed", text: previousLines[row] });
-    row += 1;
-  }
-  while (column < currentLines.length) {
-    diff.push({ type: "added", text: currentLines[column] });
-    column += 1;
-  }
-  return trimUnchangedContext(diff);
-}
-
-function buildSideBySideDiff(previous: string, current: string): SideBySideDiffRow[] {
-  if (previous === current) return [];
-  const operations = buildLineDiffOperations(previous, current);
-  const rows: SideBySideDiffRow[] = [];
-  let index = 0;
-  while (index < operations.length) {
-    const operation = operations[index];
-    if (operation.type === "same") {
-      rows.push({
-        type: "same",
-        leftNumber: operation.leftNumber,
-        rightNumber: operation.rightNumber,
-        leftText: operation.text,
-        rightText: operation.text,
-      });
-      index += 1;
-      continue;
-    }
-
-    const removed: DiffOperation[] = [];
-    const added: DiffOperation[] = [];
-    while (index < operations.length && operations[index].type !== "same") {
-      if (operations[index].type === "removed") removed.push(operations[index]);
-      if (operations[index].type === "added") added.push(operations[index]);
-      index += 1;
-    }
-    const pairCount = Math.max(removed.length, added.length);
-    for (let pairIndex = 0; pairIndex < pairCount; pairIndex += 1) {
-      const left = removed[pairIndex];
-      const right = added[pairIndex];
-      rows.push({
-        type: left && right ? "changed" : left ? "removed" : "added",
-        leftNumber: left?.leftNumber,
-        rightNumber: right?.rightNumber,
-        leftText: left?.text,
-        rightText: right?.text,
-      });
-    }
-  }
-  return trimSideBySideContext(rows);
-}
-
-type DiffOperation = {
-  type: "same" | "added" | "removed";
-  text: string;
-  leftNumber?: number;
-  rightNumber?: number;
-};
-
-function buildLineDiffOperations(previous: string, current: string): DiffOperation[] {
-  const previousLines = previous.split(/\r?\n/);
-  const currentLines = current.split(/\r?\n/);
-  const table = Array.from({ length: previousLines.length + 1 }, () => Array(currentLines.length + 1).fill(0) as number[]);
-  for (let row = previousLines.length - 1; row >= 0; row -= 1) {
-    for (let column = currentLines.length - 1; column >= 0; column -= 1) {
-      table[row][column] = previousLines[row] === currentLines[column]
-        ? table[row + 1][column + 1] + 1
-        : Math.max(table[row + 1][column], table[row][column + 1]);
-    }
-  }
-
-  const operations: DiffOperation[] = [];
-  let row = 0;
-  let column = 0;
-  while (row < previousLines.length && column < currentLines.length) {
-    if (previousLines[row] === currentLines[column]) {
-      operations.push({ type: "same", text: previousLines[row], leftNumber: row + 1, rightNumber: column + 1 });
-      row += 1;
-      column += 1;
-    } else if (table[row + 1][column] >= table[row][column + 1]) {
-      operations.push({ type: "removed", text: previousLines[row], leftNumber: row + 1 });
-      row += 1;
-    } else {
-      operations.push({ type: "added", text: currentLines[column], rightNumber: column + 1 });
-      column += 1;
-    }
-  }
-  while (row < previousLines.length) {
-    operations.push({ type: "removed", text: previousLines[row], leftNumber: row + 1 });
-    row += 1;
-  }
-  while (column < currentLines.length) {
-    operations.push({ type: "added", text: currentLines[column], rightNumber: column + 1 });
-    column += 1;
-  }
-  return operations;
-}
-
-function trimSideBySideContext(rows: SideBySideDiffRow[]): SideBySideDiffRow[] {
-  const changedIndexes = rows
-    .map((row, index) => (row.type === "same" ? -1 : index))
-    .filter((index) => index >= 0);
-  if (changedIndexes.length === 0) return [];
-  const visible = new Set<number>();
-  for (const index of changedIndexes) {
-    for (let offset = -2; offset <= 2; offset += 1) {
-      const target = index + offset;
-      if (target >= 0 && target < rows.length) visible.add(target);
-    }
-  }
-  const result: SideBySideDiffRow[] = [];
-  let skipped = false;
-  for (let index = 0; index < rows.length; index += 1) {
-    if (visible.has(index)) {
-      if (skipped) result.push({ type: "skip" });
-      result.push(rows[index]);
-      skipped = false;
-    } else {
-      skipped = true;
-    }
-  }
-  return result;
-}
-
-function trimUnchangedContext(diff: DiffLine[]): DiffLine[] {
-  const changedIndexes = diff
-    .map((line, index) => (line.type === "same" ? -1 : index))
-    .filter((index) => index >= 0);
-  if (changedIndexes.length === 0) return [];
-  const visible = new Set<number>();
-  for (const index of changedIndexes) {
-    for (let offset = -2; offset <= 2; offset += 1) {
-      const target = index + offset;
-      if (target >= 0 && target < diff.length) visible.add(target);
-    }
-  }
-  const result: DiffLine[] = [];
-  let skipped = false;
-  for (let index = 0; index < diff.length; index += 1) {
-    if (visible.has(index)) {
-      if (skipped) result.push({ type: "same", text: "..." });
-      result.push(diff[index]);
-      skipped = false;
-    } else {
-      skipped = true;
-    }
-  }
-  return result;
-}
-
 type ResizablePanelConfig = {
   defaultWidth: number;
   minWidth: number;
@@ -1666,13 +1541,6 @@ function clamp(value: number, min: number, max: number) {
   return Math.round(Math.min(Math.max(value, min), max));
 }
 
-function collectImages(nodes: DocumentTreeNode[]): DocumentTreeNode[] {
-  return nodes.flatMap((node) => {
-    if (node.type === "image") return [node];
-    return node.children ? collectImages(node.children) : [];
-  });
-}
-
 function findNodeById(nodes: DocumentTreeNode[], nodeId: string): DocumentTreeNode | null {
   for (const node of nodes) {
     if (node.id === nodeId) return node;
@@ -1686,166 +1554,6 @@ function findNodeById(nodes: DocumentTreeNode[], nodeId: string): DocumentTreeNo
 
 function isInsertableProjectVisual(type: DocumentTreeNode["type"] | undefined) {
   return type === "image" || type === "handwritten-note";
-}
-
-const markdownImageReferencePattern = /!\[([^\]]*)\]\(([^)\n]+)\)/g;
-const htmlImageSourcePattern = /(<img\b[^>]*\bsrc=)(["'])([^"']+)(\2[^>]*>)/gi;
-
-function materializeProjectImageReferences(markdown: string, projectId: string, documentPath: string, tree: DocumentTreeNode[]) {
-  if (!projectId || !documentPath || (!markdown.includes("](") && !markdown.includes("<img"))) return markdown;
-  const images = collectImages(tree);
-  if (images.length === 0) return markdown;
-
-  const materializedMarkdownImages = markdown.replace(markdownImageReferencePattern, (fullMatch, alt: string, body: string) => {
-    const parsed = splitMarkdownImageTarget(body);
-    if (!parsed || isExternalImageTarget(parsed.target)) return fullMatch;
-    const resolvedPath = resolveMarkdownAssetPath(documentPath, parsed.target);
-    const image = images.find((node) => node.path === resolvedPath);
-    const titlePart = parsed.title ? ` "${parsed.title}"` : "";
-    if (!image) {
-      if (isImagePath(resolvedPath)) {
-        return `![${alt}](${getProjectImageContentUrl(projectId, projectScopedNodeId(projectId, resolvedPath))}${titlePart})`;
-      }
-      const safeBody = `${formatMarkdownImageTarget(parsed.target)}${titlePart}`;
-      return safeBody !== body.trim() ? `![${alt}](${safeBody})` : fullMatch;
-    }
-    return `![${alt}](${getProjectImageContentUrl(projectId, image.id)}${titlePart})`;
-  });
-
-  return materializedMarkdownImages.replace(htmlImageSourcePattern, (fullMatch, prefix: string, quote: string, source: string, suffix: string) => {
-    if (isExternalImageTarget(source)) return fullMatch;
-
-    const resolvedPath = resolveMarkdownAssetPath(documentPath, source);
-    const image = images.find((node) => node.path === resolvedPath);
-    const nextSource = image ? getProjectImageContentUrl(projectId, image.id) : isImagePath(resolvedPath) ? getProjectImageContentUrl(projectId, projectScopedNodeId(projectId, resolvedPath)) : null;
-    return nextSource ? `${prefix}${quote}${nextSource}${suffix}` : fullMatch;
-  });
-}
-
-function restoreProjectImageReferences(markdown: string, projectId: string, documentPath: string, tree: DocumentTreeNode[]) {
-  if (!projectId || !documentPath || (!markdown.includes("/assets/") && !markdown.includes("knownext-asset://") && !markdown.includes("knownext-asset.localhost"))) return markdown;
-  const images = collectImages(tree);
-  const byContentUrl = new Map(images.map((image) => [getProjectImageContentUrl(projectId, image.id), image]));
-
-  const restoredMarkdownImages = markdown.replace(markdownImageReferencePattern, (fullMatch, alt: string, body: string) => {
-    const parsed = splitMarkdownImageTarget(body);
-    if (!parsed) return fullMatch;
-    const image = byContentUrl.get(parsed.target);
-    const fallbackPath = image?.path ?? pathFromProjectImageContentUrl(projectId, parsed.target);
-    if (!fallbackPath) return fullMatch;
-    const relativeTarget = relativeMarkdownTarget(fallbackPath, documentPath);
-    const titlePart = parsed.title ? ` "${parsed.title}"` : "";
-    return `![${alt}](${formatMarkdownImageTarget(relativeTarget)}${titlePart})`;
-  });
-
-  return restoredMarkdownImages.replace(htmlImageSourcePattern, (fullMatch, prefix: string, quote: string, source: string, suffix: string) => {
-    const image = byContentUrl.get(source);
-    const fallbackPath = image?.path ?? pathFromProjectImageContentUrl(projectId, source);
-    if (!fallbackPath) return fullMatch;
-
-    const relativeTarget = formatMarkdownImageTarget(relativeMarkdownTarget(fallbackPath, documentPath));
-    return `${prefix}${quote}${relativeTarget}${suffix}`;
-  });
-}
-
-function splitMarkdownImageTarget(body: string): { target: string; title: string | null } | null {
-  const value = body.trim();
-  if (!value) return null;
-  if (value.startsWith("<") && value.includes(">")) {
-    const end = value.indexOf(">");
-    return { target: value.slice(1, end), title: value.slice(end + 1).trim().replace(/^["']|["']$/g, "") || null };
-  }
-  if (!value.includes(" ")) return { target: value.replace(/^["']|["']$/g, ""), title: null };
-  const quotedTitle = value.match(/^(.+?)\s+(["'])(.*?)\2$/);
-  if (quotedTitle) return { target: quotedTitle[1].replace(/^["']|["']$/g, ""), title: quotedTitle[3] || null };
-  return { target: value.replace(/^["']|["']$/g, ""), title: null };
-}
-
-function isExternalImageTarget(target: string) {
-  return /^(https?:|data:|knownext-asset:|mailto:|#)/i.test(target);
-}
-
-function isImagePath(path: string) {
-  return /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(path);
-}
-
-function projectScopedNodeId(projectId: string, path: string) {
-  return `${projectId}::${normalizePathParts(path.split("/"))}`;
-}
-
-function pathFromProjectImageContentUrl(projectId: string, target: string) {
-  try {
-    const legacyPrefix = `knownext-asset://${encodeURIComponent(projectId)}/`;
-    let assetId: string | null = null;
-    if (target.startsWith(legacyPrefix)) {
-      assetId = decodeURIComponent(target.slice(legacyPrefix.length));
-    } else {
-      const url = new URL(target);
-      if (url.hostname !== "knownext-asset.localhost") return null;
-      const parts = url.pathname.split("/").filter(Boolean);
-      if (decodeURIComponent(parts[0] ?? "") !== projectId || !parts[1]) return null;
-      assetId = decodeURIComponent(parts[1]);
-    }
-    const scopedPrefix = `${projectId}::`;
-    return assetId?.startsWith(scopedPrefix) ? assetId.slice(scopedPrefix.length) : assetId;
-  } catch {
-    return null;
-  }
-}
-
-function formatEditableImageTarget(target: string, projectId: string, documentPath: string) {
-  const projectImagePath = pathFromProjectImageContentUrl(projectId, target);
-  if (!projectImagePath || !documentPath) return target;
-  return formatMarkdownImageTarget(relativeMarkdownTarget(projectImagePath, documentPath));
-}
-
-function resolveMarkdownAssetPath(documentPath: string, target: string) {
-  const cleanTarget = decodeMarkdownTargetPath(target.split("#", 1)[0].split("?", 1)[0]);
-  const parentParts = documentPath.split("/").slice(0, -1);
-  return normalizePathParts([...parentParts, ...cleanTarget.split("/")]);
-}
-
-function decodeMarkdownTargetPath(target: string) {
-  try {
-    return decodeURIComponent(target);
-  } catch {
-    return target;
-  }
-}
-
-function relativeMarkdownTarget(assetPath: string, documentPath: string) {
-  const fromParts = documentPath.split("/").slice(0, -1);
-  const toParts = assetPath.split("/");
-  while (fromParts.length > 0 && toParts.length > 0 && fromParts[0] === toParts[0]) {
-    fromParts.shift();
-    toParts.shift();
-  }
-  const relative = [...fromParts.map(() => ".."), ...toParts].join("/") || ".";
-  return !relative.startsWith(".") && !relative.includes("/") ? `./${relative}` : relative;
-}
-
-function formatMarkdownImageTarget(target: string) {
-  const escaped = target.replace(/</g, "%3C").replace(/>/g, "%3E").replace(/\(/g, "%28").replace(/\)/g, "%29");
-  return /\s/.test(escaped) ? `<${escaped}>` : escaped;
-}
-
-function normalizePathParts(parts: string[]) {
-  const normalized: string[] = [];
-  for (const part of parts) {
-    if (!part || part === ".") continue;
-    if (part === "..") {
-      normalized.pop();
-      continue;
-    }
-    normalized.push(part);
-  }
-  return normalized.join("/");
-}
-
-function parseImageMarkdown(markdown: string): MarkdownEditorActionOptions {
-  const match = markdown.match(/^!\[([^\]]*)\]\((.*)\)$/);
-  const parsed = match ? splitMarkdownImageTarget(match[2]) : null;
-  return { image: { alt: match?.[1] ?? "Imagen", src: parsed?.target ?? markdown } };
 }
 
 function toMarkdownEditorSelection(selectionFocus: AiSelectionFocus | null, documentId: string): MarkdownEditorSelection | null {
@@ -1912,12 +1620,6 @@ function formatCompactDateTime(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function getNotesSaveDetail(saveState: "idle" | "saving" | "error", updatedAt: string | null) {
-  if (saveState === "saving") return "Guardando automaticamente";
-  if (saveState === "error") return "No se pudieron autoguardar";
-  return `Autoguardado${updatedAt ? ` · ${formatCompactDateTime(updatedAt)}` : ""}`;
 }
 
 function buildExternalChangeBadges(changeSet: ExternalChangeSet | null): Record<string, string> {
@@ -2215,43 +1917,11 @@ function getWorkspaceStatusTitle(tab: WorkspaceTab | undefined, openaiKeyConfigu
 
 function getWorkspaceStatusDetail(tab: WorkspaceTab | undefined, projectName?: string) {
   if (tab?.kind === "release-notes") return "Solo lectura";
-  if (tab?.kind === "notes") return "Autoguardado";
+  if (tab?.kind === "notes") return "Notas personales";
   if (tab?.kind === "handwritten-note") return "Nota a mano";
   if (tab?.kind === "ai-conversation") return projectName ? `Proyecto: ${projectName}` : "Conversación del proyecto";
   if (tab?.kind === "image") return tab.path || "Activo del proyecto";
   return "Listo";
-}
-
-function DocumentConflictBanner({
-  conflictStatus,
-  onKeepLocalVersion,
-  onLoadDiskVersion,
-}: {
-  conflictStatus: DocumentConflictStatus;
-  onKeepLocalVersion: () => void;
-  onLoadDiskVersion: () => void;
-}) {
-  const orphaned = conflictStatus === "orphaned";
-  return (
-    <div className="mb-3 flex items-center gap-3 rounded-md border border-orange-200 bg-brand-hover px-3 py-2 text-[11px] text-ink-primary">
-      <div className="min-w-0 flex-1">
-        <p className="font-semibold">{orphaned ? "El archivo ya no existe en disco" : "El archivo cambió en disco"}</p>
-        <p className="mt-0.5 text-[11px] text-ink-secondary">
-          {orphaned
-            ? "Puedes guardar tu borrador para recrear el archivo o cargar disco para descartar el borrador local."
-            : "Puedes guardar tu borrador sobre el archivo actual o cargar la versión del disco y descartar el borrador."}
-        </p>
-      </div>
-      {!orphaned ? (
-        <button className="h-7 rounded-md border border-brand-orange px-2.5 text-[11px] font-semibold text-brand-orange hover:bg-white" onClick={onLoadDiskVersion}>
-          Cargar disco
-        </button>
-      ) : null}
-      <button className="h-7 rounded-md bg-brand-orange px-2.5 text-[11px] font-semibold text-white hover:bg-brand-dark" onClick={onKeepLocalVersion}>
-        {orphaned ? "Recrear archivo" : "Mantener mi versión"}
-      </button>
-    </div>
-  );
 }
 
 type PanelResizeHandleProps = {
@@ -2300,4 +1970,15 @@ function PanelResizeHandle({
       />
     </div>
   );
+}
+
+function readContextKind(value: unknown): NonNullable<LayoutConfig["contextKind"]> {
+  return value === "document" || value === "properties" || value === "references" ? value : "assistant";
+}
+
+function effectiveContextKind(preferred: NonNullable<LayoutConfig["contextKind"]>, workspace?: WorkspaceTab["kind"]): NonNullable<LayoutConfig["contextKind"]> {
+  if (!workspace || workspace === "ai-conversation") return "assistant";
+  if (preferred === "document" && workspace !== "document" && workspace !== "notes") return "properties";
+  if (preferred === "references" && (workspace === "notes" || workspace === "release-notes")) return "properties";
+  return preferred;
 }

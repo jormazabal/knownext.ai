@@ -1,0 +1,23 @@
+import {useEffect,useRef,useState} from "react";
+import {Activity,RefreshCw} from "lucide-react";
+import {getRuntimePerformance} from "../../lib/api/runtimePerformance";
+import {getApiErrorMessage} from "../../lib/api/client";
+import type {RuntimePerformance,RuntimeOperationClass} from "../../types/runtimePerformance";
+const labels:Record<RuntimeOperationClass,[string,string]>={documents:["Documentos","Documents"],projects:["Proyectos","Projects"],history:["Historial","History"],search:["Búsqueda","Search"],ai:["Asistencia IA","AI assistance"],transfer:["Traslados","Transfers"],recovery:["Recuperación","Recovery"],settings:["Configuración","Settings"],security:["Seguridad","Security"],runtime:["Estado","Status"],other:["Otros","Other"]};
+export function RuntimePerformancePanel({english=false}:{english?:boolean}){
+ const [view,setView]=useState<RuntimePerformance|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(""),[checkedAt,setCheckedAt]=useState<string|null>(null),[unavailable,setUnavailable]=useState(false);
+ const mounted=useRef(true),flight=useRef(false),t=(es:string,en:string)=>english?en:es;
+ async function refresh(){if(flight.current)return;flight.current=true;setBusy(true);setError("");try{const next=await getRuntimePerformance();if(mounted.current){setView(next);setUnavailable(next===null);setCheckedAt(new Date().toISOString());}}catch(e){if(mounted.current)setError(getApiErrorMessage(e,t("No se pudo consultar la medición. La última observación se conserva.","Measurements could not be read. The last observation is preserved.")));}finally{flight.current=false;if(mounted.current)setBusy(false);}}
+ useEffect(()=>{mounted.current=true;void refresh();return()=>{mounted.current=false;};},[]);
+ const ms=(value:number)=>value<10?t("<0,01 ms","<0.01 ms"):new Intl.NumberFormat(english?"en-GB":"es-ES",{maximumFractionDigits:2}).format(value/1000)+" ms";
+ return <section aria-label={t("Rendimiento de este runtime","Runtime performance")} aria-busy={busy} className="min-w-0 rounded-md bg-panel p-4 text-xs">
+  <header className="flex flex-wrap items-center justify-between gap-2"><h3 className="flex items-center gap-2 text-sm font-semibold"><Activity size={17}/>{t("Tiempos de respuesta locales","Local response times")}</h3><button type="button" disabled={busy} onClick={()=>void refresh()} className="inline-flex min-h-11 items-center gap-2 rounded px-3 hover:bg-white disabled:opacity-40"><RefreshCw size={14}/>{t("Actualizar medición","Refresh measurements")}</button></header>
+  <p className="mt-2 leading-5 text-ink-secondary">{t("Solicitudes JSON de Rust en esta sesión. Solo contadores y tiempos en memoria; sin documentos, rutas, prompts ni credenciales. Se descartan al cerrar.","Rust JSON requests in this session. Only counts and timings in memory; no documents, paths, prompts or credentials. Discarded on exit.")}</p>
+  <p className="mt-1 leading-5 text-ink-secondary">{t("No mide arranque, espera en cola, renderizado ni tareas invocadas fuera de este API. El p95 usa las últimas128muestras de cada actividad; máximo y contadores abarcan la sesión.","Excludes startup, queue wait, rendering and work invoked outside this API. The p95 uses the last128samples per activity; maximum and counts cover the session.")}</p>
+  {error&&<p role="alert" className="mt-3 break-words text-red-800">{error}</p>}
+  {unavailable&&<p role="status" className="mt-3">{t("Este runtime todavía no expone mediciones compatibles. No se interpreta como latencia cero.","This runtime does not expose compatible measurements yet. This does not mean zero latency.")}</p>}
+  {view&&<><p className="mt-3 font-medium">{view.observedRequests} {t("solicitudes observadas","observed requests")} · {view.errorCount} {t("con error","with errors")}</p>{checkedAt&&<p className="mt-1 text-ink-secondary">{t("Última observación:","Last observation:")} {new Date(checkedAt).toLocaleTimeString(english?"en-GB":"es-ES")}</p>}
+   {view.classes.length?<div className="mt-3 divide-y divide-line">{view.classes.map(row=><div key={row.operationClass} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 py-3"><div className="min-w-0 break-words font-medium">{labels[row.operationClass][english?1:0]}{row.errorCount>0&&<p className="mt-1 text-[11px] text-ink-secondary">{row.errorCount} {t("con error","with errors")}</p>}</div><span>{row.count}</span><div className="text-right"><p>p95 {ms(row.p95RecentDurationUs)}</p><p className="mt-1 text-[11px] text-ink-secondary">{t("Máx.","Max.")} {ms(row.maxDurationUs)}</p></div></div>)}</div>:<p role="status" className="mt-3">{t("Todavía no hay solicitudes medidas en esta instancia.","No requests have been measured in this instance yet.")}</p>}
+  </>}
+ </section>;
+}

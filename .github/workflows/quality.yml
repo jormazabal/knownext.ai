@@ -1,0 +1,66 @@
+name: Quality
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    name: Frontend and native contracts
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.0.8
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.2
+          cache: pnpm
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.95.0
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Validate version and production bundle
+        run: pnpm version:check && pnpm build && pnpm bundle:check-clean
+      - name: Packaging and release validation contracts
+        shell: pwsh
+        run: |
+          $tests = @(Get-ChildItem -LiteralPath scripts -Filter *.test.mjs | ForEach-Object { $_.FullName })
+          node --test @tests
+          exit $LASTEXITCODE
+      - name: Frontend regression
+        run: pnpm --filter @knownext/desktop test --maxWorkers=4 --minWorkers=1
+      - name: Native regression with isolated fixtures
+        shell: pwsh
+        env:
+          TAURI_CONFIG: '{"bundle":{"resources":["crates/knownext-docs/assets/fonts/OFL.txt"]}}'
+        run: |
+          foreach ($name in @('KNOWNEXT_SHARED_PROJECT_FIXTURE','KNOWNEXT_SHARED_STATE_FIXTURE','KNOWNEXT_SHARED_MODE','KNOWNEXT_OWNED_LOCK_FIXTURE','KNOWNEXT_OWNED_LOCK_MODE')) {
+            Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+          }
+          pnpm rust:test
+          exit $LASTEXITCODE
+      - name: Record successful regression inputs
+        run: node scripts/release-validation.mjs --record-quality
+      - name: Preserve regression evidence for the signed release
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-evidence
+          path: output/quality-evidence.json
+          retention-days: 7

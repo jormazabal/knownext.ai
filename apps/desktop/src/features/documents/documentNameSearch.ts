@@ -12,13 +12,13 @@ type RankedResult = DocumentNameSearchResult & {
 
 const maxResults = 10;
 
-export function searchDocumentTreeByName(nodes: DocumentTreeNode[], query: string, limit = maxResults): DocumentNameSearchResult[] {
+export function searchDocumentTreeByName(nodes: DocumentTreeNode[], query: string, limit = maxResults, includePath = false): DocumentNameSearchResult[] {
   const normalizedQuery = normalizeSearchText(query);
   const queryTokens = normalizedQuery.split(" ").filter(Boolean);
   if (queryTokens.length === 0) return [];
 
   return flattenSearchableNodes(nodes)
-    .map((candidate) => rankCandidate(candidate, normalizedQuery, queryTokens))
+    .map((candidate) => rankCandidate(candidate, normalizedQuery, queryTokens, includePath))
     .filter((result): result is RankedResult => Boolean(result))
     .sort((first, second) => first.score - second.score || first.path.length - second.path.length || first.name.localeCompare(second.name, "es"))
     .slice(0, limit)
@@ -44,14 +44,14 @@ export function getInlineNameCompletion(query: string, result: DocumentNameSearc
 function flattenSearchableNodes(nodes: DocumentTreeNode[], path: string[] = [], parentIds: string[] = []): IndexedTreeNode[] {
   return nodes.flatMap((node) => {
     const nextPath = [...path, node.name];
-    const isSearchable = node.type === "folder" || node.type === "document" || node.type === "image" || node.type === "attachment";
+    const isSearchable = node.type === "folder" || node.type === "document" || node.type === "image" || node.type === "attachment" || node.type === "handwritten-note";
     const current = isSearchable ? [{ node, path: nextPath, parentIds }] : [];
     const children = node.children ? flattenSearchableNodes(node.children, nextPath, [...parentIds, node.id]) : [];
     return [...current, ...children];
   });
 }
 
-function rankCandidate(candidate: IndexedTreeNode, normalizedQuery: string, queryTokens: string[]): RankedResult | null {
+function rankCandidate(candidate: IndexedTreeNode, normalizedQuery: string, queryTokens: string[], includePath: boolean): RankedResult | null {
   const normalizedName = normalizeSearchText(candidate.node.name);
   const compactName = normalizeCompactText(candidate.node.name);
   const compactQuery = normalizeCompactText(normalizedQuery);
@@ -62,6 +62,7 @@ function rankCandidate(candidate: IndexedTreeNode, normalizedQuery: string, quer
   if (nameHasWordPrefix(candidate.node.name, compactQuery)) return toResult(candidate, 2, ranges);
   if (compactName.includes(compactQuery)) return toResult(candidate, 3, ranges);
   if (queryTokens.every((token) => compactName.includes(normalizeCompactText(token)))) return toResult(candidate, 4, ranges);
+  if (includePath && queryTokens.every(token => normalizeSearchText(candidate.path.join("/")).includes(token))) return toResult(candidate, 5, ranges);
 
   return null;
 }
@@ -70,7 +71,7 @@ function toResult(candidate: IndexedTreeNode, score: number, matchRanges: Array<
   return {
     id: candidate.node.id,
       name: candidate.node.name,
-      type: candidate.node.type as "folder" | "document" | "image" | "attachment",
+      type: candidate.node.type,
     path: candidate.path,
     parentIds: candidate.parentIds,
     matchRanges,

@@ -23,3 +23,7 @@
 -keep class ai.knownext.mobile.RecordingBridge { *; }
 -keep class ai.knownext.mobile.RecordingPlugin { *; }
 -keep class ai.knownext.mobile.RecordingArgs { *; }
+-keep class ai.knownext.mobile.CredentialVault { *; }
+-keep class ai.knownext.mobile.ExportPlugin { *; }
+-keep class ai.knownext.mobile.ExportSaveArgs { *; }
+-keep class ai.knownext.mobile.ExportOpenArgs { *; }

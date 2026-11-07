@@ -2,6 +2,9 @@ import { AlertCircle, CheckCircle2, FileCode2, Info, RefreshCw, RotateCcw } from
 import type { DocumentPostSaveSyncState, DocumentSyncStatus, RemoteAccessState } from "../../types/domain";
 
 type DocumentStatusBarProps = {
+  isLoading?: boolean;
+  loadError?: string;
+  blockedSaveReason?: string;
   isDirty: boolean;
   saveState: "idle" | "saving" | "saved" | "error";
   wordCount?: number;
@@ -35,6 +38,9 @@ type FooterState = {
 };
 
 export function DocumentStatusBar({
+  isLoading=false,
+  loadError,
+  blockedSaveReason,
   isDirty,
   saveState,
   wordCount = 0,
@@ -55,7 +61,7 @@ export function DocumentStatusBar({
   onUpdateFromRemote,
   onDiscardPendingChanges,
 }: DocumentStatusBarProps) {
-  const state = getFooterState({
+  const state:FooterState = isLoading?{tone:"warning",label:"Cargando documento…",busy:true,showSave:false,showDiscard:false,showSync:false,showUpdate:false}:loadError?{tone:"danger",label:"Carga no confirmada",detail:loadError,busy:false,showSave:false,showDiscard:false,showSync:false,showUpdate:false}:blockedSaveReason?{tone:"warning",label:"Fuente por revisar",detail:blockedSaveReason,busy:false,showSave:false,showDiscard:false,showSync:false,showUpdate:false}:getFooterState({
     isDirty,
     saveState,
     gitEnabled,

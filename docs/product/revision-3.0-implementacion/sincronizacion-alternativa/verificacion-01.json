@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "recordedOn": "2026-11-06",
+  "status": "partial-development-not-operational-cloud",
+  "team": "root plus three real subagents",
+  "verification": {
+    "frontendUniquePassed": 19,
+    "frontendEvidence": "Agent tool outputs: ProjectActions session59276/chunk1740fd; final cloud session87218/chunk68c60f. No text logs retained; not represented as local logs.",
+    "typescript": "passed --noEmit after final UX change",
+    "rustUniquePassed": 21,
+    "rustCalculation": "18 unchanged unit results reused + 1 corrected test-only expectation + 2 runtime integration cases. No full suite repeated.",
+    "runtimeBinaryReuse": "Integration binary built in same final cargo invocation; rerun directly after changing only a cfg(test) assertion.",
+    "nativeInstalledAcceptance": false,
+    "realProviderCalls": false,
+    "fullSuitesRepeated": false
+  },
+  "remaining": [
+    "OAuth account store/login/renewal",
+    "Durable transfer queue and integrated receiver",
+    "Real cross-provider migration",
+    "Android and Proton transport acceptance"
+  ],
+  "localEvidence": {
+    "output/sc01-rust-focused-final.log": {
+      "sha256": "ff760582dc86ca702bc3cfa44c6ae801fcf8d293d74e0c06230b6a2e098a6d31",
+      "bytes": 5904
+    },
+    "output/sc01-rust-corrected-case.log": {
+      "sha256": "67b8957c671e34622de567f3c419afd4198d9b0a4608bc5bb3c4c68426d4f971",
+      "bytes": 3048
+    },
+    "output/sc01-runtime-contract.log": {
+      "sha256": "1a744d0121be5a88ad7cbd20755d75794e2591c300709965c4e9370e4a83b994",
+      "bytes": 289
+    },
+    "output/sc01-typescript-final.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "output/sc01-ux-visual.json": {
+      "sha256": "4f525f44fd9f168b95f23f3231478ba81980ff407775d5e62667772406fd7a57",
+      "bytes": 261
+    }
+  }
+}

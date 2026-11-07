@@ -5,8 +5,7 @@
     "android"
   ],
   "windows": [
-    "main",
-    "recordings"
+    "main"
   ],
   "permissions": [
     "core:default",

@@ -1,5 +1,6 @@
-import { ArchiveRestore, FileWarning, RefreshCw, Trash2, X } from "lucide-react";
-import type { OrphanDraft } from "../../types/domain";
+import {useEffect,useRef,useState} from "react";
+import {ModalFrame} from "../../components/ui/ModalFrame";
+import {getApiErrorMessage} from "../../lib/api/client";
 
 export type DocumentFooterDialogAction =
   | "discard-draft"
@@ -11,36 +12,53 @@ type CloseDirtyDocumentDialogProps = {
   open: boolean;
   documentName: string;
   onCancel: () => void;
-  onDiscard: () => void;
-  onSave: () => void;
+  onDiscard: () => void | boolean | Promise<void | boolean>;
+  onSave: () => void | boolean | Promise<void | boolean>;
 };
 
 export function CloseDirtyDocumentDialog({ open, documentName, onCancel, onDiscard, onSave }: CloseDirtyDocumentDialogProps) {
+  const[busy,setBusy]=useState<"save"|"discard"|null>(null);const[error,setError]=useState("");
+  const inFlight=useRef(false);const mounted=useRef(true);
+  const cancelButton=useRef<HTMLButtonElement|null>(null);
+  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
+  useEffect(()=>{if(!open&&!inFlight.current)setError("");},[open]);
+  useEffect(()=>{
+    const dialog=cancelButton.current?.closest<HTMLElement>('[role="alertdialog"]');
+    if(!dialog||dialog.closest('[inert]'))return;
+    if(busy)dialog.focus({preventScroll:true});else if(error)cancelButton.current?.focus({preventScroll:true});
+  },[busy,error]);
+  async function run(action:"save"|"discard"){
+    if(inFlight.current)return;inFlight.current=true;setBusy(action);setError("");
+    try{const result=await (action==="save"?onSave():onDiscard());if(result===false&&mounted.current)setError("No se pudo completar la operación. El documento sigue abierto; puedes reintentar o cancelar el cierre.");}
+    catch(cause){if(mounted.current)setError(getApiErrorMessage(cause,"No se pudo completar la operación. Se conserva el documento abierto."));}
+    finally{inFlight.current=false;if(mounted.current)setBusy(null);}
+  }
   if (!open) return null;
 
   return (
-    <div className="knownext-modal-overlay fixed inset-0 z-[90] grid place-items-center bg-black/20">
-      <section className="w-[430px] rounded-lg border border-line bg-white shadow-menu">
-        <header className="border-b border-line px-5 py-4">
+    <ModalFrame label="Cerrar documento con cambios" role="alertdialog" onClose={()=>{if(!inFlight.current)onCancel();}} className="z-[90]">
+      <section aria-busy={!!busy} className="flex max-h-[calc(100dvh-24px)] w-[min(480px,calc(100vw-24px))] flex-col overflow-hidden rounded-lg bg-white shadow-menu">
+        <header className="shrink-0 px-5 pt-4">
           <h2 className="text-[15px] font-semibold">Cerrar documento con cambios</h2>
-          <p className="mt-1 truncate text-[11px] text-ink-secondary">{documentName}</p>
+          <p className="mt-1 break-all text-xs leading-5 text-ink-secondary">{documentName}</p>
         </header>
-        <div className="px-5 py-5 text-[11px] leading-5 text-ink-secondary">
+        <div className="min-h-0 overflow-y-auto px-5 py-4 text-xs leading-5 text-ink-secondary">
           El documento tiene cambios pendientes de guardar en disco. Puedes guardarlos, descartar el borrador interno o cancelar el cierre.
+          {error&&<p role="alert" className="mt-3 text-red-700">{error}</p>}
         </div>
-        <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
-          <button className="h-9 rounded-md border border-line px-4 text-[11px] hover:bg-panel" onClick={onCancel}>
+        <footer className="flex shrink-0 flex-wrap justify-end gap-2 px-5 pb-4">
+          <button ref={cancelButton} type="button" disabled={!!busy} className="min-h-11 rounded-md px-4 text-xs hover:bg-panel disabled:opacity-50" onClick={onCancel}>
             Cancelar
           </button>
-          <button className="h-9 rounded-md border border-line px-4 text-[11px] text-red-700 hover:bg-red-50" onClick={onDiscard}>
-            Descartar
+          <button type="button" disabled={!!busy} className="min-h-11 rounded-md px-4 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50" onClick={()=>void run("discard")}>
+            {busy==="discard"?"Descartando…":"Descartar"}
           </button>
-          <button className="h-9 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark" onClick={onSave}>
-            Guardar
+          <button type="button" disabled={!!busy} className="min-h-11 rounded-md bg-brand-dark px-4 text-xs font-semibold text-white disabled:opacity-50" onClick={()=>void run("save")}>
+            {busy==="save"?"Guardando…":"Guardar"}
           </button>
         </footer>
       </section>
-    </div>
+    </ModalFrame>
   );
 }
 
@@ -49,40 +67,57 @@ type DocumentFooterActionDialogProps = {
   action: DocumentFooterDialogAction | null;
   documentName: string;
   onCancel: () => void;
-  onConfirm: () => void;
+  onConfirm: () => void | boolean | Promise<void | boolean>;
 };
 
 export function DocumentFooterActionDialog({ open, action, documentName, onCancel, onConfirm }: DocumentFooterActionDialogProps) {
+  const [busy,setBusy]=useState(false);const [error,setError]=useState("");
+  const inFlight=useRef(false);const mounted=useRef(true);const cancelButton=useRef<HTMLButtonElement|null>(null);
+  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
+  useEffect(()=>{if(!inFlight.current)setError("");},[open,action,documentName]);
+  useEffect(()=>{
+    const dialog=cancelButton.current?.closest<HTMLElement>('[role="dialog"], [role="alertdialog"]');
+    if(!dialog||dialog.closest('[inert]'))return;
+    if(busy)dialog.focus({preventScroll:true});else if(error)cancelButton.current?.focus({preventScroll:true});
+  },[busy,error]);
+  async function confirm(){
+    if(inFlight.current)return;inFlight.current=true;setBusy(true);setError("");
+    try{const result=await onConfirm();if(result===false&&mounted.current)setError("No se ha confirmado la operación. Se conserva el contenido abierto. Revisa su estado antes de volver a intentarlo.");}
+    catch(cause){if(mounted.current)setError(getApiErrorMessage(cause,"No se pudo completar la operación. Se conserva el contenido abierto."));}
+    finally{inFlight.current=false;if(mounted.current)setBusy(false);}
+  }
   if (!open || !action) return null;
   const copy = getDocumentFooterActionCopy(action, documentName);
 
   return (
-    <div className="knownext-modal-overlay fixed inset-0 z-[90] grid place-items-center bg-black/20">
-      <section className="w-[440px] rounded-lg border border-line bg-white shadow-menu" role="dialog" aria-modal="true" aria-labelledby="document-footer-action-title">
-        <header className="border-b border-line px-5 py-4">
+    <ModalFrame label={copy.title} role={copy.danger?"alertdialog":"dialog"} onClose={()=>{if(!inFlight.current)onCancel();}} className="z-[90]">
+      <section aria-busy={busy} className="flex max-h-[calc(100dvh-24px)] w-[min(480px,calc(100vw-24px))] flex-col overflow-hidden rounded-lg bg-white shadow-menu">
+        <header className="shrink-0 px-5 pt-4">
           <h2 id="document-footer-action-title" className="text-[15px] font-semibold text-ink-primary">{copy.title}</h2>
-          <p className="mt-1 truncate text-[11px] text-ink-secondary">{documentName}</p>
+          <p className="mt-1 break-words [overflow-wrap:anywhere] text-xs leading-5 text-ink-secondary">{documentName}</p>
         </header>
-        <div className="px-5 py-5">
+        <div className="min-h-0 overflow-y-auto px-5 py-4">
           <p className="text-[12px] leading-5 text-ink-secondary">{copy.description}</p>
+          {error&&<p role="alert" className="mt-3 text-xs leading-5 text-red-700">{error}</p>}
         </div>
-        <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
-          <button className="h-9 rounded-md border border-line px-3 text-[11px] font-medium text-ink-primary hover:bg-panel" type="button" onClick={onCancel}>
+        <footer className="flex shrink-0 flex-wrap justify-end gap-2 px-5 pb-4">
+          <button ref={cancelButton} disabled={busy} className="min-h-11 rounded-md px-3 text-xs font-medium text-ink-primary hover:bg-panel disabled:opacity-50" type="button" onClick={onCancel}>
             Cancelar
           </button>
           <button
             className={[
-              "h-9 rounded-md px-3 text-[11px] font-semibold text-white shadow-subtle",
+              "min-h-11 rounded-md px-3 py-2 text-xs font-semibold text-white disabled:opacity-50",
               copy.danger ? "bg-red-600 hover:bg-red-700" : "bg-brand-orange hover:bg-brand-dark",
             ].join(" ")}
             type="button"
-            onClick={onConfirm}
+            disabled={busy}
+            onClick={()=>void confirm()}
           >
-            {copy.confirmLabel}
+            {busy?"Procesando…":copy.confirmLabel}
           </button>
         </footer>
       </section>
-    </div>
+    </ModalFrame>
   );
 }
 
@@ -119,114 +154,4 @@ export function getDocumentFooterActionCopy(action: DocumentFooterDialogAction, 
   };
 }
 
-type RecoverableDraftsDialogProps = {
-  open: boolean;
-  drafts: OrphanDraft[];
-  onClose: () => void;
-  onRefresh: () => void;
-  onRestore: (draft: OrphanDraft) => void;
-  onDiscard: (draftKey: string) => void;
-};
-
-export function RecoverableDraftsDialog({ open, drafts, onClose, onRefresh, onRestore, onDiscard }: RecoverableDraftsDialogProps) {
-  if (!open) return null;
-
-  return (
-    <div className="knownext-modal-overlay fixed inset-0 z-[90] grid place-items-center bg-black/20">
-      <section
-        className="flex max-h-[min(620px,calc(100dvh-48px))] w-[min(660px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-menu"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="recoverable-drafts-title"
-      >
-        <header className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
-          <div className="flex min-w-0 gap-3">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-brand-hover text-brand-orange">
-              <ArchiveRestore size={18} />
-            </span>
-            <div className="min-w-0">
-              <h2 id="recoverable-drafts-title" className="text-[15px] font-semibold text-ink-primary">Borradores recuperables</h2>
-              <p className="mt-1 max-w-[500px] text-[11px] leading-5 text-ink-secondary">
-                Son copias locales de cambios sin guardar cuyo archivo original ya no está disponible. Puedes recrear el archivo desde el borrador o descartarlo si ya no lo necesitas.
-              </p>
-            </div>
-          </div>
-          <button
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange"
-            data-tooltip="Cerrar"
-            aria-label="Cerrar borradores recuperables"
-            onClick={onClose}
-          >
-            <X size={16} />
-          </button>
-        </header>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          <div className="mb-4 rounded-md border border-line bg-panel px-4 py-3 text-[11px] leading-5 text-ink-secondary">
-            <p className="font-semibold text-ink-primary">Cuándo aparece un borrador aquí</p>
-            <p className="mt-1">
-              Si editas un documento, quedan cambios pendientes y después el archivo se elimina, se mueve fuera del proyecto o deja de poder localizarse, KnowNext.ai conserva el contenido para evitar perder trabajo.
-            </p>
-          </div>
-          {drafts.length === 0 ? (
-            <div className="grid place-items-center rounded-md border border-dashed border-line bg-white px-4 py-8 text-center">
-              <FileWarning size={24} className="text-ink-secondary" />
-              <p className="mt-3 text-[12px] font-semibold text-ink-primary">No hay borradores pendientes</p>
-              <p className="mt-1 max-w-[420px] text-[11px] leading-5 text-ink-secondary">
-                Todos los borradores locales siguen asociados a sus archivos o ya se han resuelto. Puedes actualizar para volver a comprobar el estado del disco.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {drafts.map((draft) => (
-                <article key={draft.draftKey} className="rounded-md border border-line bg-white px-4 py-3">
-                  <div className="flex items-start gap-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[11px] font-semibold text-ink-primary">{draft.name}</p>
-                      <p className="mt-1 truncate text-[11px] text-ink-secondary">{draft.path}</p>
-                      <p className="mt-2 text-[11px] text-ink-secondary">
-                        {draft.wordCount} palabras · {formatDateTime(draft.draftUpdatedAt)}
-                        {!draft.recoverable && draft.reason ? ` · ${draft.reason}` : ""}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 gap-2">
-                      <button
-                        className="flex h-8 items-center gap-2 rounded-md border border-line px-3 text-[11px] font-medium text-red-700 hover:bg-red-50"
-                        onClick={() => onDiscard(draft.draftKey)}
-                      >
-                        <Trash2 size={14} />
-                        Descartar
-                      </button>
-                      <button
-                        className="flex h-8 items-center gap-2 rounded-md bg-brand-orange px-3 text-[11px] font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
-                        disabled={!draft.recoverable}
-                        onClick={() => onRestore(draft)}
-                      >
-                        <ArchiveRestore size={14} />
-                        Recrear archivo
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </div>
-        <footer className="flex justify-end gap-2 border-t border-line px-5 py-4">
-          <button className="h-9 rounded-md border border-line px-4 text-[11px] hover:bg-panel" onClick={onClose}>
-            Cerrar
-          </button>
-          <button className="flex h-9 items-center gap-2 rounded-md bg-brand-orange px-4 text-[11px] font-semibold text-white hover:bg-brand-dark" onClick={onRefresh}>
-            <RefreshCw size={14} />
-            Actualizar
-          </button>
-        </footer>
-      </section>
-    </div>
-  );
-}
-
-function formatDateTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(date);
-}
+export { RecoverableDraftsDialog } from "./RecoverableDraftsDialog";

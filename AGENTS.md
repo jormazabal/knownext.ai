@@ -121,6 +121,9 @@ KnowNext.ai is a local-first Tauri application for managing, editing, versioning
 
 ## Testing Rules
 
+- During development, do not repeatedly run full frontend or Rust workspace suites. Run only focused checks justified by changed critical behavior, a reproduced defect, or a materially affected shared contract; reuse unaffected results.
+- Group native builds and UI campaigns at meaningful product milestones, rather than rebuilding for each minor adjustment.
+- Run the complete regression after the whole implementation is finished. After a fix, repeat only checks whose results the fix invalidated.
 - Add tests for Rust/Tauri contracts.
 - Add frontend component tests for critical interactions when expanding behavior.
 - Maintain `docs/development/manual-test-checklist.md`.

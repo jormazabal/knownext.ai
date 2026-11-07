@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "dotnetSdk": "10.0.403",
+  "rustToolchain": "1.95.0",
+  "sdk": {"repository": "https://github.com/ProtonDriveApps/sdk.git", "revision": "05c9115955589d9f6ab7392a36f8f0cb39327133", "license": "LICENSE.md"},
+  "crypto": {"repository": "https://github.com/ProtonDriveApps/dotnet-crypto.git", "revision": "fc2c10881e6fb44fc8a181c8db99cba73d06dfdb", "license": "LICENSE.txt", "cargoLock": "crypto.Cargo.lock"},
+  "cryptoPackageVersion": "0.40.1-p0"
+}
