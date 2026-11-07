@@ -53,7 +53,7 @@ class MainActivity : TauriActivity() {
 
     override fun onWebViewCreate(webView: WebView) {
         super.onWebViewCreate(webView)
-        CredentialVault.install()
+        CredentialVault.install(this)
         recordingWebView = webView
         webView.post { imeViewportCleanup?.invoke(); imeViewportCleanup = installImeViewport(webView) }
         webView.addJavascriptInterface(this,"KnownextRecordingIntent")

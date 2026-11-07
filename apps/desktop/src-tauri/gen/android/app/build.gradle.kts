@@ -19,6 +19,11 @@ val prepareBundledFontLicense = tasks.register<Copy>("prepareBundledFontLicense"
     into(fontLicenseAssets.map { it.dir("licenses") })
     rename("OFL.txt", "Noto-OFL.txt")
 }
+val protonLicenseAssets = layout.buildDirectory.dir("generated/knownext-proton-licenses")
+val prepareProtonLicenses = tasks.register<Copy>("prepareProtonLicenses") {
+    from("../../../resources/proton/android-notices")
+    into(protonLicenseAssets.map { it.dir("licenses/proton") })
+}
 
 fun releaseVersionName(): String {
     return tauriProperties.getProperty("tauri.android.versionName")
@@ -37,6 +42,9 @@ fun releaseVersionCode(versionName: String): Int {
 android {
     compileSdk = 36
     namespace = "ai.knownext.mobile"
+    packaging { jniLibs.useLegacyPackaging = true }
+    sourceSets.getByName("main").jniLibs.srcDir("../../../resources/proton/android")
+
     signingConfigs {
         create("knownextRelease") {
             val keystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
@@ -76,6 +84,15 @@ android {
         getByName("release") {
             signingConfig = signingConfigs.getByName("knownextRelease")
             isMinifyEnabled = true
+            // Release scripts strip and hash these five exact staged binaries.
+            // Avoid a second Gradle transformation invalidating that provenance.
+            packaging {
+                jniLibs.keepDebugSymbols.add("*/arm64-v8a/libknownext_ai_desktop_lib.so")
+                jniLibs.keepDebugSymbols.add("*/arm64-v8a/libknownext_proton.so")
+                jniLibs.keepDebugSymbols.add("*/arm64-v8a/libproton_crypto.so")
+                jniLibs.keepDebugSymbols.add("*/arm64-v8a/libcrypto.so")
+                jniLibs.keepDebugSymbols.add("*/arm64-v8a/libssl.so")
+            }
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }
                     .plus(getDefaultProguardFile("proguard-android-optimize.txt"))
@@ -90,9 +107,11 @@ android {
         buildConfig = true
     }
     sourceSets.getByName("main").assets.srcDir(fontLicenseAssets)
+    sourceSets.getByName("main").assets.srcDir(protonLicenseAssets)
 }
 
 tasks.named("preBuild").configure { dependsOn(prepareBundledFontLicense) }
+tasks.named("preBuild").configure { dependsOn(prepareProtonLicenses) }
 
 rust {
     rootDirRel = "../../../"

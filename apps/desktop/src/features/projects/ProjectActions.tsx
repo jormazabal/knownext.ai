@@ -1,3 +1,4 @@
+import {CloudSyncDialog} from "../cloudSync/CloudSyncDialog";
 import {AiBudgetControls} from "./AiBudgetControls";
 import {
   BarChart3,
@@ -54,6 +55,8 @@ export function ProjectActions({
   onOpenReleaseNotes,
 }: ProjectActionsProps) {
   const text = projectActionsCopy[language];
+  const [cloudSyncOpen, setCloudSyncOpen] = useState(false);
+  const openCloudSync = () => setCloudSyncOpen(true);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountButtonRef = useRef<HTMLButtonElement | null>(null);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
@@ -93,6 +96,7 @@ export function ProjectActions({
   if (compact) {
     return (
       <div ref={accountMenuRef} className="relative z-[140]">
+        {cloudSyncOpen && renderProjectActionsPortal(<CloudSyncDialog onClose={() => setCloudSyncOpen(false)} fallbackFocus={() => accountButtonRef.current}/>)}
         <button
           className="grid h-8 w-8 place-items-center rounded-full bg-brand-hover [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 max-[760px]:h-11 max-[760px]:w-11 text-[11px] font-semibold text-brand-orange hover:bg-brand-orange hover:text-white"
           data-tooltip={accountName}
@@ -130,6 +134,7 @@ export function ProjectActions({
           onOpenRecoverableDrafts={onOpenRecoverableDrafts}
           onCheckForUpdates={onCheckForUpdates}
           onOpenReleaseNotes={onOpenReleaseNotes}
+          onOpenCloudSync={openCloudSync}
         />
       </div>
     );
@@ -138,6 +143,7 @@ export function ProjectActions({
   return (
     <div className="relative z-[140] mt-auto flex h-10 max-[760px]:h-12 [@media(pointer:coarse)]:h-12 shrink-0 items-center border-t border-line bg-white px-3 text-[11px] text-ink-secondary">
       <div ref={accountMenuRef} className="relative w-full min-w-0">
+        {cloudSyncOpen && renderProjectActionsPortal(<CloudSyncDialog onClose={() => setCloudSyncOpen(false)} fallbackFocus={() => accountButtonRef.current}/>)}
         <button
           className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-1 text-left hover:bg-brand-hover [@media(pointer:coarse)]:h-11 max-[760px]:h-11"
           ref={accountButtonRef}
@@ -175,6 +181,7 @@ export function ProjectActions({
           onOpenRecoverableDrafts={onOpenRecoverableDrafts}
           onCheckForUpdates={onCheckForUpdates}
           onOpenReleaseNotes={onOpenReleaseNotes}
+          onOpenCloudSync={openCloudSync}
         />
       </div>
     </div>
@@ -203,6 +210,7 @@ function AccountActionsMenu({
   onOpenRecoverableDrafts,
   onCheckForUpdates,
   onOpenReleaseNotes,
+  onOpenCloudSync,
 }: {
   appVersion: string;
   language: AppearanceConfig["language"];
@@ -225,6 +233,7 @@ function AccountActionsMenu({
   onOpenRecoverableDrafts: () => void;
   onCheckForUpdates: () => void;
   onOpenReleaseNotes: () => void;
+  onOpenCloudSync: () => void;
 }) {
   const [usagePanelOpen, setUsagePanelOpen] = useState(false);
   const [usagePanelPinned, setUsagePanelPinned] = useState(false);
@@ -379,6 +388,7 @@ function AccountActionsMenu({
               onOpenRecoverableDrafts={onOpenRecoverableDrafts}
               onCheckForUpdates={onCheckForUpdates}
               onOpenReleaseNotes={onOpenReleaseNotes}
+              onOpenCloudSync={onOpenCloudSync}
               onOpenAiUsage={openUsageDialog}
               onScheduleUsageOpen={scheduleUsageOpen}
               onScheduleUsageClose={scheduleUsageClose}
@@ -439,6 +449,7 @@ function AccountActionsMenu({
         onOpenRecoverableDrafts={onOpenRecoverableDrafts}
         onCheckForUpdates={onCheckForUpdates}
         onOpenReleaseNotes={onOpenReleaseNotes}
+              onOpenCloudSync={onOpenCloudSync}
         onOpenAiUsage={openUsageDialog}
         onScheduleUsageOpen={scheduleUsageOpen}
         onScheduleUsageClose={scheduleUsageClose}
@@ -478,6 +489,7 @@ function AccountActionsMenuContent({
   onOpenRecoverableDrafts,
   onCheckForUpdates,
   onOpenReleaseNotes,
+  onOpenCloudSync,
   onOpenAiUsage,
   onScheduleUsageOpen,
   onScheduleUsageClose,
@@ -499,6 +511,7 @@ function AccountActionsMenuContent({
   onOpenRecoverableDrafts: () => void;
   onCheckForUpdates: () => void;
   onOpenReleaseNotes: () => void;
+  onOpenCloudSync: () => void;
   onOpenAiUsage: () => void;
   onScheduleUsageOpen: () => void;
   onScheduleUsageClose: () => void;
@@ -546,6 +559,9 @@ function AccountActionsMenuContent({
         </div>
       </div>
       <div className="my-1 border-t border-line" />
+      <button role={narrowMode ? undefined : "menuitem"} className="flex min-h-11 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover" onClick={() => onRunAction(onOpenCloudSync)}>
+        <RefreshCw size={14}/><span>{text.cloudSync}</span>
+      </button>
       <button
         role={narrowMode ? undefined : "menuitem"}
         className="flex min-h-11 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover"
@@ -822,6 +838,7 @@ const projectActionsCopy = {
     accountOptionsClose: "Cerrar opciones de cuenta",
     connectGithub: "Conectar GitHub",
     appSettings: "Configuración de la app",
+    cloudSync: "Sincronización del proyecto",
     logout: "Cerrar sesión",
     checkingUpdates: "Buscando actualizaciones",
     checkUpdates: "Buscar actualizaciones",
@@ -859,6 +876,7 @@ const projectActionsCopy = {
     accountOptionsClose: "Close account options",
     connectGithub: "Connect GitHub",
     appSettings: "App settings",
+    cloudSync: "Project synchronization",
     logout: "Sign out",
     checkingUpdates: "Checking for updates",
     checkUpdates: "Check for updates",

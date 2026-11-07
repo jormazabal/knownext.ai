@@ -28,3 +28,10 @@ apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/binaries/
 backend/build/
 backend/*.spec
+
+# Built from native/proton-sdk, not provider clients or packaged processes.
+apps/desktop/src-tauri/resources/proton/
+
+# Native SDK generated compilation outputs.
+native/proton-sdk/bin/
+native/proton-sdk/obj/

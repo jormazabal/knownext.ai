@@ -23,6 +23,7 @@ pub extern "system" fn Java_ai_knownext_mobile_CredentialVault_nativeInstall(
         let _ = VAULT.set((vm, class));
     }
     knownext_storage::initialize_android_credential_protector(transform);
+    knownext_storage::initialize_android_proton_protector(transform);
     1
 }
 
@@ -51,4 +52,14 @@ fn transform(bytes: &[u8], protect: bool) -> Result<Vec<u8>, String> {
         let _ = env.exception_clear();
     }
     result.map_err(|_| "No se puede proteger o abrir el almacén de Android. Se conserva sin cambios; comprueba este dispositivo.".into())
+}
+
+#[no_mangle]
+pub extern "system" fn Java_ai_knownext_mobile_CredentialVault_nativeConfigureProton(
+    mut env: JNIEnv, _class: JClass, path: jni::objects::JString,
+) {
+    let value=env.get_string(&path).map(String::from);
+    if let Ok(value)=value {
+        knownext_storage::initialize_proton_library(std::path::PathBuf::from(value));
+    }
 }

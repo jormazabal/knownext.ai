@@ -1,0 +1,3 @@
+# Build locks are hash-pinned inputs on Windows and Ubuntu.
+native/proton-sdk/*.lock text eol=lf
+native/proton-sdk/nuget-locks/** text eol=lf

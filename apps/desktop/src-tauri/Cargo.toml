@@ -18,6 +18,8 @@ members = [
   "crates/knownext-research",
   "crates/knownext-recording",
   "crates/knownext-storage",
+  "crates/knownext-sync-folder",
+  "crates/knownext-proton",
 ]
 resolver = "2"
 

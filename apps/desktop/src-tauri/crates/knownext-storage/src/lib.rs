@@ -97,6 +97,14 @@ mod ai_change_history;
 mod document_replace;
 mod remote_conflicts;
 mod project_sync;
+mod cloud_sync;
+mod cloud_providers;
+mod proton_sync;
+mod proton_direct;
+mod proton_github_migration;
+pub use proton_direct::{initialize_proton_browser,initialize_proton_library};
+#[cfg(target_os="android")]
+pub use knownext_proton::initialize_android_protector as initialize_android_proton_protector;
 mod asset_queries;
 mod asset_catalog;
 mod handwritten_assets;

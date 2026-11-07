@@ -1754,3 +1754,42 @@ Consolidación140 completada: commit local fe416299, árbol limpio y auditoría1
 ### Entrega140 cerrada · QA instalada local · 2026-11-06
 
 Consolidaciónfe416299, aplicaciónC1 736e7484 y arreglo MSI a4dc873b integrados localmente. MSI corregido/COM/HKCU/reinstalación0 con binario y documento íntegros; AndroidQA actualizado, offline, edición/Guardar/reapertura y ajustes básica/avanzada contrastados, red restaurada y AVD propio cerrado. [Reporte visual](avance-140.html), [detalle](avance-140.md) y [recibo canónico](../../development/candidate-c1-validation.json). Se reutiliza regresión139 y UI Windows con mismo SHA; no suites completas repetidas. Sin IA/gasto/push/tag/publicación. P10 productivo, firmas/ARM/físico/personas y T17 real conservan sus límites. Los estados históricos previos permanecen con su contexto y quedan supersedidos por este cierre para la etapa QA140.
+
+### SC01 · Sincronización alternativa · plan corregido 2026-11-06
+
+**Revisión3 del plan; implementación reanudada con cuatro agentes.** El usuario exige Proton directo mediante SDK/autenticación Windows y Android, sin instalar Proton Drive y conexión recordada. La interpretación por carpeta no satisfacía el objetivo y queda retirada. [Definición vigente](sincronizacion-alternativa/tarea.md) · [Plan/backlog P0–P6](sincronizacion-alternativa/plan.md).
+
+P0 viabilidad/contrato; P1 retirar/migrar enfoque anterior sin pérdida; P2 sesión persistente; P3 intercambio Windows–Android; P4 automatización/recuperación/conflictos; P5 almacén/migraciones; P6 aceptación/candidata. S1 mantiene OneDrive/Google pendientes de registros y desarrollo; SOLO CLOUD fuera. Publicación no autorizada.
+
+El código anterior no se ha retirado en esta fase documental. [Avance01](sincronizacion-alternativa/avance-01.md) y [avance02](sincronizacion-alternativa/avance-02.md) son evidencia histórica de base parcial e intercambio por carpeta; no SDK/auth/Android. Ya no se exige instalar el cliente Proton para validar el objetivo. Matrices50/70 y C1 conservan su alcance.
+
+SC01 avance03: retirada inicial del flujo por carpeta en UI/rutas, evidencia P0 Android/auth y bootstrap Windows; [reporte visual](sincronizacion-alternativa/avance-03.html), [detalle](sincronizacion-alternativa/avance-03.md). Microsoft/Google aplazados por instrucción expresa. No se declara conector directo operativo ni candidata aceptada.
+
+SC01 avance04 sustituye ese corte: SDK directo dentro del proceso, conexión/sesión cifrada y motor de sincronización/recuperación/conflictos implementados. Windows QA compila y abre con perfil aislado; ABI/crypto/HTTPS anónimo Windows y Android y Kotlin focal correctos. [Reporte visual actual](sincronizacion-alternativa/avance-04.html) · [Backlog por entrega y aceptación](sincronizacion-alternativa/plan.md). Pendientes login, sesión/transferencia autenticados entre ambas plataformas y P5 integral. El usuario realizará personalmente el login; no se declara aceptación remota por pruebas locales. Sin gasto IA ni publicación.
+
+Actualización SC01: Windows y Android QA API36/x86_64 autenticados de forma independiente y cuentas recordadas tras reabrir. Proyecto sintético intercambiado en ambos sentidos con tres tamaños/SHA256 idénticos; Windows recibió automáticamente el archivo Android. Renovación real Windows y lectura SDK independiente correctas; Android completó otro sync SDK tras reapertura sin login. Primer acuse Android 504/Resultado pendiente recuperado por consulta sin replay. APK QA finales ARM64/x86_64 compiladas, firmadas y catalogadas; árbol sin Git actualizado sin reabrir. P5 integral, renovación por caducidad Android, ARM físico y aceptación ampliada permanecen pendientes. Se conserva la distinción entre compilación, sesión, lectura remota y aceptación por plataforma. Sin gasto IA, suites completas repetidas ni publicación.
+
+Checkpoint final SC01: el archivo sintético existente Android se modificó de104 a138bytes por UID QA; Windows recibió automáticamente los bytes/SHA256 nuevos y conservó los otros dos archivos. Un único sync Android, acuse UI agotado de nuevo y recuperación consultada sin replay manual. Corpus final538bytes; caso de motor local, no edición Milkdown. [Recibo](../../../output/sc01-proton-p1/windows-candidate/cross-device-receipt.json).
+
+### SC01 avance05 · continuidad, retención y migración
+
+Cuatro agentes reales, con un propietario por ámbito y compilaciones nativas secuenciadas. Desarrollo P4/P5 integrado: recuperación parcial, carpetas vacías con borrado causal seguro, inventario/cuota privada local, limpieza revisada y reanudable, migraciones Local↔Proton y GitHub compatible, revisión del destino persistida y cambio recuperable. Se preservan origen y documentos; la recuperación local expresa no se presenta como traslado integral. [Reporte visual vigente](sincronizacion-alternativa/avance-05.html) · [Detalle y evidencia](sincronizacion-alternativa/avance-05.md).
+
+Verificación focal cerrada:43casos backend únicos,39frontend/API,TypeScript/Vite,paquete cliente limpio y17vistas controladas. Sin repetir suites completas. Reproducción del pendiente residual en Android P1: una consulta periódica `POST /sync/scan` añadía un marcador sin modificar ninguno de los tres archivos. Hook corregido y dos regresiones aprobadas; candidatas P2 con fuentes finales en preparación para contrastar el drenado real, la sesión conservada y los recorridos nuevos. La aceptación instalada no se deduce de las pruebas controladas. Sin gasto IA ni publicación; Google/OneDrive,SOLO CLOUD y aceptación física/productiva conservan sus límites.
+
+SC01 avance05 cerrado en desarrollo y QA focal:47casos backend únicos y39frontend/API aprobados, sin suites completas repetidas. Revisión independiente cerró además consultas POST que fabricaban pendientes y nombres Git interpretados como patrones. Candidatas definitivas Windows/Androidx64/ARM64 verificadas con1.089fuentes/187recursos; Windows y Androidx64 conservan sesión y tres SHA, consultas/vistas sin marcadores. Carpeta vacía creada/retirada entre ambos, limpieza local104bytes protegida, reapertura/cancelación y Proton→local→mismo origen Proton verificados; Android conserva asociación y aviso de revisión, con recuperación natural tras fallo de red. [Recibo final](../../../output/sc01-proton-p2/final/acceptance-05.json) y [reporte visual](sincronizacion-alternativa/avance-05.html). QA detenida sin transferencias activas, producción intacta y sin publicación. P6 mantiene aceptación física ARM, caducidad/renovación Android,24h literales e interrupciones nativas forzadas; GitHub real y distribución/firma pública se evalúan aparte. Microsoft/Google y SOLO CLOUD siguen fuera.
+
+### Entrega3.0.0 · publicación autorizada ·7noviembre2026
+
+El usuario ordena cerrar pendientes y publicar para actualización con tres agentes. Autoriza consolidación, commit/push, PR/merge, tag, CI y publicación, sustituyendo la restricción previa para esta entrega. Continúan sin gasto IA ni suites completas repetidas innecesariamente. Equipo real: coordinador release/CI/notas, WindowsSDK/MSI y AndroidSDK/APK/update, con ámbitos exclusivos.
+
+- [x] Alcance de aceptaciones ampliadas conservado sin inventar pruebas físicas/humanas.
+- [x] Firmas existentes disponibles enGitHub; sin regenerar claves ni exportar secretos.
+- [x] Preparación SDK/crypto desde fuentes/locks; CRT estático Windows, OpenSSL Android desde fuente, recursos/notices/provenance y guardas.
+- [x] Baseline Android2.6firmada con testigo sintético enAVDown; UpgradeCode MSI coincide; aplicación habitual intacta.
+- [x] Notas3.0 y disclosure Proton experimental personal no comercial; reutilización de CI autenticada por árbol/herramientas/imagen.
+- [ ] Consolidar fuente, PR y única regresión completa CI del árbol revisado.
+- [ ] Construir MSI/NSIS+firmas/APKproducción y manifiestos; verificar paquetes/firmas/updateAndroid sintético.
+- [ ] Publicar release completa; verificar latest.json/android-latest.json, MSI/APK públicos y cerrar reporte con enlaces/hashes.
+
+Microsoft/Google ySOLO CLOUD siguen aplazados. Las aceptaciones que requieren hardware/24h o datos personales no se convierten enPASS al publicar.

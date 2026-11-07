@@ -45,6 +45,10 @@ pub fn is_slow_runtime_work(method: &str, path: &str) -> bool {
             )
             | ("POST", ["api", "projects", _, "versions"])
             | ("POST", ["api", "documents", _, "versions", _, "restore"])
+            | ("POST", ["api", "projects", _, "cloud-sync", "review" | "apply" | "cancel"])
+            | ("GET", ["api", "projects", _, "cloud-sync"])
+            | ("GET" | "POST", ["api", "projects", _, "proton-sync" | "proton-direct", ..])
+            | ("GET" | "POST", ["api", "proton", "accounts", ..])
     )
 }
 pub fn cooperative_runtime_work(method: &str, path: &str) -> bool {
@@ -57,6 +61,15 @@ pub fn cooperative_runtime_work(method: &str, path: &str) -> bool {
     ) || index_rebuild_project(method, path).is_some()
 }
 pub fn runtime_resource(method: &str, path: &str) -> Option<Resource> {
+    let control_parts=parts(path);
+    let control_parts=control_parts.iter().map(String::as_str).collect::<Vec<_>>();
+    if matches!((method,control_parts.as_slice()),
+        ("GET",["api","proton","accounts","status"]) |
+        ("GET",["api","projects",_,"proton-direct",..]) |
+        ("POST",["api","projects",_,"proton-direct","migration","query"]) |
+        ("POST",["api","projects",_,"proton-direct","pause"]) |
+        ("POST",["api","projects",_,"proton-direct","conflicts","review"])) {return None;}
+
     if is_scheduled_backup_work(method, path)
         || interaction_project_id(method, path).is_some()
         || is_provider_work(method, path)
@@ -70,7 +83,7 @@ pub fn runtime_resource(method: &str, path: &str) -> Option<Resource> {
     let p = p.iter().map(String::as_str).collect::<Vec<_>>();
     if matches!(
         p.as_slice(),
-        ["api", "auth", "github", ..] | ["api", "github", "repositories"]
+        ["api", "auth", "github", ..] | ["api", "proton", "accounts", ..] | ["api", "github", "repositories"]
     ) {
         return Some(Resource {
             group: "authentication".into(),
@@ -79,6 +92,16 @@ pub fn runtime_resource(method: &str, path: &str) -> Option<Resource> {
         });
     }
     let (project, key, exclusive) = match p.as_slice() {
+        ["api", "projects", project, "cloud-sync", ..] => (
+            *project,
+            "cloud-sync".to_owned(),
+            false,
+        ),
+        ["api", "projects", project, "proton-sync" | "proton-direct", ..] => (
+            *project,
+            "proton-sync".to_owned(),
+            false,
+        ),
         ["api", "projects", project, "sync" | "github" | "versions", ..] => (
             *project,
             "git".to_owned(),
@@ -117,6 +140,22 @@ pub fn dispatch_slow_runtime(
     }
     let p = parts(path);
     let p = p.iter().map(String::as_str).collect::<Vec<_>>();
+    if let ("POST", ["api", "projects", project, "proton-direct", "migration", "ack"]) = (method, p.as_slice()) {
+        // Remote checks never hold the editor/registry mutex. The final local
+        // switch shares authority with ordinary project-registry mutations.
+        checkpoint(Stage::Preparing)?;
+        let handoff = source.prepare_proton_migration_ack(project, body)?;
+        checkpoint(Stage::Publishing)?;
+        let response = mutations.lock().map_err(|_| "runtime-publication-unavailable")?
+            .handle(method, path, handoff.clone(), vec![])?;
+        if response.status >= 400 { return Ok(response); }
+        return ok(source.finalize_proton_migration_ack(project, handoff)?);
+    }
+    if matches!(p.as_slice(), ["api", "projects", _, "cloud-sync" | "proton-sync" | "proton-direct", ..] | ["api","proton","accounts",..]) {
+        // Snapshot preparation and durable receipts run outside the editor mutex.
+        checkpoint(Stage::Preparing)?;
+        return source.handle(method, path, body, vec![]);
+    }
     if matches!(
         p.as_slice(),
         ["api", "auth", ..] | ["api", "github", "repositories"]

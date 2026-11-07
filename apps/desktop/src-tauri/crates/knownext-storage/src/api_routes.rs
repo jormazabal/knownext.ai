@@ -1,6 +1,59 @@
 //! JSON and binary request dispatch. Business rules stay in their domain services.
 use super::*;
 
+fn proton_content_change_project(method: &str, raw_path: &str, destination: Option<&str>, response: &Value) -> Option<String> {
+    // Positive content-write list: POST is also used for searches, reviews,
+    // previews, polling and private metadata. None of those is a document edit.
+    // Unknown/new routes and changes outside this dispatcher remain detectable
+    // by the engine's independent content snapshot, without inventing markers.
+    let method = method.to_ascii_uppercase();
+    let segments = raw_path.split('?').next().unwrap_or(raw_path).trim_matches('/').split('/')
+        .map(knownext_core::percent_decode).collect::<Vec<_>>();
+    let parts=segments.iter().map(String::as_str).collect::<Vec<_>>();
+    match (method.as_str(), parts.as_slice()) {
+        ("POST", ["api", "projects", project, "ai", "interactions" | "confirm-delete"])
+            if response["operations"].as_array().is_some_and(|operations|
+                operations.iter().any(|operation| operation["runtimeApplied"] == true))
+            => Some((*project).to_owned()),
+        ("POST", ["api", "projects", project,
+            "folders" | "documents" | "handwritten-notes" | "attachments" |
+            "meeting-minutes" | "history-restores" | "document-replacements"])
+        | ("POST", ["api", "projects", project, "assets", "images"])
+        | ("PATCH", ["api", "projects", project, "nodes", _, "rename" | "move"])
+        | ("DELETE", ["api", "projects", project, "nodes", _])
+        | ("POST", ["api", "projects", project, "nodes", "batch", _, "execute"])
+        | ("POST", ["api", "projects", project, "trash", _, "restore"])
+        | ("POST", ["api", "projects", project, "documents", _, "duplicate"])
+        | ("POST", ["api", "projects", project, "scheduled-backups", _, "restore"])
+        | ("POST", ["api", "projects", project, "research-evidence", _, "apply"])
+        | ("POST", ["api", "projects", project, "ai-changes", _, "revert"])
+        | ("POST", ["api", "projects", project, "document-replacements", _, "undo"])
+        | ("POST", ["api", "projects", project, "portable-workspace", "apply"])
+        | ("POST", ["api", "projects", project, "external-changes", "import"])
+        | ("POST", ["api", "projects", project, "sync", "pull"])
+        | ("POST", ["api", "projects", project, "sync", "history-copies"])
+        | ("POST", ["api", "projects", project, "sync", "mixed-selections", _, "application"])
+        | ("POST", ["api", "projects", project, "sync", "mixed-selections", _, "application", "continue" | "copy"])
+        | ("POST", ["api", "projects", project, "ai", "context", "sources", _, "add-to-project"])
+            => Some((*project).to_owned()),
+        ("PUT", ["api", "documents" | "handwritten-notes", key])
+        | ("POST", ["api", "documents" | "handwritten-notes", key, "conflict"])
+        | ("POST", ["api", "documents", key, "ai-changes", "apply"])
+        | ("POST", ["api", "documents", key, "versions", _, "restore"])
+        | ("POST", ["api", "handwritten-notes", key, "ocr", _, "apply"])
+        | ("POST", ["api", "handwritten-notes", key, "pages", _, "insert-markdown"])
+            => key.split_once("::").map(|(project, _)| project.to_owned()),
+        ("POST", ["api", "document-templates", _, "create"])
+        | ("POST", ["api", "recovery", "drafts", _, "copy"])
+        | ("POST", ["api", "ai", "results", _, "copy"])
+        | ("POST", ["api", "drafts", _, "restore"]) => destination.map(str::to_owned)
+            .or_else(|| response.pointer("/node/id").or_else(|| response.pointer("/document/id"))
+                .and_then(Value::as_str).and_then(|key| key.split_once("::"))
+                .map(|(project, _)| project.to_owned())),
+        _ => None,
+    }
+}
+
 impl LocalApi {
     pub fn handle(
         &self,
@@ -11,7 +64,15 @@ impl LocalApi {
     ) -> ApiResult {
         let class = runtime_performance::OperationClass::for_request(method, raw_path);
         let started = std::time::Instant::now();
+        let destination = body["projectId"].as_str().map(str::to_owned);
         let result = self.handle_unmeasured(method, raw_path, body, files);
+        if let Ok(response) = &result {
+          if response.status < 400 {
+            let project=proton_content_change_project(method,raw_path,destination.as_deref(),&response.body);
+            if let Some(project)=project { let _=self.proton_note_local_change(&project); }
+          }
+        }
+
         if let Some(class) = class {
             let failed = match &result {
                 Ok(response) => response.status >= 400,
@@ -59,6 +120,32 @@ impl LocalApi {
         self.ai_state_preflight(&segments)?;
         if let ["api","projects",project,"ai","research",..]=segments.as_slice(){ self.research_jobs_checked(project)?; self.ai_research_policy(project)?; }
         match (method.as_str(), segments.as_slice()) {
+            ("GET", ["api", "proton", "accounts", "status"]) => ok(self.proton_accounts("status", body)?),
+            ("POST", ["api", "proton", "accounts", action]) if matches!(*action,"start"|"poll"|"cancel"|"disconnect") => ok(self.proton_accounts(action, body)?),
+            ("GET", ["api", "projects", p, "proton-direct"]) => ok(self.proton_direct(p,"status",body)?),
+            ("GET", ["api", "projects", p, "proton-direct", action]) if matches!(*action,"conflicts"|"storage") => ok(self.proton_direct(p,action,body)?),
+            ("GET", ["api", "projects", p, "proton-direct", "migration"]) => ok(self.proton_direct(p,"migration-query",body)?),
+            ("POST", ["api", "projects", p, "proton-direct", "retention", action]) if matches!(*action,"review"|"apply"|"cancel") => ok(self.proton_direct(p,&format!("retention-{action}"),body)?),
+            ("POST", ["api", "projects", p, "proton-direct", "migration", action]) if matches!(*action,"review"|"start"|"query"|"cancel"|"ack") => ok(self.proton_direct(p,&format!("migration-{action}"),body)?),
+            ("POST", ["api", "projects", p, "proton-direct", action]) if matches!(*action,"review"|"connect"|"sync"|"pause"|"disconnect") => ok(self.proton_direct(p,action,body)?),
+            ("POST", ["api", "projects", p, "proton-direct", "conflicts", "review"]) => ok(self.proton_direct(p,"conflict-review",body)?),
+            ("POST", ["api", "projects", p, "proton-direct", "conflicts", "resolve"]) => ok(self.proton_direct(p,"resolve",body)?),
+            // Folder exchange is superseded. Keep read/recovery state and safe
+            // disconnect, but never create a new binding or publish more files.
+            ("POST", ["api", "projects", _, "proton-sync", action])
+                if matches!(*action, "review" | "connect" | "publish") =>
+                Ok(LocalApiResponse { status: 409, body: json!({"code":"proton-folder-retired","message":"El intercambio por carpeta Proton está retirado. La conexión directa está en desarrollo.","documentsPreserved":true}) }),
+            ("POST", ["api", "projects", _, "proton-sync", "receive", "apply"]) =>
+                Ok(LocalApiResponse { status: 409, body: json!({"code":"proton-folder-retired","message":"La recepción por carpeta está retirada. Se conservan los intentos y las copias para su recuperación.","documentsPreserved":true}) }),
+            ("GET", ["api", "projects", p, "proton-sync"]) => ok(self.proton_sync_status(p)?),
+            ("GET", ["api", "projects", p, "proton-sync", "inbox"]) => ok(self.proton_sync_inbox(p)?),
+            ("POST", ["api", "projects", p, "proton-sync", "receive", "review"]) => ok(self.proton_sync_receive_review(p, body)?),
+            ("POST", ["api", "projects", p, "proton-sync", "disconnect"]) => ok(self.proton_sync_disconnect(p, body)?),
+            ("GET", ["api", "cloud-sync", "capabilities"]) => ok(cloud_providers::capabilities()),
+            ("GET", ["api", "projects", p, "cloud-sync"]) => ok(self.cloud_sync_status(p)?),
+            ("POST", ["api", "projects", p, "cloud-sync", "review"]) => ok(self.cloud_sync_review(p, body)?),
+            ("POST", ["api", "projects", p, "cloud-sync", "apply"]) => ok(self.cloud_sync_apply(p, body)?),
+            ("POST", ["api", "projects", p, "cloud-sync", "cancel"]) => ok(self.cloud_sync_cancel(p, body)?),
             ("GET",["api","projects",p,"scheduled-backups"])=>ok(self.scheduled_backups(p)?),
             ("PUT",["api","projects",p,"scheduled-backups"])=>ok(self.update_scheduled_backup_policy(p,body)?),
             ("POST",["api","projects",p,"scheduled-backups","run"])=>ok(self.run_scheduled_backup(p,body)?),

@@ -11,6 +11,8 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 knownext-ai = { path = "../knownext-ai" }
 knownext-ai-skills = { path = "../knownext-ai-skills" }
 knownext-core = { path = "../knownext-core" }
+knownext-sync-folder = { path = "../knownext-sync-folder" }
+knownext-proton = { path = "../knownext-proton" }
 knownext-drawing = { path = "../knownext-drawing" }
 knownext-docs = { path = "../knownext-docs" }
 knownext-recording = { path = "../knownext-recording" }

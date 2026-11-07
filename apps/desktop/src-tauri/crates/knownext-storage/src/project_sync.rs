@@ -27,6 +27,11 @@ impl LocalApi {
             } else {
                 "github-manual"
             };
+            if self.proton_migration_holds_source(project_id).unwrap_or(true) {
+                return github_remote_status(project_id, mode, "migration-pending", "Cambio de sincronización en curso",
+                    "Los archivos siguen disponibles localmente. Consulta el cambio pendiente antes de enviar o recibir desde GitHub.",
+                    "migration-pending", true, local_changes, local_hash, None, false, false);
+            }
             let authenticated = self.auth_status()["isAuthenticated"]
                 .as_bool()
                 .unwrap_or(false);

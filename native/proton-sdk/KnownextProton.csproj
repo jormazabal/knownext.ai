@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+<PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>Proton.Drive.Sdk.Account</AssemblyName><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><LangVersion>preview</LangVersion><AllowUnsafeBlocks>true</AllowUnsafeBlocks><PublishAot>true</PublishAot><NativeLib>Shared</NativeLib><NuGetLockFilePath>$(MSBuildThisFileDirectory)obj/$(RuntimeIdentifier).packages.lock.json</NuGetLockFilePath><ProtonSdkRoot Condition="'$(ProtonSdkRoot)'==''">$(MSBuildThisFileDirectory)../../target/proton-sdk/sources/sdk</ProtonSdkRoot><ProtonAccountRoot Condition="'$(ProtonAccountRoot)'==''">$(ProtonSdkRoot)/incubating/account/cs/src/Proton.Drive.Sdk.Account</ProtonAccountRoot></PropertyGroup>
+<ItemGroup><Compile Include="$(ProtonAccountRoot)/**/*.cs" Exclude="$(ProtonAccountRoot)/obj/**/*.cs;$(ProtonAccountRoot)/bin/**/*.cs"/><ProjectReference Include="$(ProtonSdkRoot)/client/cs/src/Proton.Drive.Sdk/Proton.Drive.Sdk.csproj"/>
+<PackageReference Include="Proton.Cryptography" Version="0.40.1-p0"/>
+<PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="10.0.14"/>
+<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.14"/>
+<PackageReference Include="Microsoft.Extensions.Http" Version="10.0.14"/>
+<PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.11.0"/>
+</ItemGroup></Project>

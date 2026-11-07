@@ -1,10 +1,10 @@
 # KnowNext.ai
 
-> 3.0.0 está en aceptación local como candidata C1; todavía no se ha publicado. Los enlaces versionados de esta revisión se activarán al publicar la release; el canal público anterior no se modifica durante esta preparación.
+> 3.0.0 incorpora el nuevo espacio de trabajo y sincronización directa con Proton en beta experimental para uso personal no comercial. Consulta las notas de versión y sus límites de compatibilidad.
 
 KnowNext.ai is a local-first Tauri application for managing, editing, versioning, exporting, and consulting Markdown documentation by project.
 
-Version 3.0.0 (local candidate C1) runs as a self-contained native app on Windows and Android:
+Version 3.0.0 runs as a self-contained native app on Windows and Android:
 
 - Tauri v2 shell and commands.
 - Rust local runtime for persistence, documents, exports, AI orchestration, diagnostics, and project operations.
@@ -15,6 +15,8 @@ Version 3.0.0 (local candidate C1) runs as a self-contained native app on Window
 - Local JSON/file persistence with replaceable Rust services.
 
 There is no external product service, packaged auxiliary runtime, API port, or mobile workstation dependency in 3.0.0.
+
+Proton connection is an experimental, unofficial integration for personal non-commercial use. It uses the official SDK inside the app and does not require installing Proton Drive. The SDK is not yet supported for third-party production use and may require updates for Proton's cryptographic migration; see the [official SDK guidelines](https://github.com/ProtonDriveApps/sdk/blob/05c9115955589d9f6ab7392a36f8f0cb39327133/README.md). Documents remain available locally. Google Drive, OneDrive and cloud-only projects are not included.
 
 ## Download
 

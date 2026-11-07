@@ -108,6 +108,10 @@ impl LocalApi {
         let previous=registry["projects"].as_array().and_then(|p|p.iter().find(|p|p["id"].as_str()==Some(project_id))).ok_or("Proyecto no encontrado")?.clone();
         let next_folder=payload.get("folderPath").map(|p|p.as_str().ok_or("Ubicación no válida")).transpose()?;
         let changes_location = next_folder.is_some_and(|folder|Some(folder)!=previous["folderPath"].as_str());
+        if (changes_location || payload.get("syncMode").and_then(Value::as_str).is_some_and(is_github_sync_mode))
+            && (self.proton_sync_is_connected(project_id)? || self.proton_direct_connected(project_id)?) {
+            return Err("Desconecta primero la asociación Proton desde su panel antes de cambiar la ubicación o activar GitHub. Los documentos y el intercambio se conservan.".into());
+        }
         if changes_location&&self.has_background_work(){return Err("Hay investigación en segundo plano. Espera a que termine antes de cambiar la ubicación del proyecto; no se ha cambiado el destino".into());}
         let relocated=next_folder.filter(|_|changes_location).map(|folder|self.reviewed_location(project_id,folder,&payload["locationReview"],&registry)).transpose()?;
         let original = PathBuf::from(previous["folderPath"].as_str().ok_or("Ubicación original no compatible")?);
@@ -225,6 +229,9 @@ impl LocalApi {
             .get("syncMode")
             .and_then(Value::as_str)
             .unwrap_or("manual-local");
+        if is_github_sync_mode(sync_mode) && (self.proton_sync_is_connected(project_id)? || self.proton_direct_connected(project_id)?) {
+            return Err("El proyecto ya tiene una asociación Proton. Desconéctala desde su panel antes de activar GitHub.".into());
+        }
         let repository_exists=if sync_mode!="none"{project_capabilities::require_history_runtime()?;let root=self.project_root(project_id)?;ensure_git_repo(&root)?;root.join(".git").exists()}else{false};
         self.update_project_fields(project_id, |project| {
             project["syncMode"] = Value::from(sync_mode);
@@ -244,6 +251,9 @@ impl LocalApi {
         body: Value,
         publishing: bool,
     ) -> Result<Value, String> {
+        if self.proton_sync_is_connected(project_id)? || self.proton_direct_connected(project_id)? {
+            return Err("El proyecto ya tiene una asociación Proton. Se conserva; no se ha conectado GitHub.".into());
+        }
         let owner = body
             .get("owner")
             .and_then(Value::as_str)

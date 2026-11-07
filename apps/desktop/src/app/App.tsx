@@ -205,6 +205,7 @@ import {
 } from "../lib/api/handwrittenNotes";
 import { getUserNotes, saveUserNotes } from "../lib/api/notes";
 import { getExternalChanges, importExternalChanges, scanExternalChanges } from "../lib/api/externalChanges";
+import { PROTON_WORKSPACE_CHANGED_EVENT } from "../lib/api/protonDirect";
 import { autoRunProjectSync, changeProjectSyncMode, connectProjectGithub, enableProjectHistory, getProjectFileSyncOverview, getProjectSyncStatus, publishProjectGithub, scanProjectSync, verifyProjectGithubConnection } from "../lib/api/sync";
 import { APP_VERSION } from "../lib/appVersion";
 import { RELEASE_NOTES_MARKDOWN } from "../lib/releaseNotes";
@@ -871,6 +872,10 @@ export function App() {
       const now = Date.now();
       if (now - externalChangesLastCheckRef.current < 55_000) return;
       externalChangesLastCheckRef.current = now;
+      if (!activeProject.isGitRepository) {
+        void handleReloadProjectTree(activeProject.id);
+        return;
+      }
       void refreshExternalChangeSet(activeProject.id, { refreshTreeOnChanges: true, silent: true });
     };
     const startupTimeout = window.setTimeout(check, 1200);
@@ -881,7 +886,20 @@ export function App() {
       window.clearTimeout(startupTimeout);
       window.clearInterval(interval);
     };
-  }, [activeProject?.id, acknowledgedExternalChangeSets, configLoaded, externalChangesBusy]);
+  }, [activeProject?.id, activeProject?.isGitRepository, acknowledgedExternalChangeSets, configLoaded, externalChangesBusy]);
+
+  useEffect(() => {
+    if (!configLoaded || !activeProject) return;
+    const projectId=activeProject.id;
+    const changed=(event:Event)=>{
+      const detail=(event as CustomEvent<{projectId?:unknown}>).detail;
+      if(detail?.projectId!==projectId||activeAiProjectRef.current!==projectId)return;
+      void handleReloadProjectTree(projectId);
+      void checkOpenDocumentSync({silent:true});
+    };
+    window.addEventListener(PROTON_WORKSPACE_CHANGED_EVENT,changed);
+    return()=>window.removeEventListener(PROTON_WORKSPACE_CHANGED_EVENT,changed);
+  }, [activeProject?.id, configLoaded]);
 
   useEffect(() => {
     if (!configLoaded || !activeProject) {

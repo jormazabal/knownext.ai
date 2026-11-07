@@ -20,6 +20,7 @@ use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 mod runtime_dispatch;
 mod scheduled_backup_runtime;
+mod proton_sync_runtime;
 mod navigation_policy;
 mod operations;
 mod managed_native;
@@ -339,11 +340,23 @@ pub fn run() {
             );
             #[cfg(target_os = "android")]
             let api=android_recording::local_api().map_err(std::io::Error::other)?;
+            // The Proton URL contains an ephemeral fragment key: open natively.
+            let browser_app=app.handle().clone();
+            knownext_storage::initialize_proton_browser(Box::new(move |url| {
+                use tauri_plugin_shell::ShellExt;
+                #[allow(deprecated)]
+                browser_app.shell().open(url, None).map_err(|_|"No se pudo abrir el navegador de Proton".to_string())
+            }));
+            #[cfg(not(target_os="android"))]
+            if let Ok(resources)=app.path().resource_dir() {
+                knownext_storage::initialize_proton_library(resources.join("resources").join("proton").join("windows").join("knownext_proton.dll"));
+            }
             app.manage(api.runtime_operations());
             app.manage(restart::RestartFence::default());
             app.manage(workspace_exit::ExitRequest::default());
             app.manage(LocalApiState(Mutex::new(api.clone()), api, Mutex::new(()),Mutex::new(()),Mutex::new(())));
             scheduled_backup_runtime::start(app.handle());
+            proton_sync_runtime::start(app.handle());
             #[cfg(desktop)]
             {
                 recording::setup_tray(app.handle())?;

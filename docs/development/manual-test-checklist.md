@@ -1173,3 +1173,96 @@ Esta tabla concreta el alcance observado y no marca como superadas las casillas 
 
 
 Cierre de esta etapa QA140: Windows MSI paralelo y Android QA/emulador aceptados sólo en los recorridos comprobados anteriores. No se marcan como completas las casillas amplias que incluyen migración/actualizador productivos, firma oficial, ARM físico/SAF/Keystore/hardware o personas. T17 real continúa aplazada sin gasto; publicación excluida. P10 mantiene abiertas esas aceptaciones generales.
+
+## SC01 · Sincronización alternativa en desarrollo
+
+La primera integración prepara revisiones locales y capacidades; no activa aún conexiones cloud. Capturas de componentes con datos controlados no acreditan cuentas o aceptación instalada.
+
+- [ ] Abrir «Sincronización del proyecto» desde el menú y confirmar identidad del proyecto activo.
+- [ ] Distinguir proyecto GitHub existente de destino cloud no conectado; ninguna revisión debe desconectar GitHub.
+- [ ] Comprobar alcance, historial local y exclusiones, incluida una modificación posterior que invalide la revisión.
+- [ ] Cancelar o reabrir una revisión pendiente sin perder sus fuentes ni inventar un envío.
+- [ ] Confirmar que preparación y consulta de estado no bloquean el guardado en otro documento.
+- [ ] Completar OAuth nativo y sincronización real Windows↔Windows y Windows↔Android con corpus sintético cuando los conectores estén operativos.
+- [ ] Migrar entre proveedores y cuentas con verificación de contenido, regreso y aportaciones tardías desde otro dispositivo.
+- [ ] Validar Proton directo Windows↔Android sin cliente externo; sesión persistente y confirmación remota por revisión, PD01–PD14.
+
+## SC01 · Proton directo · aceptación por alcance
+
+Revisión3 (2026-11-06) sustituye el checklist del cliente/carpeta Windows.
+Código antiguo presente, no aceptado como solución.
+[Plan vigente](../product/revision-3.0-implementacion/sincronizacion-alternativa/plan.md).
+La planificación inicial no ejecutó pruebas. Reanudación avance03: pruebas focales y P0 nativo en ejecución; sus resultados no completan aceptación funcional de estas casillas.
+
+- [ ] Windows/Android sin Proton Drive/CLI: conectar por navegador, elegir proyecto e intercambiar corpus sintético.
+- [ ] Cancelar/caducar login, cuenta equivocada y 2FA; sin contraseña en KnowNext o secretos/URL sensible en logs.
+- [ ] Cerrar/reiniciar/reabrir al día siguiente, editar y sincronizar sin login habitual; caducidad/renovación real comprobada separadamente.
+- [ ] Red/429/5xx no desconectan; revocación pide reconectar conservando cola/documentos/otros proyectos.
+- [ ] DPAPI/Keystore y migración conservan GitHub/IA; exportaciones/respaldos no incluyen secretos.
+- [ ] Markdown/carpetas/adjuntos/notas manuscritas/actas/metadatos íntegros; exclusiones explícitas.
+- [ ] Edición fluida en transferencia; acuse anterior no oculta ediciones nuevas.
+- [ ] Offline ambos equipos, reanudar Android y eventos; borradores protegidos.
+- [ ] Conflictos contenido/mover/borrar, resolución obsoleta rechazada y variantes conservadas.
+- [ ] Cortar transferencia/recepción y cerrar durante publicación; recuperar sin duplicar ni borrar cambios posteriores.
+- [ ] Cuota/disco lleno simulados, inventario/limpieza revisada protegen bases/variantes/pendientes/desconocidos.
+- [ ] Local↔Proton, cuenta/raíz, GitHub compatible y retorno tras editar: inventarios/IDs/enlaces/historial contrastados.
+- [ ] Estado antiguo por carpeta/parcial recuperable sin reconectar ni borrar automáticamente; alta antigua inaccesible.
+- [ ] UI accesible escritorio/móvil, sesión recordada y distinción guardado/nube/recepción en otro equipo.
+- [ ] SDK/cifrado/versiones/ABI Windows x64/Android arm64 contrastados; condiciones de distribución antes de entrega pública.
+- [ ] Regresión final agrupada; repetir sólo casos invalidados después. Sin gasto IA ni publicación.
+
+Avance02/verificacion02 conservan evidencia histórica de carpetas, no acreditan estas casillas.
+
+### SC01 · avance04 de integración (6 de noviembre)
+
+- [x] ABI/crypto/SRP/AES-GCM e inicio HTTPS anónimo en Windows y emulador Androidx64; no equivale a login autenticado.
+- [x] Servicio de cuenta: once casos únicos; UI/API: veintisiete casos únicos acumulados, con reutilización de resultados no afectados. El último impide «Conservar ambos» ante un borrado remoto y mantiene las dos decisiones válidas.
+- [x] Contratos focales: cuatro de ámbito/legado y ocho directos, incluidos acuse perdido, guardar/edición externa, resolución local, edición de retorno causal y borrado frente a réplica desconectada.
+- [x] Planificador: once casos iniciales y cuatro nuevos de antecedente propio demostrado, sin repetir suite completa.
+- [x] Windows QA compila y abre con identificador aislado; Kotlin Android focal compila, corrigiendo instalación del vault con contexto.
+- [x] Compilación final TypeScript/Vite y comprobación de ausencia de secretos en el paquete cliente correctas tras el ajuste de conflicto por borrado.
+- [x] Windows QA: login humano en navegador oficial, cuenta recordada al reabrir, revisión SDK y asociación del proyecto sintético; sincronización real confirmada por revisión.
+- [ ] Comparar hashes del corpus sintético Windows↔Android; reabrir ambas apps conservando sesión y comprobar renovación autenticada.
+- [ ] Aceptar la APK completa, Keystore, recursos nativos y recuperación en el ciclo de vida Android.
+
+Recorrido inicial Android API36/x86_64 (APK QA anterior `26d455eb…307c4`, superado por la aceptación autenticada final más abajo): instalación y arranque correctos; proyecto sintético conservado; selector de sincronización y SDK disponibles; un único inicio abre Chrome; detener y reabrir el proceso recupera el intento pendiente cifrado y permite consultarlo. Aquel corte no incluía cuenta autenticada, transferencia ni renovación de token real. Se corrigió el alias `/data/user/0`→`/data/data` del espacio de montajes de la aplicación, manteniendo las guardas de descendientes. [Evidencia nativa](../../output/sc01-proton-p1/android-qa/qa-report.md).
+
+Validación final de este corte:
+
+- [x] Windows: proyecto sintético de dos archivos/400 bytes enviado mediante la interfaz y SDK; estado «Al día con Proton» observado.
+- [x] Una renovación real de credenciales; servicio reinstanciado, acceso SDK y lectura de los dos blobs desde el espacio gestionado; bytes y SHA256 idénticos. [Recibo redactado](../../output/sc01-proton-p1/native/session-acceptance/receipt.json). No equivale a una espera real de 24 horas ni a renovación Android.
+- [x] Último frontend: 29 casos únicos UI/API acumulados, TypeScript/Vite y paquete cliente limpio. Evento de refresco manual y parcial; árbol sin Git actualizado por comprobación periódica.
+- [x] APK x86_64 final `9346c161…6681a`: un archivo sintético nuevo apareció en el árbol sin reabrir el proyecto, observado dentro de 65 segundos. [Recibo](../../output/sc01-proton-p1/android-qa/offline-tree-result.json).
+- [x] APK ARM64 final y APK x86_64 final, ambas QA: compilación, firma y cinco bibliotecas verificadas con el mismo código. [Catálogo](../../output/sc01-proton-p1/native/android-qa-final-artifacts.json).
+- [x] Autenticación independiente Android en navegador oficial; recepción Windows→Android y publicación Android→Windows sin cliente externo. Tres archivos sintéticos con tamaños y SHA256 idénticos; Windows recibió automáticamente el tercero.
+- [x] Cuenta/asociación Android recordadas tras detener y reabrir sólo el paquete QA; una nueva sincronización SDK autenticada terminó «Al día con Proton» sin login.
+- [x] Primer acuse Android incierto (504/Resultado pendiente): consultar recuperó «Al día con Proton» sin repetir el envío ni forzar el cierre durante la operación.
+- [x] Modificación de un archivo sintético existente en Android (UID QA, no edición Milkdown): 104→138 bytes; Windows lo recibió automáticamente con el nuevo SHA256 idéntico y los otros dos archivos intactos. Un único sync Android, también con espera UI agotada; ninguna repetición manual. [Recibo Windows](../../output/sc01-proton-p1/windows-candidate/cross-device-receipt.json).
+- [ ] Caducidad/renovación autenticada Android, espera literal de 24 horas, interrupciones durante escritura y aceptación física ARM64.
+- [x] Pendiente residual Android cerrado en avance05: el sondeo creaba marcadores sin editar. Reproducción previa, drenado normal de tres marcadores y cero tras74,937segundos acreditados; la confirmación del contenido y el estado de una pausa/aviso se mantienen como hechos distintos.
+
+La página oficial de Proton puede invitar a abrir Proton Drive después de autorizar. El cliente externo no es necesario: volver a KnowNext permite consultar la cuenta. El navegador y los almacenes de cuenta no se capturan ni exportan con secretos.
+
+[Reporte visual04](../product/revision-3.0-implementacion/sincronizacion-alternativa/avance-04.html).
+No marcar las casillas globales anteriores como completas a partir de estas comprobaciones parciales.
+
+### SC01 · avance05: continuidad, retención y migración
+
+- [x] Veinte contratos directos: recepción parcial, borrador tardío, cambios en archivos ya completados, carpetas vacías/movidas/recreadas, bases sin identidad y contabilidad de pendientes. Son contratos locales, no campaña con proveedor.
+- [x] Once contratos de ciclo de vida: inventario/revisión estables, protección de desconocidos/bases, limpieza parcial reanudable/cancelable, recibos, recuperación local explícita y cambio de asociación tras interrupción sin perder ediciones posteriores. Incluyen recuperar la revisión y el destino guardados con el mismo intento; fixtures con admisión global se ejecutan en serie.
+- [x] Treinta y nueve casos únicos frontend/API, con reutilización de los no afectados. Confirmaciones antiguas y consultas tardías no anuncian «Al día» para una operación nueva; acuse incierto consulta sin repetir POST. La recuperación muestra la cuenta y ubicación guardadas antes de confirmar.
+- [x] Diecisiete vistas controladas desktop/móvil y comprobación focal de acciones: limpieza revisada/cancelada, migración preparada/confirmada, retorno al intento y aviso de traslado. No acreditan cuenta nativa.
+- [x] Diez casos unitarios críticos de GitHub, directorios y admisión, más el contrato de carriles Tauri. El nuevo caso Git literal conserva privados y cubre alta/baja de un nombre con corchetes.
+- [x] Cinco contratos del marcador de cambios: consultas, vistas, búsquedas y selección no crean trabajo; las escrituras documentales sí se registran y los cambios externos reales se detectan por snapshot. Reproducción previa en APK P1: una consulta `POST /sync/scan` añadió un marcador sin alterar los tres hashes.
+- [x] P2 instalada conservando sesión/UID y los tres SHA; drenado normal de los marcadores heredados y cola estable tras el sondeo, sin borrarlos para ocultar el problema.
+- [x] Campaña única de carpetas vacías Windows↔Android, limpieza104bytes con protegidos, recuperación/reapertura/cancelación y migración Proton→local→mismo origen Proton; identidad, cuenta y tres SHA conservados. Android recibió baja/aviso y se recuperó de un fallo de red sin replay. Las entradas de motor/retención/migración no cambiaron con los arreglos finales y su evidencia se reutiliza.
+- [x] Candidatas definitivas Windows/Androidx64/ARM64 preparadas y verificadas con1.089entradas de fuente y187recursos web. Windows y Androidx64 QA focal aprobada, sin nuevas suites completas ni llamadas IA. [Recibo de cierre](../../output/sc01-proton-p2/final/acceptance-05.json). ARM físico, renovación Android tras caducidad,24h literales, interrupción nativa forzada durante escritura, GitHub real y distribución productiva conservan aceptación independiente.
+
+[Reporte visual05](../product/revision-3.0-implementacion/sincronizacion-alternativa/avance-05.html). Sin suites completas repetidas, IA ni publicación.
+
+Comprobaciones finales afectadas por la revisión independiente del avance05:
+
+- [x] Contratos finales y Windows definitivo: con Proton pausado, escaneo externo y creación/refresco de vista no dejan marcadores ni pendientes ficticios. Búsquedas, planes y actividad privada cubiertos por contrato; Android definitivo se registra en la casilla siguiente.
+- [x] Una edición externa real invalida la confirmación aunque no cree marcador. Windows comprobó pendiente real1 al añadir el PDF temporal y vuelta0 tras retirarlo con hash verificado; los tres archivos originales permanecen íntegros. Escrituras de documentos/carpetas/manuscritas/importaciones cubiertas por contrato.
+- [x] Contrato Git local con `[.]private` y `.private` preparado por separado: sólo el nombre literal revisado entra en la versión; el privado continúa preparado y excluido, también al borrar el archivo público revisado. La existencia se contrasta con `cat-file -e`, sin inferirla de la salida vacía de `show`.
+- [x] Windows final ejecutada y Android QA actualizado conservando sesión/UID/archivos. Sólo se comprobaron las rutas invalidadas: escaneo externo y creación/refresco de vista con un PDF temporal de15bytes, retirado tras verificar su hash. Cero marcadores y pendientes; Android conserva el aviso de traslado esperado y no se presenta como «Al día». [Recibo Windows](../../output/sc01-proton-p2/final/windows-qa/readonly-acceptance.json) y [recibo Android](../../output/sc01-proton-p2/android-qa/final-apk-focused-acceptance.json). Retención, directorios y migraciones se reutilizan con sus entradas sin cambios.

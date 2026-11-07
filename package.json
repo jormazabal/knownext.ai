@@ -23,7 +23,7 @@
     "rust:test": "node --test scripts/test-native.test.mjs && node scripts/test-native.mjs",
     "version:check": "node scripts/check-version.mjs",
     "release:secrets:check": "node scripts/check-release-secrets.mjs",
-    "release:check": "pnpm version:check && pnpm build && pnpm bundle:check-clean && pnpm test && pnpm rust:test"
+    "release:check": "node scripts/release-validation.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, mkdirSync, rmSync, readFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -9,7 +9,8 @@ const sdkRoot = process.env.ANDROID_HOME ?? join(process.env.LOCALAPPDATA ?? "",
 const ndkHome = process.env.NDK_HOME ?? join(sdkRoot, "ndk", "28.2.13676358");
 const javaHome = process.env.JAVA_HOME ?? "C:\\Program Files\\Android\\Android Studio\\jbr";
 const abi = process.env.KNOWNEXT_ANDROID_ABI ?? "arm64";
-const androidApiLevel = process.env.KNOWNEXT_ANDROID_API_LEVEL ?? "35";
+const androidApiLevel = process.env.KNOWNEXT_ANDROID_API_LEVEL ?? "24";
+if(androidApiLevel!=="24")throw new Error("The app preserves minSdk24: its release linker must target API24; the optional Proton provider targets API29 separately.");
 const llvmBin = join(ndkHome, "toolchains", "llvm", "prebuilt", process.platform === "win32" ? "windows-x86_64" : "linux-x86_64", "bin");
 const commandExtension = process.platform === "win32" ? ".cmd" : "";
 
@@ -31,6 +32,7 @@ if (!target) {
 }
 
 assertAndroidSigningEnvironment();
+if(!existsSync(javaHome)||!existsSync(sdkRoot))throw new Error("JAVA_HOME and ANDROID_HOME must identify the release toolchains.");
 
 const env = {
   ...process.env,
@@ -47,17 +49,23 @@ const env = {
 };
 
 env[`CARGO_TARGET_${target.rustTarget.toUpperCase().replaceAll("-", "_")}_LINKER`] = join(llvmBin, target.linker);
+env[`CC_${target.rustTarget.replaceAll("-","_")}`]=join(llvmBin,target.linker);
+env[`AR_${target.rustTarget.replaceAll("-","_")}`]=join(llvmBin,process.platform==="win32"?"llvm-ar.exe":"llvm-ar");
 
 console.log(`KnowNext.ai Android release build`);
 console.log(`Version: ${version}`);
 console.log(`ABI: ${abi}`);
 
 assertNoClientSecretEnvironment(env);
+// The release must build its native provider from committed inputs. Never use
+// whichever experiment binaries happen to exist under output/ or resources/.
+run("node",["scripts/prepare-proton-android.mjs","--abi",target.manifestAbi],repoRoot,env);
+const nativeReceipt=join(repoRoot,"output",`release-${version}`,"android","proton","android-native.json");
 run("pnpm", ["build"], repoRoot, env);
 run("node", ["scripts/check-client-bundle-clean.mjs", "apps/desktop/dist"], repoRoot, env);
 run(
   "cargo",
-  ["build", "--target", target.rustTarget, "--features", "custom-protocol", "--release"],
+  ["build", "--locked", "--lib", "--target", target.rustTarget, "--features", "custom-protocol", "--release"],
   join(repoRoot, "apps", "desktop", "src-tauri"),
   env,
 );
@@ -66,7 +74,9 @@ const sourceLibrary = join(repoRoot, "apps", "desktop", "src-tauri", "target", t
 const jniDir = join(repoRoot, "apps", "desktop", "src-tauri", "gen", "android", "app", "src", "main", "jniLibs", target.jniFolder);
 const jniLibrary = join(jniDir, "libknownext_ai_desktop_lib.so");
 mkdirSync(jniDir, { recursive: true });
+const previousJni=existsSync(jniLibrary)?readFileSync(jniLibrary):null;
 copyFileSync(sourceLibrary, jniLibrary);
+run(join(llvmBin,process.platform==="win32"?"llvm-strip.exe":"llvm-strip"),["--strip-unneeded",jniLibrary],repoRoot,env);
 
 try {
   const gradleWrapper = join(repoRoot, "apps", "desktop", "src-tauri", "gen", "android", process.platform === "win32" ? "gradlew.bat" : "gradlew");
@@ -79,12 +89,16 @@ try {
   );
 
   const apk = join(repoRoot, "apps", "desktop", "src-tauri", "gen", "android", "app", "build", "outputs", "apk", ...target.apkPath);
+  const metadata=JSON.parse(readFileSync(join(dirname(apk),"output-metadata.json"),"utf8"));
+  if(metadata.applicationId!=="ai.knownext.mobile"||metadata.variantName.toLowerCase().includes("debug"))throw new Error("Refusing non-production Android package.");
+  run(process.env.PYTHON??(process.platform==="win32"?"python":"python3"),["scripts/check-android-release.py","--apk",apk,"--native-receipt",nativeReceipt,"--app-library",jniLibrary,"--version",version,"--build-tools",join(sdkRoot,"build-tools","36.0.0"),"--out",join(repoRoot,"output",`release-${version}`,"android","packaging.json")],repoRoot,env);
   const output = join(repoRoot, "output", target.outputName);
   mkdirSync(dirname(output), { recursive: true });
   copyFileSync(apk, output);
   console.log(`APK: ${output}`);
 } finally {
-  rmSync(jniLibrary, { force: true });
+  if(previousJni===null)rmSync(jniLibrary, { force: true });
+  else writeFileSync(jniLibrary,previousJni);
 }
 
 function run(command, args, cwd, env) {

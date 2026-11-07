@@ -2427,6 +2427,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "knownext-proton"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "fs2",
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "knownext-recording"
 version = "0.1.0"
 dependencies = [
@@ -2463,8 +2477,10 @@ dependencies = [
  "knownext-core",
  "knownext-docs",
  "knownext-drawing",
+ "knownext-proton",
  "knownext-recording",
  "knownext-research",
+ "knownext-sync-folder",
  "libc",
  "quick-xml 0.38.4",
  "reqwest",
@@ -2477,6 +2493,19 @@ dependencies = [
  "unicode-normalization",
  "windows-sys 0.61.2",
  "zip 4.6.1",
+]
+
+[[package]]
+name = "knownext-sync-folder"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "unicase",
+ "unicode-normalization",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -15,9 +15,14 @@ object CredentialVault {
 
     @JvmStatic external fun nativeInstall(): Boolean
 
-    @JvmStatic fun install() {
+    @JvmStatic external fun nativeConfigureProton(path: String)
+
+    @JvmStatic fun install(context: android.content.Context) {
         System.loadLibrary("knownext_ai_desktop_lib")
         nativeInstall()
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            nativeConfigureProton(java.io.File(context.applicationInfo.nativeLibraryDir, "libknownext_proton.so").absolutePath)
+        }
     }
 
     @JvmStatic @Synchronized fun transform(input: ByteArray, protect: Boolean): ByteArray {

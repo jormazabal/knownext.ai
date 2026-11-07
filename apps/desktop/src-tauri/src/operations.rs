@@ -24,6 +24,16 @@ fn lane(request: &LocalApiRequest) -> (Lane, u8) {
     ) {
         return (Lane::Control, 0);
     }
+    if matches!((method,parts.as_slice()),("POST",["api","projects",_,"proton-direct","pause"])) {
+        return (Lane::Control,0);
+    }
+    if matches!((method,parts.as_slice()),
+        ("GET",["api","proton","accounts","status"]) |
+        ("GET",["api","projects",_,"proton-direct",..]) |
+        ("POST",["api","projects",_,"proton-direct","migration","query"]) |
+        ("POST",["api","projects",_,"proton-direct","conflicts","review"])) {
+        return (Lane::Query,0);
+    }
     if knownext_storage::is_scheduled_backup_work(method,path){return (Lane::Transfer,2);}
     if knownext_storage::is_export_batch_work(method,path){return (Lane::Transfer,2);}
     if knownext_storage::is_slow_runtime_work(method,path){return (Lane::Background,1);}
@@ -146,6 +156,22 @@ mod tests {
             body: None,
             files: None,
         }
+    }
+    #[test]
+    fn proton_state_and_pause_do_not_queue_behind_network_or_saves(){
+        assert_eq!(lane(&request("POST","/api/projects/owned/proton-direct/sync")),(Lane::Background,1));
+        assert_eq!(lane(&request("POST","/api/projects/owned/proton-direct/pause")),(Lane::Control,0));
+        assert_eq!(lane(&request("GET","/api/projects/owned/proton-direct")),(Lane::Query,0));
+        assert_eq!(lane(&request("GET","/api/proton/accounts/status")),(Lane::Query,0));
+        assert!(knownext_storage::runtime_resource("POST","/api/projects/owned/proton-direct/pause").is_none());
+        assert!(knownext_storage::runtime_resource("GET","/api/projects/owned/proton-direct").is_none());
+        for method in ["GET", "POST"] {
+            let path=if method=="GET"{"/api/projects/owned/proton-direct/migration"}else{"/api/projects/owned/proton-direct/migration/query"};
+            assert_eq!(lane(&request(method,path)),(Lane::Query,0));
+            assert!(knownext_storage::runtime_resource(method,path).is_none());
+        }
+        assert_eq!(lane(&request("POST","/api/projects/owned/proton-direct/migration/start")),(Lane::Background,1));
+        assert_eq!(lane(&request("POST","/api/projects/owned/proton-direct/retention/apply")),(Lane::Background,1));
     }
     #[test]fn runtime_block_slow_routes_and_resources_preserve_save_admission(){assert_eq!(lane(&request("POST","/api/auth/github/device/poll")),(Lane::Background,1));assert_eq!(lane(&request("GET","/api/projects/owned/sync/status")),(Lane::Background,1));assert_eq!(lane(&request("PUT","/api/documents/owned%3A%3Adoc.md")),(Lane::Mutation,0));assert!(knownext_storage::runtime_resource("POST","/api/projects/owned/ai/interactions").is_none());assert!(knownext_storage::runtime_resource("POST","/api/projects/owned/assets/images").is_none());assert!(validate(&request("POST","/api/config\n")).is_err());}
     #[test]

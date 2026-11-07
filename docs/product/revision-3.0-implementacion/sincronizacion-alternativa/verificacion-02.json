@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "recordedOn": "2026-11-06",
+  "status": "manual-folder-exchange-implemented-real-proton-acceptance-pending",
+  "team": "coordinator and three real subagents; separate file scopes",
+  "verification": {
+    "rustPassed": 25,
+    "rustBreakdown": {
+      "folderContracts": 14,
+      "cfapiPolicy": 2,
+      "projectService": 7,
+      "dispatcher": 2
+    },
+    "frontendUniquePassed": 15,
+    "frontendReuse": "Latest executed result per suite/case; filter-skipped cases reuse unaffected PASS. Initial selector failures retained in original logs.",
+    "typescript": "passed --noEmit",
+    "fullSuitesRun": false,
+    "broadPrecheck": "interrupted; not counted as PASS; final focused integration compilation passed",
+    "realProtonClient": false,
+    "crossDeviceCloudTransfer": false,
+    "nativeInstalledAcceptance": false,
+    "aiExpense": false,
+    "publication": false
+  },
+  "userContext": "User can install Proton Drive; Microsoft/Google registrations will be managed by user. No personal data accessed.",
+  "limits": [
+    "manual publish/receive; no automation",
+    "no automatic deletes/renames or integrated GitHub migration",
+    "partial receive preserved/observable but assisted repair pending",
+    "private-store accumulated quota/cleanup pending",
+    "assisted conflict comparison/resolution pending",
+    "CFAPI compatibility implemented; official client/hydration not accepted",
+    "Android not enabled"
+  ],
+  "localEvidence": {
+    "output/sc01-proton-folder-final.log": {
+      "sha256": "8a964e04e55610845191acf1b7c0fdb05ccbfb6cebc1870411a669d093be8731",
+      "bytes": 1927,
+      "availability": "local ignored output"
+    },
+    "output/sc01-proton-integration-final.log": {
+      "sha256": "b7fa67d96d5fa07e48a5903f31ec2a563b89434db5f15f430614ea122c519bfb",
+      "bytes": 2521,
+      "availability": "local ignored output"
+    },
+    "output/sc01-proton-typescript-final.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "availability": "local ignored output"
+    },
+    "output/sc01-proton-ux-tests.json": {
+      "sha256": "889a8729f216d1cd6605d37b1830a4d98fcfd1fec6ef644033a1a2f81b2b1a4f",
+      "bytes": 6949,
+      "availability": "local ignored output"
+    },
+    "output/sc01-proton-ux-rechecked.json": {
+      "sha256": "094ccb07e6e87032938348de9686196cad9a3c636f4d071736ada30be5a735ea",
+      "bytes": 2017,
+      "availability": "local ignored output"
+    },
+    "output/sc01-proton-ux-final.json": {
+      "sha256": "79af13d1d25c7a99cdcbf1e8f4d2a30c73214b59485fc23b35ae525d61bfdaa8",
+      "bytes": 4647,
+      "availability": "local ignored output"
+    },
+    "output/sc01-proton-ux-recovery-final.json": {
+      "sha256": "cea6aeb9c657a01740c29640d0f068bac771aa1a3778138ae1453a861ec5f13c",
+      "bytes": 2817,
+      "availability": "local ignored output"
+    }
+  },
+  "sourceHashes": {
+    "apps/desktop/src-tauri/crates/knownext-sync-folder/src/lib.rs": "64986d85a8d59ec8bd56e4c0ee8f04e319aec5b20363c6c097421df2fc8947c3",
+    "apps/desktop/src-tauri/crates/knownext-storage/src/proton_sync.rs": "dd6b8d379ccaeaace9928988119e64f3cad397a5e314892feedbd03c3a0f48c7",
+    "apps/desktop/src-tauri/crates/knownext-storage/tests/proton_sync_contract.rs": "3bd5105a8d36220ec60801b0ba152a677fa365e77f24be01d0f652c58d7a6c78",
+    "apps/desktop/src/features/cloudSync/ProtonSyncPanel.tsx": "54b64f47597aeefa2fccd04bb41366c39faa3fbb83c2612544ccdcb220f5a960",
+    "apps/desktop/src/types/protonSync.ts": "23302a07df4fdebe7d90619857b3b11f51e525447807a162bffbfb5376d84434",
+    "apps/desktop/src/lib/api/protonSync.ts": "99b4dbaef6af4852a18ea3cf75f01c844410ac3b977f1605e711721679e583b1"
+  }
+}
