@@ -61,6 +61,23 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: pnpm release:secrets:check
 
+      - name: Prepare unpublished release for parallel platform builds
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(cat VERSION)"
+          tag="v$version"
+          state="$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null || true)"
+          if [ "$state" = "true" ]; then
+            echo "Continuing the unpublished draft."
+          elif [ -n "$state" ]; then
+            echo "Refusing to replace an already published release." >&2
+            exit 1
+          else
+            gh release create "$tag" --verify-tag --draft --title "KnowNext.ai $version" --notes-file "docs/releases/$version.md"
+          fi
+
   release-windows:
     name: Build and publish Windows release
     runs-on: windows-latest
@@ -174,13 +191,24 @@ jobs:
           gh release upload "$env:KNOWNEXT_RELEASE_TAG" $source[0].FullName --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Corresponding-source upload failed.' }
 
+      - name: Preserve Windows packaging evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-evidence
+          path: |
+            output/release-regression-evidence.json
+            target/proton-sdk/license-inventory.json
+            apps/desktop/src-tauri/resources/proton/windows/provenance.json
+          if-no-files-found: ignore
+          retention-days: 14
+
   release-android:
     name: Build and upload Android private APK
-    if: ${{ !cancelled() && needs.release-preflight.result == 'success' && (needs.release-windows.result == 'success' || (inputs.android_only && needs.release-windows.result == 'skipped')) }}
+    if: ${{ !cancelled() && needs.release-preflight.result == 'success' }}
     runs-on: ubuntu-latest
     needs:
       - release-preflight
-      - release-windows
     env:
       CARGO_BUILD_JOBS: "2"
 
@@ -278,3 +306,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$KNOWNEXT_RELEASE_TAG" output/KnowNext.ai-android-arm64-v*.apk output/android-latest.json "output/release-${KNOWNEXT_RELEASE_VERSION}/android/knownext-proton-android-sources.zip" --clobber
+
+      - name: Preserve Android packaging evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-android-evidence
+          path: |
+            output/release-*/android/packaging.json
+            output/release-*/android/proton/android-native.json
+            output/release-*/android/proton/bootstrap/license-inventory.json
+          if-no-files-found: ignore
+          retention-days: 14
