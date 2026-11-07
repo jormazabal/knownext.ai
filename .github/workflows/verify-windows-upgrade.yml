@@ -1,0 +1,58 @@
+name: Verify Windows MSI upgrade
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha256:
+        description: Verified SHA-256 of the v3.0.0 draft MSI
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  upgrade:
+    if: github.repository == 'jormazabal/knownext.ai' && github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    # GitHub requires repository push access to discover draft releases.
+    permissions:
+      contents: write
+    env:
+      CANDIDATE_SHA256: ${{ inputs.candidate_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download the public baseline and exact draft candidate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:CANDIDATE_SHA256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'Provide the candidate SHA-256.' }
+          $work = Join-Path $env:RUNNER_TEMP 'knownext-msi-upgrade'
+          New-Item -ItemType Directory -Path $work | Out-Null
+          Invoke-WebRequest -Uri 'https://github.com/jormazabal/knownext.ai/releases/download/v2.6.0/KnowNext.ai_2.6.0_x64_en-US.msi' -OutFile (Join-Path $work 'KnowNext.ai_2.6.0_x64_en-US.msi')
+          $draft = gh release view v3.0.0 --repo jormazabal/knownext.ai --json isDraft --jq .isDraft
+          if ($LASTEXITCODE -ne 0 -or $draft -cne 'true') { throw 'The v3.0.0 draft release is required.' }
+          gh release download v3.0.0 --repo jormazabal/knownext.ai --pattern 'KnowNext.ai_3.0.0_x64_en-US.msi' --dir $work
+          if ($LASTEXITCODE -ne 0) { throw 'Draft MSI download failed.' }
+
+      - name: Install and verify the per-user MSI upgrade
+        shell: pwsh
+        run: ./scripts/verify-windows-upgrade.ps1 -CandidateSha256 $env:CANDIDATE_SHA256
+
+      - name: Preserve upgrade evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-msi-upgrade-2.6.0-to-3.0.0
+          path: ${{ runner.temp }}/knownext-msi-upgrade/evidence/
+          if-no-files-found: ignore
+          retention-days: 14

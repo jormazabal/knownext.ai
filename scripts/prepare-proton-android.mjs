@@ -47,10 +47,13 @@ run("cargo",[`+${pins.rustToolchain}`,"build","--manifest-path",sources.cryptoMa
 });
 const published=join(work,"wrapper",abi);
 const managedProperties=[`-p:ProtonSdkRoot=${sources.sdkRoot}`,`-p:ProtonAccountRoot=${sources.accountRoot}`,"-p:CryptoBackend=rust",`-p:ProtonCryptographyVersion=${pins.cryptoPackageVersion}`];
+// The pinned .NET SDK selects NativeAOT runtime packs only in publish context
+// (DefaultItems.props). Explicit restore must use that context too; otherwise
+// --no-restore fails NETSDK1112 even though the locked NuGet graph restored.
+const nativeProperties=[...managedProperties,"-p:_IsPublishing=true","-p:DisableUnsupportedError=true","-p:PublishAotUsingRuntimePack=true",`-p:CppCompilerAndLinker=${join(bin,`${target.triple}29-clang`)}`,"-p:CrossCompileAbi=android29","-p:StripSymbols=false"];
 run("pwsh",["-NoProfile","-File",join(repo,"native/proton-sdk/prepare-restore.ps1"),"-SourcesReceipt",join(bootstrap,"sources.json"),"-Runtime",target.rid]);
-run(dotnet,["restore",join(repo,"native/proton-sdk/KnownextProton.csproj"),"-r",target.rid,"--locked-mode","--configfile",sources.nugetConfig,...managedProperties],bootstrap);
-run(dotnet,["publish",join(repo,"native/proton-sdk/KnownextProton.csproj"),"-c","Release","-r",target.rid,"--no-restore",...managedProperties,
-  "-p:DisableUnsupportedError=true","-p:PublishAotUsingRuntimePack=true",`-p:CppCompilerAndLinker=${join(bin,`${target.triple}29-clang`)}`,"-p:CrossCompileAbi=android29","-p:StripSymbols=false",
+run(dotnet,["restore",join(repo,"native/proton-sdk/KnownextProton.csproj"),"-r",target.rid,"--locked-mode","--configfile",sources.nugetConfig,...nativeProperties],bootstrap);
+run(dotnet,["publish",join(repo,"native/proton-sdk/KnownextProton.csproj"),"-c","Release","-r",target.rid,"--no-restore",...nativeProperties,
   `-p:NativeOutputPath=${join(work,"wrapper-link",abi)}/`,"-o",published],bootstrap);
 
 // Build only OpenSSL, directly from its Apache-licensed, hash-pinned source.
