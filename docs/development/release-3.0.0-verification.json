@@ -1,0 +1,157 @@
+{
+  "schemaVersion": 1,
+  "version": "3.0.0",
+  "releaseUrl": "https://github.com/jormazabal/knownext.ai/releases/tag/v3.0.0",
+  "publishedAt": "2026-11-07T04:27:42Z",
+  "verifiedAt": "2026-11-07T05:27:54.66694+01:00",
+  "stable": true,
+  "releaseCommit": "be4e59b45afa9f62253941a519aaebb1216cbbca",
+  "integrationPullRequests": [
+    92,
+    93,
+    94
+  ],
+  "regression": {
+    "run": 42331739232,
+    "tree": "58cd5c6efb0d70fb4ebdbb9f607f4621a15eef79",
+    "frontendCases": 1217,
+    "nativePassed": true,
+    "reusedByWindowsBuild": true,
+    "fullRerunsAfterPackagingFix": false
+  },
+  "windows": {
+    "buildRun": 42334885424,
+    "buildJob": 128289537972,
+    "source": "11d5142479763a5abc25d015b17fe57ca997b7a8",
+    "buildInputsUnchangedByAndroidRecovery": true,
+    "updaterPublicKeyUnchanged": true,
+    "updaterSignaturesVerified": true,
+    "authenticodeConfigured": false,
+    "upgradeRun": 42337718269,
+    "upgradeFrom": "2.6.0",
+    "upgradeTo": "3.0.0",
+    "installedPerUser": true,
+    "sameInstallPath": true,
+    "oldRegistrationRemoved": true,
+    "installedResourcesVerified": true,
+    "witness": {
+      "sha256": "258d479d16a710a281185d44025eeb7a37c3a0e482394199106c9742736f26f3",
+      "preserved": true
+    },
+    "scope": "Hosted Windows runner; synthetic AppData; no personal installation touched"
+  },
+  "android": {
+    "buildRun": 42336484484,
+    "buildJob": 128294543489,
+    "source": "be4e59b45afa9f62253941a519aaebb1216cbbca",
+    "applicationId": "ai.knownext.mobile",
+    "versionCode": 3000000,
+    "minimumSdk": 24,
+    "protonMinimumSdk": 29,
+    "certificateSha256": "18d0db03027d208ae7afa9c5083cb22e6565a0daf7e2b64377490657da271569",
+    "apkSha256": "3398a66686d62ae3f37427613b9f431048b0d434886add8829208551f8c630a9",
+    "installedUpdate": "PASS",
+    "originalUidPreserved": true,
+    "testDocumentPreserved": true,
+    "offlineSaveAndReopen": "PASS",
+    "savedDocumentSha256": "9eb10f832c01cd91ee2510ddc8875a8e250d7be7fffa917ce233e139078eb5b1",
+    "anonymousProtonStartAndCancel": "PASS",
+    "accountAuthorized": false,
+    "scope": "ARM64 through libndk_translation.so, not physical ARM",
+    "visualCaptureExcluded": "Stale screenshot; validated with accessibility tree and file SHA-256"
+  },
+  "assets": {
+    "KnowNext.ai_3.0.0_x64_en-US.msi": {
+      "sha256": "2eb9dd1e3b2ea806bbdc132c5a7e803858ae44a1bdca3bd72ce3cc4abc367dd8",
+      "bytes": 32735232
+    },
+    "KnowNext.ai_3.0.0_x64_en-US.msi.sig": {
+      "sha256": "aac6c0c047bba238d772d2c2d66430c3dbf0cd53d7dde8364095e2933b2e2636",
+      "bytes": 424
+    },
+    "KnowNext.ai_3.0.0_x64-setup.exe": {
+      "sha256": "ea12cdf692a13cbbc377d90202b6c48557975cc7c8667925e955292b46feb938",
+      "bytes": 23267292
+    },
+    "KnowNext.ai_3.0.0_x64-setup.exe.sig": {
+      "sha256": "d5664b1be059377063cc99ec42c2e867dead1b702533ebffebe09fe6ac0b3ad7",
+      "bytes": 424
+    },
+    "latest.json": {
+      "sha256": "db24d37cebef5bfe899e58054c992ef886815e34bc21d951bda2275c957808be",
+      "bytes": 2022
+    },
+    "KnowNext.ai-android-arm64-v3.0.0.apk": {
+      "sha256": "3398a66686d62ae3f37427613b9f431048b0d434886add8829208551f8c630a9",
+      "bytes": 36244672
+    },
+    "android-latest.json": {
+      "sha256": "b3ec5a0d58bd67b241ca5eebd6dc155b458e04bee8281e0820fa2efbdd997d32",
+      "bytes": 676
+    },
+    "knownext-proton-sources-windows.zip": {
+      "sha256": "59badc433c2664b02af256bf9cecc1ba5086c9b4b9b5733e635184f5e923381e",
+      "bytes": 18027560
+    },
+    "knownext-proton-android-sources.zip": {
+      "sha256": "98f36ecdad4899af92ed56dd423545f488f8253f732953e044cc89cc8e06547b",
+      "bytes": 19653180
+    }
+  },
+  "sourceArchives": {
+    "knownext-proton-sources-windows.zip": {
+      "files": 217,
+      "rustLicenses": 189,
+      "nugetLicenses": 55,
+      "pendingLicenseReviews": 0
+    },
+    "knownext-proton-android-sources.zip": {
+      "files": 234,
+      "rustLicenses": 206,
+      "nugetLicenses": 55,
+      "pendingLicenseReviews": 0
+    }
+  },
+  "publicDownloads": [
+    {
+      "name": "latest.json",
+      "url": "https://github.com/jormazabal/knownext.ai/releases/latest/download/latest.json",
+      "http": 200,
+      "sha256": "db24d37cebef5bfe899e58054c992ef886815e34bc21d951bda2275c957808be",
+      "bytes": 2022
+    },
+    {
+      "name": "android-latest.json",
+      "url": "https://github.com/jormazabal/knownext.ai/releases/latest/download/android-latest.json",
+      "http": 200,
+      "sha256": "b3ec5a0d58bd67b241ca5eebd6dc155b458e04bee8281e0820fa2efbdd997d32",
+      "bytes": 676
+    },
+    {
+      "name": "KnowNext.ai_3.0.0_x64_en-US.msi",
+      "url": "https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_3.0.0_x64_en-US.msi",
+      "http": 200,
+      "sha256": "2eb9dd1e3b2ea806bbdc132c5a7e803858ae44a1bdca3bd72ce3cc4abc367dd8",
+      "bytes": 32735232
+    },
+    {
+      "name": "KnowNext.ai-android-arm64-v3.0.0.apk",
+      "url": "https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai-android-arm64-v3.0.0.apk",
+      "http": 200,
+      "sha256": "3398a66686d62ae3f37427613b9f431048b0d434886add8829208551f8c630a9",
+      "bytes": 36244672
+    }
+  ],
+  "realAiCalls": 0,
+  "remainingAcceptance": [
+    "Physical device and human acceptance, including audio, pen, suspension and accessibility",
+    "Android Proton session expiry/renewal and literal 24-hour endurance",
+    "Forced interruption during native writes and live GitHub migration",
+    "Paid-provider AI evaluation deferred by user"
+  ],
+  "excludedScope": [
+    "OneDrive",
+    "Google Drive",
+    "Cloud-only projects"
+  ]
+}
