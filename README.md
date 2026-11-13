@@ -1,10 +1,10 @@
 # KnowNext.ai
 
-> 3.0.0 incorpora el nuevo espacio de trabajo y sincronización directa con Proton en beta experimental para uso personal no comercial. Consulta las notas de versión y sus límites de compatibilidad.
+> 3.0.1 simplifica las barras, menús y grabadora, mejora el foco y las imágenes y facilita el acceso a Proton Drive. Proton continúa en beta experimental para uso personal no comercial. Consulta las notas de versión y sus límites de compatibilidad.
 
 KnowNext.ai is a local-first Tauri application for managing, editing, versioning, exporting, and consulting Markdown documentation by project.
 
-Version 3.0.0 runs as a self-contained native app on Windows and Android:
+Version 3.0.1 runs as a self-contained native app on Windows and Android:
 
 - Tauri v2 shell and commands.
 - Rust local runtime for persistence, documents, exports, AI orchestration, diagnostics, and project operations.
@@ -14,7 +14,7 @@ Version 3.0.0 runs as a self-contained native app on Windows and Android:
 - Frontend API boundary under `apps/desktop/src/lib/api`, backed by Tauri commands instead of HTTP.
 - Local JSON/file persistence with replaceable Rust services.
 
-There is no external product service, packaged auxiliary runtime, API port, or mobile workstation dependency in 3.0.0.
+There is no external product service, packaged auxiliary runtime, API port, or mobile workstation dependency in 3.0.1.
 
 Proton connection is an experimental, unofficial integration for personal non-commercial use. It uses the official SDK inside the app and does not require installing Proton Drive. The SDK is not yet supported for third-party production use and may require updates for Proton's cryptographic migration; see the [official SDK guidelines](https://github.com/ProtonDriveApps/sdk/blob/05c9115955589d9f6ab7392a36f8f0cb39327133/README.md). Documents remain available locally. Google Drive, OneDrive and cloud-only projects are not included.
 
@@ -22,8 +22,8 @@ Proton connection is an experimental, unofficial integration for personal non-co
 
 The latest installers are published on GitHub Releases:
 
-- [Download KnowNext.ai for Windows](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_3.0.0_x64_en-US.msi)
-- [Download KnowNext.ai for Android arm64](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai-android-arm64-v3.0.0.apk)
+- [Download KnowNext.ai for Windows](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_3.0.1_x64_en-US.msi)
+- [Download KnowNext.ai for Android arm64](https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai-android-arm64-v3.0.1.apk)
 - [View all releases](https://github.com/jormazabal/knownext.ai/releases)
 
 The Windows updater checks the signed Tauri manifest:

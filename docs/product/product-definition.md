@@ -1,5 +1,17 @@
 # Product Definition
 
+## Workspace usability (post-3.0 corrections)
+
+- A single 44 px row above the editor combines document tabs with navigation/context toggles at its ends and search/recording on the right. Inactive AI and Notes tabs open through the account menu.
+- The account menu stays at the bottom of navigation in both document and Settings views. Its primary layer contains AI, Notes, results, Activity, Settings and project trash; account/connections/diagnostics remain in a secondary view.
+- Navigation uses a soft gray background and compact 28 px rows (44 px for touch). Navigation and document surfaces share the same discreet 5 px scrollbar. File and folder menu levels render in independent floating layers, flip at viewport edges and support keyboard navigation without horizontal scrolling. Three-dot controls open their menu only on click, never on hover; clicking again closes it. The originating three-dot control stays visible and pointer gaps never dismiss an open menu.
+- The workspace recorder is a compact floating card (440 px wide, about 302 px high when idle), with sessions collapsed initially and expandable on demand. Touch controls retain 44 px targets.
+- Activity opens from the account menu; pending attention is indicated on the account control. Background operations and recovery notices do not insert rows above document tabs. Pending/unconfirmed work remains inspectable.
+- Activating or reselecting a Markdown document returns keyboard focus to that editor. Loading and background updates must not interrupt an input field or dialog.
+- Original reference definitions, including recording markers, remain stored in Markdown without displaying technical preservation cards. Their links still render normally.
+- Relative and legacy project image references resolve only for display. File paste/upload uses the project import service before inserting portable Markdown, preventing new temporary blob references. Historical blob-only images require the original file to be inserted again.
+- Project editing includes an explicit Proton Drive entry tied to the edited project. Opening/closing connection settings preserves pending identity edits; authentication, availability checks and migration confirmation remain in the existing Proton workflow.
+
 KnowNext.ai is a compact local-first workspace for Markdown documentation. Users organize projects, edit documents visually, keep notes, inspect history, export content, and ask contextual AI questions without depending on a separate product service.
 
 ## Product Shape

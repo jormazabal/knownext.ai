@@ -25,6 +25,23 @@ Use `docs/development/functional-validation-matrix.md` to record which areas are
 
 ## Windows Critical Acceptance
 
+### 3.0.1 usability fixes (packaged acceptance recorded separately)
+
+- At desktop width, show only one navigation toggle. At phone width, open/close the drawer without a second opener in the document tabs; retain the close action inside the drawer.
+- Confirm a single 44 px row over the document: left panel toggle, tabs, search, recording, right panel toggle. At 360/390 px, use the compact tab selector without horizontal clipping.
+- Enter and exit Settings with a project open: search/recording/panel controls retain their positions, and the same account menu remains below navigation. Open Settings, trash, Activity, Notes, AI results and the secondary account/application view. Verify keyboard focus on return.
+- Load a long tree: the sidebar stays softly gray, with 28 px rows on desktop and at least 44 px for touch. Sidebar and document scrollbars share the same subtle 5 px rounded style and scroll normally by mouse, touch and keyboard. Hover over the three dots: no menu opens. Click to open, click again to close. Open Export in document/handwritten context menus: each submenu has a separate floating layer, remains reachable across the gap and opens left at the right edge. No horizontal menu scrollbar. Keep the three-dot trigger visible while its menu is open. Move slowly through both gaps and pause for more than one second: the layers stay open until an action, trigger click, outside click or Escape. Check ArrowRight, ArrowLeft, Escape and a three-level test menu.
+- Open the recorder: a floating 440 px card, about 302 px tall when idle, replaces the full-height drawer. Sessions start collapsed; expanding sessions/details grows only within the viewport. Check start, pause/resume, stop, levels, source switches, Settings, nested destination/confirmation dialogs and Escape focus return. At 360 px keep 44 px touch controls and no horizontal clipping. Real capture/transcription still requires native acceptance.
+- Start a long operation while typing: the tabs and document must not move. Open Activity from the account menu, inspect pending/completed work, close with Escape and confirm focus returns to the account trigger. Unconfirmed work retains a visible badge; recovery failures remain actionable without inserting rows above the tabs.
+- Open, switch and reselect Markdown tabs and return from Settings/history: typing targets the visible document and preserves its cursor. Slow editor loading must not take focus from AI/search fields or a dialog.
+- Open documents with relative image paths (including spaces/accents) and legacy `knownext-asset://` references. Images render in the editor and history content; editing and saving preserve the Markdown reference.
+- Paste/drop an image file into a project document and use the image upload control. Confirm the file is stored through the native import service before insertion, then save/reopen/restart and check the image remains. Inspect Markdown: no newly created `blob:` image references. Simulate failed import and a tab/project switch during import; report the failure and preserve the text. Notes without a project must explain that image insertion needs a project document.
+- Open a recorded transcript and a document with reference links. Internal definitions have no visible card, text or empty block. Edit/save/reopen and confirm link targets, unused definitions and recording references remain in Markdown.
+- Edit project → Configurar Proton Drive: enter the connection for that exact project, return without losing unsaved identity fields. Verify unavailable SDK, existing connection and pending migration states. Authenticate/synchronize only in the native acceptance environment; browser checks do not establish a real Proton session.
+- Previously persisted `blob:` references cannot recover bytes after their original session ends. Reinsert those original images; missing external attachments and unsupported wiki embeds are not repaired by these fixes.
+
+### General Windows acceptance
+
 - For dev validation, start from a clean port and launch the native Tauri window from an interactive PowerShell:
   - `netstat -ano | findstr :1420`
   - Stop only the stale PID that owns `127.0.0.1:1420`, if present.

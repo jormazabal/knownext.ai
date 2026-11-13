@@ -9,7 +9,7 @@ import type {CloudSyncCapabilities, CloudSyncProvider, CloudSyncReceipt, CloudSy
 type ProjectIdentity = {id: string; name: string};
 type Loaded = {project: ProjectIdentity; capabilities: CloudSyncCapabilities; status: CloudSyncStatus};
 
-export function CloudSyncDialog({onClose, fallbackFocus}: {onClose: () => void; fallbackFocus?: () => HTMLElement | null}) {
+export function CloudSyncDialog({onClose, fallbackFocus, project: selectedProject, initialProvider}: {onClose: () => void; fallbackFocus?: () => HTMLElement | null; project?: ProjectIdentity; initialProvider?: CloudSyncProvider}) {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loadError, setLoadError] = useState("");
   const [attempt, setAttempt] = useState(0);
@@ -19,11 +19,11 @@ export function CloudSyncDialog({onClose, fallbackFocus}: {onClose: () => void; 
     let current = true;
     setLoadError("");
     const capabilities = getCloudSyncCapabilities();
-    void Promise.all([getActiveProject().then(async project => ({project, status: await getCloudSyncStatus(project.id)})), capabilities])
+    void Promise.all([(selectedProject ? Promise.resolve(selectedProject) : getActiveProject()).then(async project => ({project, status: await getCloudSyncStatus(project.id)})), capabilities])
       .then(([{project, status}, providers]) => {if (current) {pendingReview.current = status.activeMigration ?? null; setLoaded({project, status, capabilities: providers});}})
       .catch(error => {if (current) setLoadError(message(error));});
     return () => {current = false;};
-  }, [attempt]);
+  }, [attempt, selectedProject?.id]);
   async function closeSafely() {
     if (operationBusy.current) {setLoadError("Hay una operación en curso. Espera a que termine antes de cerrar."); return;}
     try {
@@ -42,16 +42,16 @@ export function CloudSyncDialog({onClose, fallbackFocus}: {onClose: () => void; 
         <button type="button" aria-label="Cerrar sincronización" onClick={() => void closeSafely()} className="grid min-h-11 min-w-11 place-items-center rounded hover:bg-panel"><X size={18}/></button>
       </header>
       {loaded && loadError && <p role="alert" className="px-5 pt-3 text-sm text-red-700">{loadError}</p>}
-      {loaded ? <CloudSyncSteps {...loaded} onClose={() => void closeSafely()} onReviewChange={review => {pendingReview.current = review;}} onBusyChange={busy => {operationBusy.current = busy;}}/> : <div className="p-5 text-sm">
+      {loaded ? <CloudSyncSteps {...loaded} initialProvider={initialProvider} onClose={() => void closeSafely()} onReviewChange={review => {pendingReview.current = review;}} onBusyChange={busy => {operationBusy.current = busy;}}/> : <div className="p-5 text-sm">
         {loadError ? <><p role="alert" className="text-red-700">{loadError}</p><button className="mt-3 min-h-11 rounded px-3 hover:bg-panel" onClick={() => setAttempt(value => value + 1)}>Reintentar consulta</button></> : <p role="status">Consultando proyecto y opciones de sincronización…</p>}
       </div>}
     </section>
   </ModalFrame>;
 }
 
-export function CloudSyncSteps({project, capabilities, status, onClose, onReviewChange, onBusyChange}: Loaded & {onClose: () => void; onReviewChange?: (review: CloudSyncReview | null) => void; onBusyChange?: (busy: boolean) => void}) {
+export function CloudSyncSteps({project, capabilities, status, onClose, onReviewChange, onBusyChange, initialProvider}: Loaded & {onClose: () => void; onReviewChange?: (review: CloudSyncReview | null) => void; onBusyChange?: (busy: boolean) => void; initialProvider?: CloudSyncProvider}) {
   const [currentStatus, setCurrentStatus] = useState(status);
-  const [protonOpen,setProtonOpen]=useState(false);
+  const [protonOpen,setProtonOpen]=useState(initialProvider === "proton-drive" && !status.activeMigration);
   const [step, setStep] = useState<1 | 2 | 3>(status.activeMigration ? 2 : 1);
   const [provider, setProvider] = useState<CloudSyncProvider>(status.activeMigration?.provider ?? (status.provider === "github" ? "none" : status.provider));
   const [review, setReview] = useState<CloudSyncReview | null>(status.activeMigration ?? null);

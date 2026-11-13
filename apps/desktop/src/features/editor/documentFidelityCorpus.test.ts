@@ -39,6 +39,19 @@ it("preserves unused and reference-link definitions without hiding rendered link
  const source='[Enlace][manual].\n\n[manual]: docs/guia.md "Guía"\n[unused]: assets/original.png "Original"\n\nPárrafo editable.\n';
  await fixture(source,e=>{edit(e);const output=read(e);expect(output).toContain('[manual]: docs/guia.md "Guía"');expect(output).toContain('[unused]: assets/original.png "Original"');expect(output).toContain('[Enlace](docs/guia.md "Guía")');reparse(e,output);expect(protectedSources(e)).toHaveLength(1);});
 });
+it("keeps reference definitions invisible while preserving their original source and visible links",async()=>{
+  const source='[Manual][manual].\n\n[manual]: docs/guia.md "Guía"\n[knownext-recording:session]: #\n\nFinal.\n';
+  await fixture(source,e=>{
+    e.action(ctx=>{
+      const view=ctx.get(editorViewCtx);
+      const definitions=view.dom.querySelector('[data-knownext-preserved-block="definition"]') as HTMLElement;
+      expect(definitions.hidden).toBe(true);expect(definitions.textContent).toBe("");
+      expect(view.dom.querySelector('a')?.textContent).toBe("Manual");
+    });
+    edit(e);expect(read(e)).toContain('[knownext-recording:session]: #');expect(read(e)).toContain('[manual]: docs/guia.md "Guía"');
+    reparse(e,read(e));expect(protectedSources(e)).toHaveLength(1);
+  });
+});
 it("preserves the mixed document corpus after unrelated editing and reopening",async()=>{
  const source='# Informe\n\n| Campo | Valor |\n| --- | --- |\n| **Dato** | [Web](https://example.invalid "Título") |\n\n- [x] Tarea completada\n- [ ] Tarea pendiente\n\n> Cita con *énfasis*.\n\nTexto con nota[^uno] y <u>subrayado</u> y <mark data-knx-highlight="green">resaltado</mark>.\n\n[^uno]: Nota conservada.\n\n```mermaid\ngraph TD\nA-->B\n```\n\n<!-- Comentario privado conservado -->\n\n<details>\n<summary>Detalle</summary>\n**Contenido HTML**\n</details>\n\n![Plano](assets/plano.png "Título imagen")\n\n<!-- knownext-image: {"version":1,"ratio":0.6} -->\n\nFinal.\n';
  await fixture(source,e=>{edit(e);const output=read(e);for(const part of ['[x] Tarea completada','[ ] Tarea pendiente','[^uno]: Nota conservada.','graph TD','A-->B','<!-- Comentario privado conservado -->','<details>','**Contenido HTML**','<u>subrayado</u>','resaltado','![Plano](assets/plano.png "Título imagen")','"ratio":0.6','Final. Añadido.'])expect(output).toContain(part);reparse(e,output);expect(read(e)).toBe(output);});

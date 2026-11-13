@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ModalFrame } from "../../components/ui/ModalFrame";
+import { CloudSyncDialog } from "../cloudSync/CloudSyncDialog";
 import { getApiErrorMessage } from "../../lib/api/client";
 import { selectProjectFolder } from "../../lib/runtime/folders";
 import { isMobileDeviceRuntime, isTauriRuntime } from "../../lib/runtime/platform";
@@ -119,6 +120,7 @@ export function CreateProjectDialog({
   const [activeStep, setActiveStep] = useState<WizardStepId>("scenario");
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [protonOpen, setProtonOpen] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const submitting = useRef(false);
 
@@ -158,6 +160,7 @@ export function CreateProjectDialog({
   useEffect(() => {
     if (!open) return;
     setDeleteConfirmationOpen(false);
+    setProtonOpen(false);
     setSubmitError(null);
 
     if (isEditing && project) {
@@ -346,7 +349,7 @@ export function CreateProjectDialog({
                 {isEditing ? "Editar proyecto" : "Crear proyecto de documentación"}
               </h2>
               <p className="mt-0.5 text-[11px] text-ink-secondary">
-                {isEditing ? "Actualiza la identidad, revisa el estado y configura GitHub." : "Asistente para elegir origen, carpeta local, historial y conexión GitHub."}
+                {isEditing ? "Identidad, ubicación, historial y sincronización del proyecto." : "Asistente para elegir origen, carpeta local, historial y conexión GitHub."}
               </p>
             </div>
           </div>
@@ -401,6 +404,10 @@ export function CreateProjectDialog({
               </aside>
             ) : null}
             <div className="px-5 py-5">
+              {isEditing && project && <section className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-md border border-line p-4" aria-label="Sincronización con Proton Drive">
+                <div className="min-w-0 flex-1"><h3 className="text-sm font-semibold">Proton Drive</h3><p className="mt-1 text-xs leading-5 text-ink-secondary">Conecta tu cuenta y elige dónde sincronizar este proyecto.</p></div>
+                <button type="button" className="inline-flex min-h-11 items-center gap-2 rounded-md bg-brand-hover px-3 text-xs font-semibold text-brand-orange hover:bg-panel" onClick={()=>setProtonOpen(true)}><Cloud size={16}/>Configurar Proton Drive</button>
+              </section>}
               {isEditing ? (
                 <EditProjectForm
                   project={project}
@@ -616,6 +623,7 @@ export function CreateProjectDialog({
           </section>
         </ModalFrame>
       ) : null}
+      {protonOpen && project && <CloudSyncDialog project={project} initialProvider="proton-drive" onClose={()=>setProtonOpen(false)}/>}
     </ModalFrame>
   );
 }

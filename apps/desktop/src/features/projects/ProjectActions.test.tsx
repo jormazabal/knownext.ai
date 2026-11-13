@@ -3,12 +3,25 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { ProjectActions } from "./ProjectActions";
 import * as aiApi from "../../lib/api/ai";
+import { Activity, Trash2 } from "lucide-react";
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   Reflect.deleteProperty(window, "matchMedia");
 });
 describe("ProjectActions", () => {
+  it("keeps workspace actions in the primary account menu and account tools one level below",async()=>{
+    const activity=vi.fn(),trash=vi.fn(),settings=vi.fn();
+    render(<ProjectActions appVersion="qa" authStatus={{isAuthenticated:false,provider:null,user:null,scopes:[]}} workspaceActions={[{id:"activity",label:"Actividad",icon:Activity,onSelect:activity,badge:"!"},{id:"trash",label:"Papelera del proyecto",icon:Trash2,onSelect:trash}]} orphanDraftCount={0} isCheckingForUpdates={false} onLoginGithub={vi.fn()} onLogout={vi.fn()} onOpenAppSettings={settings} onOpenRecoverableDrafts={vi.fn()} onCheckForUpdates={vi.fn()} onOpenReleaseNotes={vi.fn()}/>);
+    await userEvent.click(screen.getByRole("button",{name:/Mi cuenta/i}));
+    expect(screen.getByRole("menuitem",{name:/Actividad/})).toBeInTheDocument();
+    expect(screen.getByRole("menuitem",{name:"Papelera del proyecto"})).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem",{name:"Buscar actualizaciones"})).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("menuitem",{name:"Cuenta y aplicación"}));
+    expect(screen.getByRole("menuitem",{name:"Buscar actualizaciones"})).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("menuitem",{name:"Volver"}));
+    await userEvent.click(screen.getByRole("menuitem",{name:"Papelera del proyecto"}));expect(trash).toHaveBeenCalledOnce();
+  });
   it("selects a project month and shows unavailable EUR as a gap rather than free usage",async()=>{
     mockNarrowViewport();
     const summary={month:"2026-11",projectId:null,currency:"EUR" as const,estimated:true,totalEstimatedCost:10,generatedAt:"owned",models:[],capabilities:[],availableProjects:[{id:"owned-a",name:"Proyecto A",state:"registered" as const}]};

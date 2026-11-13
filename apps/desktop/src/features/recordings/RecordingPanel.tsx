@@ -76,7 +76,7 @@ export function RecordingPanel({
   const [draft, setDraft] = useState<RecordingSettings | null>(null);
   const [devices, setDevices] = useState<RecordingDevice[]>([]);
   const [destination, setDestination] = useState<RecordingSession | null>(null);
-  const [list, setList] = useState(embedded || !compact);
+  const [list, setList] = useState(!compact);
   const [detailsOpen,setDetailsOpen]=useState(false);
   useCompactRecordingWindow(compact, list||detailsOpen);
   const [playing, setPlaying] = useState<RecordingSession | null>(null);
@@ -94,12 +94,12 @@ export function RecordingPanel({
   const settings = active?.settings ?? draft ?? snapshot?.settings;
   useEffect(() => {
     const previousFocus = document.activeElement as HTMLElement | null;
-    titleRef.current?.focus();
+    if (!embedded) titleRef.current?.focus();
     void recordingRequest<RecordingDevice[]>("devices")
       .then(setDevices)
       .catch(() => undefined);
     return () => {
-      previousFocus?.focus();
+      if (!embedded) previousFocus?.focus();
       void recordingRequest("preview-stop").catch(() => undefined);
     };
   }, []);
@@ -187,6 +187,7 @@ export function RecordingPanel({
       <header className={compact && !embedded ? "sr-only" : "flex shrink-0 items-center justify-between px-3 py-2"}>
         <h2
           ref={titleRef}
+          data-autofocus={embedded || undefined}
           tabIndex={-1}
           className="flex items-center gap-2 text-lg font-semibold"
         >
@@ -204,6 +205,7 @@ export function RecordingPanel({
         )}
       </header>
       <div className={compact ? "recording-body" : "min-h-0 flex-1 space-y-4 overflow-auto p-4"}>
+        {compact && !settings && error && <p role="alert" className="text-xs leading-5">{error}</p>}
         {!compact&&<>
         {error && (
           <p role="alert" className="rounded-md bg-orange-50 p-3 text-sm">

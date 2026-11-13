@@ -36,6 +36,7 @@ import { createPortal } from "react-dom";
 import type { DocumentNameSearchResult, DocumentTreeNode } from "../../types/domain";
 import type { SelectionAction } from "../../types/fileBatch";
 import { clearDocumentTreeDragData, getDocumentTreeDragData, setDocumentTreeDragData } from "../../lib/dragData";
+import { FloatingTreeMenu, type FloatingMenuItem } from "./FloatingTreeMenu";
 import { ModalFrame } from "../../components/ui/ModalFrame";
 import { getInlineNameCompletion, searchDocumentTreeByName } from "./documentNameSearch";
 
@@ -87,7 +88,6 @@ type TreeDropTarget = { id: string | null; valid: boolean; label: string };
 type TreeMouseDropTarget = TreeDropTarget & { targetFolderId?: string | null };
 
 const CONTEXT_MENU_WIDTH = 244;
-const CONTEXT_SUBMENU_WIDTH = 150;
 const CONTEXT_MENU_ITEM_HEIGHT = 28;
 const CONTEXT_MENU_PADDING = 8;
 const CONTEXT_MENU_VIEWPORT_GAP = 8;
@@ -151,11 +151,11 @@ export function DocumentTree({
   changeBadges = {},
   projectStatus = null,
 }: DocumentTreeProps) {
-  const closeTimer = useRef<number | null>(null);
   const expandTimer = useRef<number | null>(null);
   const autoExpandedNodeIds = useRef<Set<string>>(new Set());
   const [openMenu, setOpenMenu] = useState<{
     node: DocumentTreeNode;
+    trigger: HTMLElement;
     x: number;
     y: number;
   } | null>(null);
@@ -220,10 +220,10 @@ export function DocumentTree({
   useEffect(() => {
     if (!openMenu) return;
     const closeOutside = (event: globalThis.PointerEvent) => {
-      if (!(event.target instanceof Element) || !event.target.closest("[data-document-tree-menu]")) setOpenMenu(null);
+      if (!(event.target instanceof Element) || !event.target.closest("[data-document-tree-menu], [data-document-tree-menu-trigger]")) setOpenMenu(null);
     };
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") { event.preventDefault(); setOpenMenu(null); }
+      if (event.key === "Escape") { event.preventDefault(); openMenu.trigger.focus(); setOpenMenu(null); }
     };
     document.addEventListener("pointerdown", closeOutside);
     document.addEventListener("keydown", closeOnEscape);
@@ -233,20 +233,11 @@ export function DocumentTree({
     };
   }, [openMenu?.node.id]);
 
-  function clearCloseTimer() {
-    if (closeTimer.current !== null) {
-      window.clearTimeout(closeTimer.current);
-      closeTimer.current = null;
+  function handleMenuOpen(node: DocumentTreeNode, event: MouseEvent<HTMLElement>) {
+    if (event.type === "click" && openMenu?.node.id === node.id) {
+      setOpenMenu(null);
+      return;
     }
-  }
-
-  function scheduleCloseMenu() {
-    clearCloseTimer();
-    closeTimer.current = window.setTimeout(() => setOpenMenu(null), 120);
-  }
-
-  function handleMenuEnter(node: DocumentTreeNode, event: MouseEvent<HTMLElement>) {
-    clearCloseTimer();
     const rect = event.currentTarget.getBoundingClientRect();
     const itemCount = getContextMenuItemCount(node.type);
     const position = getSafeContextMenuPosition({
@@ -258,6 +249,7 @@ export function DocumentTree({
     });
     setOpenMenu({
       node,
+      trigger: event.currentTarget,
       x: position.x,
       y: position.y,
     });
@@ -276,7 +268,6 @@ export function DocumentTree({
       event.preventDefault();
       return;
     }
-    clearCloseTimer();
     setOpenMenu(null);
     draggedNodeRef.current = node;
     setDraggedNode(node);
@@ -405,8 +396,7 @@ export function DocumentTree({
       const distance = Math.abs(event.clientX - drag.startX) + Math.abs(event.clientY - drag.startY);
       if (distance < 8) return;
       drag.dragging = true;
-      clearCloseTimer();
-      setOpenMenu(null);
+        setOpenMenu(null);
       setDraggedNode(drag.node);
     }
     setDragPreview({ label: drag.node.name, x: event.clientX, y: event.clientY });
@@ -632,8 +622,7 @@ export function DocumentTree({
               menuNodeId={openMenu?.node.id}
               draggedNodeId={draggedNode?.id}
               dropTarget={dropTarget}
-              onMenuEnter={handleMenuEnter}
-              onMenuLeave={scheduleCloseMenu}
+              onMenuOpen={handleMenuOpen}
               onDragStart={startDrag}
               onNodeDrag={handleNativeDrag}
               onDragEnd={finishDrag}
@@ -701,6 +690,7 @@ export function DocumentTree({
       {openMenu
         ? createPortal(
           <ContextMenu
+              key={openMenu.node.id}
               type={openMenu.node.type}
               x={openMenu.x}
               y={openMenu.y}
@@ -708,8 +698,7 @@ export function DocumentTree({
                 onContextAction(action, openMenu.node);
                 setOpenMenu(null);
               }}
-              onMouseEnter={clearCloseTimer}
-              onMouseLeave={scheduleCloseMenu}
+              onDismiss={()=>setOpenMenu(null)}
             />,
             document.body,
           )
@@ -748,8 +737,7 @@ type TreeNodeProps = {
   menuNodeId?: string;
   draggedNodeId?: string;
   dropTarget: { id: string | null; valid: boolean; label: string } | null;
-  onMenuEnter: (node: DocumentTreeNode, event: MouseEvent<HTMLElement>) => void;
-  onMenuLeave: () => void;
+  onMenuOpen: (node: DocumentTreeNode, event: MouseEvent<HTMLElement>) => void;
   onDragStart: (node: DocumentTreeNode, event: DragEvent<HTMLDivElement>) => void;
   onNodeDrag: (node: DocumentTreeNode, event: DragEvent<HTMLDivElement>) => void;
   onDragEnd: () => void;
@@ -778,8 +766,7 @@ function TreeNode({
   menuNodeId,
   draggedNodeId,
   dropTarget,
-  onMenuEnter,
-  onMenuLeave,
+  onMenuOpen,
   onDragStart,
   onNodeDrag,
   onDragEnd,
@@ -852,7 +839,7 @@ function TreeNode({
           event.preventDefault();
           event.stopPropagation();
           onActivateTreeNode(node.id);
-          onMenuEnter(node, event);
+          onMenuOpen(node, event);
         }}
         onClick={event => { if (selection) onToggleSelection?.(node.id,event.shiftKey); else onNodeClick(node, (event.nativeEvent as globalThis.PointerEvent).pointerType === "touch"); }}
         onDoubleClick={(event) => {
@@ -915,14 +902,14 @@ function TreeNode({
               </span>
             ) : null}
             <button tabIndex={-1}
-              className="grid h-5 w-5 place-items-center rounded-md opacity-0 hover:bg-white group-hover:opacity-100 focus:opacity-100 [@media(pointer:coarse)]:opacity-100 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+              className={`grid h-5 w-5 place-items-center rounded-md hover:bg-white group-hover:opacity-100 focus:opacity-100 [@media(pointer:coarse)]:opacity-100 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 ${hasOpenMenu ? "opacity-100 bg-white" : "opacity-0"}`}
+              aria-haspopup="menu" aria-expanded={hasOpenMenu}
+              data-document-tree-menu-trigger
               aria-label={`Abrir menú de ${displayName}`}
               onClick={(event) => {
                 event.stopPropagation();
-                onMenuEnter(node, event);
+                onMenuOpen(node, event);
               }}
-              onMouseEnter={(event) => onMenuEnter(node, event)}
-              onMouseLeave={onMenuLeave}
             >
               <MoreVertical size={14} />
             </button>
@@ -948,8 +935,7 @@ function TreeNode({
               menuNodeId={menuNodeId}
               draggedNodeId={draggedNodeId}
               dropTarget={dropTarget}
-              onMenuEnter={onMenuEnter}
-              onMenuLeave={onMenuLeave}
+              onMenuOpen={onMenuOpen}
               onDragStart={onDragStart}
               onNodeDrag={onNodeDrag}
               onDragEnd={onDragEnd}
@@ -1610,27 +1596,15 @@ function ContextMenu({
   x,
   y,
   onSelect,
-  onMouseEnter,
-  onMouseLeave,
+  onDismiss,
 }: {
   type: DocumentTreeNode["type"];
   x: number;
   y: number;
   onSelect: (action: DocumentTreeAction) => void;
-  onMouseEnter: () => void;
-  onMouseLeave: () => void;
+  onDismiss: () => void;
 }) {
-  type ContextMenuItem = {
-    label: string;
-    icon: LucideIcon;
-    action?: DocumentTreeAction;
-    submenu?: Array<{
-      label: string;
-      icon: LucideIcon;
-      action: DocumentTreeAction;
-    }>;
-  };
-  const [openSubmenu, setOpenSubmenu] = useState<string | null>(null);
+  type ContextMenuItem = FloatingMenuItem<DocumentTreeAction>;
   const folderItems: ContextMenuItem[] = [
     { label: "Grabar audio y crear documento…", icon: Mic, action: "record-audio" },
     { label: "Nueva carpeta", icon: FolderPlus, action: "create-folder" },
@@ -1693,77 +1667,5 @@ function ContextMenu({
     { label: "Eliminar", icon: Trash2, action: "delete" },
   ];
   const items: ContextMenuItem[] = type === "folder" ? folderItems : type === "image" ? imageItems : type === "attachment" ? attachmentItems : type === "handwritten-note" ? handwrittenItems : documentItems;
-  const submenuOpensLeft = x + CONTEXT_MENU_WIDTH + CONTEXT_SUBMENU_WIDTH + CONTEXT_MENU_VIEWPORT_GAP > (window.innerWidth || document.documentElement.clientWidth || 1024);
-
-  return (
-    <div
-      data-document-tree-menu="true"
-      className="fixed z-50 w-[244px] max-w-[calc(100vw-16px)] overflow-y-auto rounded-md border border-line bg-white p-1 shadow-menu"
-      style={{ left: x, top: y, maxHeight: `calc(100vh - ${CONTEXT_MENU_VIEWPORT_GAP * 2}px)` }}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
-    >
-      {items.map((item, index) => {
-        const submenu = item.submenu ?? [];
-        const hasSubmenu = submenu.length > 0;
-        const isOpen = hasSubmenu && openSubmenu === item.label;
-        const submenuHeight = getContextMenuHeight(submenu.length);
-        const submenuTop = Math.min(
-          index * CONTEXT_MENU_ITEM_HEIGHT,
-          Math.max(0, (window.innerHeight || document.documentElement.clientHeight || 768) - y - submenuHeight - CONTEXT_MENU_VIEWPORT_GAP),
-        );
-
-        return (
-          <div key={item.label} className="group relative">
-            <button
-              className="flex h-7 [@media(pointer:coarse)]:h-11 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover focus:bg-brand-hover focus:outline-none"
-              aria-haspopup={hasSubmenu ? "menu" : undefined}
-              aria-expanded={hasSubmenu ? isOpen : undefined}
-              onMouseEnter={() => setOpenSubmenu(hasSubmenu ? item.label : null)}
-              onFocus={() => setOpenSubmenu(hasSubmenu ? item.label : null)}
-              onClick={() => {
-                if (hasSubmenu) {
-                  setOpenSubmenu(isOpen ? null : item.label);
-                  return;
-                }
-                if (item.action) onSelect(item.action as DocumentTreeAction);
-              }}
-            >
-              <item.icon size={13} />
-              <span className="min-w-0 flex-1 truncate">{item.label}</span>
-              {hasSubmenu ? <ChevronRight size={13} className="text-muted" /> : null}
-            </button>
-            {hasSubmenu ? (
-              <div
-                className={`absolute z-50 w-[150px] overflow-y-auto rounded-md border border-line bg-white p-1 shadow-menu ${
-                  isOpen ? "block" : "hidden group-hover:block group-focus-within:block"
-                }`}
-                style={{
-                  top: submenuTop,
-                  left: submenuOpensLeft ? undefined : "100%",
-                  right: submenuOpensLeft ? "100%" : undefined,
-                  marginLeft: submenuOpensLeft ? undefined : 6,
-                  marginRight: submenuOpensLeft ? 6 : undefined,
-                  maxHeight: `calc(100vh - ${CONTEXT_MENU_VIEWPORT_GAP * 2}px)`,
-                }}
-                role="menu"
-              >
-                {submenu.map((submenuItem) => (
-                  <button
-                    key={submenuItem.action}
-                    className="flex h-7 [@media(pointer:coarse)]:h-11 w-full items-center gap-2 rounded px-2 text-left text-[11px] hover:bg-brand-hover focus:bg-brand-hover focus:outline-none"
-                    role="menuitem"
-                    onClick={() => onSelect(submenuItem.action)}
-                  >
-                    <submenuItem.icon size={13} />
-                    <span className="min-w-0 truncate">{submenuItem.label}</span>
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        );
-      })}
-    </div>
-  );
+  return <FloatingTreeMenu items={items} x={x} y={y} focusOnOpen label={type === "folder" ? "Acciones de la carpeta" : "Acciones del archivo"} onSelect={onSelect} onClose={onDismiss}/>;
 }

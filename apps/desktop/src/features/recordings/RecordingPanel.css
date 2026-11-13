@@ -41,7 +41,23 @@
 
 .recording-panel[data-compact="true"] > .recording-footer { padding: 0 12px 4px; }
 
-/* Embedded workspace controls retain touch targets while sharing the compact composition. */
+/* Floating workspace recorder grows only when sessions or details are requested. */
+.knownext-modal-overlay.recording-overlay { z-index: 110; align-items: start; justify-items: end; padding: 88px 16px 16px; background: rgb(17 24 39 / .10); }
+.recording-floating-panel { width: min(440px, 100%); min-width: 0; overflow: hidden; border: 1px solid #E5E7EB; border-radius: 14px; background: white; box-shadow: 0 14px 48px rgb(17 24 39 / .14), 0 2px 6px rgb(17 24 39 / .05); }
+.recording-floating-panel .recording-panel { height: auto; max-height: calc(100dvh - 104px); }
+.recording-floating-panel .recording-panel > header { padding: 8px 12px 4px; }
+.recording-floating-panel h2 { font-size: 14px; line-height: 20px; }
+.recording-floating-panel h2 > svg { width: 17px; height: 17px; }
+.recording-floating-panel .recording-body { padding: 8px 12px 10px; }
+.recording-floating-panel .recording-session-list { max-height: 260px; flex: 0 1 auto; }
+.recording-floating-panel .recording-panel .recording-footer { padding-top: 4px; }
+.recording-floating-panel .recording-source select { border-color: #E5E7EB; }
+.recording-floating-panel .recording-details summary { line-height: 20px; }
+.recording-floating-panel .recording-panel :is(.recording-body, .recording-session-list) { scrollbar-width: thin; scrollbar-color: #CBD0D8 transparent; }
+
+/* Keep comfortable controls on touch screens. */
+@media (pointer: coarse), (max-width: 639px) {
+
 .recording-panel[data-embedded="true"] button,
 .recording-panel[data-embedded="true"] select,
 .recording-panel[data-embedded="true"] summary { min-height: 44px; min-width: 44px; }
@@ -51,3 +67,7 @@
 .recording-panel[data-embedded="true"] .recording-source input:checked::before { background: #a64125; }
 .recording-panel[data-embedded="true"] .recording-source input::after { left: 12px; top: 16px; }
 .recording-panel[data-embedded="true"] .recording-source input:checked::after { left: 20px; }
+
+  .knownext-modal-overlay.recording-overlay { padding: 12px 8px; }
+  .recording-floating-panel .recording-panel { max-height: calc(100dvh - 24px); }
+}

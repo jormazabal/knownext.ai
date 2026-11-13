@@ -7,7 +7,7 @@ function images(nodes: DocumentTreeNode[]): DocumentTreeNode[] {
 
 /** View-only URL resolution. Never rewrite the Markdown or access files here. */
 export function projectImageSource(source: string, projectId: string, documentPath: string, tree: DocumentTreeNode[]): string {
-  if (!projectId || !documentPath || isExternal(source)) return source;
+  if (!projectId || !documentPath) return source;
   const path = projectImagePath(source, projectId, documentPath);
   if (!path) return source;
   const image = images(tree).find(node => node.path === path);

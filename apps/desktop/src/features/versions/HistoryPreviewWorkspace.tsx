@@ -6,11 +6,12 @@ import { compareHistory, type DiffOperation, type SideBySideDiffRow } from "./hi
 import { formatVersionFullDate, type VersionPreview, type VersionPreviewMode } from "./VersionHistoryPanel";
 import "./HistoryPreviewWorkspace.css";
 
-export function HistoryPreviewWorkspace({ preview, currentMarkdown, markdownZoomPercent, onModeChange, onRestore, onRestoreParts, onBackToCurrent, onSwap }: {
+export function HistoryPreviewWorkspace({ preview, currentMarkdown, markdownZoomPercent, onModeChange, onRestore, onRestoreParts, onBackToCurrent, onSwap, resolveImageSource }: {
   preview: VersionPreview; currentMarkdown: string; markdownZoomPercent: number;
   onModeChange: (mode: VersionPreviewMode) => void; onRestore: () => void;
   onBackToCurrent: () => void; onSwap: () => void;
   onRestoreParts?:()=>void;
+  resolveImageSource?:(source:string)=>string;
 }) {
   const [presentation, setPresentation] = useState("auto");
   const [contentSide, setContentSide] = useState("left");
@@ -42,7 +43,7 @@ export function HistoryPreviewWorkspace({ preview, currentMarkdown, markdownZoom
     </header>
     {preview.mode==="content" ? <section>
       <label className="flex flex-wrap items-center gap-2 text-xs font-semibold">Contenido de<select className="min-h-11 max-w-full rounded-md border border-line bg-white px-2" value={contentSide} onChange={event=>setContentSide(event.target.value)}><option value="left">A · {leftLabel}</option><option value="right">B · {rightLabel}</option></select></label>
-      <div className="mt-3" key={`${preview.documentId}-${contentSide}-${preview.version.id}-${preview.comparison?.version.id??"current"}`}><ReadonlyMarkdownViewer markdown={contentSide==="left"?preview.markdown:rightMarkdown} ariaLabel="Contenido de la versión seleccionada" emptyMessage="Esta versión no tiene contenido." zoomPercent={markdownZoomPercent}/></div>
+      <div className="mt-3" key={`${preview.documentId}-${contentSide}-${preview.version.id}-${preview.comparison?.version.id??"current"}`}><ReadonlyMarkdownViewer markdown={contentSide==="left"?preview.markdown:rightMarkdown} ariaLabel="Contenido de la versión seleccionada" emptyMessage="Esta versión no tiene contenido." zoomPercent={markdownZoomPercent} resolveImageSource={resolveImageSource}/></div>
     </section> : diff?.status==="limited" ? <section role="status" className="rounded-md bg-panel p-4 text-sm leading-6"><p>{diff.reason}</p><button className={`${button} mt-2 text-brand-orange`} onClick={()=>onModeChange("content")}>Consultar contenido completo</button></section> : diff?.status==="ready" ? <section>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs">
         <p>{diff.added===0&&diff.removed===0?"Sin diferencias de líneas.":`${diff.removed} líneas retiradas · ${diff.added} añadidas de A a B`}</p>

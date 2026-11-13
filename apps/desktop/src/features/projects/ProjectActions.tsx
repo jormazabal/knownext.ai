@@ -2,6 +2,8 @@ import {CloudSyncDialog} from "../cloudSync/CloudSyncDialog";
 import {AiBudgetControls} from "./AiBudgetControls";
 import {
   BarChart3,
+  ChevronUp,
+  type LucideIcon,
   ChevronRight,
   FileText,
   FileClock,
@@ -14,6 +16,7 @@ import {
   Settings,
   Telescope,
   UserPlus,
+  UserRound,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState, type RefObject } from "react";
@@ -23,7 +26,10 @@ import type { AiUsageCapabilitySummary, AiUsageModelSummary, AiUsageSummaryRespo
 import {useAiUsageScope} from "./useAiUsageScope";
 import {AiUsageLedgerControls} from "./AiUsageLedgerControls";
 
+export type WorkspaceMenuAction = { id: string; label: string; icon: LucideIcon; onSelect: () => void; disabled?: boolean; badge?: string | number };
+
 type ProjectActionsProps = {
+  workspaceActions?: WorkspaceMenuAction[];
   appVersion: string;
   language?: AppearanceConfig["language"];
   compact?: boolean;
@@ -40,6 +46,7 @@ type ProjectActionsProps = {
 };
 
 export function ProjectActions({
+  workspaceActions = [],
   appVersion,
   language = "es",
   compact = false,
@@ -62,7 +69,7 @@ export function ProjectActions({
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const narrowActionsMode = useNarrowActionsMode();
 
-  const accountName = authStatus.user?.name || authStatus.user?.login || text.noGithubAccount;
+  const accountName = authStatus.user?.name || authStatus.user?.login || (workspaceActions.length ? language === "en" ? "My account" : "Mi cuenta" : text.noGithubAccount);
   const accountInitials = getInitials(accountName);
 
   useEffect(() => {
@@ -98,10 +105,10 @@ export function ProjectActions({
       <div ref={accountMenuRef} className="relative z-[140]">
         {cloudSyncOpen && renderProjectActionsPortal(<CloudSyncDialog onClose={() => setCloudSyncOpen(false)} fallbackFocus={() => accountButtonRef.current}/>)}
         <button
-          className="grid h-8 w-8 place-items-center rounded-full bg-brand-hover [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 max-[760px]:h-11 max-[760px]:w-11 text-[11px] font-semibold text-brand-orange hover:bg-brand-orange hover:text-white"
+          className="relative grid h-8 w-8 place-items-center rounded-full bg-brand-hover [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 max-[760px]:h-11 max-[760px]:w-11 text-[11px] font-semibold text-brand-orange hover:bg-brand-orange hover:text-white"
           data-tooltip={accountName}
           data-tooltip-placement="right"
-          ref={accountButtonRef}
+          ref={accountButtonRef} data-workspace-account-trigger
           aria-label={accountName}
           aria-haspopup={narrowActionsMode ? "dialog" : "menu"}
           onKeyDown={event => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setAccountMenuOpen(true); } }}
@@ -111,8 +118,10 @@ export function ProjectActions({
           }}
         >
           {accountInitials}
+          {workspaceActions.some(action => action.badge) && <span className="absolute right-0 top-0 h-2 w-2 rounded-full bg-brand-orange" aria-label="Actividad o resultados pendientes"/>}
         </button>
         <AccountActionsMenu
+          workspaceActions={workspaceActions}
           appVersion={appVersion}
           language={language}
           text={text}
@@ -146,7 +155,7 @@ export function ProjectActions({
         {cloudSyncOpen && renderProjectActionsPortal(<CloudSyncDialog onClose={() => setCloudSyncOpen(false)} fallbackFocus={() => accountButtonRef.current}/>)}
         <button
           className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-1 text-left hover:bg-brand-hover [@media(pointer:coarse)]:h-11 max-[760px]:h-11"
-          ref={accountButtonRef}
+          ref={accountButtonRef} data-workspace-account-trigger
           aria-haspopup={narrowActionsMode ? "dialog" : "menu"}
           onKeyDown={event => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setAccountMenuOpen(true); } }}
           aria-expanded={accountMenuOpen}
@@ -155,11 +164,14 @@ export function ProjectActions({
           }}
         >
           <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-brand-hover text-[11px] font-semibold text-brand-orange">
-            {accountInitials}
+            {workspaceActions.length > 0 && !authStatus.user ? <UserRound size={16}/> : accountInitials}
           </span>
-          <span className="truncate text-[11px] font-medium">{accountName}</span>
+          <span className="min-w-0 flex-1 truncate text-[11px] font-medium">{accountName}</span>
+          {workspaceActions.some(action => action.badge) && <span className="h-2 w-2 shrink-0 rounded-full bg-brand-orange" aria-label="Actividad o resultados pendientes"/>}
+          <ChevronUp size={13} aria-hidden/>
         </button>
         <AccountActionsMenu
+          workspaceActions={workspaceActions}
           appVersion={appVersion}
           language={language}
           text={text}
@@ -189,6 +201,7 @@ export function ProjectActions({
 }
 
 function AccountActionsMenu({
+  workspaceActions,
   appVersion,
   language,
   text,
@@ -212,6 +225,7 @@ function AccountActionsMenu({
   onOpenReleaseNotes,
   onOpenCloudSync,
 }: {
+  workspaceActions: WorkspaceMenuAction[];
   appVersion: string;
   language: AppearanceConfig["language"];
   text: ProjectActionsCopy;
@@ -371,6 +385,7 @@ function AccountActionsMenu({
           </header>
           <div className="min-h-0 flex-1 overflow-y-auto p-2">
             <AccountActionsMenuContent
+        workspaceActions={workspaceActions}
               className="rounded-md border border-line bg-white p-1"
               appVersion={appVersion}
               text={text}
@@ -425,14 +440,15 @@ function AccountActionsMenu({
         }
       }}
       className={[
-        "absolute bottom-[38px] z-[140] w-[252px] transition",
+        "workspace-account-menu-anchor absolute bottom-[42px] z-[140] w-[min(288px,calc(100vw-32px))] transition",
         placement === "right" ? "left-10" : "left-1/2 -translate-x-1/2",
         accountMenuOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
       ].join(" ")}
     >
       <div className="relative" onMouseEnter={cancelUsageTimers} onMouseLeave={scheduleUsageClose}>
       <AccountActionsMenuContent
-        className="rounded-md border border-line bg-white p-1 shadow-menu"
+        workspaceActions={workspaceActions}
+        className="max-h-[calc(100dvh-100px)] overflow-y-auto rounded-md border border-line bg-white p-1 shadow-menu"
         appVersion={appVersion}
         text={text}
         authStatus={authStatus}
@@ -472,6 +488,7 @@ function AccountActionsMenu({
 }
 
 function AccountActionsMenuContent({
+  workspaceActions,
   className,
   appVersion,
   text,
@@ -494,6 +511,7 @@ function AccountActionsMenuContent({
   onScheduleUsageOpen,
   onScheduleUsageClose,
 }: {
+  workspaceActions: WorkspaceMenuAction[];
   className: string;
   appVersion: string;
   text: ProjectActionsCopy;
@@ -516,8 +534,24 @@ function AccountActionsMenuContent({
   onScheduleUsageOpen: () => void;
   onScheduleUsageClose: () => void;
 }) {
+  const [accountDetails, setAccountDetails] = useState(false);
+  const primaryMenu = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (workspaceActions.length) primaryMenu.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+  }, [accountDetails, workspaceActions.length]);
+  if (workspaceActions.length > 0 && !accountDetails) return <div ref={primaryMenu} className={`${className} workspace-account-menu`} role={narrowMode ? undefined : "menu"} aria-label={narrowMode ? undefined : text.accountOptionsTitle}>
+    {workspaceActions.filter(action => action.id !== "trash").map(action => <button key={action.id} role={narrowMode ? undefined : "menuitem"} disabled={action.disabled} onClick={() => onRunAction(action.onSelect)}>
+      <action.icon size={17}/><span className="min-w-0 flex-1">{action.label}</span>{action.badge ? <span className="workspace-account-badge">{action.badge}</span> : null}
+    </button>)}
+    <div className="workspace-account-separator"/>
+    <button role={narrowMode ? undefined : "menuitem"} onClick={()=>onRunAction(onOpenAppSettings)}><Settings size={17}/><span>{text === projectActionsCopy.en ? "Settings" : "Configuración"}</span></button>
+    {workspaceActions.filter(action=>action.id === "trash").map(action=><button key={action.id} role={narrowMode ? undefined : "menuitem"} disabled={action.disabled} onClick={()=>onRunAction(action.onSelect)}><action.icon size={17}/><span>{action.label}</span></button>)}
+    <div className="workspace-account-separator"/>
+    <button className="workspace-account-secondary" role={narrowMode ? undefined : "menuitem"} onClick={()=>setAccountDetails(true)}><span className="flex-1">{text === projectActionsCopy.en ? "Account and application" : "Cuenta y aplicación"}</span><ChevronRight size={15}/></button>
+  </div>;
   return (
-    <div className={className} role={narrowMode ? undefined : "menu"} aria-label={narrowMode ? undefined : text.accountOptionsTitle}>
+    <div ref={primaryMenu} className={`${className}${workspaceActions.length ? " workspace-account-menu workspace-account-details" : ""}`} role={narrowMode ? undefined : "menu"} aria-label={narrowMode ? undefined : text.accountOptionsTitle}>
+      {workspaceActions.length > 0 && <button role={narrowMode ? undefined : "menuitem"} onClick={()=>setAccountDetails(false)}><ChevronRight size={15} className="rotate-180"/><span>{text === projectActionsCopy.en ? "Back" : "Volver"}</span></button>}
       <div className="px-2 py-2">
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-2">

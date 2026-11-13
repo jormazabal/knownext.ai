@@ -2,6 +2,8 @@ import type {HandwrittenOcrApplyRequest,HandwrittenOcrApply,HandwrittenOcrResult
 import {HistoryRestoreDialog} from "../features/history/HistoryRestoreDialog";
 import type {HandwrittenPageFocus,WorkspaceNodeFocus} from "../types/localSearch";
 import { useWorkspaceSurfaceTransition } from "./useWorkspaceSurfaceTransition";
+import { WorkspaceControls } from "./WorkspaceControls";
+import { LocalOperationsNotice } from "../features/documents/LocalOperationsNotice";
 import { projectImageSource } from "../lib/projectImageSources";
 import type { SettingsWorkspace } from "../types/settings";
 import { DocumentToolsPanel } from "../features/editor/DocumentToolsPanel";
@@ -9,13 +11,12 @@ import { WorkspaceWelcome } from "../features/projects/WorkspaceWelcome";
 import {ProjectTreeReadIssue} from "../features/documents/ProjectTreeReadIssue";
 import { LoadFailure } from "../components/ui/LoadFailure";
 import { WorkspaceCommandPalette } from "../features/documents/WorkspaceCommandPalette";
-import { Search } from "lucide-react";
 import "./DesktopLayout.css";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import {createDeferredView} from "../components/ui/createDeferredView";
 import {notesSaveFeedback} from "../features/documents/notesSaveFeedback";
 import type {MarkdownEditorProps} from "../features/editor/MarkdownEditor";
-import { AlertTriangle, ArrowLeft, FileText, GitCompareArrows, History, Image as ImageIcon, Maximize2, Mic, Minus, PanelLeftClose, PanelLeftOpen, PanelRightOpen, PanelRightClose, Pin, Settings, Trash2, Plus, RotateCcw } from "lucide-react";
+import { Activity, GitCompareArrows, NotebookPen, Sparkles, Trash2, AlertTriangle, FileText, History, Image as ImageIcon, Maximize2, Mic, Minus, PanelLeftClose, PanelRightClose, Pin, Plus, RotateCcw } from "lucide-react";
 import { AiConversationView } from "../features/assistant/AiConversationView";
 import { AiPromptInput, type AiPromptExecutionOptions } from "../features/assistant/AiPromptInput";
 import { AiResponseBubble } from "../features/assistant/AiResponseBubble";
@@ -272,6 +273,7 @@ type DesktopLayoutProps = {
   onAddHandwrittenNoteContext: (noteId: string) => void | Promise<void>;
   onMoveTreeNode: (node: DocumentTreeNode, targetFolderId: string | null) => void | Promise<void>;
   onImportProjectImage: (parentId: string | null, file: File) => Promise<AssetImportResponse>;
+  onUploadEditorImage: (documentId: string, file: File) => Promise<string>;
   onBuildImageReference: (documentId: string, assetId: string, altText?: string | null) => Promise<InsertImageReferenceResponse>;
   onBuildHandwrittenImageReference: (documentId: string, noteId: string, altText?: string | null) => Promise<HandwrittenNoteInsertMarkdownResponse>;
   onInsertImageIntoActiveDocument: (assetId: string) => void | Promise<void>;
@@ -334,6 +336,9 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   const mobileShell = isMobileDeviceRuntime();
   const phoneShell = isPhoneAppShell();
   const [editorControllers, setEditorControllers] = useState<Record<string, MarkdownEditorController>>({});
+  const [editorFocusRequest, setEditorFocusRequest] = useState(0);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [activityAttention, setActivityAttention] = useState(false);
   const editorControllersRef = useRef<Record<string, MarkdownEditorController>>({});
   const [editorFormatState, setEditorFormatState] = useState<MarkdownEditorFormatState>(emptyMarkdownEditorFormatState);
   const [editorHistoryStates, setEditorHistoryStates] = useState<Record<string, MarkdownEditorHistoryState>>({});
@@ -670,6 +675,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   }, [navigationOpen, settingsMode, props.historyOpen, props.onCloseHistory]);
 
   const handleOpenDocument = useCallback((documentId: string, name: string) => {
+    setEditorFocusRequest(value=>value+1);
     props.onOpenDocument(documentId, name);
     setNavigationOpen(false);
   }, [props.onOpenDocument]);
@@ -715,9 +721,11 @@ export function DesktopLayout(props: DesktopLayoutProps) {
   return (
     <div className={["workspace-v3 h-full overflow-hidden bg-white text-ink-primary", mobileShell ? "knownext-mobile-shell" : "", phoneShell ? "knownext-phone-shell" : ""].join(" ")}>
       {mobileShell ? null : <TitleBar />}
+      <LocalOperationsNotice fallbackFocus={()=>document.querySelector<HTMLButtonElement>("[data-workspace-account-trigger]")} open={activityOpen} onClose={()=>setActivityOpen(false)} onAttentionChange={setActivityAttention} assistantStatus={assistantBusy ? "IA en curso" : props.aiBubble ? "Resultado IA disponible" : undefined}/>
       {commandsOpen && <WorkspaceCommandPalette language={props.appLanguage} key={props.activeProject?.id ?? "none"} tree={props.tree} projectId={props.activeProject?.id ?? null} projects={props.projects} recentIds={recentByProject[props.activeProject?.id ?? ""] ?? []} onClose={()=>setCommandsOpen(false)} onSelectProject={id=>{setNavigationOpen(false);props.settingsWorkspace?.onClose();props.onSelectProject(id);}} onSelectNode={(id,type,name,focus)=>{setNavigationOpen(false);props.settingsWorkspace?.onClose();props.onSelectTreeNode(id,type,name,focus);if(type==='folder'){changeNavigation(true);setNavigationOpen(true);}}} commands={[
         {id:'settings',label:settingsMode?(props.appLanguage==="en"?'Back to document':'Volver al documento'):(props.appLanguage==="en"?'Open settings':'Abrir configuración'),detail:(props.appLanguage==="en"?'Settings on this device':'Ajustes de este dispositivo'),run:()=>{if(settingsMode)props.settingsWorkspace?.onClose();else props.onOpenAppSettings();}},
         {id:'project',label:(props.appLanguage==="en"?'Create or open a project':'Crear o abrir un proyecto'),run:props.onCreateProject},
+        {id:'recordings',label:props.appLanguage==="en"?'Open recordings':'Abrir grabaciones',run:props.onOpenRecordings},
         ...(props.activeProject&&props.onOpenProjectReplace?[{id:'replace-project',label:(props.appLanguage==="en"?'Replace in documents':'Reemplazar en documentos'),detail:(props.appLanguage==="en"?'Select, compare and apply as drafts':'Seleccionar, comparar y aplicar como borradores'),run:props.onOpenProjectReplace}]:[]),
         ...(props.activeProject&&props.historyEnabled?[{id:'history-file-restore',label:(props.appLanguage==="en"?'Restore a historical file':'Restaurar archivo histórico'),detail:(props.appLanguage==="en"?'Review Markdown, notes and resources by path':'Revisar Markdown, notas y recursos por ruta'),run:()=>setNativeHistoryRestore({documentId:props.activeDocumentId||`${props.activeProject!.id}::`})}]:[]),
         ...(props.activeProject&&props.onOpenAssetCatalog?[{id:'asset-catalog',label:(props.appLanguage==="en"?'Project resources and links':'Recursos y enlaces del proyecto'),detail:(props.appLanguage==="en"?'Review attachments, references, available text and missing items':'Consultar adjuntos, referencias, texto disponible y faltantes'),run:props.onOpenAssetCatalog}]:[]),
@@ -762,15 +770,6 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                     data-tooltip-placement="bottom"
                     aria-label="Ocultar panel de documentos"
                     onClick={() => setNavigationOpen(false)}
-                  >
-                    <PanelLeftClose size={16} />
-                  </button>
-                  <button
-                    className="hidden h-8 w-8 shrink-0 place-items-center rounded-md text-ink-secondary hover:bg-brand-hover hover:text-brand-orange lg:grid"
-                    data-tooltip="Ocultar documentos"
-                    data-tooltip-placement="bottom"
-                    aria-label="Ocultar panel de documentos"
-                    onClick={() => changeNavigation(false)}
                   >
                     <PanelLeftClose size={16} />
                   </button>
@@ -824,7 +823,18 @@ export function DesktopLayout(props: DesktopLayoutProps) {
               />
             ) : null}
           </div>
+
+          </div>
+          <div className="min-h-0 flex-1 flex-col" style={{display: settingsMode ? "flex" : "none"}}>
+            {props.settingsWorkspace?.navigation({onNavigate: () => setNavigationOpen(false), onHide: () => {setNavigationOpen(false);changeNavigation(false);}})}
+          </div>
           <ProjectActions
+            workspaceActions={[
+              ...props.tabs.filter(tab=>tab.kind === "notes" || tab.kind === "ai-conversation").map(tab=>({id:tab.id,label:tab.kind === "notes" ? "Notas" : "Asistente IA",icon:tab.kind === "notes" ? NotebookPen : Sparkles,onSelect:()=>{props.settingsWorkspace?.onClose();setNavigationOpen(false);setEditorFocusRequest(value=>value+1);props.onSelectTab(tab.id);}})),
+              ...(props.aiResultReview ? [{id:"ai-results",label:"Resultados IA",icon:GitCompareArrows,onSelect:props.aiResultReview.onOpen,badge:props.aiResultReview.count || (props.aiResultReview.hasError ? "!" : undefined)}] : []),
+              {id:"activity",label:"Actividad",icon:Activity,onSelect:()=>setActivityOpen(true),badge:activityAttention ? "!" : assistantBusy ? "…" : undefined},
+              {id:"trash",label:"Papelera del proyecto",icon:Trash2,onSelect:()=>props.onOpenTrash?.(),disabled:!props.activeProject || !props.onOpenTrash},
+            ]}
             appVersion={props.appVersion}
             language={props.appLanguage}
             authStatus={props.authStatus}
@@ -838,10 +848,6 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             onOpenReleaseNotes={handleOpenReleaseNotes}
             isCheckingForUpdates={props.isCheckingForUpdates}
           />
-          </div>
-          <div className="min-h-0 flex-1 flex-col" style={{display: settingsMode ? "flex" : "none"}}>
-            {props.settingsWorkspace?.navigation({onNavigate: () => setNavigationOpen(false), onHide: () => {setNavigationOpen(false);changeNavigation(false);}})}
-          </div>
         </aside>
         {navigationVisible ? (
           <div className="hidden lg:block">
@@ -857,34 +863,31 @@ export function DesktopLayout(props: DesktopLayoutProps) {
           </div>
         ) : null}
 
-        <main data-workspace-focus-anchor tabIndex={-1} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white">
-          <nav className="workspace-panel-controls" aria-label="Paneles de trabajo">
-            <button ref={navigationToggleRef} aria-label="Alternar navegación" aria-expanded={window.matchMedia("(min-width: 1024px)").matches ? navigationVisible : navigationOpen} onClick={() => { if (window.matchMedia("(min-width: 1024px)").matches) changeNavigation(!navigationVisible); else setNavigationOpen(value => !value); }}><PanelLeftOpen size={16}/><span>Navegación</span></button>
-            {settingsMode && <button aria-label="Volver al documento" onClick={props.settingsWorkspace?.onClose}><ArrowLeft size={16}/><span>Volver al documento</span></button>}
-            <span className="min-w-0 flex-1 truncate text-xs text-ink-secondary">{settingsMode ? (props.appLanguage === "en" ? "This device" : "Este dispositivo") : props.activeProject?.name}</span>
-            <button aria-label="Acceso rápido" title="Acceso rápido · Ctrl/Cmd Shift P" onClick={()=>setCommandsOpen(true)}><Search size={16}/></button>
-            <button aria-label="Abrir Grabaciones" title="Grabaciones" onClick={props.onOpenRecordings}><Mic size={16}/></button>
-            {props.aiResultReview && <button className="relative" aria-label={`Resultados IA conservados${props.aiResultReview.count ? `: ${props.aiResultReview.count}` : ""}`} title={props.aiResultReview.hasError ? "Revisar resultados · Hay un aviso de conservación" : "Resultados IA conservados"} onClick={props.aiResultReview.onOpen}><GitCompareArrows size={16}/><span>Resultados IA{props.aiResultReview.count ? ` · ${props.aiResultReview.count}` : props.aiResultReview.hasError ? " · !" : ""}</span>{(props.aiResultReview.count > 0 || props.aiResultReview.hasError) && <span className="workspace-result-count" aria-hidden="true">{props.aiResultReview.count || "!"}</span>}</button>}
-            <button aria-label="Configuración" aria-pressed={settingsMode} onClick={() => {if(settingsMode)props.settingsWorkspace?.onClose();else props.onOpenAppSettings();}}><Settings size={16}/></button>
-            {!settingsMode && props.activeProject && props.onOpenTrash && <button aria-label="Papelera del proyecto" onClick={props.onOpenTrash}><Trash2 size={16}/></button>}
-            <span className="workspace-activity" role="status">{assistantBusy ? "IA en curso" : props.aiBubble ? "Resultado IA disponible" : ""}</span>
-            <button ref={contextToggleRef} aria-label="Alternar contexto" aria-expanded={contextOpen} onClick={() => { const next = !contextOpen; if(settingsMode){setSettingsContextVisible(next);return;} if (props.historyOpen) props.onCloseHistory(); setContextVisible(next); }}><span>Contexto</span><PanelRightOpen size={16}/></button>
-          </nav>
-          {props.activeProject&&props.treeReadIssue&&!settingsMode&&<div className={navigationVisible?"shrink-0 p-2 lg:hidden":"shrink-0 p-2"}><ProjectTreeReadIssue message={props.treeReadIssue} hasPreviousView={!!props.tree.length} busy={props.treeReadBusy??false} onRetry={()=>props.onReloadProjectTree?.()} onSearch={()=>setCommandsOpen(true)}/></div>}
-          {props.continuityNotice}
-          {hasOpenTab && !settingsMode ? (
-            <>
-          <DocumentTabs
+        <main data-workspace-focus-anchor tabIndex={-1} className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white">
+          <WorkspaceControls settings={settingsMode} projectName={props.activeProject?.name}
+            navigationOpen={window.matchMedia("(min-width: 1024px)").matches ? navigationVisible : navigationOpen}
+            contextOpen={contextOpen} navigationRef={navigationToggleRef} contextRef={contextToggleRef}
+            onNavigation={() => { if (window.matchMedia("(min-width: 1024px)").matches) changeNavigation(!navigationVisible); else setNavigationOpen(value => !value); }}
+            onContext={() => { const next = !contextOpen; if(settingsMode){setSettingsContextVisible(next);return;} if (props.historyOpen) props.onCloseHistory(); setContextVisible(next); }}
+            onBack={props.settingsWorkspace?.onClose}
+            onSearch={()=>setCommandsOpen(true)} onRecordings={props.onOpenRecordings}
+            tabs={hasOpenTab ? (<DocumentTabs utilityTabsInMenu
             tabs={props.tabs}
             activeTabId={props.activeTabId}
             activeDocumentId={props.activeDocumentId}
             dirtyDocumentIds={props.dirtyDocumentIds}
-            onOpenNavigation={() => setNavigationOpen(true)}
-            onSelectTab={props.onSelectTab}
+            onSelectTab={id=>{setEditorFocusRequest(value=>value+1);props.onSelectTab(id);}}
             onCloseTab={props.onCloseTab}
             onCloseTabs={props.onCloseTabs}
             onReorderDocumentTabs={props.onReorderDocumentTabs}
+          />) : undefined}
+
           />
+          {props.activeProject&&props.treeReadIssue&&!settingsMode&&<div className={navigationVisible?"shrink-0 p-2 lg:hidden":"shrink-0 p-2"}><ProjectTreeReadIssue message={props.treeReadIssue} hasPreviousView={!!props.tree.length} busy={props.treeReadBusy??false} onRetry={()=>props.onReloadProjectTree?.()} onSearch={()=>setCommandsOpen(true)}/></div>}
+          <div className="workspace-continuity-notice">{props.continuityNotice}</div>
+          {hasOpenTab && !settingsMode ? (
+            <>
+
               {hasReleaseNotes || hasAiConversation || hasOpenImage || hasOpenReferenceDocument || hasOpenHandwrittenNote || hasOpenDocument ? null : (
               <MarkdownToolbar
                 historyOpen={props.historyOpen}
@@ -909,7 +912,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
             </>
           ) : null}
           <div className="relative flex min-h-0 flex-1">
-            <section ref={documentSurfaceRef} aria-hidden={settingsMode || undefined} style={{display: settingsMode ? "none" : undefined}} className={["relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", hasOpenTab ? "bg-white" : "bg-panel"].join(" ")}>
+            <section ref={documentSurfaceRef} aria-hidden={settingsMode || undefined} style={{display: settingsMode ? "none" : undefined}} className={["workspace-document-surface relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", hasOpenTab ? "bg-white" : "bg-panel"].join(" ")}>
               {hasOpenTab ? (
                 <>
                   <div className={hasAiConversation || hasOpenImage || hasOpenReferenceDocument || hasOpenHandwrittenNote || hasOpenDocument ? "min-h-0 flex-1 overflow-hidden pb-[54px]" : "min-h-0 flex-1 overflow-y-auto px-8 pt-4 pb-12"}>
@@ -976,6 +979,8 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                               <MarkdownEditor
                                 key={props.notesEditorKey}
                                 documentKey={props.notesEditorKey}
+                                active={!settingsMode && hasNotes}
+                                focusRequest={editorFocusRequest}
                                 markdown={props.notesMarkdown}
                                 onChange={props.onNotesMarkdownChange}
                                 onControllerChange={(controller, releasedController) => handleEditorControllerChange("user-notes", controller, releasedController)}
@@ -1015,6 +1020,7 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                       ) : (
                         <HistoryComparisonSurface documentId={props.activeDocumentId} preview={activeHistoryPreview ? (
                         <HistoryPreviewWorkspace
+                          resolveImageSource={source=>projectImageSource(source,props.activeProject?.id??"",props.activeDocument?.path??"",props.tree)}
                           preview={activeHistoryPreview}
                           currentMarkdown={props.activeMarkdown}
                           markdownZoomPercent={markdownZoomPercent}
@@ -1054,8 +1060,11 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                                 <MarkdownEditor
                                   key={session.editorKey}
                                   documentKey={session.editorKey}
+                                  active={!settingsMode && session.documentId === props.activeDocumentId && !activeHistoryPreview}
+                                  focusRequest={editorFocusRequest}
                                   markdown={session.markdown}
                                   resolveImageSource={source => projectImageSource(source, props.activeProject?.id ?? "", session.document!.path, props.tree)}
+                                  onUploadImage={file => props.onUploadEditorImage(session.documentId, file)}
                                   onChange={(markdown, source) => props.onMarkdownChange(session.documentId, markdown, source)}
                                   onControllerChange={(controller, releasedController) => handleEditorControllerChange(session.documentId, controller, releasedController)}
                                   onFormatStateChange={(formatState) => {
@@ -1094,15 +1103,6 @@ export function DesktopLayout(props: DesktopLayoutProps) {
                 }}/>
               ) : (
                 <>
-                  <button
-                    className="absolute left-3 top-3 z-10 grid h-8 w-8 place-items-center rounded-md border border-line bg-white text-ink-secondary shadow-subtle hover:bg-brand-hover hover:text-brand-orange lg:hidden"
-                    data-tooltip="Abrir documentos"
-                    data-tooltip-placement="bottom"
-                    aria-label="Abrir panel de documentos"
-                    onClick={() => setNavigationOpen(true)}
-                  >
-                    <PanelLeftOpen size={16} />
-                  </button>
                   <div className="pointer-events-none absolute inset-0 grid place-items-center">
                     <BrandMark variant="watermark" className="w-[min(420px,44vw)] max-w-[62%]" />
                   </div>

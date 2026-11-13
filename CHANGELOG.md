@@ -2,6 +2,15 @@
 
 All KnowNext.ai releases use one monolithic application version for the frontend, Tauri shell, Rust runtime, Windows updater, and Android updater.
 
+## 3.0.1 - 2026-11-13
+
+- Combined document tabs, search, recording and panel controls into one stable row; moved secondary actions to a consistent account menu available from documents and Settings.
+- Compacted navigation rows and unified subtle sidebar/document scrollbars; redesigned the account menu and separated nested file/folder menus into floating layers without horizontal overflow. Three-dot triggers open on click and remain visible while navigating menus.
+- Replaced the full-height recording drawer with a narrower floating card and collapsed session history, while retaining touch controls and access to recording details.
+- Restored editor focus on document activation and preserved hidden Markdown reference definitions without technical cards in the writing surface.
+- Fixed legacy project image URLs, resolved images in history content, and persisted pasted/uploaded image files before insertion instead of creating temporary blob references.
+- Added Proton Drive configuration directly to project editing, preserving unsaved fields when returning from connection settings.
+
 ## 3.0.0 - 2026-11-07
 
 - Fixed per-user MSI installation of the bundled font license with an HKCU key path, explicit empty-directory cleanup and a strict resource mapping guard.

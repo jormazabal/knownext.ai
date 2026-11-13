@@ -7,6 +7,14 @@ const tabs = [
   { kind: "document" as const, id: "doc-b", name: "Esquemas.md" },
 ];
 describe("DocumentTabs", () => {
+  it("moves inactive utility tabs to the account menu but labels the active utility as a tab",()=>{
+    const props: Parameters<typeof DocumentTabs>[0]={utilityTabsInMenu:true,tabs:[...tabs,{kind:"notes" as const,id:"user-notes" as const,name:"Notas",utilityTabId:"notes" as const},{kind:"ai-conversation" as const,id:"project-ai-conversation",name:"IA",readonly:true as const}],activeTabId:"doc-a",dirtyDocumentIds:[],onSelectTab:vi.fn(),onCloseTab:vi.fn()};
+    const view=render(<DocumentTabs {...props}/>);
+    expect(screen.queryByText("Notas")).not.toBeInTheDocument();expect(screen.queryByText("IA")).not.toBeInTheDocument();
+    view.rerender(<DocumentTabs {...props} activeTabId="user-notes"/>);
+    expect(screen.getByText("Notas")).toBeInTheDocument();expect(screen.queryByLabelText("Cerrar Notas")).not.toBeInTheDocument();
+    expect(screen.getByText("Acta.md")).toBeInTheDocument();
+  });
   afterEach(() => {
     cleanup();
     Object.defineProperty(window, "matchMedia", { value: undefined, configurable: true });
