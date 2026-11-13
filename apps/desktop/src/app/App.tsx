@@ -5,7 +5,6 @@ import {AiChangeHistoryDialog} from "../features/ai/AiChangeHistoryDialog";
 import {ProjectReplaceDialog} from "../features/search/ProjectReplaceDialog";
 import {useWorkspaceExit} from "./useWorkspaceExit";
 import {protectUpdateInstallation,releaseUpdateInstallation} from "../lib/runtime/updateProtection";
-import {LocalOperationsNotice} from "../features/documents/LocalOperationsNotice";
 import {imageInsertionTargetIsCurrent,type ImageInsertionTarget} from "./imageInsertionTarget";
 import {useProjectWork} from "./useProjectWork";
 import {acknowledgeDraftWrite,isDraftWriteConflict} from "./draftWriteRevision";
@@ -4659,6 +4658,19 @@ export function App() {
     currentImageInsertionSession(target);return response;
   }
 
+  async function handleUploadEditorImage(documentId: string, file: File): Promise<string> {
+    const target = captureImageInsertion(documentId);
+    const imported = await handleImportProjectImage(null, file);
+    try {
+      currentImageInsertionSession(target);
+      const reference = await buildImageReference(target.projectId, documentId, imported.asset.id, file.name);
+      currentImageInsertionSession(target);
+      return reference.markdown;
+    } catch (error) {
+      throw new Error(`La imagen ya está guardada como ${imported.asset.name}. Puedes insertarla desde las imágenes del proyecto. ${getApiErrorMessage(error, "No se pudo insertar en este documento.")}`);
+    }
+  }
+
   async function handleBuildHandwrittenImageReference(documentId: string, noteId: string, altText?: string | null): Promise<HandwrittenNoteInsertMarkdownResponse> {
     const target=captureImageInsertion(documentId);
     const session=handwrittenSessionsRef.current[noteId];
@@ -4937,7 +4949,7 @@ export function App() {
   return (
     <>
       <DesktopLayout
-        continuityNotice={<><WorkspaceContinuityNotice state={workspaceContinuity.state} onRetry={workspaceContinuity.retry}/><LocalOperationsNotice/></>}
+        continuityNotice={<WorkspaceContinuityNotice state={workspaceContinuity.state} onRetry={workspaceContinuity.retry}/>}
         applyingAiEditProposalId={applyingAiEditProposalId}
         canApplyEditorOperation={operation => !operation.aiProposalId || (aiProposalExecution.current.mayApply(operation.id) && aiProposalRequests.current.has(operation.aiProposalId) && aiConfigRef.current.permissions.editDocuments && aiTrackedOperationEpochs.current.get(operation.id)?.epoch===aiWorkspaceEpoch.current.value && aiTrackedOperationEpochs.current.get(operation.id)?.projectId===activeAiProjectRef.current)}
         aiResultReview={{ count: aiResultReview.entries.length, hasError: Boolean(aiResultReview.error || aiResultReview.warnings.length || aiResultReview.entries.some(entry => entry.error)), onOpen: () => setAiResultReviewOpen(true) }}
@@ -5161,6 +5173,7 @@ export function App() {
         onMoveTreeNode={handleMoveTreeNodeDrop}
         onBatchAction={activeProject ? (action, nodeIds,initialTargetFolderId) => {if(action==="export")setProjectTransferMode({kind:"export",projectId:activeProject.id,projectName:activeProject.name,nodeIds});else setFileBatch({ projectId: activeProject.id, action, nodeIds,initialTargetFolderId,workspaceEpoch:aiWorkspaceEpoch.current.value });} : undefined}
         onImportProjectImage={handleImportProjectImage}
+        onUploadEditorImage={handleUploadEditorImage}
         onBuildImageReference={handleBuildImageReference}
         onBuildHandwrittenImageReference={handleBuildHandwrittenImageReference}
         onInsertImageIntoActiveDocument={(assetId) => void insertImageIntoActiveDocument(assetId)}
@@ -5206,7 +5219,7 @@ export function App() {
       {assetCatalogOpen&&activeProject&&<AssetCatalogDialog key={activeProject.id} projectId={activeProject.id} projectName={activeProject.name} onClose={()=>setAssetCatalogOpen(false)} onOpen={target=>{setAssetCatalogOpen(false);handleOpenLocalReference(target);}} onOpenExternal={url=>{void openExternalUrl(url).catch(error=>showError(error,"No se pudo abrir el enlace externo"));}}/>}
       {assetMoveReview.review&&<AssetMoveImpactDialog language={appearanceConfig.language} key={assetMoveReview.review.path} review={assetMoveReview.review} onDecide={assetMoveReview.settle}/>}
       {meetingMinutes&&<MeetingMinutesDialog key={meetingMinutes.projectId+meetingMinutes.sessionId} {...meetingMinutes} onClose={()=>setMeetingMinutes(null)} onBeforeChange={beforeCriticalStateChange} onSettled={afterCriticalStateChange} onPublished={id=>{setMeetingMinutes(null);setPendingRecordingDocument({id,projectId:id.split("::")[0]});}}/>}
-      {recordingPanel && <div className="fixed inset-0 z-[110] flex justify-end bg-black/20"><div className="relative h-full w-full max-w-[520px] border-l border-line bg-white shadow-xl"><RecordingPanel compact embedded onOpenMinutes={(sessionId,projectId)=>{setRecordingPanel(false);setMeetingMinutes({sessionId,projectId});}} onOpenSettings={()=>{setRecordingPanel(false);if(activeProject)void handleReloadProjectTree(activeProject.id);setAppSettingsOpen(true);}} initialDestination={recordingDestination} onClose={() => {setRecordingPanel(false); if(activeProject) void handleReloadProjectTree(activeProject.id);}} onOpenDocument={id => {void openRecordingDocument(id);}} /></div></div>}
+      {recordingPanel && <ModalFrame label="Grabaciones" onClose={() => {setRecordingPanel(false); if(activeProject) void handleReloadProjectTree(activeProject.id);}} className="recording-overlay"><div className="recording-floating-panel"><RecordingPanel compact embedded onOpenMinutes={(sessionId,projectId)=>{setRecordingPanel(false);setMeetingMinutes({sessionId,projectId});}} onOpenSettings={()=>{setRecordingPanel(false);if(activeProject)void handleReloadProjectTree(activeProject.id);setAppSettingsOpen(true);}} initialDestination={recordingDestination} onClose={() => {setRecordingPanel(false); if(activeProject) void handleReloadProjectTree(activeProject.id);}} onOpenDocument={id => {void openRecordingDocument(id);}} /></div></ModalFrame>}
       {trashOpen && activeProject && <ProjectTrashDialog projectId={activeProject.id} projectName={activeProject.name} onRestored={result => applyFileOperationResult(result)} onClose={() => setTrashOpen(false)}/>}
       {fileBatch && activeProject?.id === fileBatch.projectId && <FileBatchDialog {...fileBatch} nodes={tree} folders={collectFolders(tree)} beforeExecute={beforeFileBatchExecute} onClose={() => {assetMoveReview.settle(false);setFileBatch(null);}} onApplied={plan => {
         if(fileBatchRef.current!==fileBatch||activeAiProjectRef.current!==fileBatch.projectId||aiWorkspaceEpoch.current.value!==fileBatch.workspaceEpoch)return;

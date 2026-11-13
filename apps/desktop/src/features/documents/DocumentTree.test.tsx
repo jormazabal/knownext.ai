@@ -127,7 +127,7 @@ describe("DocumentTree", () => {
     fireEvent.pointerDown(document.body);
     expect(screen.queryByRole("button",{name:"Grabar audio y crear documento…"})).not.toBeInTheDocument();
     fireEvent.contextMenu(screen.getByText("Requisitos"));
-    fireEvent.click(screen.getByRole("button",{name:"Grabar audio y crear documento…"}));
+    fireEvent.click(screen.getByRole("menuitem",{name:"Grabar audio y crear documento…"}));
     expect(onContextAction).toHaveBeenCalledWith("record-audio",nodes[0]);
   });
 
@@ -197,7 +197,7 @@ describe("DocumentTree", () => {
       />,
     );
 
-    await userEvent.hover(screen.getByRole("button", { name: /^abrir menú de requisitos$/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^abrir menú de requisitos$/i }));
     await waitFor(() => expect(screen.getByText("Nueva carpeta")).toBeInTheDocument());
     await userEvent.click(screen.getByText("Nuevo documento"));
 
@@ -227,21 +227,36 @@ describe("DocumentTree", () => {
       />,
     );
 
-    await userEvent.hover(screen.getByRole("button", { name: /abrir menú de requisitos-funcionales\.md/i }));
-    await waitFor(() => expect(screen.getByText("Exportar")).toBeInTheDocument());
+    const trigger = screen.getByRole("button", { name: /abrir menú de requisitos-funcionales\.md/i });
+    await userEvent.hover(trigger);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(trigger);
+    expect(screen.getByRole("menuitem", { name: "Exportar" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Exportar" })).toHaveFocus();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    await userEvent.click(trigger);
+    await userEvent.click(trigger);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    await userEvent.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded","true");expect(trigger).toHaveClass("opacity-100");
+    await userEvent.unhover(trigger);await new Promise(resolve=>setTimeout(resolve,350));
+    expect(screen.getByRole("menuitem",{name:"Exportar"})).toBeInTheDocument();
     expect(screen.queryByText("Exportar PDF")).not.toBeInTheDocument();
 
     await userEvent.hover(screen.getByText("Exportar"));
     await waitFor(() => expect(screen.getByRole("menuitem", { name: /markdown/i })).toBeInTheDocument());
     await userEvent.click(screen.getByRole("menuitem", { name: /markdown/i }));
 
-    await userEvent.hover(screen.getByRole("button", { name: /abrir menú de requisitos-funcionales\.md/i }));
+    await userEvent.click(screen.getByRole("button", { name: /abrir menú de requisitos-funcionales\.md/i }));
     await waitFor(() => expect(screen.getByText("Exportar")).toBeInTheDocument());
     await userEvent.hover(screen.getByText("Exportar"));
     await waitFor(() => expect(screen.getByRole("menuitem", { name: /pdf/i })).toBeInTheDocument());
     await userEvent.click(screen.getByRole("menuitem", { name: /pdf/i }));
 
-    await userEvent.hover(screen.getByRole("button", { name: /abrir menú de requisitos-funcionales\.md/i }));
+    await userEvent.click(screen.getByRole("button", { name: /abrir menú de requisitos-funcionales\.md/i }));
     await waitFor(() => expect(screen.getByText("Exportar")).toBeInTheDocument());
     await userEvent.hover(screen.getByText("Exportar"));
     await waitFor(() => expect(screen.getByRole("menuitem", { name: /docx/i })).toBeInTheDocument());
@@ -289,10 +304,10 @@ describe("DocumentTree", () => {
         toJSON: () => ({}),
       });
 
-      await userEvent.hover(menuButton);
+      await userEvent.click(menuButton);
       await waitFor(() => expect(screen.getByText("Exportar")).toBeInTheDocument());
 
-      const menu = screen.getByText("Exportar").closest(".fixed") as HTMLElement;
+      const menu = screen.getByText("Exportar").closest('[role="menu"]') as HTMLElement;
       expect(menu).toHaveStyle({ top: "8px" });
     } finally {
       Object.defineProperty(window, "innerHeight", { value: originalInnerHeight, configurable: true });
@@ -1004,7 +1019,7 @@ describe("DocumentTree", () => {
     await userEvent.dblClick(screen.getByText("brief.pdf"));
     expect(onOpenReferenceDocument).toHaveBeenCalledWith("attachment-brief", "brief.pdf", "brief.pdf");
 
-    await userEvent.hover(screen.getByRole("button", { name: /abrir menú de brief\.pdf/i }));
+    await userEvent.click(screen.getByRole("button", { name: /abrir menú de brief\.pdf/i }));
     await waitFor(() => expect(screen.getByText("Abrir vista")).toBeInTheDocument());
     expect(screen.getByText("Usar como contexto IA")).toBeInTheDocument();
     await userEvent.click(screen.getByText("Usar como contexto IA"));
@@ -1047,12 +1062,12 @@ describe("DocumentTree", () => {
     expect(onOpenImage).toHaveBeenCalledWith("image-diagram", "diagram.png", "assets/diagram.png");
     expect(onOpenDocument).not.toHaveBeenCalled();
 
-    await userEvent.hover(screen.getByRole("button", { name: /abrir menú de diagram\.png/i }));
+    await userEvent.click(screen.getByRole("button", { name: /abrir menú de diagram\.png/i }));
     await waitFor(() => expect(screen.getByText("Insertar en documento")).toBeInTheDocument());
     await userEvent.click(screen.getByText("Insertar en documento"));
     expect(onContextAction).toHaveBeenCalledWith("insert-image", imageNode);
 
-    await userEvent.hover(screen.getByRole("button", { name: /abrir menú de diagram\.png/i }));
+    await userEvent.click(screen.getByRole("button", { name: /abrir menú de diagram\.png/i }));
     await waitFor(() => expect(screen.getByText("Copiar referencia")).toBeInTheDocument());
     await userEvent.click(screen.getByText("Copiar referencia"));
     expect(onContextAction).toHaveBeenCalledWith("copy-image-reference", imageNode);
@@ -1088,7 +1103,7 @@ describe("DocumentTree", () => {
     expect(onOpenHandwrittenNote).toHaveBeenCalledWith("note-boceto", "Boceto.knote");
     expect(onOpenDocument).not.toHaveBeenCalled();
 
-    await userEvent.hover(screen.getByRole("button", { name: /abrir menú de boceto\.knote/i }));
+    await userEvent.click(screen.getByRole("button", { name: /abrir menú de boceto\.knote/i }));
     await waitFor(() => expect(screen.getByText("Insertar en documento")).toBeInTheDocument());
     await userEvent.click(screen.getByText("Insertar en documento"));
 

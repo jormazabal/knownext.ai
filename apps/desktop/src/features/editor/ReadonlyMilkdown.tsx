@@ -1,7 +1,7 @@
 import {Crepe} from "@milkdown/crepe";
 import {prosePluginsCtx} from "@milkdown/kit/core";
 import {Milkdown,MilkdownProvider,useEditor} from "@milkdown/react";
-import type {CSSProperties} from "react";
+import {useRef,type CSSProperties} from "react";
 import {clearHighlightCommand,configureHighlightMarkdownSerialization,highlightSchema,remarkHighlightHtmlPlugin,toggleHighlightCommand} from "./highlightExtension";
 import {configureUnderlineMarkdownSerialization,remarkUnderlineHtmlPlugin,toggleUnderlineCommand,underlineSchema} from "./underlineExtension";
 import {createMermaidDiagramPlugin,createMermaidDiagramViewPlugin} from "./mermaidNodeView";
@@ -11,12 +11,14 @@ import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
 import "./MarkdownEditor.css";
 
-export function ReadonlyMilkdownView({markdown,zoomPercent}:{markdown:string;zoomPercent:number}){
-  return <MilkdownProvider key={markdown}><ReadonlyMilkdown markdown={markdown} zoomPercent={zoomPercent}/></MilkdownProvider>;
+type ReadonlyProps={markdown:string;zoomPercent:number;resolveImageSource?:(source:string)=>string};
+export function ReadonlyMilkdownView(props:ReadonlyProps){
+  return <MilkdownProvider key={props.markdown}><ReadonlyMilkdown {...props}/></MilkdownProvider>;
 }
-function ReadonlyMilkdown({markdown,zoomPercent}:{markdown:string;zoomPercent:number}){
+function ReadonlyMilkdown({markdown,zoomPercent,resolveImageSource}:ReadonlyProps){
+  const resolver=useRef(resolveImageSource);resolver.current=resolveImageSource;
   useEditor(root=>{
-    const crepe=new Crepe({root,defaultValue:markdown,features:{[Crepe.Feature.BlockEdit]:false,[Crepe.Feature.LinkTooltip]:false,[Crepe.Feature.Toolbar]:false}});
+    const crepe=new Crepe({root,defaultValue:markdown,featureConfigs:{[Crepe.Feature.ImageBlock]:{proxyDomURL:source=>resolver.current?.(source)??source}},features:{[Crepe.Feature.BlockEdit]:false,[Crepe.Feature.LinkTooltip]:false,[Crepe.Feature.Toolbar]:false}});
     crepe.editor.config(ctx=>{
       configureUnderlineMarkdownSerialization(ctx);configureHighlightMarkdownSerialization(ctx);
       configureImageFidelity(ctx);

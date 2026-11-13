@@ -5,6 +5,12 @@ import { projectImageAsset, projectImageSource } from "./projectImageSources";
 
 const tree: DocumentTreeNode[] = [{id:"folder",name:"Assets",path:"Assets",type:"folder",children:[{id:"project::Assets/Plano (1).png",name:"Plano (1).png",path:"Assets/Plano (1).png",type:"image"}]}];
 const contentUrl = getProjectImageContentUrl("project", "project::Assets/Plano (1).png");
+it("adapts saved legacy image URLs to the current native asset protocol",()=>{
+  const source=`knownext-asset://project/${encodeURIComponent("project::Assets/Plano (1).png")}`;
+  expect(projectImageSource(source,"project","Docs/Plan.md",tree)).toBe(contentUrl);
+  expect(projectImageAsset(source,"project","Docs/Plan.md",tree)?.id).toBe("project::Assets/Plano (1).png");
+  expect(projectImageSource("knownext-asset://other/other%3A%3Aimage.png","project","Docs/Plan.md",tree)).toBe("knownext-asset://other/other%3A%3Aimage.png");
+});
 it("resolves a view URL without changing literal source, query or fragment",()=>{
   const source='../Assets/Plano%20(1).png?raw=1#vista';
   expect(projectImageSource(source,"project","Docs/Plan.md",tree)).toBe(contentUrl);

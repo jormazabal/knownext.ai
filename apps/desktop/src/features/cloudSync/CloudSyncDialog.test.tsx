@@ -14,6 +14,16 @@ afterEach(() => {cleanup(); vi.restoreAllMocks();});
 const show = () => render(<CloudSyncSteps project={{id:"owned",name:"Proyecto propio"}} status={status} capabilities={capabilities} onClose={vi.fn()}/>);
 
 describe("CloudSyncSteps", () => {
+  it("opens Proton for the explicitly edited project without consulting another active project",async()=>{
+    const active=vi.spyOn(projects,"getActiveProject");
+    vi.spyOn(api,"getCloudSyncCapabilities").mockResolvedValue(capabilities);
+    const cloudStatus=vi.spyOn(api,"getCloudSyncStatus").mockResolvedValue(status);
+    vi.spyOn(protonDirect,"getProtonAccount").mockResolvedValue({available:false,reason:"SDK no disponible",account:null,attempt:null});
+    const direct=vi.spyOn(protonDirect,"getProtonDirectStatus").mockResolvedValue({projectId:"owned",binding:null,state:"local",detail:"Local",paused:false,remoteConfirmed:false});
+    render(<CloudSyncDialog project={{id:"owned",name:"Proyecto editado"}} initialProvider="proton-drive" onClose={vi.fn()}/>);
+    expect(await screen.findByRole("button",{name:"Conectar con Proton"})).toBeDisabled();
+    expect(cloudStatus).toHaveBeenCalledWith("owned");expect(direct).toHaveBeenCalledWith("owned");expect(active).not.toHaveBeenCalled();
+  });
   it("checks the exact review before applying and reports only the runtime result", async () => {
     const inspect = vi.spyOn(api,"reviewCloudSync").mockResolvedValue(review);
     const apply = vi.spyOn(api,"applyCloudSync").mockResolvedValue({id:review.id,revision:review.revision,projectId:"owned",status:"active-local",provider:"none",generation:1,completedAt:"2026-11-06",remoteConfirmed:false,documentsPreserved:true});

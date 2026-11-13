@@ -78,8 +78,10 @@ export const preservedBlockSchema = $nodeSchema(nodeName, () => ({
     const source = element.getAttribute("data-knownext-preserved-source"), kind = element.getAttribute("data-knownext-preserved-block");
     return source !== null && kind !== null && Object.prototype.hasOwnProperty.call(labels, kind) ? { source, kind } : false;
   } }],
-  toDOM: node => ["div", { "data-knownext-preserved-block": node.attrs.kind, "data-knownext-preserved-source": node.attrs.source, contenteditable: "false", class: "knownext-preserved-block" },
-    ["details", ["summary", labels[node.attrs.kind] ?? "Bloque original conservado"], ["p", "Este bloque se conserva sin cambios. Puedes editar el resto del documento."], ["pre", ["code", node.attrs.source]]]],
+  toDOM: node => node.attrs.kind === "definition"
+    ? ["div", { "data-knownext-preserved-block": "definition", "data-knownext-preserved-source": node.attrs.source, contenteditable: "false", hidden: "", "aria-hidden": "true", style: "display:none" }]
+    : ["div", { "data-knownext-preserved-block": node.attrs.kind, "data-knownext-preserved-source": node.attrs.source, contenteditable: "false", class: "knownext-preserved-block" },
+      ["details", ["summary", labels[node.attrs.kind] ?? "Bloque original conservado"], ["p", "Este bloque se conserva sin cambios. Puedes editar el resto del documento."], ["pre", ["code", node.attrs.source]]]],
   parseMarkdown: { match: node => node.type === nodeName, runner: (state, node, type) => {
     const value = node as AstNode;
     state.addNode(type, { source: typeof value.value === "string" ? value.value : "", kind: value.knownextKind ?? "definition" });

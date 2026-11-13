@@ -40,8 +40,12 @@ import "@milkdown/crepe/theme/frame.css";
 import "./MarkdownEditor.css";
 import { createDocumentPasteGuard, insertClipboardPlainText, type DocumentPasteNotice, documentPublication, preservedBlockSchema, configureDocumentFidelity } from "./documentFidelity";
 import { configureImageFidelity, remarkImageFidelity, syncRenderedImageMetadata } from "./imageFidelity";
+import { useActiveEditorFocus } from "./useActiveEditorFocus";
+import { configurePersistentImageUploads } from "./persistentImageUploads";
 
 export type MarkdownEditorProps = {
+  active?: boolean;
+  focusRequest?: number;
   documentKey: string;
   markdown: string;
   onChange: (markdown: string, source?: MarkdownEditorChangeSource) => void;
@@ -54,6 +58,7 @@ export type MarkdownEditorProps = {
   selectionFocus?: MarkdownEditorSelection | null;
   zoomPercent: number;
   resolveImageSource?: (source: string) => string;
+  onUploadImage?: (file: File) => Promise<string>;
 };
 
 type MarkdownEditorCallbacks = {
@@ -78,9 +83,12 @@ const selectionFocusPluginKey = new PluginKey<SelectionFocusRange | null>("known
 const transientTextPluginKey = new PluginKey<TransientTextPreview | null>("knownext-transient-text-preview");
 const persistentCaretPluginKey = new PluginKey<PersistentCaretState>("knownext-persistent-caret");
 
-function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, onImageEditRequest, onDiagramEditRequest, selectionFocus, zoomPercent, resolveImageSource }: MarkdownEditorProps) {
+function MilkdownInstance({ active = true, focusRequest = 0, markdown, onChange, onControllerChange, onFormatStateChange, onHistoryStateChange, onSelectionChange, onImageEditRequest, onDiagramEditRequest, selectionFocus, zoomPercent, resolveImageSource, onUploadImage }: MarkdownEditorProps) {
   const imageSourceResolverRef = useRef(resolveImageSource);
   imageSourceResolverRef.current = resolveImageSource;
+  const uploadImageRef = useRef(onUploadImage);
+  uploadImageRef.current = onUploadImage;
+  const [imageUploadError, setImageUploadError] = useState<string | null>(null);
   const editorShellRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const originalDocumentRef = useRef<{ markdown: string; document: ProseMirrorNode } | null>(null);
@@ -134,6 +142,10 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
       const proxyDomURL = (source: string) => imageSourceResolverRef.current?.(source) ?? source;
       ctx.update(imageBlockConfig.key, config => ({ ...config, proxyDomURL, captionPlaceholderText: document.documentElement.lang === "en" ? "Image caption" : document.documentElement.lang === "eu" ? "Irudiaren oina" : "Pie de imagen" }));
       ctx.update(inlineImageConfig.key, config => ({ ...config, proxyDomURL }));
+      configurePersistentImageUploads(ctx, file => {
+        if (!uploadImageRef.current) return Promise.reject(new Error("Para guardar imágenes, abre un documento de proyecto."));
+        return uploadImageRef.current(file);
+      }, setImageUploadError);
     });
     crepe.editor.use(createMermaidDiagramViewPlugin((target) => callbacksRef.current.onDiagramEditRequest?.(target)));
     crepe.editor.use(remarkUnderlineHtmlPlugin).use(underlineSchema).use(toggleUnderlineCommand);
@@ -186,6 +198,8 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
 
     return crepe;
   }, []);
+
+  useActiveEditorFocus(active, !loading, viewRef, focusRequest);
 
   useEffect(() => {
     if (loading || controllerReadyRef.current) return;
@@ -311,6 +325,7 @@ function MilkdownInstance({ markdown, onChange, onControllerChange, onFormatStat
         }}>Pegar solo el texto</button>}
         <button type="button" onClick={() => setPasteNotice(null)}>Cerrar aviso</button>
       </div></div>}
+      {imageUploadError && <div role="alert" className="knownext-editor-paste-notice"><p>{imageUploadError}</p><button type="button" onClick={()=>setImageUploadError(null)}>Cerrar aviso de imagen</button></div>}
       <Milkdown />
       {imageEditOverlay ? (
         <div

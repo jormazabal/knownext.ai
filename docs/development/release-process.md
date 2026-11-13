@@ -1,5 +1,9 @@
 # Release Process
 
+## 3.0.1 validation scope
+
+The maintainer requested a prompt release with necessary, non-duplicated tests. Reuse the completed local frontend/native regression and repeat only affected interaction checks. Run the distribution gate once in the release workflow; cancel a redundant PR Quality run before merging when the same gate will run on the release tag. This does not waive the release gate or claim that cancelled checks passed. Windows and Android packaging run in parallel. The isolated Windows upgrade workflow now checks the public 3.0.0 MSI against the exact 3.0.1 draft and verifies synthetic AppData preservation. Verify Android identity, increasing version code, existing certificate and APK hash, then both public updater endpoints. Hardware/account acceptance remains separate.
+
 KnowNext.ai is versioned and released as one monolithic application. The frontend, Tauri runtime, Rust package metadata, Windows updater, and Android updater must carry the same release version.
 
 ## Version Source

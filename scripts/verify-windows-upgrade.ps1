@@ -13,9 +13,9 @@ if (!$IsWindows -or $env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -
 $work = Join-Path $env:RUNNER_TEMP 'knownext-msi-upgrade'
 $evidence = Join-Path $work 'evidence'
 New-Item -ItemType Directory -Path $evidence -Force | Out-Null
-$baselinePath = Join-Path $work 'KnowNext.ai_2.6.0_x64_en-US.msi'
-$candidatePath = Join-Path $work 'KnowNext.ai_3.0.0_x64_en-US.msi'
-$baselineHash = '9fed807911e341aa6e4ba6f99e2553750cd2b56711a265723116ae7e1008d591'
+$baselinePath = Join-Path $work 'KnowNext.ai_3.0.0_x64_en-US.msi'
+$candidatePath = Join-Path $work 'KnowNext.ai_3.0.1_x64_en-US.msi'
+$baselineHash = '2eb9dd1e3b2ea806bbdc132c5a7e803858ae44a1bdca3bd72ce3cc4abc367dd8'
 $family = '{389ECB95-C3D2-5327-872C-5E9508C14B2A}'
 $installKey = 'HKCU:\Software\knownext\KnowNext.ai'
 $appData = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'ai.knownext.desktop'
@@ -111,8 +111,8 @@ function Read-InstalledRegistration($Package) {
 
 $proof = [ordered]@{ pass = $false; runner = 'github-hosted-windows'; scope = 'Per-user MSI installation and upgrade with synthetic AppData'; phase = 'verify-inputs' }
 try {
-    $proof.baseline = Read-VerifiedMsi $baselinePath $baselineHash '2.6.0'
-    $proof.candidate = Read-VerifiedMsi $candidatePath $CandidateSha256 '3.0.0'
+    $proof.baseline = Read-VerifiedMsi $baselinePath $baselineHash '3.0.0'
+    $proof.candidate = Read-VerifiedMsi $candidatePath $CandidateSha256 '3.0.1'
     if ($proof.baseline.productCode -ieq $proof.candidate.productCode) { throw 'The MSI versions must have distinct ProductCodes.' }
     Assert-AppStopped
     if ((Test-Path -LiteralPath $appData) -or (Test-Path -LiteralPath $installKey) -or
@@ -122,7 +122,7 @@ try {
     }
 
     $proof.phase = 'install-baseline'
-    Install-PerUserMsi $baselinePath 'install-2.6.0.log'
+    Install-PerUserMsi $baselinePath 'install-3.0.0.log'
     $proof.baselineInstalled = Read-InstalledRegistration $proof.baseline
     New-Item -ItemType Directory -Path $appData -Force | Out-Null
     $witness = Join-Path $appData 'synthetic-msi-upgrade-witness.json'
@@ -131,7 +131,7 @@ try {
     $witnessHash = (Get-FileHash -LiteralPath $witness -Algorithm SHA256).Hash.ToLowerInvariant()
 
     $proof.phase = 'upgrade-candidate'
-    Install-PerUserMsi $candidatePath 'upgrade-3.0.0.log'
+    Install-PerUserMsi $candidatePath 'upgrade-3.0.1.log'
     $proof.candidateInstalled = Read-InstalledRegistration $proof.candidate
     if ($proof.candidateInstalled.installDir -ine $proof.baselineInstalled.installDir) { throw 'The upgrade changed the registered installation path.' }
     if (@(Find-ProductRegistration $proof.baseline.productCode).Count) { throw 'The old ProductCode remains registered after the upgrade.' }

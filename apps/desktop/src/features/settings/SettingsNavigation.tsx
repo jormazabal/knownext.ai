@@ -21,7 +21,7 @@ export function SettingsNavigation({language, section, onSelectSection, onNaviga
     });
   }
   return <div className="flex min-h-0 flex-1 flex-col px-3 pb-3 pt-2">
-    <header className="flex shrink-0 items-center justify-between gap-2 px-2 py-1"><h2 className="text-sm font-semibold">{language === "en" ? "Settings" : "Configuración"}</h2><button aria-label={language === "en" ? "Hide settings navigation" : "Ocultar navegación de configuración"} className="grid h-11 w-11 place-items-center rounded-md text-ink-secondary hover:bg-panel" onClick={onHide}><PanelLeftClose size={16}/></button></header>
+    <header className="flex shrink-0 items-center justify-between gap-2 px-2 py-1"><h2 className="text-sm font-semibold">{language === "en" ? "Settings" : "Configuración"}</h2><button aria-label={language === "en" ? "Hide settings navigation" : "Ocultar navegación de configuración"} className="grid h-11 w-11 place-items-center rounded-md text-ink-secondary hover:bg-panel lg:hidden" onClick={onHide}><PanelLeftClose size={16}/></button></header>
     <p className="mb-4 px-2 text-xs text-ink-secondary">{language === "en" ? "This device" : "Este dispositivo"}</p>
     <nav ref={nav} aria-label={settingsCopy[language].sectionsLabel} role="tablist" aria-orientation="vertical" className="min-h-0 overflow-y-auto" onKeyDown={event => {
       const index = sections.findIndex(item => item.id === section);

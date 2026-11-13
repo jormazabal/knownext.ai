@@ -16,12 +16,14 @@ type DocumentTabsProps = {
   onCloseTabs?: (tabIds: string[]) => void;
   onReorderDocumentTabs?: (draggedTabId: string, targetTabId: string, placement: "before" | "after") => void;
   rightSlot?: ReactNode;
+  utilityTabsInMenu?: boolean;
 };
 
-export function DocumentTabs({ tabs, activeTabId, activeDocumentId = null, dirtyDocumentIds, onOpenNavigation, onSelectTab, onCloseTab, onCloseTabs, onReorderDocumentTabs, rightSlot }: DocumentTabsProps) {
+export function DocumentTabs({ tabs: allTabs, activeTabId, activeDocumentId = null, dirtyDocumentIds, onOpenNavigation, onSelectTab, onCloseTab, onCloseTabs, onReorderDocumentTabs, rightSlot, utilityTabsInMenu = false }: DocumentTabsProps) {
+  const tabs = utilityTabsInMenu ? allTabs.filter(tab => !isFixedUtilityTab(tab) || tab.id === activeTabId) : allTabs;
   const dirtyIds = new Set(dirtyDocumentIds);
-  const fixedTabs = tabs.filter((tab) => isFixedUtilityTab(tab));
-  const scrollableTabs = tabs.filter((tab) => !isFixedUtilityTab(tab));
+  const fixedTabs = utilityTabsInMenu ? [] : tabs.filter((tab) => isFixedUtilityTab(tab));
+  const scrollableTabs = utilityTabsInMenu ? tabs : tabs.filter((tab) => !isFixedUtilityTab(tab));
   const compactTabs = useCompactTabsMode();
   const contextTriggerRef = useRef<HTMLElement | null>(null);
   const tabsViewportRef = useRef<HTMLDivElement | null>(null);

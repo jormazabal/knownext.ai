@@ -4,6 +4,8 @@ import { RecordingPanel } from "./RecordingPanel";
 import { useRecordings } from "./useRecordings";
 import {listProjects,getProjectTree} from "../../lib/api/projects";
 import { recordingRequest } from "../../lib/api/recordings";
+import { useState } from "react";
+import { ModalFrame } from "../../components/ui/ModalFrame";
 vi.mock("./useRecordings",()=>({useRecordings:vi.fn()}));
 vi.mock("../../lib/api/recordings",()=>({recordingRequest:vi.fn(),recordingAudio:vi.fn(),recordingTranscript:vi.fn()}));
 vi.mock("../../lib/api/projects",()=>({listProjects:vi.fn().mockResolvedValue([]),getProjectTree:vi.fn().mockResolvedValue([])}));
@@ -35,6 +37,15 @@ describe("meeting recording flow",()=>{
 });
 
 describe("compact recording controller",()=>{
+ it("returns focus to the opener when the floating recorder closes",async()=>{
+  function Harness(){const [open,setOpen]=useState(false);return <><button onClick={()=>setOpen(true)}>Abrir grabadora</button>{open&&<ModalFrame label="Grabaciones" onClose={()=>setOpen(false)}><RecordingPanel compact embedded onClose={()=>setOpen(false)}/></ModalFrame>}</>;}
+  render(<Harness/>);
+  const trigger=screen.getByRole("button",{name:"Abrir grabadora"});trigger.focus();fireEvent.click(trigger);
+  expect(screen.getByRole("heading",{name:"Grabaciones"})).toHaveFocus();
+  fireEvent.keyDown(document.activeElement!,{key:"Escape"});
+  await waitFor(()=>expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(trigger).toHaveFocus();
+ });
  it("keeps recovery access outside the scrolling body and includes unavailable sessions without allowing capture",()=>{
   vi.mocked(useRecordings).mockReturnValue({snapshot:{...base,settingsError:"Future preferences",settingsRecoveryRevision:"review",unavailableSessions:1},error:null,busy:null,command} as never);
   render(<RecordingPanel compact/>);
@@ -75,17 +86,17 @@ describe("compact recording controller",()=>{
  });
 });
 
-it("embedded compact manager opens retained sessions with fixed controls and useful close/settings actions",async()=>{
- const session={id:"retained",revision:1,createdAt:"2026-11-04T12:00:00Z",status:"attention",settings,destination:{projectId:"owned",folderId:null,name:"Audio trasladado"},samples:48000,bytes:96000,error:null,chunks:[],documentId:null,completedAt:null,keep:true,audioDeleted:false,recovered:true};vi.mocked(useRecordings).mockReturnValue({snapshot:{...base,sessions:[session]},error:null,busy:null,command} as never);const close=vi.fn(),openSettings=vi.fn();render(<RecordingPanel compact embedded onClose={close} onOpenSettings={openSettings}/>);expect(await screen.findByRole("heading",{name:"Audio trasladado"})).toBeInTheDocument();expect(screen.getByRole("button",{name:/Sesiones/})).toHaveAttribute("aria-expanded","true");expect(document.getElementById("recording-session-list")).not.toContainElement(screen.getByRole("button",{name:"Iniciar grabación"}));expect(screen.queryByRole("button",{name:"Abrir gestor"})).not.toBeInTheDocument();fireEvent.click(screen.getByRole("button",{name:"Ajustes"}));expect(openSettings).toHaveBeenCalledTimes(1);expect(command).not.toHaveBeenCalled();fireEvent.click(screen.getByRole("button",{name:"Cerrar grabaciones"}));expect(close).toHaveBeenCalledTimes(1);
+it("embedded compact manager opens collapsed and reveals retained sessions with fixed controls and useful close/settings actions",async()=>{
+ const session={id:"retained",revision:1,createdAt:"2026-11-04T12:00:00Z",status:"attention",settings,destination:{projectId:"owned",folderId:null,name:"Audio trasladado"},samples:48000,bytes:96000,error:null,chunks:[],documentId:null,completedAt:null,keep:true,audioDeleted:false,recovered:true};vi.mocked(useRecordings).mockReturnValue({snapshot:{...base,sessions:[session]},error:null,busy:null,command} as never);const close=vi.fn(),openSettings=vi.fn();render(<RecordingPanel compact embedded onClose={close} onOpenSettings={openSettings}/>);expect(screen.queryByRole("heading",{name:"Audio trasladado"})).not.toBeInTheDocument();expect(screen.getByRole("button",{name:/Sesiones/})).toHaveAttribute("aria-expanded","false");fireEvent.click(screen.getByRole("button",{name:/Sesiones/}));expect(await screen.findByRole("heading",{name:"Audio trasladado"})).toBeInTheDocument();expect(screen.getByRole("button",{name:/Sesiones/})).toHaveAttribute("aria-expanded","true");expect(document.getElementById("recording-session-list")).not.toContainElement(screen.getByRole("button",{name:"Iniciar grabación"}));expect(screen.queryByRole("button",{name:"Abrir gestor"})).not.toBeInTheDocument();fireEvent.click(screen.getByRole("button",{name:"Ajustes"}));expect(openSettings).toHaveBeenCalledTimes(1);expect(command).not.toHaveBeenCalled();fireEvent.click(screen.getByRole("button",{name:"Cerrar grabaciones"}));expect(close).toHaveBeenCalledTimes(1);
 });
 
 it("opens minutes for the selected stopped session without queueing or editing its transcript",()=>{
- const session={id:"source-owned",revision:1,createdAt:"2026-11-05T12:00:00Z",status:"completed",settings,destination:{projectId:"owned",folderId:null,name:"Reunión de producto"},samples:48000,bytes:96000,error:null,chunks:[{start:0,samples:48000,status:"completed"}],documentId:"owned::Reunion.md",completedAt:1,keep:false,audioDeleted:false,recovered:false};vi.mocked(useRecordings).mockReturnValue({snapshot:{...base,sessions:[session]},error:null,busy:null,command} as never);const open=vi.fn();render(<RecordingPanel compact embedded onOpenMinutes={open}/>);fireEvent.click(screen.getByRole("button",{name:"Acta revisable"}));expect(open).toHaveBeenCalledTimes(1);expect(open).toHaveBeenCalledWith("source-owned","owned");expect(command).not.toHaveBeenCalled();
+ const session={id:"source-owned",revision:1,createdAt:"2026-11-05T12:00:00Z",status:"completed",settings,destination:{projectId:"owned",folderId:null,name:"Reunión de producto"},samples:48000,bytes:96000,error:null,chunks:[{start:0,samples:48000,status:"completed"}],documentId:"owned::Reunion.md",completedAt:1,keep:false,audioDeleted:false,recovered:false};vi.mocked(useRecordings).mockReturnValue({snapshot:{...base,sessions:[session]},error:null,busy:null,command} as never);const open=vi.fn();render(<RecordingPanel compact embedded onOpenMinutes={open}/>);fireEvent.click(screen.getByRole("button",{name:/Sesiones/}));fireEvent.click(screen.getByRole("button",{name:"Acta revisable"}));expect(open).toHaveBeenCalledTimes(1);expect(open).toHaveBeenCalledWith("source-owned","owned");expect(command).not.toHaveBeenCalled();
 });
 
 describe("recording modal boundaries",()=>{
  const retained={id:"modal-session",revision:1,createdAt:"2026-11-06T10:00:00Z",status:"ready",settings,destination:{projectId:"p",folderId:"p::notes",name:"Acta.md"},samples:48000,bytes:96000,error:null,chunks:[],documentId:null,completedAt:null,keep:false,audioDeleted:false,recovered:false};
- function mount(){vi.mocked(useRecordings).mockReturnValue({snapshot:{...base,sessions:[retained]},error:null,busy:null,command} as never);return render(<RecordingPanel compact embedded/>);}
+ function mount(){vi.mocked(useRecordings).mockReturnValue({snapshot:{...base,sessions:[retained]},error:null,busy:null,command} as never);const result=render(<RecordingPanel compact embedded/>);fireEvent.click(screen.getByRole("button",{name:/Sesiones/}));return result;}
  it("traps confirmation focus, closes with Escape and returns focus without deleting audio",async()=>{
   const {container}=mount();const trigger=screen.getByRole("button",{name:"Eliminar audio"});trigger.focus();fireEvent.click(trigger);
   const dialog=screen.getByRole("alertdialog",{name:"Confirmar acción"});const cancel=within(dialog).getByRole("button",{name:"Cancelar"});expect(cancel).toHaveFocus();expect((container.querySelector(".recording-body") as HTMLElement).inert).toBe(true);
