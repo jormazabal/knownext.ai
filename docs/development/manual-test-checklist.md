@@ -1,14 +1,14 @@
 # Manual Test Checklist
 
-Use this checklist before publishing a KnowNext.ai release. For 2.3.0, run critical acceptance on packaged Windows and Android builds. Do not publish if a critical item fails.
+Use this checklist before publishing a KnowNext.ai release. Run critical acceptance on packaged Windows and Android builds. Do not publish if a critical item fails. The [3.0.1 distribution receipt](release-3.0.1-verification.json) records completed checks and the remaining device/UI acceptance separately.
 
 Use `docs/development/functional-validation-matrix.md` to record which areas are proven by automated tests, which areas have been manually validated, and which areas remain blocked by credentials, signing keys, or device access.
 
 ## Build Under Test
 
-- Version: `2.3.0`
-- Windows artifact: primary installer `KnowNext.ai_2.3.0_x64_en-US.msi`; secondary NSIS asset `KnowNext.ai_2.3.0_x64-setup.exe`
-- Android artifact: `KnowNext.ai-android-arm64-v2.3.0.apk`
+- Version: `3.0.1`
+- Windows artifact: primary installer `KnowNext.ai_3.0.1_x64_en-US.msi`; secondary NSIS asset `KnowNext.ai_3.0.1_x64-setup.exe`
+- Android artifact: `KnowNext.ai-android-arm64-v3.0.1.apk`
 - Runtime: local Tauri/Rust, no external product service or workstation service dependency.
 
 ## Automated Gate

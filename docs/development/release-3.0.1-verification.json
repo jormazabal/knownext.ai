@@ -1,0 +1,169 @@
+{
+  "schemaVersion": 1,
+  "version": "3.0.1",
+  "releaseUrl": "https://github.com/jormazabal/knownext.ai/releases/tag/v3.0.1",
+  "publishedAt": "2026-11-13T01:19:24Z",
+  "verifiedAt": "2026-11-13T01:19:28.096430+00:00",
+  "stable": true,
+  "releaseCommit": "dcaf8d4511b8f47280f89cc4466b75ce4b0dff12",
+  "integrationPullRequests": [
+    97
+  ],
+  "regression": {
+    "run": 43335844903,
+    "job": 131591827896,
+    "result": "success",
+    "frontendFiles": 280,
+    "frontendCases": 1237,
+    "nativeGroups": 94,
+    "nativeCases": 854,
+    "packagingContracts": 24,
+    "source": "Run release gate in the successful signed-release workflow",
+    "redundantQualityRunCancelled": 43335681934,
+    "cancelledRunIsNotEvidenceOfPass": true,
+    "localChecks": {
+      "frontendBaselineFiles": 279,
+      "frontendBaselineTests": 1231,
+      "laterAffectedWorkspaceTests": 73,
+      "laterRecorderTests": 13,
+      "nativeGroups": 94,
+      "nativeTests": 854,
+      "packagingContractTests": 24,
+      "productionBuild": "passed",
+      "cleanBundle": "passed",
+      "versionAlignment": "passed"
+    },
+    "rerunAfterPublication": false
+  },
+  "windows": {
+    "buildRun": 43335844903,
+    "buildJob": 131591827896,
+    "updaterPublicKeyUnchanged": true,
+    "updaterSignaturesVerified": true,
+    "negativeSignatureControls": 6,
+    "authenticodeConfigured": false,
+    "updaterPrefersMsi": true,
+    "upgradeRun": 43343791620,
+    "upgradeJob": 131618152349,
+    "upgradeFrom": "3.0.0",
+    "upgradeTo": "3.0.1",
+    "installedPerUser": true,
+    "sameInstallPath": true,
+    "oldRegistrationRemoved": true,
+    "installedResourcesVerified": true,
+    "witness": {
+      "sha256": "9af8b3bcf21b7b8550934ec63eea66cf2c3738c10d7f1f5a281fbd9a91eba24c",
+      "preserved": true
+    },
+    "scope": "Hosted Windows runner; synthetic AppData; no personal installation touched"
+  },
+  "android": {
+    "buildRun": 43335844903,
+    "buildJob": 131591828025,
+    "applicationId": "ai.knownext.mobile",
+    "versionName": "3.0.1",
+    "versionCode": 3000001,
+    "minimumSdk": 24,
+    "protonMinimumSdk": 29,
+    "certificateSha256": "18d0db03027d208ae7afa9c5083cb22e6565a0daf7e2b64377490657da271569",
+    "apkSha256": "9495f5af0ac5c4b665eeec85099a955992011a8e2c7b25fbd27c9642fabaf89c",
+    "nativeLibrariesVerified": 5,
+    "upgradeFrom": "3.0.0",
+    "installedUpdate": "PASS",
+    "originalUidPreserved": true,
+    "testDocumentPreserved": true,
+    "testDocumentSha256": "9eb10f832c01cd91ee2510ddc8875a8e250d7be7fffa917ce233e139078eb5b1",
+    "scope": "ARM64 through libndk_translation.so, not physical ARM",
+    "packagedUiAndOfflineAcceptance": "not established in this run",
+    "visualAcceptanceLimit": "System UI ANR on the 3.0.0 baseline in the emulator, also with software rendering. Do not claim packaged UI/offline acceptance from this run. Mobile browser interaction checks passed separately.",
+    "accountAuthorizedInThisRun": false
+  },
+  "assets": {
+    "KnowNext.ai_3.0.1_x64_en-US.msi": {
+      "sha256": "a0976e41bc5ce1e0488a9fc6c3e90974410b51a66e80483be0907d57132326d8",
+      "bytes": 32739328
+    },
+    "KnowNext.ai_3.0.1_x64_en-US.msi.sig": {
+      "sha256": "d528266559183c4841e4439e69c64c91bb356318849874a49a3fd9fbf6f75290",
+      "bytes": 424
+    },
+    "KnowNext.ai_3.0.1_x64-setup.exe": {
+      "sha256": "fa1a1ec820705db1d2ec2396d0b3d10e641e6d99749a26cdf4dd8c7ce7017ead",
+      "bytes": 23264834
+    },
+    "KnowNext.ai_3.0.1_x64-setup.exe.sig": {
+      "sha256": "149abc638e2c152125334779037a914ed694e3bd84e54b64800d34af863a6a91",
+      "bytes": 424
+    },
+    "latest.json": {
+      "sha256": "4299ee4b354251140aa90ed05be1446599fd8552f23984c41b193b3a8875d81c",
+      "bytes": 2022
+    },
+    "KnowNext.ai-android-arm64-v3.0.1.apk": {
+      "sha256": "9495f5af0ac5c4b665eeec85099a955992011a8e2c7b25fbd27c9642fabaf89c",
+      "bytes": 36249972
+    },
+    "android-latest.json": {
+      "sha256": "fcef19373b41d96b313576ebbfb2308d35db8f4d187e90359980214c390bb462",
+      "bytes": 676
+    },
+    "knownext-proton-sources-windows.zip": {
+      "sha256": "60f3bb0c9bc5e218380973c0d04c32440b1d381321af22d3ff1b90a0e506c864",
+      "bytes": 18027560
+    },
+    "knownext-proton-android-sources.zip": {
+      "sha256": "4a41d49d5ac55f367e4bec54a0becde975a41d3dc8663edfde3f75bf1ec3a0dd",
+      "bytes": 19653180
+    }
+  },
+  "sourceArchives": {
+    "knownext-proton-sources-windows.zip": {
+      "files": 217,
+      "rustLicenses": 189,
+      "nugetLicenses": 55,
+      "pendingLicenseReviews": 0
+    },
+    "knownext-proton-android-sources.zip": {
+      "files": 234,
+      "rustLicenses": 206,
+      "nugetLicenses": 55,
+      "pendingLicenseReviews": 0
+    }
+  },
+  "publicDownloads": [
+    {
+      "name": "latest.json",
+      "url": "https://github.com/jormazabal/knownext.ai/releases/latest/download/latest.json",
+      "http": 200,
+      "sha256": "4299ee4b354251140aa90ed05be1446599fd8552f23984c41b193b3a8875d81c",
+      "bytes": 2022
+    },
+    {
+      "name": "android-latest.json",
+      "url": "https://github.com/jormazabal/knownext.ai/releases/latest/download/android-latest.json",
+      "http": 200,
+      "sha256": "fcef19373b41d96b313576ebbfb2308d35db8f4d187e90359980214c390bb462",
+      "bytes": 676
+    },
+    {
+      "name": "KnowNext.ai_3.0.1_x64_en-US.msi",
+      "url": "https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai_3.0.1_x64_en-US.msi",
+      "http": 200,
+      "sha256": "a0976e41bc5ce1e0488a9fc6c3e90974410b51a66e80483be0907d57132326d8",
+      "bytes": 32739328
+    },
+    {
+      "name": "KnowNext.ai-android-arm64-v3.0.1.apk",
+      "url": "https://github.com/jormazabal/knownext.ai/releases/latest/download/KnowNext.ai-android-arm64-v3.0.1.apk",
+      "http": 200,
+      "sha256": "9495f5af0ac5c4b665eeec85099a955992011a8e2c7b25fbd27c9642fabaf89c",
+      "bytes": 36249972
+    }
+  ],
+  "remainingAcceptance": [
+    "Physical Windows/ARM64 Android hardware and native microphone/system capture.",
+    "Packaged Android visual/offline flow: emulator System UI blocked on both baseline and candidate; mobile browser checks are separate evidence.",
+    "Real Proton accounts, Android token expiry and a literal 24-hour run remain separate acceptance; not repeated for these UI changes.",
+    "Historic blob-only image references need the original image to be inserted again."
+  ]
+}
